@@ -101,6 +101,7 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 	retryPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
 	if stalled.Diagnostic.StallPhase == StallPhasePreArtifact && retryPolicy.RetryPreArtifactStallWindow > 0 {
 		retryPolicy.PreArtifactStallWindow = retryPolicy.RetryPreArtifactStallWindow
+		retryPolicy.PreArtifactWallClockWindow = retryPolicy.RetryPreArtifactStallWindow
 	}
 	emitStallRetryScheduledDiagnostic(task, adapter.Provider(), stalled.Diagnostic)
 	retryResult, retryErr := runProviderCommand(ctx, task, adapter, retryPolicy)
@@ -979,6 +980,7 @@ func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) A
 	if repairPolicy.PreArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PreArtifactStallWindow = defaultFocusedRepairWindow
 	}
+	repairPolicy.PreArtifactWallClockWindow = defaultFocusedRepairWindow
 	if repairPolicy.PostArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PostArtifactStallWindow = defaultFocusedRepairWindow
 	}

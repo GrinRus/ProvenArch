@@ -62,6 +62,7 @@ func (s artifactSnapshot) stallDiagnostic() StallDiagnostic {
 
 func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *commandActivityTracker, policy ActivityPolicy) (StallError, bool) {
 	var validSince time.Time
+	monitorStartedAt := time.Now().UTC()
 	for {
 		select {
 		case <-ctx.Done():
@@ -132,6 +133,20 @@ func monitorArtifactStall(ctx context.Context, task acpruntime.Task, tracker *co
 		validSince = time.Time{}
 		if !policy.MonitorPreArtifact {
 			continue
+		}
+		now := time.Now().UTC()
+		if policy.PreArtifactWallClockWindow > 0 && now.Sub(monitorStartedAt) >= policy.PreArtifactWallClockWindow {
+			return StallError{
+				Sentinel: ErrStalledBeforeArtifacts,
+				Diagnostic: StallDiagnostic{
+					StallPhase:            StallPhasePreArtifact,
+					ArtifactState:         snapshot.State,
+					ArtifactObserved:      snapshot.ArtifactObserved,
+					AuthoredFileCount:     snapshot.AuthoredFiles,
+					LastPipeActivity:      lastPipe,
+					LastWriteRootMutation: lastMutation,
+				},
+			}, true
 		}
 		if !lastMutation.IsZero() && time.Since(lastMutation) < policy.PreArtifactStallWindow {
 			continue

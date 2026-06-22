@@ -104,6 +104,7 @@ type ActivityPolicy struct {
 	MonitorPreArtifact          bool
 	FreshArtifactMutationAfter  time.Time
 	PreArtifactStallWindow      time.Duration
+	PreArtifactWallClockWindow  time.Duration
 	RetryPreArtifactStallWindow time.Duration
 	PostArtifactStallWindow     time.Duration
 	PartialArtifactStallWindow  time.Duration
@@ -135,6 +136,12 @@ func WithCollectArtifactEnrichmentWindow(task acpruntime.Task, policy ActivityPo
 	}
 	if policy.PartialArtifactStallWindow <= 0 || policy.PartialArtifactStallWindow < defaultCollectEnrichmentWindow {
 		policy.PartialArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	if policy.MonitorPreArtifact && policy.PreArtifactWallClockWindow <= 0 {
+		policy.PreArtifactWallClockWindow = policy.PreArtifactStallWindow
+		if policy.PreArtifactWallClockWindow <= 0 {
+			policy.PreArtifactWallClockWindow = defaultPreArtifactStallWindow
+		}
 	}
 	return policy
 }
@@ -277,6 +284,9 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 	if policy.PreArtifactStallWindow <= 0 {
 		policy.PreArtifactStallWindow = defaultPreArtifactStallWindow
 	}
+	if policy.PreArtifactWallClockWindow < 0 {
+		policy.PreArtifactWallClockWindow = 0
+	}
 	if policy.RetryPreArtifactStallWindow <= 0 {
 		policy.RetryPreArtifactStallWindow = defaultRetryPreArtifactWindow
 	}
@@ -302,6 +312,9 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 func applyActivityPolicyEnvOverrides(policy ActivityPolicy) ActivityPolicy {
 	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC"); value > 0 {
 		policy.PreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_WALL_CLOCK_SEC"); value > 0 {
+		policy.PreArtifactWallClockWindow = value
 	}
 	if value := positiveSecondsEnv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC"); value > 0 {
 		policy.RetryPreArtifactStallWindow = value

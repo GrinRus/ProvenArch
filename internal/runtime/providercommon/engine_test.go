@@ -40,6 +40,7 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 
 func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "301")
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_WALL_CLOCK_SEC", "306")
 	t.Setenv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC", "302")
 	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "303")
 	t.Setenv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC", "304")
@@ -49,6 +50,9 @@ func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 
 	if got, want := policy.PreArtifactStallWindow, 301*time.Second; got != want {
 		t.Fatalf("pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PreArtifactWallClockWindow, 306*time.Second; got != want {
+		t.Fatalf("pre artifact wall clock window = %s, want %s", got, want)
 	}
 	if got, want := policy.RetryPreArtifactStallWindow, 302*time.Second; got != want {
 		t.Fatalf("retry pre artifact window = %s, want %s", got, want)
@@ -75,6 +79,26 @@ func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.
 	}
 	if got, want := policy.PostArtifactStallWindow, defaultPostArtifactStallWindow; got != want {
 		t.Fatalf("post artifact window = %s, want default %s", got, want)
+	}
+}
+
+func TestFocusedRepairActivityPolicyUsesPreArtifactWallClockCap(t *testing.T) {
+	t.Parallel()
+
+	policy := focusedRepairActivityPolicy(ActivityPolicy{
+		MonitorArtifacts:           true,
+		MonitorPreArtifact:         true,
+		PreArtifactStallWindow:     time.Hour,
+		PreArtifactWallClockWindow: time.Hour,
+		PostArtifactStallWindow:    time.Hour,
+		PartialArtifactStallWindow: time.Hour,
+	}, true)
+
+	if got, want := policy.PreArtifactWallClockWindow, defaultFocusedRepairWindow; got != want {
+		t.Fatalf("focused repair pre-artifact wall clock window = %s, want %s", got, want)
+	}
+	if !policy.MonitorPreArtifact {
+		t.Fatal("focused repair should monitor pre-artifact activity")
 	}
 }
 
@@ -253,6 +277,9 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	}
 	if got := int(activityPolicy["pre_artifact_stall_window_ms"].(float64)); got != 1000 {
 		t.Fatalf("expected pre-artifact window diagnostic 1000ms, got %d", got)
+	}
+	if _, ok := activityPolicy["pre_artifact_wall_clock_window_ms"].(float64); !ok {
+		t.Fatalf("expected pre-artifact wall clock diagnostic, got %#v", activityPolicy)
 	}
 }
 
@@ -2973,6 +3000,53 @@ func TestMonitorArtifactStallTripsPreArtifactWindow(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected monitor to trip pre-artifact window")
+	}
+}
+
+func TestMonitorArtifactStallTripsPreArtifactWallClockDespitePipeActivity(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-pre-wall-clock-active-pipe")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().UTC())
+	keepPipeFresh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepPipeFresh:
+				return
+			case at := <-ticker.C:
+				tracker.Note(at)
+			}
+		}
+	}()
+	defer close(keepPipeFresh)
+
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     time.Hour,
+			PreArtifactWallClockWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:    time.Hour,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledBeforeArtifacts) {
+			t.Fatalf("expected pre-artifact wall-clock stall, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected pre-artifact wall-clock cap despite fresh pipe activity")
 	}
 }
 
