@@ -113,7 +113,7 @@ func (e *pipelineExecution) runRuntimeShard(
 	if handled, result := e.loadReplayableShardResult(stepID, domainID, plan, entry, summaryState.singleShard); handled {
 		if result.Err != nil {
 			taskID := strings.TrimSpace(entry.TaskID)
-			if markErr := summaryState.markFailed(plan, taskID, strings.TrimSpace(result.Err.Error())); markErr != nil {
+			if markErr := summaryState.markFailedError(plan, taskID, result.Err); markErr != nil {
 				result.Err = markErr
 			}
 		}
@@ -136,8 +136,7 @@ func (e *pipelineExecution) runRuntimeShard(
 		}
 	}
 	if err != nil {
-		message := strings.TrimSpace(err.Error())
-		if markErr := summaryState.markFailed(plan, prepared.Task.TaskID, message); markErr != nil {
+		if markErr := summaryState.markFailedError(plan, prepared.Task.TaskID, err); markErr != nil {
 			err = markErr
 		}
 	}

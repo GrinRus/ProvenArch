@@ -54,12 +54,67 @@ func (customMetadataRunner) RuntimeMeta() contracts.RuntimeMeta {
 	return contracts.RuntimeMeta{Name: "custom-runtime", Version: "v1"}
 }
 
+type recordingShardSummaryStore struct {
+	items []runtimeShardSummaryEntry
+}
+
+func (s *recordingShardSummaryStore) LoadSummary(string, string) ([]runtimeShardSummaryEntry, error) {
+	return append([]runtimeShardSummaryEntry(nil), s.items...), nil
+}
+
+func (s *recordingShardSummaryStore) PersistSummary(_ string, _ string, items []runtimeShardSummaryEntry) error {
+	s.items = append([]runtimeShardSummaryEntry(nil), items...)
+	return nil
+}
+
+func (s *recordingShardSummaryStore) RuntimeExecutionExists(string) bool {
+	return false
+}
+
+func (s *recordingShardSummaryStore) PersistRuntimeExecutionArtifact(string, string, []byte) error {
+	return nil
+}
+
 func TestRuntimeMetaForRunnerUsesMetadataInterface(t *testing.T) {
 	t.Parallel()
 
 	meta := runtimeMetaForRunner(customMetadataRunner{})
 	if meta.Name != "custom-runtime" || meta.Version != "v1" {
 		t.Fatalf("unexpected runtime meta from interface: %+v", meta)
+	}
+}
+
+func TestRuntimeShardSummaryPersistsRunnerErrorCode(t *testing.T) {
+	t.Parallel()
+
+	store := &recordingShardSummaryStore{}
+	state := &runtimeShardSummaryState{
+		store:  store,
+		stepID: "init.step1.collect",
+		entries: []runtimeShardSummaryEntry{
+			{ShardID: "shard-a", Status: "pending"},
+		},
+		index: map[string]int{"shard-a": 0},
+	}
+	err := acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		"claude-code became unavailable before required artifacts",
+		nil,
+	)
+
+	if markErr := state.markFailedError(runtimeShardPlan{ShardID: "shard-a"}, "task-a", err); markErr != nil {
+		t.Fatalf("mark failed: %v", markErr)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("unexpected persisted item count: %d", len(store.items))
+	}
+	item := store.items[0]
+	if item.ErrorCode != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected shard error_code %q, got %q", acpruntime.ErrorCodeRunnerUnavailable, item.ErrorCode)
+	}
+	if item.Error == "" || item.TaskID != "task-a" || item.Status != "failed" {
+		t.Fatalf("unexpected persisted shard item: %+v", item)
 	}
 }
 

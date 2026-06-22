@@ -107,8 +107,8 @@ Baseline scenario set:
   - fallback warning + root shard `.` при пустом результате фильтров
   - scheduler semantics `sequential|parallel` (`max_parallel_tasks`) и deterministic apply order
   - `fail_fast` останавливает step/pipeline на первой shard error без перехода в downstream runtime steps
-- `best_effort` partial shard failures: pipeline completes terminal reporting with status `failed` + `error_code=run_partial_failed`; partial collect skips live downstream `step2/3/4` runtime and records `*_skipped_due_to_partial_collect` so collect remains the root cause
-- batch/report tests фиксируют, что `partial_failure_count>0` / `run_partial_failed` остаётся primary `runtime_flow_failed` в `run_matrix`/`execution_report`, а stale classifier rows с `runner_unavailable` или `runtime_contract_failed` не переписывают collect partial root cause; provider class remains secondary evidence.
+- `best_effort` partial shard failures: pipeline completes terminal reporting with status `failed` + `error_code=run_partial_failed`; partial collect skips live downstream `step2/3/4` runtime and records `*_skipped_due_to_partial_collect` so collect remains an explicit execution blocker/counter.
+- batch/report tests фиксируют, что `partial_failure_count>0` / `run_partial_failed` остаётся видимым `runtime_flow_failed` signal в `run_matrix`/`execution_report`, но primary `failure_class` выбирается из конкретного terminal/provider classifier (`runner_unavailable` или `runtime_contract_failed`), если он есть; это разделяет primary terminal failure и secondary partial shard evidence.
 - frontend report tests фиксируют, что `frontend_e2e_matrix_<batch-id>.md` для `runtime_run_failed` содержит runtime details (`run_id`, `last_run_status`, `error_code`, `current_step`, screenshot count/result directory) без изменения summary status taxonomy.
 - docflow builder seam:
   - staged artifacts, citation index, final run index and semantic snapshot remain characterization-covered before promotion

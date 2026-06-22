@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
 func (e *pipelineExecution) loadRuntimeShardSummaryState(
@@ -46,6 +48,7 @@ func (e *pipelineExecution) loadRuntimeShardSummaryState(
 			entry.Status = normalizeShardSummaryStatus(existing.Status)
 			entry.TaskID = strings.TrimSpace(existing.TaskID)
 			entry.TaskRun = strings.TrimSpace(existing.TaskRun)
+			entry.ErrorCode = strings.TrimSpace(existing.ErrorCode)
 			entry.Error = strings.TrimSpace(existing.Error)
 		}
 		taskrunPath := entry.TaskRun
@@ -126,6 +129,14 @@ func shardFailureMessage(entry runtimeShardSummaryEntry) string {
 		message = "shard failed in previous attempt"
 	}
 	return message
+}
+
+func shardErrorCode(err error) string {
+	code, _, ok := acpruntime.ClassifyError(err)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(code)
 }
 
 func (e *pipelineExecution) loadReplayableShardResult(
@@ -239,26 +250,34 @@ func (s *runtimeShardSummaryState) markCheckpointed(
 	if err := s.store.PersistRuntimeExecutionArtifact(taskrunPath, taskrunLabel, raw); err != nil {
 		return err
 	}
-	s.updateLocked(plan, "checkpointed", taskID, taskrunPath, "")
+	s.updateLocked(plan, "checkpointed", taskID, taskrunPath, "", "")
 	return s.persistLocked()
 }
 
 func (s *runtimeShardSummaryState) markSucceeded(plan runtimeShardPlan, taskID string, taskrunPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.updateLocked(plan, "succeeded", taskID, taskrunPath, "")
+	s.updateLocked(plan, "succeeded", taskID, taskrunPath, "", "")
 	return s.persistLocked()
 }
 
-func (s *runtimeShardSummaryState) markFailed(plan runtimeShardPlan, taskID string, message string) error {
+func (s *runtimeShardSummaryState) markFailed(plan runtimeShardPlan, taskID string, message string, errorCode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.updateLocked(plan, "failed", taskID, "", message)
+	s.updateLocked(plan, "failed", taskID, "", message, errorCode)
 	return s.persistLocked()
+}
+
+func (s *runtimeShardSummaryState) markFailedError(plan runtimeShardPlan, taskID string, err error) error {
+	message := ""
+	if err != nil {
+		message = strings.TrimSpace(err.Error())
+	}
+	return s.markFailed(plan, taskID, message, shardErrorCode(err))
 }
 
 func (s *runtimeShardSummaryState) markAborted(plan runtimeShardPlan) error {
-	return s.markFailed(plan, "", "shard not executed because fail_fast aborted remaining work")
+	return s.markFailed(plan, "", "shard not executed because fail_fast aborted remaining work", "")
 }
 
 func (s *runtimeShardSummaryState) updateLocked(
@@ -267,6 +286,7 @@ func (s *runtimeShardSummaryState) updateLocked(
 	taskID string,
 	taskrunPath string,
 	message string,
+	errorCode string,
 ) {
 	idx, ok := s.index[plan.ShardID]
 	if !ok {
@@ -286,6 +306,11 @@ func (s *runtimeShardSummaryState) updateLocked(
 		entry.Error = strings.TrimSpace(message)
 	} else {
 		entry.Error = ""
+	}
+	if strings.TrimSpace(errorCode) != "" {
+		entry.ErrorCode = strings.TrimSpace(errorCode)
+	} else {
+		entry.ErrorCode = ""
 	}
 	s.entries[idx] = entry
 }

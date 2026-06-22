@@ -91,7 +91,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 		if err != nil {
 			outcome.FailedShards++
-			if markErr := summaryState.markFailed(result.Plan, result.Prepared.Task.TaskID, strings.TrimSpace(err.Error())); markErr != nil {
+			if markErr := summaryState.markFailedError(result.Plan, result.Prepared.Task.TaskID, err); markErr != nil {
 				return nil, runtimeShardOutcome{}, markErr
 			}
 			if options.BestEffort {

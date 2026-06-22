@@ -1038,9 +1038,9 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("execution:stall-pressure", result.issues)
         self.assertIn("execution:partial-failures", result.issues)
         self.assertTrue(result.runtime_flow_failed)
-        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
 
-    def test_python_report_keeps_partial_collect_root_cause_over_runner_unavailable_classifier(self) -> None:
+    def test_python_report_keeps_provider_class_primary_for_partial_collect_classifier(self) -> None:
         run_dir = self.root / "run-partial-vs-runner-unavailable-python"
         self._create_fixture_run_dir(run_dir)
         write_text(
@@ -1086,12 +1086,12 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("runtime_flow_failed", result.failure_class)
+        self.assertEqual("runner_unavailable", result.failure_class)
         self.assertTrue(result.runtime_flow_failed)
-        self.assertFalse(result.runner_unavailable)
+        self.assertTrue(result.runner_unavailable)
         self.assertEqual(1, result.partial_failure_count)
         self.assertTrue(
-            any("partial collect shard failures keep runtime_flow_failed" in detail for detail in result.issue_details),
+            any("partial shard failures were recorded during execution" in detail for detail in result.issue_details),
             result.issue_details,
         )
 
@@ -1107,10 +1107,11 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "process_exit": "1",
             },
         )
-        self.assertEqual("runtime_flow_failed", contract_classifier_result.failure_class)
+        self.assertEqual("runtime_contract_failed", contract_classifier_result.failure_class)
         self.assertTrue(contract_classifier_result.runtime_flow_failed)
+        self.assertTrue(contract_classifier_result.runtime_contract_failed)
         self.assertTrue(
-            any("partial collect shard failures keep runtime_flow_failed" in detail for detail in contract_classifier_result.issue_details),
+            any("partial shard failures were recorded during execution" in detail for detail in contract_classifier_result.issue_details),
             contract_classifier_result.issue_details,
         )
 

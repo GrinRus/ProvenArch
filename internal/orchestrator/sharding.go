@@ -101,6 +101,7 @@ type runtimeShardSummaryEntry struct {
 	Status     string   `json:"status"`
 	TaskID     string   `json:"task_id,omitempty"`
 	TaskRun    string   `json:"taskrun_path,omitempty"`
+	ErrorCode  string   `json:"error_code,omitempty"`
 	Error      string   `json:"error,omitempty"`
 }
 

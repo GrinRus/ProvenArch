@@ -2001,16 +2001,16 @@ def evaluate_run(
         failure_class = "runtime_contract_failed"
     elif failure_reason == "runtime_contract_failed":
         failure_class = "runtime_contract_failed"
-    elif validator_verdict_failed_hit or runtime_flow_failed:
-        failure_class = "runtime_flow_failed"
-    elif runtime_contract_failed_hit:
+    elif runtime_contract_failed_hit and (terminal_runtime_provider_failure or not validator_verdict_failed_hit):
         failure_class = "runtime_contract_failed"
-    elif infra_signal_terminated:
-        failure_class = "infra_signal_terminated"
     elif runner_unavailable_hit:
         failure_class = "runner_unavailable"
+    elif infra_signal_terminated:
+        failure_class = "infra_signal_terminated"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
+    elif validator_verdict_failed_hit or runtime_flow_failed:
+        failure_class = "runtime_flow_failed"
 
     if classified_failure and classified_failure != "none":
         if failure_class != classified_failure:
@@ -2026,11 +2026,6 @@ def evaluate_run(
             "runner_unavailable",
             "runtime_flow_failed",
         }
-        ignore_classified_partial_collect_override = (
-            runtime_flow_failed
-            and partial_failures_hit
-            and classified_failure in {"runner_unavailable", "runtime_contract_failed"}
-        )
         if ignore_classified_incomplete:
             details.append(
                 "reliability/classifier-override -> ignored infra_incomplete_cycle because run-status.env marks terminal process_failed summary"
@@ -2038,10 +2033,6 @@ def evaluate_run(
         elif ignore_classified_contract_override:
             details.append(
                 "reliability/classifier-override -> ignored runner/runtime-flow override because raw runtime/session-summary classified the run as runtime_contract_failed"
-            )
-        elif ignore_classified_partial_collect_override:
-            details.append(
-                "reliability/classifier-override -> ignored runner/runtime-contract override because partial collect shard failures keep runtime_flow_failed as the primary root cause"
             )
         elif failure_class == "summary_missing" and classified_failure in {
             "runtime_timeout",
@@ -2054,9 +2045,8 @@ def evaluate_run(
             failure_class = classified_failure
         elif failure_class == "none" or failure_class_rank(classified_failure) < failure_class_rank(failure_class):
             failure_class = classified_failure
-        if not (ignore_classified_partial_collect_override and classified_failure == "runtime_contract_failed"):
-            runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
-        if not ignore_classified_contract_override and not ignore_classified_partial_collect_override:
+        runtime_contract_failed_hit = runtime_contract_failed_hit or classified_failure == "runtime_contract_failed"
+        if not ignore_classified_contract_override:
             runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
