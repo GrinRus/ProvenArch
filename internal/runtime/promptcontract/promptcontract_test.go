@@ -1222,6 +1222,10 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0",
 		"write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 		"Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id",
+		"When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array.",
+		"Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
+		"When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
+		"never infer that the current run has 0 observed documents from a missing documents[] field.",
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"When final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
 		"Do not write stale index availability claims such as `No current-run final-run-index document list was available`",
@@ -1309,6 +1313,8 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"draft artifact enrichment no-action retry mode",
 		"DRAFT ENRICHMENT NO-ACTION RETRY:",
 		"Your next response must be exactly one filesystem command",
+		"Do not print the command, fenced code, or a Python script as assistant text.",
+		"A plain-text response containing `python3 - <<'PY'` without filesystem mutation",
 		"The command must use python3",
 		"overwrite every markdown target listed below before it exits",
 		"/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json",
@@ -1316,7 +1322,10 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"proposal.md -> proposals/runtime-recommendations.md",
 		"changelog.md -> reports/changelog/runtime-proposals.md",
 		"Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+		"For final-run-index.json, count documents from top-level canonical_documents[] only",
+		"For citation-index.json, count citations from top-level citations[] only.",
 		"Also read validator/finding/coverage/proposal summaries",
+		"Draft surface initialized",
 		"For step4, overwrite proposal.md and changelog.md.",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
@@ -1337,6 +1346,35 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("no-action retry prompt must stay compact and avoid bootstrap/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsPrintedCommandRetryMode(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment no-action retry mode",
+		"The previous retry printed a shell/Python command as text instead of executing it.",
+		"This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
+		"Do not print the command, fenced code, or a Python script as assistant text.",
+		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected printed-command retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }

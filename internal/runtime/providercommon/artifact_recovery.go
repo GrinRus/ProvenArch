@@ -876,6 +876,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
 					}
+					if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
+					}
 					if shouldRetryDraftNoActionEnrichment(stage, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
 					}
@@ -900,6 +903,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
+			}
+			if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
 			}
 			if shouldRetryDraftNoActionEnrichment(stage, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
@@ -966,7 +972,9 @@ func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
 }
 
 func shouldRetryDraftNoActionEnrichment(stage string, err error) bool {
-	return strings.TrimSpace(stage) != "draft_artifact_enrichment_no_action_retry" &&
+	trimmedStage := strings.TrimSpace(stage)
+	return trimmedStage != "draft_artifact_enrichment_no_action_retry" &&
+		trimmedStage != "draft_artifact_enrichment_command_text_retry" &&
 		isDraftEnrichmentNoopOrScaffoldFailure(err)
 }
 
@@ -975,6 +983,36 @@ func draftNoActionRetryError(err error) error {
 		return errors.New("draft_artifact_enrichment_no_action_retry")
 	}
 	return fmt.Errorf("draft_artifact_enrichment_no_action_retry: %w", err)
+}
+
+func shouldRetryDraftPrintedCommandEnrichment(stage string, result acpruntime.Result, err error) bool {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_no_action_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{result.Stdout, result.Stderr, errorText(err)}, "\n"))
+	markers := []string{
+		"python3 - <<",
+		"python3 <<",
+		"python3 -c ",
+		"```bash",
+		"```sh",
+		"```python",
+		"here-doc",
+		"heredoc",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftCommandTextRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_command_text_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_command_text_retry: %w", err)
 }
 
 func shouldRetryDraftMissingPythonEnrichment(stage string, result acpruntime.Result, err error) bool {

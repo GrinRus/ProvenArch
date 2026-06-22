@@ -429,6 +429,7 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 	hardMarkers := []string{
 		"provider wrote this draft artifact",
 		"drafted required runtime artifacts",
+		"draft surface initialized",
 		"draft surface initialized for the scoped repository analysis",
 		"this draft is grounded in the current step manifest",
 		"current draft manifest",

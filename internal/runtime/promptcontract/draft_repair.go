@@ -209,7 +209,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
 	outputs := draftEnrichmentOutputs(skeleton)
 	statusEvidenceFiles := draftEnrichmentShardStatusEvidenceFiles(task)
-	if draftEnrichmentValidationMentionsNoActionRetry(validationErr) {
+	if draftEnrichmentValidationMentionsNoActionRetry(validationErr) || draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		return composeDraftArtifactEnrichmentNoActionRetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
 	}
 	lines := []string{
@@ -331,6 +331,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
 			"- Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence. Current-run markdown may mention only current_run_id taskrun paths.",
 			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not found, or unavailable.",
+			"- When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array. Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
+			"- When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
+			"- If final-run-index.json exists but canonical_documents[] cannot be parsed, write an explicit parse gap or omit the count; never infer that the current run has 0 observed documents from a missing documents[] field.",
 			"- If final-run-index.json or citation-index.json are present for current_run_id, summarize counts, document titles, citation ids, and repo/path references in concise markdown. Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 			"- Do not write broken path bullets such as a lone backtick, partial prose inside backticks, or unbalanced inline-code/path references.",
 			"- Do not paste sampled authored-shard snippets as semicolon-separated prose when they contain inline-code markers. Convert sampled evidence into short paraphrased facts and balanced path references.",
@@ -357,6 +360,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
 			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
+			"- When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array. Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
+			"- When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
+			"- If final-run-index.json exists but canonical_documents[] cannot be parsed, write an explicit parse gap or omit the count; never infer that the current run has 0 observed documents from a missing documents[] field.",
 			"- When final-run-index.json or citation-index.json are present for current_run_id, summarize counts, selected document titles, citation ids, and repo/path references. Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
 			"- Do not paste sampled shard markdown snippets with inline-code markers into proposal.md or changelog.md. If a sampled signal includes backticks, paraphrase it in plain text or use a fully balanced path reference.",
 			"- Do not write stale index availability claims such as `No current-run final-run-index document list was available`; if final-run-index.json is absent, omit that index status, and if it is present, summarize the observed canonical document count.",
@@ -389,6 +395,8 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 		"DRAFT ENRICHMENT NO-ACTION RETRY:",
 		"- The previous focused enrichment did not freshly replace every referenced markdown target with valid evidence-backed content.",
 		"- Your next response must be exactly one filesystem command, not a plan, not prose, not a status note.",
+		"- Do not print the command, fenced code, or a Python script as assistant text. The command must actually execute and mutate files before exit.",
+		"- A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed no-action enrichment.",
 		"- The command must use python3, read bounded current-run evidence, and overwrite every markdown target listed below before it exits.",
 		"- Do not run or copy the earlier heredoc/bootstrap draft command.",
 		"- Do not write deterministic filler, raw JSON dumps, placeholder text, or recovery mechanics as final markdown.",
@@ -427,10 +435,17 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	}
 	lines = append(lines,
 		"- Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+		"- For final-run-index.json, count documents from top-level canonical_documents[] only; never infer 0 observed documents from a missing documents[] field.",
+		"- For citation-index.json, count citations from top-level citations[] only.",
 		"- Also read validator/finding/coverage/proposal summaries and up to 6 high-signal staging/shards manifests or authored markdown docs.",
-		"- Banned final markdown markers: Runtime draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
+		"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
 		"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
 	)
+	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
+		lines = append(lines,
+			"- The previous retry printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
+		)
+	}
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		lines = append(lines,
@@ -464,6 +479,10 @@ func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
 
 func draftEnrichmentValidationMentionsNoActionRetry(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_no_action_retry")
+}
+
+func draftEnrichmentValidationMentionsCommandTextRetry(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_command_text_retry")
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {
