@@ -976,8 +976,12 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Fresh mutation is required",
 		"rewrite every markdown target",
 		"Prefer not to rewrite the draft manifest during enrichment",
+		"if it is structurally valid, leave it byte-for-byte",
+		"top-level keys version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs",
+		"Do not add top-level status, enriched_at, metadata, validation, confidence, source, content_digest",
 		"The only allowed output object keys are path, canonical_path, kind, and title",
-		"Never add logical_path",
+		"Never add outputs[].status, outputs[].content_digest",
+		"logical_path, target, output_path, publish_path",
 		"Preserve outputs[].path and outputs[].canonical_path exactly",
 		"update only top-level summary or updated_at",
 		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
@@ -1294,6 +1298,37 @@ func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *test
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsManifestShapeRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`parse runtime draft manifest: json: unknown field "status"`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MANIFEST SHAPE RETRY:",
+		"the draft manifest JSON no longer matched the strict runtime draft manifest shape",
+		"restore the manifest to the allowed key set without weakening or bypassing validation",
+		"Leave evidence-backed markdown content in place when it is already valid",
+		"Remove unknown manifest fields such as status, content_digest, enriched_at",
+		"Allowed top-level manifest keys are exactly version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs.",
+		"Allowed output object keys are exactly path, canonical_path, kind, and title.",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected manifest-shape retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T) {
 	t.Parallel()
 
@@ -1325,6 +1360,10 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"For final-run-index.json, count documents from top-level canonical_documents[] only",
 		"For citation-index.json, count citations from top-level citations[] only.",
 		"Also read validator/finding/coverage/proposal summaries",
+		"Prefer not to rewrite the manifest; if it is structurally valid, leave it byte-for-byte and only rewrite markdown.",
+		"Allowed top-level manifest keys are version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs only",
+		"never add status, enriched_at, metadata, validation, confidence, source",
+		"Allowed output object keys are path, canonical_path, kind, and title only.",
 		"Draft surface initialized",
 		"For step4, overwrite proposal.md and changelog.md.",
 		"proposal.md must include Decision / recommended operator action",
@@ -1380,6 +1419,8 @@ func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCand
 		filepath.Join(repoDir, "README.md"),
 		"For step0, overwrite charter-overview.md with target identity",
 		"Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
+		"Allowed output object keys are path, canonical_path, kind, and title only.",
+		"never add status, enriched_at, metadata, validation, confidence, source",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected step0 no-action retry prompt to contain %q, got:\n%s", token, prompt)

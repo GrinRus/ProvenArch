@@ -165,6 +165,11 @@ func ResolveHeadlessDraftEnrichmentIncludeDirectories(task Task) []string {
 	}
 
 	if strings.TrimSpace(task.StepID) == "init.step0.constitution" {
+		for _, root := range task.ReadContextRoots {
+			if shouldIncludeStep0DraftEnrichmentRepoRoot(root, task.Workspace, taskrunRoot) {
+				dirs.add(root)
+			}
+		}
 		workspace := strings.TrimSpace(task.Workspace)
 		if workspace != "" {
 			addResolvedRepoScopeDirectories(dirs.add, filepath.Clean(workspace), headlessRepoScopeFilter(task))
@@ -227,6 +232,41 @@ func shouldIncludeDraftEnrichmentReadRoot(root string, taskrunRoot string) bool 
 		strings.HasPrefix(slash, "staging/final/") ||
 		slash == "staging/drafts" ||
 		strings.HasPrefix(slash, "staging/drafts/")
+}
+
+func shouldIncludeStep0DraftEnrichmentRepoRoot(root string, workspace string, taskrunRoot string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	cleanRoot := filepath.Clean(root)
+	if workspace = strings.TrimSpace(workspace); workspace != "" && samePath(cleanRoot, filepath.Clean(workspace)) {
+		return false
+	}
+	if taskrunRoot = strings.TrimSpace(taskrunRoot); taskrunRoot != "" && isPathWithin(cleanRoot, filepath.Clean(taskrunRoot)) {
+		return false
+	}
+	if workspace != "" {
+		taskrunsRoot := filepath.Join(filepath.Clean(workspace), "reports", "taskruns")
+		if isPathWithin(cleanRoot, taskrunsRoot) {
+			return false
+		}
+	}
+	return true
+}
+
+func samePath(path string, other string) bool {
+	return filepath.Clean(path) == filepath.Clean(other)
+}
+
+func isPathWithin(path string, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
 type orderedExistingDirs struct {

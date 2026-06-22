@@ -2522,6 +2522,49 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentManifestShape(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-manifest-shape")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	invalidManifestScript := writeEngineScript(t, asIsDraftEnrichmentWithInvalidManifestShapeScript(task, "First evidence-backed enrichment before manifest shape retry."))
+	validManifestScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{invalidManifestScript, validManifestScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected manifest-shape draft enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_manifest_shape") {
+		t.Fatalf("expected manifest-shape retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful manifest-shape retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read enriched overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	}
+}
+
 func TestRunHeadlessProviderRejectsRepeatedDraftEnrichmentNoAction(t *testing.T) {
 	t.Parallel()
 
@@ -4038,6 +4081,40 @@ func asIsMalformedThenValidEnrichmentScript(task acpruntime.Task) string {
 		"",
 		"Valid architect summary after markdown syntax retry with operator decision evidence.",
 		"EOF",
+	}, "\n") + "\n"
+}
+
+func asIsDraftEnrichmentWithInvalidManifestShapeScript(task acpruntime.Task, marker string) string {
+	return strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		`{`,
+		`  "version": 1,`,
+		`  "run_id": "` + task.RunID + `",`,
+		`  "step_id": "init.step2.asis_docs",`,
+		`  "step_contract": "as_is",`,
+		`  "agent_role": "architect",`,
+		`  "summary": "Provider enriched markdown but drifted manifest shape.",`,
+		`  "status": "enriched",`,
+		`  "outputs": [`,
+		`    {"path":"overview.md","canonical_path":"reports/as-is/overview.md","kind":"report","title":"As-Is Overview","content_digest":"123"},`,
+		`    {"path":"summary.md","canonical_path":"reports/coverage/summary.md","kind":"summary","title":"Coverage Summary"},`,
+		`    {"path":"architect-summary.md","canonical_path":"reports/agent-outputs/architect/summary.md","kind":"summary","title":"Architect Summary"}`,
+		`  ],`,
+		`  "enriched_at": "2026-06-22T17:48:00Z"`,
+		`}`,
+		"EOF",
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cat >\"$draft_root/$name\" <<'EOF'",
+		"# Evidence-backed draft",
+		"",
+		marker,
+		"EOF",
+		"done",
 	}, "\n") + "\n"
 }
 

@@ -227,9 +227,11 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
 		fmt.Sprintf("- Rewrite draft content only under draft_final_root: %q.", strings.TrimSpace(task.DraftFinalRoot)),
 		"- Allowed write targets are the step draft manifest in write_root and referenced draft files under draft_final_root.",
-		"- Prefer not to rewrite the draft manifest during enrichment; if you must touch it, preserve its existing outputs[] entries exactly.",
+		"- Prefer not to rewrite the draft manifest during enrichment; if it is structurally valid, leave it byte-for-byte and rewrite only markdown.",
+		"- If the manifest must be touched, keep this exact manifest shape: top-level keys version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs.",
+		"- Do not add top-level status, enriched_at, metadata, validation, confidence, source, content_digest, or any provider-invented manifest field.",
 		"- Do not add, remove, rename, or alias outputs[] fields. The only allowed output object keys are path, canonical_path, kind, and title.",
-		"- Never add logical_path, target, output_path, publish_path, or other output aliases; the strict parser treats them as runtime_contract_failed.",
+		"- Never add outputs[].status, outputs[].content_digest, logical_path, target, output_path, publish_path, or other output aliases; the strict parser treats them as runtime_contract_failed.",
 		"- Use only the bounded read_context_roots, the current write_root/draft_final_root files, and staged evidence already available to this provider.",
 		fmt.Sprintf(`- bounded_read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
 		"- Do not write shard-pack-manifest.json, validator-verdict.json, raw logs, sibling taskruns, workspace source-of-truth files, or repository files.",
@@ -375,6 +377,17 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		)
 	}
 	if validationErr != nil {
+		if draftEnrichmentValidationMentionsManifestShape(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT MANIFEST SHAPE RETRY:",
+				"- The previous enrichment produced markdown, but the draft manifest JSON no longer matched the strict runtime draft manifest shape.",
+				"- Read the existing draft manifest and markdown targets, then restore the manifest to the allowed key set without weakening or bypassing validation.",
+				"- Leave evidence-backed markdown content in place when it is already valid; otherwise rewrite every referenced markdown target again in the same filesystem command.",
+				"- Remove unknown manifest fields such as status, content_digest, enriched_at, metadata, validation, confidence, source, logical_path, target, output_path, or publish_path.",
+				"- Allowed top-level manifest keys are exactly version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs.",
+				"- Allowed output object keys are exactly path, canonical_path, kind, and title.",
+			)
+		}
 		if draftEnrichmentValidationMentionsMalformedMarkdown(validationErr) {
 			lines = append(lines,
 				"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
@@ -409,7 +422,10 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 		fmt.Sprintf(`- current_step_id = %q`, strings.TrimSpace(task.StepID)),
 		fmt.Sprintf(`- bounded_read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
 		"- Allowed writes: the existing step draft manifest in write_root and referenced draft files under draft_final_root only.",
-		"- If you update the manifest, preserve each outputs[] path/canonical_path/kind/title exactly; never add logical_path, target, output_path, or aliases.",
+		"- Prefer not to rewrite the manifest; if it is structurally valid, leave it byte-for-byte and only rewrite markdown.",
+		"- If you update the manifest, preserve each outputs[] path/canonical_path/kind/title exactly; never add logical_path, target, output_path, status, content_digest, or aliases.",
+		"- Allowed top-level manifest keys are version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs only; never add status, enriched_at, metadata, validation, confidence, source, or provider-invented fields.",
+		"- Allowed output object keys are path, canonical_path, kind, and title only.",
 		"- Required markdown overwrite targets:",
 	}
 	if len(outputs) == 0 {
@@ -444,6 +460,13 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		lines = append(lines,
 			"- The previous retry printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
+		)
+	}
+	if draftEnrichmentValidationMentionsManifestShape(validationErr) {
+		lines = append(lines,
+			"DRAFT ENRICHMENT MANIFEST SHAPE RETRY:",
+			"- The previous enrichment changed the manifest shape. Your command must restore the strict manifest shape and keep or refresh evidence-backed markdown.",
+			"- Remove unknown manifest fields such as status, content_digest, enriched_at, metadata, validation, confidence, source, logical_path, target, output_path, or publish_path.",
 		)
 	}
 	switch strings.TrimSpace(task.StepID) {
@@ -483,6 +506,15 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 
 func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func draftEnrichmentValidationMentionsManifestShape(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
+		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
 }
 
 func draftEnrichmentValidationMentionsNoActionRetry(err error) bool {

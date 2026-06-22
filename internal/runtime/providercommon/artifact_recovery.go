@@ -878,6 +878,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
+				} else if shouldRetryDraftManifestShapeEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
 				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
@@ -906,6 +908,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	}
 	if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
+		if shouldRetryDraftManifestShapeEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
+		}
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
@@ -975,6 +980,15 @@ func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
 	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
 		err != nil &&
 		strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func shouldRetryDraftManifestShapeEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_manifest_shape" || err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
+		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
 }
 
 func shouldRetryDraftNoActionEnrichment(stage string, err error) bool {
