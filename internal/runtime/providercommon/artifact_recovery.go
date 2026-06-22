@@ -873,6 +873,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
 				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
+					}
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
@@ -884,12 +887,18 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, enrichmentErr)
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment stalled before valid artifacts were available", enrichmentErr)
 		}
+		if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, enrichmentErr) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, enrichmentErr, "draft_artifact_enrichment_python3_retry")
+		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, enrichmentResult, enrichmentErr)
 	}
 	if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
+			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
 		}
 		if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
@@ -947,6 +956,16 @@ func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
 	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
 		err != nil &&
 		strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func shouldRetryDraftMissingPythonEnrichment(stage string, result acpruntime.Result, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_python3_retry" {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{result.Stdout, result.Stderr, errorText(err)}, "\n"))
+	return strings.Contains(text, "command not found: python") ||
+		strings.Contains(text, "python: command not found") ||
+		strings.Contains(text, "python: not found")
 }
 
 func isDraftBootstrapOnlyValidationFailure(err error) bool {

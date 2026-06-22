@@ -968,6 +968,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Your next action must be a filesystem command that rewrites every referenced markdown draft target",
 		"Forbidden analysis-only phrases before the rewrite: I have enough evidence",
 		"First focused work unit: execute one bounded filesystem command that reads the current draft manifest",
+		"If you use Python for this bounded filesystem command, invoke python3 explicitly. Never invoke python",
 		"execute one bounded filesystem command",
 		"rewrites every referenced markdown target in that same command",
 		"bounded staged evidence",

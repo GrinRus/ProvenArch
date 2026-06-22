@@ -2379,6 +2379,51 @@ func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) 
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentMissingPython(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-python-missing")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	missingPythonScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"printf '%s\\n' 'zsh:1: command not found: python'",
+		"exit 1",
+	}, "\n")+"\n")
+	enrichmentScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{missingPythonScript, enrichmentScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected missing-python draft enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected completed draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read enriched overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	}
+}
+
 func TestRunHeadlessProviderRetriesDraftEnrichmentMalformedMarkdown(t *testing.T) {
 	t.Parallel()
 
@@ -3255,6 +3300,13 @@ type sequenceAdapter struct {
 	calls    int
 }
 
+type draftEnrichmentSequenceAdapter struct {
+	testAdapter
+	draftEnrichmentCommands []string
+	mu                      sync.Mutex
+	draftCalls              int
+}
+
 func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -3267,6 +3319,20 @@ func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	}
 	a.calls++
 	return CommandSpec{Command: a.commands[index], PromptBytes: a.promptBytes}, nil
+}
+
+func (a *draftEnrichmentSequenceAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.draftEnrichmentCommands) == 0 {
+		return CommandSpec{}, errors.New("draft enrichment command is unavailable")
+	}
+	index := a.draftCalls
+	if index >= len(a.draftEnrichmentCommands) {
+		index = len(a.draftEnrichmentCommands) - 1
+	}
+	a.draftCalls++
+	return CommandSpec{Command: a.draftEnrichmentCommands[index]}, nil
 }
 
 func (a testAdapter) Provider() acpruntime.Provider {

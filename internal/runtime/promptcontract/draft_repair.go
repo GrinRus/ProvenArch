@@ -218,6 +218,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Do not run the earlier heredoc/bootstrap draft command again.",
 		"- Do not create or preserve recovery scaffold text as final content.",
 		"- First focused work unit: execute one bounded filesystem command that reads the current draft manifest and bounded staged evidence, then rewrites every referenced markdown target in that same command before any optional extended analysis.",
+		"- If you use Python for this bounded filesystem command, invoke python3 explicitly. Never invoke python; some trusted live hosts do not provide a python binary.",
 		"- Fresh mutation is required: the harness ignores pre-existing bootstrap files until you rewrite every markdown target in this enrichment command.",
 		"- Do not spend the whole run reading evidence without a write; make a marker-free evidence-backed rewrite for every markdown target in the first command, then refine it if time remains.",
 		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
