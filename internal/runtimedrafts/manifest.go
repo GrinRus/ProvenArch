@@ -212,6 +212,9 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		if runtimeDraftTextBootstrapOnly(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references bootstrap-only placeholder draft content", idx, output.Path))
 		}
+		if strings.TrimSpace(stepID) == "init.step0.constitution" && runtimeDraftStep0TextHasDownstreamEvidenceLeak(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q mentions downstream or runtime-only evidence in step0 constitution content", idx, output.Path))
+		}
 		if foreignRunID := runtimeDraftTextForeignRunID(text, runID); foreignRunID != "" {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references foreign taskrun %q instead of current run_id %q", idx, output.Path, foreignRunID, strings.TrimSpace(runID)))
 		}
@@ -636,6 +639,41 @@ func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
 			return true
 		}
 		if strings.Contains(trimmed, "documents=[{") || strings.Contains(trimmed, "citations=[{") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftStep0TextHasDownstreamEvidenceLeak(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"reports/changelog/",
+		"reports/taskruns/",
+		"staging/final",
+		"staging/shards",
+		"collected shard",
+		"shard manifest",
+		"validator output",
+		"runtime provider",
+		"produced by:",
+		"draft manifest",
+		"draft root",
+		"manifest mutation",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- generated:") || strings.HasPrefix(trimmed, "generated:") {
 			return true
 		}
 	}

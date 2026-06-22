@@ -854,14 +854,7 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 			return enrichmentAdapter.DraftArtifactEnrichmentCommandSpec(task, validationErr)
 		},
 		func(policy ActivityPolicy) ActivityPolicy {
-			policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
-			if strings.TrimSpace(task.StepID) == "init.step0.constitution" {
-				if policy.PreArtifactStallWindow < 2*time.Minute {
-					policy.PreArtifactStallWindow = 2 * time.Minute
-				}
-				policy.PreArtifactWallClockWindow = 2 * time.Minute
-			}
-			return policy
+			return draftArtifactEnrichmentActivityPolicy(task, policy)
 		},
 	)
 	if commandErr != nil {
@@ -933,6 +926,19 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", "")
 	return true, enrichmentResult, nil
+}
+
+const minDraftArtifactEnrichmentPreArtifactWindow = 3 * time.Minute
+
+func draftArtifactEnrichmentActivityPolicy(task acpruntime.Task, policy ActivityPolicy) ActivityPolicy {
+	policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+	if policy.PreArtifactStallWindow < minDraftArtifactEnrichmentPreArtifactWindow {
+		policy.PreArtifactStallWindow = minDraftArtifactEnrichmentPreArtifactWindow
+	}
+	if policy.PreArtifactWallClockWindow < minDraftArtifactEnrichmentPreArtifactWindow {
+		policy.PreArtifactWallClockWindow = minDraftArtifactEnrichmentPreArtifactWindow
+	}
+	return policy
 }
 
 func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, validationErr error) error {

@@ -68,6 +68,25 @@ func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestDraftArtifactEnrichmentActivityPolicyExtendsPreArtifactWindow(t *testing.T) {
+	t.Parallel()
+
+	policy := draftArtifactEnrichmentActivityPolicy(acpruntime.Task{StepID: "init.step4.proposals"}, ActivityPolicy{
+		PreArtifactStallWindow:     90 * time.Second,
+		PreArtifactWallClockWindow: 90 * time.Second,
+	})
+
+	if got, want := policy.PreArtifactStallWindow, minDraftArtifactEnrichmentPreArtifactWindow; got != want {
+		t.Fatalf("pre artifact stall window = %s, want %s", got, want)
+	}
+	if got, want := policy.PreArtifactWallClockWindow, minDraftArtifactEnrichmentPreArtifactWindow; got != want {
+		t.Fatalf("pre artifact wall clock window = %s, want %s", got, want)
+	}
+	if policy.FreshArtifactMutationAfter.IsZero() {
+		t.Fatalf("expected fresh artifact mutation threshold to be set")
+	}
+}
+
 func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.T) {
 	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "bad")
 	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "-1")

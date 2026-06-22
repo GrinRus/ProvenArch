@@ -1017,9 +1017,9 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Read the current draft manifest only for contract fields and exact outputs",
 		"do not quote or copy its bootstrap summary",
 		"Runtime draft recovery initialized",
-		"Use collected shard manifests and validator output as the evidence source before final review",
-		"Do not read every staged shard document",
-		"at most 6 authored markdown docs",
+		"later-pipeline evidence placeholder",
+		"Do not perform an unbounded evidence sweep",
+		"compact high-signal evidence reads",
 		"A no-op rewrite is invalid",
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"every inline-code/path backtick pair must be balanced",
@@ -1100,14 +1100,14 @@ func TestComposeDraftArtifactEnrichmentPromptForConstitutionRequiresWriteFirstRe
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrInvalid)
 	for _, token := range []string{
 		"STEP0 CONSTITUTION WRITE-FIRST SEQUENCE",
-		"collected shards and validator output do not exist yet for this step",
+		"only repository entrypoint evidence is valid for this step",
 		"Do not wait for later pipeline evidence.",
 		"Your next filesystem command must read the current constitution-draft.json",
 		"then overwrite charter-overview.md under draft_final_root before any optional extra analysis",
 		filepath.Join(task.DraftFinalRoot, "charter-overview.md"),
 		"charter-overview.md must contain: target identity; repository evidence used with repo/path references",
 		"coverage gaps; and a decision-ready operator summary",
-		"do not keep bootstrap text or mention that collected shards/validator output will arrive later",
+		"do not keep bootstrap text or mention that later pipeline evidence will arrive",
 		"baseline-subagents.yaml unless it is invalid",
 		"Final self-check: charter-overview.md was freshly overwritten",
 		"STEP0 bounded repository evidence candidates:",
@@ -1121,6 +1121,22 @@ func TestComposeDraftArtifactEnrichmentPromptForConstitutionRequiresWriteFirstRe
 	}
 	if strings.Contains(prompt, filepath.Join(workspace, "README.md")) {
 		t.Fatalf("step0 enrichment prompt should not use workspace root files as repo evidence candidates:\n%s", prompt)
+	}
+	for _, forbidden := range []string{
+		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE",
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"staging/shards",
+		"Use collected shard manifests",
+		"collected shards and validator output",
+		"collected shards/validator output",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 enrichment prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
+		}
 	}
 }
 
@@ -1366,6 +1382,8 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"Allowed output object keys are path, canonical_path, kind, and title only.",
 		"Draft surface initialized",
 		"For step4, overwrite proposal.md and changelog.md.",
+		"For step4 no-action retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files",
+		"If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
 		"no-shard-coverage-blocker statement",
@@ -1424,6 +1442,22 @@ func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCand
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected step0 no-action retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"staging/shards",
+		"Use collected shard manifests",
+		"collected shard/final/validator",
+		"collected shards and validator output",
+		"Also read validator/finding/coverage/proposal summaries",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 no-action retry prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
 		}
 	}
 }

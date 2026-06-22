@@ -234,7 +234,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Never add outputs[].status, outputs[].content_digest, logical_path, target, output_path, publish_path, or other output aliases; the strict parser treats them as runtime_contract_failed.",
 		"- Use only the bounded read_context_roots, the current write_root/draft_final_root files, and staged evidence already available to this provider.",
 		fmt.Sprintf(`- bounded_read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
-		"- Do not write shard-pack-manifest.json, validator-verdict.json, raw logs, sibling taskruns, workspace source-of-truth files, or repository files.",
+		"- Do not write non-draft runtime artifacts, raw logs, sibling taskruns, workspace source-of-truth files, or repository files.",
 		"- Read the current draft manifest only for contract fields and exact outputs; do not quote or copy its bootstrap summary, schema keys, canonical_path examples, validation errors, or scaffold phrases into final markdown.",
 		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf(`- draft_final_root (absolute) = %q`, strings.TrimSpace(task.DraftFinalRoot)),
@@ -246,29 +246,43 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		fmt.Sprintf("- current_domain_id = %q", strings.TrimSpace(task.DomainID)),
 		fmt.Sprintf("- current_repo_scope = %q", strings.TrimSpace(task.RepoScope)),
 		fmt.Sprintf("- current_repo_scopes = %s", strings.Join(task.RepoScopes, ", ")),
-		"- Current target identity comes from repo_scope/repo_scopes/domain_id and the current staged artifacts, not from matrix id, batch id, profile id, workspace path, or run-folder names.",
-		"- If current_repo_scopes contains exactly one repo, final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
-		"- Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
-		"- Final markdown must not cite taskrun identifiers other than current_run_id. If older workspace artifacts are visible, do not use them as current-run evidence and do not list their run_* paths as reviewed indexes.",
-		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 	}
-	if len(statusEvidenceFiles) == 0 {
+	if isStep0DraftEnrichmentStep(task.StepID) {
 		lines = append(lines,
-			"- No current-run typed shard-plan/shard-summary files were visible in the allowed read roots; use observed staging/shards coverage and call unknowns out explicitly.",
+			"- Current target identity comes from repo_scope/repo_scopes/domain_id and repository entrypoint evidence, not from matrix id, batch id, profile id, workspace path, run-folder names, staged artifacts, or later pipeline evidence.",
+			"- Step0 runs before later pipeline evidence exists. Do not read, mention, count, or summarize downstream evidence surfaces in constitution markdown.",
+			"- Final markdown must not cite taskrun identifiers, runtime provider names, generated timestamps, draft manifests, draft roots, recovery mechanics, or future pipeline outputs.",
+			"DRAFT ENRICHMENT STEP0 REPOSITORY EVIDENCE:",
+			"- Use bounded repository entrypoint evidence from read_context_roots and the charter contract. If repository evidence is sparse, record that exact repository evidence gap.",
 		)
 	} else {
 		lines = append(lines,
-			"- Read these exact current-run typed shard-plan/shard-summary files before falling back to staging/shards counts:",
+			"- Current target identity comes from repo_scope/repo_scopes/domain_id and the current staged artifacts, not from matrix id, batch id, profile id, workspace path, or run-folder names.",
+			"- If current_repo_scopes contains exactly one repo, final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
+			"- Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+			"- Final markdown must not cite taskrun identifiers other than current_run_id. If older workspace artifacts are visible, do not use them as current-run evidence and do not list their run_* paths as reviewed indexes.",
+			"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 		)
-		for _, file := range statusEvidenceFiles {
-			lines = append(lines, fmt.Sprintf("- %s", file))
+		if len(statusEvidenceFiles) == 0 {
+			lines = append(lines,
+				"- No current-run typed shard-plan/shard-summary files were visible in the allowed read roots; use observed staging/shards coverage and call unknowns out explicitly.",
+			)
+		} else {
+			lines = append(lines,
+				"- Read these exact current-run typed shard-plan/shard-summary files before falling back to staging/shards counts:",
+			)
+			for _, file := range statusEvidenceFiles {
+				lines = append(lines, fmt.Sprintf("- %s", file))
+			}
 		}
+		lines = append(lines,
+			"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
+			"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts and an explicit no-shard-coverage-blocker statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\" Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
+			"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
+		)
 	}
 	lines = append(lines,
-		"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
-		"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
-		"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts and an explicit no-shard-coverage-blocker statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\" Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
-		"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
 		"DRAFT ENRICHMENT TARGETS:",
 	)
 	if len(outputs) == 0 {
@@ -289,28 +303,28 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Preserve outputs[].path and outputs[].canonical_path exactly as loaded from the current manifest; do not synthesize a new outputs[] map from scratch.",
 		"- If you update manifest metadata, update only top-level summary or updated_at and leave outputs[] byte-for-byte equivalent for path/canonical_path/kind/title.",
 		"- Every outputs[].path must stay relative to draft_final_root and every referenced draft file must exist before exit.",
-		"- Replace bootstrap-only markdown with evidence-backed content that cites concrete repositories, staged artifacts, files, services, modules, findings, or coverage gaps visible in the allowed read roots.",
+		"- Replace bootstrap-only markdown with evidence-backed content that cites concrete evidence visible in the allowed read roots.",
 		"- Final markdown must read as an operator-facing architecture/report/proposal artifact, not as a runtime recovery log. Do not make draft manifests, draft roots, enrichment, recovery, bounded reads, or staged evidence mechanics the subject of the report.",
 		"- Final markdown must summarize structured JSON evidence in readable prose or compact bullets. Do not paste raw JSON, Python dict/list reprs, `documents=[{...}]`, `citations=[{...}]`, `{'id': ...}`, or truncated object fragments.",
 		"- Final markdown must be syntactically readable: every inline-code/path backtick pair must be balanced on the same non-fence line, and code fences must be closed before exit.",
 		"- Do not copy raw authored-shard prose fragments that contain backticks, especially truncated excerpts. Paraphrase signals instead, or write paths without inline-code formatting when truncating or summarizing.",
 		"- Do not end prose sentences with stray backticks. If any summary text contains an unmatched backtick, remove the backtick or rewrite the sentence before exit.",
-		"- Do not read every staged shard document. Prefer all shard-pack-manifest.json files plus at most 6 authored markdown docs selected for architectural signal, then cite remaining coverage as summarized from manifests/indexes.",
+		"- Do not perform an unbounded evidence sweep. Prefer compact high-signal evidence reads before the first markdown rewrite.",
 		"- A no-op rewrite is invalid: every referenced markdown draft must be freshly rewritten with marker-free evidence-backed content, not merely re-saved unchanged.",
 		"- Preserve valid non-markdown support bundles when they are already canonical; for constitution, baseline-subagents.yaml may remain the baseline YAML bundle.",
-		"- Final content MUST NOT include these scaffold/recovery markers: Provider wrote this draft artifact; Drafted required runtime artifacts for this step; Draft surface initialized for the scoped repository analysis; This draft is grounded in the current step manifest; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded read; recovery pass; recovery action; enrichment read; enrichment pass; Final content must stay tied to collected shard evidence and validator output; Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Use collected shard manifests and validator output as the evidence source before final review; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized; bootstrap-only placeholder; placeholder draft content; placeholder draft text; placeholder content; placeholder proposal content; replace placeholder; replaced placeholder; replacing placeholders.",
+		"- Final content MUST NOT include these scaffold/recovery markers: Provider wrote this draft artifact; Drafted required runtime artifacts for this step; Draft surface initialized for the scoped repository analysis; This draft is grounded in the current step manifest; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded read; recovery pass; recovery action; enrichment read; enrichment pass; later-pipeline evidence placeholder; Runtime draft recovery initialized; draft recovery initialized; Treat this as diagnostic evidence until; Draft surface initialized; Current run evidence should be reviewed; Runtime proposal surface initialized; bootstrap-only placeholder; placeholder draft content; placeholder draft text; placeholder content; placeholder proposal content; replace placeholder; replaced placeholder; replacing placeholders.",
 		"- Final action must be: ensure the draft manifest and every referenced draft file exist, then ensure every referenced markdown draft changed and contains no unchanged bootstrap/recovery scaffold text.",
 	)
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		charterTarget := filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "charter-overview.md")
 		lines = append(lines,
-			"- STEP0 CONSTITUTION WRITE-FIRST SEQUENCE: collected shards and validator output do not exist yet for this step. Do not wait for later pipeline evidence.",
+			"- STEP0 CONSTITUTION WRITE-FIRST SEQUENCE: only repository entrypoint evidence is valid for this step. Do not wait for later pipeline evidence.",
 			"- Your next filesystem command must read the current constitution-draft.json, current charter-overview.md, and bounded repository entrypoint evidence from read_context_roots, then overwrite charter-overview.md under draft_final_root before any optional extra analysis.",
 			fmt.Sprintf("- Exact required constitution overview overwrite target: %q.", charterTarget),
 			"- Enrich charter-overview.md with concrete constitution content from read_context_roots, repo scope, and charter wizard contract when available.",
 			"- charter-overview.md must contain: target identity; repository evidence used with repo/path references; architecture scope; operating principles or constraints; coverage gaps; and a decision-ready operator summary.",
-			"- If repository evidence is sparse, write the exact missing evidence category as a coverage gap; do not keep bootstrap text or mention that collected shards/validator output will arrive later.",
+			"- If repository evidence is sparse, write the exact missing evidence category as a coverage gap; do not keep bootstrap text or mention that later pipeline evidence will arrive.",
 			"- Do not rewrite baseline-subagents.yaml unless it is invalid; it must remain a valid baseline agents bundle.",
 			"- Final self-check: charter-overview.md was freshly overwritten in this focused call, includes at least one concrete repo/path evidence reference when available, and contains none of the banned scaffold markers.",
 		)
@@ -449,14 +463,23 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 			lines = append(lines, "- "+file)
 		}
 	}
-	lines = append(lines,
-		"- Also read current-run staging/final final-run-index.json and citation-index.json if present.",
-		"- For final-run-index.json, count documents from top-level canonical_documents[] only; never infer 0 observed documents from a missing documents[] field.",
-		"- For citation-index.json, count citations from top-level citations[] only.",
-		"- Also read validator/finding/coverage/proposal summaries and up to 6 high-signal staging/shards manifests or authored markdown docs.",
-		"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
-		"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
-	)
+	if isStep0DraftEnrichmentStep(task.StepID) {
+		lines = append(lines,
+			"- For step0, do not read current-run downstream evidence artifacts; those surfaces are invalid for constitution.",
+			"- Step0 final markdown must not mention runtime providers, generated timestamps, taskrun/log/report mechanics, draft manifests, draft roots, recovery/enrichment, downstream indexes, downstream checks, downstream reports, or future pipeline outputs.",
+			"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; runtime provider; Produced by; Generated; taskrun; replace placeholder; replaced placeholder; replacing placeholders.",
+			"- Final self-check inside the command: charter-overview.md was freshly overwritten, is marker-free, has balanced backticks/fences, and contains repository evidence, coverage gaps, and next decision content.",
+		)
+	} else {
+		lines = append(lines,
+			"- Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+			"- For final-run-index.json, count documents from top-level canonical_documents[] only; never infer 0 observed documents from a missing documents[] field.",
+			"- For citation-index.json, count citations from top-level citations[] only.",
+			"- Also read validator/finding/coverage/proposal summaries and up to 6 high-signal staging/shards manifests or authored markdown docs.",
+			"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
+			"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
+		)
+	}
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		lines = append(lines,
 			"- The previous retry printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
@@ -473,7 +496,7 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	case "init.step0.constitution":
 		lines = append(lines,
 			fmt.Sprintf("- Exact required constitution overview overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "charter-overview.md")),
-			"- Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary; collected shard/final/validator evidence does not exist yet.",
+			"- Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary; later pipeline evidence is invalid for this step.",
 			"- For step0, overwrite charter-overview.md with target identity, repository evidence, architecture scope, operating principles/constraints, coverage gaps, and a decision-ready operator summary.",
 			"- Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
 		)
@@ -493,6 +516,8 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			"- For step4, overwrite proposal.md and changelog.md.",
+			"- For step4 no-action retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files; do not run an open-ended repo or staged-artifact sweep before the first mutation.",
+			"- If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
 			"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, risks/gaps/out-of-scope.",
 			"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
 			"- If typed shard status shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement.",
@@ -506,6 +531,10 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 
 func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func isStep0DraftEnrichmentStep(stepID string) bool {
+	return strings.TrimSpace(stepID) == "init.step0.constitution"
 }
 
 func draftEnrichmentValidationMentionsManifestShape(err error) bool {

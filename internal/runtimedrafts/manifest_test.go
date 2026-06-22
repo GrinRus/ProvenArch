@@ -124,6 +124,62 @@ func TestValidateRequiredManifestRejectsConstitutionBootstrapDraftContent(t *tes
 	}
 }
 
+func TestValidateRequiredManifestRejectsConstitutionDownstreamEvidenceLeak(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	contaminatedDraft := `# Constitution Overview
+
+## Repository Evidence
+- README.md shows the repository entrypoint for the scoped system.
+
+## Runtime Notes
+- Produced by: claude-code runtime provider.
+- Generated: 2026-06-22T18:47:43Z.
+- Canonical documents: 0 documents observed in final-run-index.json.
+- Citations: 0 citations observed in citation-index.json.
+
+## Operator Summary
+- Use the repository evidence above before continuing.
+`
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte(contaminatedDraft), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("agents: []\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md", "kind": "charter", "title": "Constitution"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml", "kind": "bundle", "title": "Baseline Subagents"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ConstitutionManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile})
+	if err == nil {
+		t.Fatalf("expected downstream/runtime-only constitution content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "mentions downstream or runtime-only evidence in step0 constitution content") {
+		t.Fatalf("expected step0 downstream leak error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsConstitutionDraftOutsideAllowedPublishSurface(t *testing.T) {
 	t.Parallel()
 
