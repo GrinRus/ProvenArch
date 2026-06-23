@@ -1278,6 +1278,28 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T071328Z` re
 
 ---
 
+## Live E2E Collect Repair Canonical Path Mapping
+
+### Context
+Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` confirmed that the canonical semantic-shape fix worked for `posthog-bin`, but exposed the next collect repair drift. The compact `collect_pair_repair` wrote provider-authored markdown and canonical semantic objects, yet set `documents[0].canonical_path` to the live staging path `reports/taskruns/.../staging/shards/posthog-bin/bin-overview.md`. Strict contract validation correctly rejected it, then `collect_manifest_repair` stalled/no-op without replacing the manifest. The run was stopped after terminal shard failure because the matrix could no longer become acceptance evidence.
+
+### Plan
+- [x] Centralize stable collect canonical path generation from shard slug + authored doc path.
+- [x] Add exact `documents[].path -> documents[].canonical_path` mapping to manifest-only repair prompts.
+- [x] Add exact `documents[0].canonical_path` to compact collect pair repair prompts and explicitly forbid `reports/taskruns/**`, `/staging/`, absolute `write_root`, raw runtime paths and duplicated artifact-root canonical paths.
+- [x] Add prompt/skeleton contract tests for the live-observed drift.
+- [x] Update live E2E runbook/spec/architecture/testing docs.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium `claude-code`.
+
+### Acceptance
+- [x] Compact collect pair repair prompt no longer leaves canonical path inference open.
+- [x] Manifest-only repair prompt lists stable canonical-path mappings for existing authored docs.
+- [ ] Latest strict medium `claude-code` rerun no longer fails on staging/taskrun `documents[].canonical_path`.
+- [ ] Latest strict medium `claude-code` and `codex-code` evidence both reach clean execution and accepted manual artifact/UX decisions.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

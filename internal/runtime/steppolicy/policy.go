@@ -338,6 +338,19 @@ func SuggestedCollectDocumentPath(task acpruntime.Task) string {
 	return "overview.md"
 }
 
+func CollectManifestCanonicalPath(task acpruntime.Task, docPath string) string {
+	docPath = filepath.ToSlash(strings.TrimSpace(docPath))
+	docSlug := slugComponent(strings.TrimSuffix(docPath, filepath.Ext(docPath)))
+	if docSlug == "" {
+		docSlug = "overview"
+	}
+	shardSlug := slugComponent(firstNonEmpty(task.ShardID, task.DomainID, strings.Join(task.PathScopes, "-"), "shard"))
+	if shardSlug == "" {
+		shardSlug = "shard"
+	}
+	return fmt.Sprintf("reports/as-is/%s/%s.md", shardSlug, docSlug)
+}
+
 func CollectFirstActionSection(task acpruntime.Task) string {
 	if !acpruntime.IsCollectStep(task.StepID) {
 		return ""
@@ -644,7 +657,7 @@ func collectManifestTaskSkeleton(task acpruntime.Task, docPaths []string, eviden
 			Kind:          "report",
 			Title:         titleFromSlug(docSlug),
 			Path:          docPath,
-			CanonicalPath: fmt.Sprintf("reports/as-is/%s/%s.md", shardSlug, docSlug),
+			CanonicalPath: CollectManifestCanonicalPath(task, docPath),
 			Topics:        []string{topic},
 			CitationIDs:   []string{citationID},
 		})

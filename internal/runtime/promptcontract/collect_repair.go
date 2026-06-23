@@ -33,6 +33,7 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; the first command must also prove every citation/provenance repo path is an existing file.",
 		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
+		"- documents[].canonical_path must be a stable promoted workspace path. Never use write_root, artifact_root, absolute paths, reports/taskruns, staging, raw logs, or runtime metadata paths as canonical_path.",
 		"- If shard-pack-manifest.json already exists but is invalid, do not inspect or patch it; overwrite it after the evidence pass.",
 		"- The manifest top-level object may contain only ACP shard-pack-manifest fields: version, run_id, step_id, shard_id, domain_id, agent_role, artifact_root, repo_scopes, path_scopes, summary, documents, citations, and semantic.",
 		"- Do not add top-level claims, claim_map, validation, metadata, compatibility, schema, or any alternate semantic wrapper; claim IDs belong only in citations[].claim_ids.",
@@ -79,6 +80,10 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		repairLines = append(repairLines, "Existing authored document files in write_root:")
 		for _, rel := range authoredDocs {
 			repairLines = append(repairLines, fmt.Sprintf("- %s", rel))
+		}
+		repairLines = append(repairLines, "Stable collect canonical_path mapping for existing authored documents:")
+		for _, mapping := range collectCanonicalPathMappingLines(task, authoredDocs) {
+			repairLines = append(repairLines, "- "+mapping)
 		}
 	}
 	if len(evidencePaths) > 0 {
@@ -127,6 +132,12 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 			lines = append(lines, "  - "+rel)
 		}
 	}
+	if len(authoredDocs) > 0 {
+		lines = append(lines, "- Stable canonical_path mapping to copy into documents[] exactly:")
+		for _, mapping := range collectCanonicalPathMappingLines(task, authoredDocs) {
+			lines = append(lines, "  - "+mapping)
+		}
+	}
 	lines = append(lines, "- Bounded repository evidence candidates:")
 	if len(evidencePaths) == 0 {
 		lines = append(lines, "  - README.md", "  - README.adoc")
@@ -137,11 +148,24 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 	}
 	lines = append(lines,
 		"- Do not emit only this evidence list. The same first command must write shard-pack-manifest.json.",
+		"- Reject any documents[].canonical_path that contains reports/taskruns, /staging/, raw runtime paths, write_root, artifact_root, or an absolute filesystem prefix.",
 		"- Do not cite repository directories. If a candidate is directory-only or missing, record it in coverage.missing/questions instead of citations/provenance.",
 		"- Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
 		"- Do not use a copied skeleton or generic repo/shard wrapper semantic as the final manifest.",
 	)
 	return strings.Join(lines, "\n")
+}
+
+func collectCanonicalPathMappingLines(task acpruntime.Task, docPaths []string) []string {
+	lines := make([]string, 0, len(docPaths))
+	for _, rel := range docPaths {
+		rel = filepath.ToSlash(strings.TrimSpace(rel))
+		if rel == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s -> %s", rel, steppolicy.CollectManifestCanonicalPath(task, rel)))
+	}
+	return lines
 }
 
 func firstNonEmpty(values ...string) string {
@@ -198,6 +222,8 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 		"- Explain concrete components, runtime/config/deploy/test/data surfaces, ownership gaps, and dependencies in the markdown document.",
 		"- Build shard-pack-manifest.json from that markdown plus the same repo/path evidence: documents, citations, semantic.coverage, semantic.questions, semantic.entities, semantic.edges, and semantic.findings.",
 		"- The manifest top-level object may contain only ACP shard-pack-manifest fields: version, run_id, step_id, shard_id, domain_id, agent_role, artifact_root, repo_scopes, path_scopes, summary, documents, citations, and semantic.",
+		"- documents[].canonical_path must be the stable promoted path from the task-specific skeleton, never the staging path where the markdown is authored.",
+		"- Any canonical_path beginning with reports/taskruns/ or containing /staging/ is invalid even if documents[].path is correct.",
 		"- Do not add top-level claims, claim_map, validation, metadata, compatibility, schema, or any alternate semantic wrapper; claim IDs belong only in citations[].claim_ids.",
 		"- Do not leave template placeholders in JSON strings. Literal SHARD, <shard>, <claim>, TODO, REPLACE_ME, or quoted suffix fragments such as \"claim.foo.\"SHARD are invalid.",
 		"- Use repo/path provenance for every semantic evidence object; stdout claims are diagnostics only.",
@@ -285,6 +311,8 @@ func composeCompactCollectArtifactPairRepairPrompt(provider acpruntime.Provider,
 		fmt.Sprintf("- version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole)),
 		fmt.Sprintf("- artifact_root must be exactly %q.", strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf("- documents[0].path must be %q and must point to the authored markdown file under write_root.", filepath.ToSlash(docRel)),
+		fmt.Sprintf("- documents[0].canonical_path must be exactly %q.", steppolicy.CollectManifestCanonicalPath(task, docRel)),
+		"- documents[].canonical_path must never contain reports/taskruns, /staging/, write_root, artifact_root, raw runtime paths, or absolute filesystem paths.",
 		"- documents[] may contain only id, kind, title, path, canonical_path, topics, citation_ids.",
 		"- citations[] may contain only id, repo, path, claim_ids, document_ids; every cited path must be an existing file under the resolved repo root.",
 		"- semantic must include coverage, questions, entities, edges, and findings with repo/path provenance; avoid repo/shard wrapper-only semantic output.",

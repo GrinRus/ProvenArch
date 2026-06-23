@@ -278,6 +278,12 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	if got, want := len(manifest.Documents), 2; got != want {
 		t.Fatalf("documents = %d, want %d in skeleton:\n%s", got, want, raw)
 	}
+	if got, want := manifest.Documents[0].CanonicalPath, "reports/as-is/bank-source-docs/docs-overview.md"; got != want {
+		t.Fatalf("documents[0].canonical_path = %q, want %q", got, want)
+	}
+	if got, want := manifest.Documents[1].CanonicalPath, "reports/as-is/bank-source-docs/overview.md"; got != want {
+		t.Fatalf("documents[1].canonical_path = %q, want %q", got, want)
+	}
 	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
 		t.Fatalf("citation path = %q, want %q", got, want)
 	}
