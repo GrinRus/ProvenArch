@@ -1258,6 +1258,26 @@ Strict medium `codex-code` rerun `regres-long-posthog-ftgo-20260621T193026Z` rea
 
 ---
 
+## Live E2E Collect Repair Canonical Semantic Shape
+
+### Context
+Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T071328Z` reproduced a collect recovery failure before a full profile completed. The first PostHog shard failed as `runtime_contract_failed`; later shards showed the same provider behavior but were sometimes rescued by manifest-only repair. The repeated root cause was `collect_pair_repair` writing legacy `shard-pack-manifest.json` semantic shape: `semantic.coverage.notes` as a string, entities with direct `repo/path/evidence` or missing `provenance`, edges with `relation/source/target`, findings without `description`, and provenance as direct `{repo,path}` or missing `kind/confidence/evidence[]`.
+
+### Plan
+- [x] Strengthen collect manifest contract lines and compact checklist with canonical semantic object shapes.
+- [x] Add canonical semantic-shape guidance to collect pair repair and manifest-only repair prompts.
+- [x] Add prompt contract tests for the exact live failure fields and forbidden aliases.
+- [x] Update live E2E runbook/spec/architecture/testing docs.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium `claude-code`.
+
+### Acceptance
+- [x] Prompt contracts explicitly reject legacy collect semantic aliases that appeared in the failed `claude-code` run.
+- [ ] Latest strict medium `claude-code` rerun no longer fails from unchanged/legacy collect repair manifest shape.
+- [ ] Latest strict medium `claude-code` and `codex-code` evidence both reach clean execution and accepted manual artifact/UX decisions.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

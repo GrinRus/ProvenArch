@@ -89,6 +89,10 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	}
 	repairLines = append(repairLines, overwriteCollectManifestRepairInstructions()...)
 	repairLines = append(repairLines,
+		"CANONICAL SEMANTIC SHAPE:",
+	)
+	repairLines = append(repairLines, collectManifestCanonicalShapeBlock()...)
+	repairLines = append(repairLines,
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
 	)
 	repairLines = append(repairLines, compactCollectManifestValidationChecklist(strings.TrimSpace(task.ArtifactRoot))...)
@@ -285,7 +289,9 @@ func composeCompactCollectArtifactPairRepairPrompt(provider acpruntime.Provider,
 		"- citations[] may contain only id, repo, path, claim_ids, document_ids; every cited path must be an existing file under the resolved repo root.",
 		"- semantic must include coverage, questions, entities, edges, and findings with repo/path provenance; avoid repo/shard wrapper-only semantic output.",
 		"- Do not add top-level claims, claim_map, validation, metadata, compatibility, schema, or alternate semantic wrappers.",
+		"CANONICAL SEMANTIC SHAPE:",
 	}
+	lines = append(lines, collectManifestCanonicalShapeBlock()...)
 	if focus := collectArtifactPairRepairValidationFocus(validationErr); len(focus) > 0 {
 		lines = append(lines, "VALIDATION-SPECIFIC REPAIR FOCUS:")
 		lines = append(lines, focus...)
@@ -353,6 +359,19 @@ func collectArtifactPairRepairValidationFocus(validationErr error) []string {
 		)
 	}
 	return lines
+}
+
+func collectManifestCanonicalShapeBlock() []string {
+	return []string{
+		`- coverage.notes shape: "notes": ["observed config/runtime/deploy surface"]; a bare string is invalid.`,
+		`- entity object shape: {"id":"svc.example","name":"Example","type":"service","provenance":{"kind":"observation","confidence":0.8,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		`- entity forbidden fields: kind, repo, path, evidence at the entity top level. Use type and provenance.evidence[].`,
+		`- edge object shape: {"id":"edge.example.depends","type":"depends_on","from":"svc.example","to":"store.example","provenance":{"kind":"observation","confidence":0.7,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		`- edge forbidden fields: relation, source, target. Use type, from, and to.`,
+		`- finding object shape: {"id":"finding.example.owner","severity":"medium","title":"Owner not confirmed","description":"Scoped evidence does not identify an owning team.","provenance":{"kind":"observation","confidence":0.6,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		`- finding forbidden fields: summary, inference, evidence_citation_ids, confidence at the finding top level.`,
+		`- provenance object shape is always kind + numeric confidence + evidence[]; provenance as direct {"repo":"...","path":"..."} is invalid.`,
+	}
 }
 
 func collectArtifactPairRepairDocumentPath(task acpruntime.Task, validationErr error) string {

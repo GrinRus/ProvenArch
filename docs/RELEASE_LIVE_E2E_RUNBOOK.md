@@ -715,6 +715,7 @@ Zero tolerance:
 - process-contaminated collect markdown (`bounded read/pass`, guessed paths, concrete expected-missing path checks) is invalid, but clean coverage gaps such as “no OpenAPI/Swagger spec was observed under this scope” should not be classified as runtime process narration
 - collect coverage gaps must not use runtime-process wording such as “not examined in this bounded pass”; use operator-facing wording such as “not confirmed in scoped repository evidence” instead
 - collect manifests must not add legacy top-level `claims`/`claim_map`/`metadata`/`validation`/`compatibility`, and `citations[].claim_ids` must not contain unreplaced template tokens such as `SHARD`, `<shard>`, `<claim>`, `TODO`, or `REPLACE_ME`
+- collect manifests and collect repair outputs must keep canonical semantic shape: `semantic.coverage.notes` is an array, entities use `id/name/type/provenance`, edges use `id/type/from/to/provenance`, findings use `id/severity/title/description/provenance`, and provenance is `kind/confidence/evidence[]`. Legacy aliases observed in live repair attempts (`coverage.notes` string, entity-level `repo/path/evidence`, `relation/source/target`, direct repo/path provenance, `evidence_citation_ids`, finding `summary`) are `runtime_contract_failed`, not artifact-quality-only warnings.
 - `runner_unavailable`
 - `summary_missing`
 - `infra_signal_terminated`
