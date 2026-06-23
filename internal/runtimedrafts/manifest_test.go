@@ -124,6 +124,106 @@ func TestValidateRequiredManifestRejectsConstitutionBootstrapDraftContent(t *tes
 	}
 }
 
+func TestValidateRequiredManifestAcceptsConstitutionWithBoundedReadCoverageGap(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	evidenceBackedDraft := `# FTGO Application Constitution
+
+## Repository Evidence Used
+- README.adoc identifies FTGO as a food delivery microservices example.
+- settings.gradle lists service modules including order-service and restaurant-service.
+
+## Architecture Scope
+- The bounded service view covers order placement, restaurant acceptance, and delivery orchestration.
+
+## Coverage Gaps
+- Deployment and operational manifests exist but were not inspected in this bounded read, so production assumptions remain unverified.
+
+## Decision-Ready Operator Summary
+- Continue with collect shards focused on service boundaries, Eventuate messaging, and deployment evidence.
+`
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte(evidenceBackedDraft), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("agents: []\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md", "kind": "charter", "title": "Constitution"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml", "kind": "bundle", "title": "Baseline Subagents"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ConstitutionManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile}); err != nil {
+		t.Fatalf("expected evidence-backed constitution draft with bounded-read coverage gap to validate: %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsConstitutionBoundedReadRootsRecoveryMarker(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	recoveryDraft := `# Constitution
+
+## Runtime Notes
+- The bounded read roots were used to initialize this draft surface.
+`
+	if err := os.WriteFile(filepath.Join(draftRoot, "charter-overview.md"), []byte(recoveryDraft), 0o644); err != nil {
+		t.Fatalf("write charter overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "baseline-subagents.yaml"), []byte("agents: []\n"), 0o644); err != nil {
+		t.Fatalf("write baseline subagents: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step0.constitution",
+  "step_contract": "constitution",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "charter-overview.md", "canonical_path": "charter/overview.md", "kind": "charter", "title": "Constitution"},
+    {"path": "baseline-subagents.yaml", "canonical_path": "skills/subagents.yaml", "kind": "bundle", "title": "Baseline Subagents"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ConstitutionManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step0.constitution", "constitution", []string{ConstitutionManifestFile})
+	if err == nil {
+		t.Fatalf("expected bounded-read-roots recovery marker to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
+		t.Fatalf("expected bootstrap placeholder error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsConstitutionDownstreamEvidenceLeak(t *testing.T) {
 	t.Parallel()
 

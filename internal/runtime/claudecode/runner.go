@@ -131,10 +131,17 @@ func (a claudeAdapter) ValidateArtifacts(task acpruntime.Task) error {
 
 func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
+	preArtifactWindow := 180 * time.Second
+	retryPreArtifactWindow := time.Duration(0)
+	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep1Collect {
+		preArtifactWindow = 5 * time.Minute
+		retryPreArtifactWindow = 5 * time.Minute
+	}
 	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
-		MonitorArtifacts:       monitorArtifacts,
-		MonitorPreArtifact:     monitorArtifacts,
-		PreArtifactStallWindow: 180 * time.Second,
+		MonitorArtifacts:            monitorArtifacts,
+		MonitorPreArtifact:          monitorArtifacts,
+		PreArtifactStallWindow:      preArtifactWindow,
+		RetryPreArtifactStallWindow: retryPreArtifactWindow,
 	})
 }
 

@@ -1312,13 +1312,36 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 - [x] Reject metadata-only shard-summary key dumps and false zero-shard/zero-file claims when typed/shard manifest evidence exists.
 - [x] Strengthen compact `draft_artifact_enrichment_no_action_retry` prompt for step2 typed completeness.
 - [x] Add unit and prompt contract regression tests.
-- [ ] Run full DoD.
-- [ ] Commit and rerun strict medium `claude-code`.
+- [x] Run full DoD.
+- [x] Commit and rerun strict medium `claude-code`.
 
 ### Acceptance
 - [x] Valid step2 markdown with exact `N/N succeeded` and no failed/incomplete statement passes when typed summary shows all succeeded.
 - [x] Live-observed misleading markdown fails as `runtime_contract_failed`.
-- [ ] Latest strict medium rerun no longer accepts metadata-dump/false-zero step2 coverage.
+- [x] Latest strict medium rerun no longer accepts metadata-dump/false-zero step2 coverage.
+
+---
+
+## Live E2E Step0 Bounded-Read Marker And Claude Collect Window
+
+### Context
+- 2026-06-23 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T113848Z` validated the step2 hardening: downstream `step2/3/4` no longer masked partial collect, and machine execution reports kept artifact quality telemetry out of the execution verdict.
+- PostHog failed at collect as execution-only `runner_unavailable`: two shards produced no stdout/stderr and no authored files across normal collect, fresh retry and focused collect-pair repair, each bounded by the 180s pre-artifact window.
+- FTGO failed at `init.step0.constitution` due a draft-validation false positive: provider-authored `charter-overview.md` was evidence-backed and decision-ready, but the hard scaffold marker `bounded read` rejected the valid coverage-gap sentence “not inspected in this bounded read.”
+
+### Plan
+- [x] Narrow draft scaffold markers from generic `bounded read` to process-specific markers such as `bounded read roots`, `bounded read pass`, `bounded evidence read` and `bounded staged evidence`.
+- [x] Add regression coverage that accepts evidence-backed step0 coverage gaps using `bounded read` and still rejects recovery-process `bounded read roots`.
+- [x] Extend `claude-code` collect initial/retry pre-artifact window to 5 minutes while leaving draft/enrichment windows unchanged.
+- [x] Update prompt contract wording and live E2E docs/spec/testing strategy.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium `claude-code`.
+
+### Acceptance
+- [x] Evidence-backed `charter-overview.md` with a normal bounded-read coverage gap passes draft validation.
+- [x] Recovery/process bounded-read markers remain contract-invalid.
+- [x] Claude collect policy exposes 5-minute initial/retry pre-artifact windows for `init|refresh.step1.collect`.
+- [ ] Latest strict medium `claude-code` rerun no longer fails from the FTGO false-positive marker and has enough collect budget to test PostHog shard recovery.
 
 ---
 
