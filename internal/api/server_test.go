@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -4148,6 +4149,7 @@ for arg in "$@"; do
   LAST_ARG="$arg"
 done
 TASK_PAYLOAD="$TASK_PAYLOAD" TASK_PROMPT="$LAST_ARG" python3 - <<'PY'
+import glob
 import json
 import os
 import re
@@ -4244,6 +4246,28 @@ if not repo_scopes:
 question = first_non_empty(task, ["question", "Question"]) or from_prompt("question") or from_prompt("Question")
 context_pack_path = first_non_empty(task, ["context_pack_path", "ContextPackPath"]) or from_prompt("context_pack_path") or from_prompt("ContextPackPath")
 
+def shard_completeness_line():
+    if not draft_root or not run_id:
+        return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+    taskruns_root = os.path.abspath(os.path.join(draft_root, "..", "..", "..", ".."))
+    matches = sorted(glob.glob(os.path.join(taskruns_root, f"{run_id}-*-step1-collect-shard-summary-*.json")))
+    for path in matches:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                items = json.load(handle).get("items", [])
+        except Exception:
+            continue
+        if not items:
+            continue
+        planned = len(items)
+        succeeded = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "succeeded")
+        failed = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "failed")
+        incomplete = planned - succeeded - failed
+        if failed == 0 and incomplete == 0:
+            return f"Shard completeness: {succeeded}/{planned} succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary."
+        return f"Shard completeness: planned={planned} succeeded={succeeded} failed={failed} incomplete={incomplete} from the current-run typed shard summary."
+    return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+
 def write_runtime_draft(manifest_name, outputs, default_step_contract="draft"):
     if not write_root or not draft_root:
         return
@@ -4303,18 +4327,21 @@ elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
                 "canonical_path": "reports/as-is/overview.md",
                 "kind": "report",
                 "title": "Stub As-Is Overview",
+                "content": "# Stub As-Is Overview\n\nEvidence references: reports/as-is/overview.md.\n",
             },
             {
                 "path": "summary.md",
                 "canonical_path": "reports/coverage/summary.md",
                 "kind": "report",
                 "title": "Stub Coverage Summary",
+                "content": "# Stub Coverage Summary\n\n" + shard_completeness_line() + "\n",
             },
             {
                 "path": "architect-summary.md",
                 "canonical_path": "reports/agent-outputs/architect/summary.md",
                 "kind": "agent-output",
                 "title": "Stub Architect Summary",
+                "content": "# Stub Architect Summary\n\nWhat is complete: " + shard_completeness_line() + "\n\nWhat to inspect next: review generated as-is and coverage artifacts.\n",
             },
         ],
         "as_is",
@@ -4737,6 +4764,7 @@ func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
 	if writeRoot == "" || draftRoot == "" {
 		return nil
 	}
+	shardCompleteness := syntheticServerShardCompletenessLine(task)
 
 	type draftSpec struct {
 		manifest string
@@ -4774,21 +4802,21 @@ func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
 					"canonical_path": "reports/as-is/overview.md",
 					"kind":           "report",
 					"title":          "Stub As-Is Overview",
-					"content":        "# Stub As-Is Overview\n",
+					"content":        "# Stub As-Is Overview\n\nEvidence references: reports/as-is/overview.md.\n",
 				},
 				{
 					"path":           "summary.md",
 					"canonical_path": "reports/coverage/summary.md",
 					"kind":           "report",
 					"title":          "Stub Coverage Summary",
-					"content":        "# Stub Coverage Summary\n",
+					"content":        "# Stub Coverage Summary\n\n" + shardCompleteness + "\n",
 				},
 				{
 					"path":           "architect-summary.md",
 					"canonical_path": "reports/agent-outputs/architect/summary.md",
 					"kind":           "agent-output",
 					"title":          "Stub Architect Summary",
-					"content":        "# Stub Architect Summary\n",
+					"content":        "# Stub Architect Summary\n\nWhat is complete: " + shardCompleteness + "\n\nWhat to inspect next: review generated as-is and coverage artifacts.\n",
 				},
 			},
 		}
@@ -4848,4 +4876,57 @@ func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(writeRoot, spec.manifest), raw, 0o644)
+}
+
+func syntheticServerShardCompletenessLine(task acpruntime.Task) string {
+	taskrunsRoot := filepath.Clean(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "..", "..", "..", ".."))
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+	}
+	matches, err := filepath.Glob(filepath.Join(taskrunsRoot, runID+"-*-step1-collect-shard-summary-*.json"))
+	if err != nil || len(matches) == 0 {
+		return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+	}
+	sort.Strings(matches)
+	for _, match := range matches {
+		line, ok := syntheticServerShardCompletenessLineFromFile(match)
+		if ok {
+			return line
+		}
+	}
+	return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+}
+
+func syntheticServerShardCompletenessLineFromFile(filename string) (string, bool) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return "", false
+	}
+	var summary struct {
+		Items []struct {
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+		return "", false
+	}
+	planned := len(summary.Items)
+	succeeded := 0
+	failed := 0
+	incomplete := 0
+	for _, item := range summary.Items {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "succeeded":
+			succeeded++
+		case "failed":
+			failed++
+		default:
+			incomplete++
+		}
+	}
+	if failed == 0 && incomplete == 0 {
+		return fmt.Sprintf("Shard completeness: %d/%d succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.", succeeded, planned), true
+	}
+	return fmt.Sprintf("Shard completeness: planned=%d succeeded=%d failed=%d incomplete=%d from the current-run typed shard summary.", planned, succeeded, failed, incomplete), true
 }

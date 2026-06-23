@@ -432,6 +432,130 @@ func TestValidateRequiredManifestRejectsAsIsBootstrapDraftContent(t *testing.T) 
 	}
 }
 
+func TestValidateRequiredManifestAcceptsAsIsDraftShardCompletenessFromTypedSummary(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step2_as_is")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step2_as_is")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	shardSummary := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "domain_id": "posthog",
+  "items": [
+    {"shard_id": "posthog-root", "status": "succeeded"},
+    {"shard_id": "posthog-services", "status": "succeeded"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-posthog.json"), []byte(shardSummary), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	files := map[string]string{
+		"overview.md":          "# As-Is Architecture Overview\n\nEvidence references: reports/as-is/posthog-root/root-overview.md and reports/as-is/posthog-services/services-overview.md.\n",
+		"summary.md":           "# Coverage Summary\n\nShard completeness: 2/2 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\n\nEvidence density is sufficient for the scoped PostHog shards, with remaining gaps called out per shard.\n",
+		"architect-summary.md": "# Architect Summary\n\nWhat is complete: 2/2 succeeded collect shards are available for review.\n\nWhat to inspect next: compare services and root-surface evidence before publishing.\n",
+	}
+	for relPath, content := range files {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile}); err != nil {
+		t.Fatalf("expected typed shard completeness draft to validate: %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsAsIsDraftMisleadingShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step2_as_is")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step2_as_is")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	shardSummary := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "domain_id": "posthog",
+  "items": [
+    {"shard_id": "posthog-root", "status": "succeeded"},
+    {"shard_id": "posthog-services", "status": "succeeded"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-posthog.json"), []byte(shardSummary), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	files := map[string]string{
+		"overview.md":          "# As-Is Architecture Overview\n\nEvidence references: reports/as-is/posthog-root/root-overview.md.\n",
+		"summary.md":           "# Coverage Summary\n\n## Shard Completeness\n- meta: 1 keys\n- step_id: init.step1.collect\n- domain_id: posthog\n- strategy: sequential\n",
+		"architect-summary.md": "# Architect Summary\n\nSupporting artifacts reviewed: Staging shard directory contains 0 files.\n",
+	}
+	for relPath, content := range files {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected misleading shard completeness to be rejected")
+	}
+	for _, want := range []string{
+		"includes metadata-only shard-summary keys",
+		"does not report exact current-run shard completeness",
+		"claims staging shard evidence is empty",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in error, got %v", want, err)
+		}
+	}
+}
+
 func TestValidateRequiredManifestRejectsAsIsDraftUnknownTopLevelField(t *testing.T) {
 	t.Parallel()
 

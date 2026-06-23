@@ -244,6 +244,11 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		if runtimeDraftTextHasMetadataOnlyEvidenceBullet(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes metadata-only JSON keys as evidence instead of architecture or proposal signals", idx, output.Path))
 		}
+		if strings.TrimSpace(stepID) == "init.step2.asis_docs" || strings.TrimSpace(stepID) == "refresh.step2.asis_docs" {
+			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
+				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
+			}
+		}
 		if mismatch := runtimeDraftTextIndexCountMismatch(text, cleanDraftRoot); mismatch != "" {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 		}
@@ -679,6 +684,139 @@ func runtimeDraftTextHasMetadataOnlyEvidenceBullet(text string) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+type runtimeDraftShardCompleteness struct {
+	planned    int
+	succeeded  int
+	failed     int
+	incomplete int
+}
+
+func runtimeDraftTextAsIsShardCompletenessMismatch(text string, draftRoot string, runID string, output Output) string {
+	counts, ok := readRuntimeDraftShardCompleteness(draftRoot, runID)
+	if !ok || counts.planned == 0 {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "staging shard directory contains 0 file") ||
+		strings.Contains(lower, "staging shards directory contains 0 file") ||
+		strings.Contains(lower, "staging shard directory contains zero file") ||
+		strings.Contains(lower, "staging shards directory contains zero file") ||
+		strings.Contains(lower, "staging shard directory contains 0 shard") ||
+		strings.Contains(lower, "staging shards directory contains 0 shard") {
+		return fmt.Sprintf("claims staging shard evidence is empty but current-run typed shard summary contains %d planned shard(s)", counts.planned)
+	}
+
+	canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+	if canonicalPath != "reports/coverage/summary.md" {
+		return ""
+	}
+	summaryProblems := []string{}
+	if runtimeDraftTextHasShardSummaryMetadataDump(text) {
+		summaryProblems = append(summaryProblems, "includes metadata-only shard-summary keys instead of architecture coverage evidence")
+	}
+	if !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+		summaryProblems = append(summaryProblems, fmt.Sprintf("does not report exact current-run shard completeness from typed shard summary: planned=%d succeeded=%d failed=%d incomplete=%d", counts.planned, counts.succeeded, counts.failed, counts.incomplete))
+	}
+	if len(summaryProblems) > 0 {
+		return strings.Join(summaryProblems, " and ")
+	}
+	return ""
+}
+
+func runtimeDraftTextHasShardSummaryMetadataDump(text string) bool {
+	hits := 0
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		lower := strings.ToLower(strings.TrimSpace(trimmed))
+		for _, marker := range []string{
+			"meta:",
+			"step_id:",
+			"domain_id:",
+			"strategy:",
+			"max_parallel_tasks:",
+			"failure_policy:",
+			"shard_discovery_mode:",
+		} {
+			if strings.HasPrefix(lower, marker) {
+				hits++
+				break
+			}
+		}
+	}
+	return hits >= 2
+}
+
+func readRuntimeDraftShardCompleteness(draftRoot string, runID string) (runtimeDraftShardCompleteness, bool) {
+	taskrunsRoot := filepath.Clean(filepath.Join(strings.TrimSpace(draftRoot), "..", "..", "..", ".."))
+	if strings.TrimSpace(runID) == "" {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	pattern := filepath.Join(taskrunsRoot, strings.TrimSpace(runID)+"-*-step1-collect-shard-summary-*.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	sort.Strings(matches)
+	for _, match := range matches {
+		counts, ok := readRuntimeDraftShardCompletenessFile(match)
+		if ok && counts.planned > 0 {
+			return counts, true
+		}
+	}
+	return runtimeDraftShardCompleteness{}, false
+}
+
+func readRuntimeDraftShardCompletenessFile(filename string) (runtimeDraftShardCompleteness, bool) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	var summary struct {
+		Items []struct {
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	counts := runtimeDraftShardCompleteness{planned: len(summary.Items)}
+	for _, item := range summary.Items {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "succeeded":
+			counts.succeeded++
+		case "failed":
+			counts.failed++
+		default:
+			counts.incomplete++
+		}
+	}
+	return counts, true
+}
+
+func runtimeDraftTextClaimsShardCompleteness(text string, counts runtimeDraftShardCompleteness) bool {
+	lower := strings.ToLower(text)
+	exactSucceeded := fmt.Sprintf("%d/%d succeeded", counts.succeeded, counts.planned)
+	if strings.Contains(lower, exactSucceeded) {
+		if counts.failed == 0 && counts.incomplete == 0 {
+			return strings.Contains(lower, "no failed") &&
+				(strings.Contains(lower, "no failed, pending, or incomplete") ||
+					strings.Contains(lower, "no failed or incomplete") ||
+					strings.Contains(lower, "failed=0"))
+		}
+		return true
+	}
+	if strings.Contains(lower, fmt.Sprintf("planned=%d", counts.planned)) &&
+		strings.Contains(lower, fmt.Sprintf("succeeded=%d", counts.succeeded)) &&
+		strings.Contains(lower, fmt.Sprintf("failed=%d", counts.failed)) {
+		if counts.incomplete == 0 {
+			return strings.Contains(lower, "incomplete=0") || strings.Contains(lower, "pending=0")
+		}
+		return strings.Contains(lower, fmt.Sprintf("incomplete=%d", counts.incomplete))
 	}
 	return false
 }

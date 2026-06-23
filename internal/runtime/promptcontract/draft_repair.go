@@ -525,6 +525,10 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 			"- overview.md must summarize architecture surfaces with concrete repo/path or staged-artifact evidence.",
 			"- summary.md must state shard completeness from typed shard status when visible plus evidence density/readability and gaps.",
 			"- architect-summary.md must state what is complete, what is missing, and what the operator should inspect or decide next.",
+			"- If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
+			"- When typed shard-summary shows all shards succeeded, summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+			"- Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
+			"- Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 		)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,

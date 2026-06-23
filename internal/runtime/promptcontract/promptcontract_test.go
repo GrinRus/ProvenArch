@@ -1556,6 +1556,36 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptStep2NoActionRetryRequiresTypedShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns", "/tmp/workspace/reports/taskruns/run-1/staging/shards"},
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[1].path "summary.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment no-action retry mode",
+		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
+		"If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
+		"summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+		"Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
+		"Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step2 no-action retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCandidates(t *testing.T) {
 	t.Parallel()
 

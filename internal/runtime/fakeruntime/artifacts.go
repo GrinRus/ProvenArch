@@ -218,6 +218,10 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 
 	coverage := strings.Builder{}
 	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")
+	if completeness, ok := runtimeDraftShardCompletenessLine(task); ok {
+		coverage.WriteString("## Shard Completeness\n\n")
+		coverage.WriteString("- " + completeness + "\n\n")
+	}
 	if len(semantic.Coverage.Observed) > 0 {
 		coverage.WriteString("## Observed\n\n")
 		for _, item := range semantic.Coverage.Observed {
@@ -242,6 +246,59 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 		return err
 	}
 	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.AsIsManifestFile, task, summary, outputs)
+}
+
+func runtimeDraftShardCompletenessLine(task acpruntime.Task) (string, bool) {
+	taskrunsRoot := filepath.Clean(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "..", "..", "..", ".."))
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(taskrunsRoot, runID+"-*-step1-collect-shard-summary-*.json"))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	sort.Strings(matches)
+	for _, match := range matches {
+		line, ok := runtimeDraftShardCompletenessLineFromFile(match)
+		if ok {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+func runtimeDraftShardCompletenessLineFromFile(filename string) (string, bool) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return "", false
+	}
+	var summary struct {
+		Items []struct {
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+		return "", false
+	}
+	planned := len(summary.Items)
+	succeeded := 0
+	failed := 0
+	incomplete := 0
+	for _, item := range summary.Items {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "succeeded":
+			succeeded++
+		case "failed":
+			failed++
+		default:
+			incomplete++
+		}
+	}
+	if failed == 0 && incomplete == 0 {
+		return fmt.Sprintf("Shard completeness: %d/%d succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.", succeeded, planned), true
+	}
+	return fmt.Sprintf("Shard completeness: planned=%d succeeded=%d failed=%d incomplete=%d from the current-run typed shard summary.", planned, succeeded, failed, incomplete), true
 }
 
 func writeProposalsDraftManifest(writeRoot string, task acpruntime.Task, summary string) error {

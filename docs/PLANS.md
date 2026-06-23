@@ -1300,6 +1300,28 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 
 ---
 
+## Live E2E Step2 Typed Shard Completeness Hardening
+
+### Context
+- 2026-06-23 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T091625Z` confirmed the collect `canonical_path` fix across 16 PostHog shard manifests, including the previously failing `posthog-bin` shard.
+- The same run was stopped during `init.step2.asis_docs` after manual artifact-quality inspection found misleading enriched draft markdown: typed shard-summary evidence had `items=16` with succeeded statuses, but `summary.md` dumped metadata-like lines (`meta: 1 keys`, `step_id`, `domain_id`, `strategy`) and `architect-summary.md` claimed `Staging shard directory contains 0 files`.
+- This is a runtime draft contract problem, not product functionality and not artifact-quality telemetry: when typed current-run shard status is readable, step2 coverage must report exact planned/succeeded/failed/incomplete counts or fail validation.
+
+### Plan
+- [x] Add strict `step2.asis_docs` draft validation against current-run typed shard-summary files.
+- [x] Reject metadata-only shard-summary key dumps and false zero-shard/zero-file claims when typed/shard manifest evidence exists.
+- [x] Strengthen compact `draft_artifact_enrichment_no_action_retry` prompt for step2 typed completeness.
+- [x] Add unit and prompt contract regression tests.
+- [ ] Run full DoD.
+- [ ] Commit and rerun strict medium `claude-code`.
+
+### Acceptance
+- [x] Valid step2 markdown with exact `N/N succeeded` and no failed/incomplete statement passes when typed summary shows all succeeded.
+- [x] Live-observed misleading markdown fails as `runtime_contract_failed`.
+- [ ] Latest strict medium rerun no longer accepts metadata-dump/false-zero step2 coverage.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
