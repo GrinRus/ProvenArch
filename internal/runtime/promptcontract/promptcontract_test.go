@@ -779,6 +779,57 @@ func TestComposeCollectArtifactPairRepairPromptAddsValidationSpecificFocus(t *te
 	}
 }
 
+func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"README.md"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderClaudeCode, task, fmt.Errorf("collect pair recovery stalled before valid artifacts were available: runtime_stalled_before_artifacts"))
+	for _, token := range []string{
+		"Compact live recovery path: write first",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"COMPACT MANIFEST FIELD CONTRACT:",
+		"documents[0].path must be \"root-overview.md\"",
+		"VALIDATION-SPECIFIC REPAIR FOCUS:",
+		"write the markdown document and shard-pack-manifest.json in the first filesystem command",
+		"Bounded repository evidence candidates:",
+		"- README.md",
+		"Previous collect artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact collect pair repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		`"entities": [`,
+		`"edges": [`,
+		`"findings": [`,
+		"Copying this skeleton unchanged is invalid",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact collect pair repair prompt must not include bulky skeleton token %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptTargetsExistingAuthoredMarkdown(t *testing.T) {
 	t.Parallel()
 
@@ -1382,6 +1433,34 @@ func TestComposeDraftArtifactEnrichmentPromptAddsManifestShapeRetryHint(t *testi
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected manifest-shape retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" claims current-run final/citation indexes are unavailable instead of omitting downstream index status`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
+		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not readable",
+		"For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely",
+		"count only top-level canonical_documents[]",
+		"count only top-level citations[]",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected downstream-index retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }

@@ -411,6 +411,15 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 				"- Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
 			)
 		}
+		if draftEnrichmentValidationMentionsDownstreamIndexClaim(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
+				"- The previous enrichment wrote stale current-run final/citation index availability text.",
+				"- Rewrite every referenced markdown file again and remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not readable, or has 0 observed documents without a validated zero-document index.",
+				"- For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely and focus on shard completeness, evidence density, readable architecture facts, coverage gaps, and operator decisions.",
+				"- If a current-run final-run-index.json is present, count only top-level canonical_documents[]. If citation-index.json is present, count only top-level citations[].",
+			)
+		}
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
@@ -544,6 +553,15 @@ func draftEnrichmentValidationMentionsManifestShape(err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
 		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
+}
+
+func draftEnrichmentValidationMentionsDownstreamIndexClaim(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
+		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
 }
 
 func draftEnrichmentValidationMentionsNoActionRetry(err error) bool {

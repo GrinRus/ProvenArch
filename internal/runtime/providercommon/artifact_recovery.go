@@ -888,6 +888,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
 				} else if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
+				} else if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
 				}
 			}
 			emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -919,6 +921,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
+		}
+		if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
 		}
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
@@ -995,6 +1000,15 @@ func shouldRetryDraftManifestShapeEnrichment(stage string, err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
 		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
+}
+
+func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_downstream_index_retry" || err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
+		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
 }
 
 func shouldRetryDraftNoActionEnrichment(stage string, err error) bool {

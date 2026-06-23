@@ -2611,6 +2611,49 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentManifestShape(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-index-claim")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	badIndexClaimScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Coverage Summary",
+		"",
+		"- No current-run final-run-index.json or citation-index.json was present in the allowed current-run locations.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{badIndexClaimScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected downstream-index claim enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_downstream_index_retry") {
+		t.Fatalf("expected downstream index retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful downstream index retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRejectsRepeatedDraftEnrichmentNoAction(t *testing.T) {
 	t.Parallel()
 

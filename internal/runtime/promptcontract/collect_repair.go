@@ -154,6 +154,9 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	evidencePaths := repairEvidenceCandidates(task)
+	if useCompactCollectPairRepairPrompt(validationErr) {
+		return composeCompactCollectArtifactPairRepairPrompt(provider, task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
+	}
 	skeleton := steppolicy.CollectManifestTaskSkeleton(task, []string{docRel}, evidencePaths)
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in collect artifact pair focused recovery mode.", provider),
@@ -241,6 +244,79 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	lines = append(lines,
 		"- Use the embedded JSON above as the task-specific skeleton. Do not infer schema from prior reports/taskruns artifacts or raw logs.",
 		"- This is provider-authored recovery; ACP will only validate artifacts and write the runtime-execution metadata.",
+	)
+	if detail := errorText(validationErr); detail != "" {
+		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func useCompactCollectPairRepairPrompt(validationErr error) bool {
+	detail := strings.ToLower(errorText(validationErr))
+	return strings.Contains(detail, "runtime_stalled_before_artifacts") ||
+		(strings.Contains(detail, "repo evidence path") && strings.Contains(detail, "directory")) ||
+		strings.Contains(detail, "process-contaminated") ||
+		strings.Contains(detail, "process contaminated")
+}
+
+func composeCompactCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error, docRel string, docTarget string, manifestTarget string, evidencePaths []string) string {
+	lines := []string{
+		fmt.Sprintf("You are ACP runtime provider %q in collect artifact pair focused recovery mode.", provider),
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
+		"- Compact live recovery path: write first, keep the command small, and do not spend the window on broad analysis.",
+		"- This repair is not a bootstrap/fallback writer. Do not create a seed-only or recovery-summary pair.",
+		"- Do not run a separate read-only preflight, print an evidence packet, or answer with a plan/status note before the writes.",
+		"- Your next action must be one bounded filesystem command that reads allowed evidence and writes both exact targets before returning.",
+		fmt.Sprintf("- Write exactly two files in the first command: %q and %q.", docTarget, manifestTarget),
+		"- Write the markdown document first as operator-facing architecture evidence, then write shard-pack-manifest.json that references it.",
+		"- If the authored document target already exists, rewrite it completely from observed evidence; do not leave stale missing-path or process wording in place.",
+		"- Read at most 8 listed evidence candidates and at most the first 6000 bytes from each file.",
+		"- If a claim is not supported by observed snippets, omit it or record a concrete coverage gap; do not abort for self-invented semantic checks.",
+		"- Repository evidence in citations/provenance must be concrete existing files. Directories and missing paths are coverage gaps/questions, never evidence paths.",
+		"- Do not write outside write_root, delete files, read raw logs, inspect sibling taskruns, or rely on prior reports/taskruns history.",
+		"- Use python3 if scripting; keep the command mechanically simple and avoid generated source strings or nested quote tricks.",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"- Execute one filesystem command now. It must write the final markdown + manifest before any optional explanation.",
+		"COMPACT MANIFEST FIELD CONTRACT:",
+		fmt.Sprintf("- version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole)),
+		fmt.Sprintf("- artifact_root must be exactly %q.", strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf("- documents[0].path must be %q and must point to the authored markdown file under write_root.", filepath.ToSlash(docRel)),
+		"- documents[] may contain only id, kind, title, path, canonical_path, topics, citation_ids.",
+		"- citations[] may contain only id, repo, path, claim_ids, document_ids; every cited path must be an existing file under the resolved repo root.",
+		"- semantic must include coverage, questions, entities, edges, and findings with repo/path provenance; avoid repo/shard wrapper-only semantic output.",
+		"- Do not add top-level claims, claim_map, validation, metadata, compatibility, schema, or alternate semantic wrappers.",
+	}
+	if focus := collectArtifactPairRepairValidationFocus(validationErr); len(focus) > 0 {
+		lines = append(lines, "VALIDATION-SPECIFIC REPAIR FOCUS:")
+		lines = append(lines, focus...)
+	}
+	lines = append(lines,
+		"RECOVERY ACCEPTANCE REQUIREMENT:",
+		"- Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT, Recovery Bootstrap, Recovery Summary, Recovery Evidence Summary, seed-only collect recovery fallback, Additional provider enrichment should replace, Treat this as diagnostic evidence until, first bounded evidence read was attempted, initial artifact records only, or will be repaired with concrete.",
+		"- Successful recovery output must not mention bounded read, bounded pass, guessed path, guessed file, guessed evidence, missing expected evidence, expected path was not present, expected file was not present, or recovery attempts as final artifact content.",
+		"- A noop, zero-output, unchanged skeleton, generic owner-mapping-only manifest, or partially-written repair is terminal.",
+		"FINAL SELF-CHECK COMMAND:",
+		"test -s "+shellSingleQuote(docTarget)+" && test -s "+shellSingleQuote(manifestTarget)+" && ! grep -E 'ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT|Recovery Bootstrap|Recovery Summary|Recovery Evidence Summary|seed-only collect recovery fallback|Additional provider enrichment should replace|Treat this as diagnostic evidence until|first bounded evidence read was attempted|initial artifact records only|will be repaired with concrete|bounded read|bounded pass|guessed path|guessed file|guessed evidence|missing expected evidence|expected path was not present|expected file was not present' "+shellSingleQuote(docTarget)+" "+shellSingleQuote(manifestTarget),
+		"Artifact-only recovery contract:",
+		"- Do not return semantic JSON or any semantic payload on stdout.",
+		"- Backend validation, not stdout claims, is the success surface.",
+		fmt.Sprintf(`- artifact_root (workspace-relative) = %q`, strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf(`- write_root (absolute) = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- exact authored document target = %q`, docTarget),
+		fmt.Sprintf(`- exact manifest target = %q`, manifestTarget),
+		fmt.Sprintf(`- read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
+		fmt.Sprintf(`- repo_scopes = %q`, strings.Join(task.RepoScopes, ", ")),
+		fmt.Sprintf(`- path_scopes = %q`, strings.Join(task.PathScopes, ", ")),
+	)
+	if len(evidencePaths) > 0 {
+		lines = append(lines, "Bounded repository evidence candidates:")
+		for _, rel := range evidencePaths {
+			lines = append(lines, "- "+rel)
+		}
+	}
+	lines = append(lines, compactCollectManifestValidationChecklist(strings.TrimSpace(task.ArtifactRoot))...)
+	lines = append(lines,
+		"- This is provider-authored recovery; ACP will only validate artifacts and write runtime-execution metadata.",
 	)
 	if detail := errorText(validationErr); detail != "" {
 		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
