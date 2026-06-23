@@ -880,9 +880,6 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
 					}
-					if shouldRetryDraftNoActionEnrichment(stage, err) {
-						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
-					}
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
@@ -912,9 +909,6 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 			}
 			if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
-			}
-			if shouldRetryDraftNoActionEnrichment(stage, err) {
-				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftNoActionRetryError(err), "draft_artifact_enrichment_no_action_retry")
 			}
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
@@ -1011,22 +1005,8 @@ func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) boo
 		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
 }
 
-func shouldRetryDraftNoActionEnrichment(stage string, err error) bool {
-	trimmedStage := strings.TrimSpace(stage)
-	return trimmedStage != "draft_artifact_enrichment_no_action_retry" &&
-		trimmedStage != "draft_artifact_enrichment_command_text_retry" &&
-		isDraftEnrichmentNoopOrScaffoldFailure(err)
-}
-
-func draftNoActionRetryError(err error) error {
-	if err == nil {
-		return errors.New("draft_artifact_enrichment_no_action_retry")
-	}
-	return fmt.Errorf("draft_artifact_enrichment_no_action_retry: %w", err)
-}
-
 func shouldRetryDraftPrintedCommandEnrichment(stage string, result acpruntime.Result, err error) bool {
-	if strings.TrimSpace(stage) != "draft_artifact_enrichment_no_action_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_command_text_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
 		return false
 	}
 	text := strings.ToLower(strings.Join([]string{result.Stdout, result.Stderr, errorText(err)}, "\n"))

@@ -209,8 +209,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	skeleton := steppolicy.RuntimeDraftManifestTaskSkeleton(task)
 	outputs := draftEnrichmentOutputs(skeleton)
 	statusEvidenceFiles := draftEnrichmentShardStatusEvidenceFiles(task)
-	if draftEnrichmentValidationMentionsNoActionRetry(validationErr) || draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
-		return composeDraftArtifactEnrichmentNoActionRetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
+	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
+		return composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
 	}
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment focused recovery mode.", provider),
@@ -427,14 +427,14 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	return strings.Join(lines, "\n")
 }
 
-func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
+func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
 	lines := []string{
-		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment no-action retry mode.", provider),
-		"DRAFT ENRICHMENT NO-ACTION RETRY:",
-		"- The previous focused enrichment did not freshly replace every referenced markdown target with valid evidence-backed content.",
+		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment command-text retry mode.", provider),
+		"DRAFT ENRICHMENT COMMAND-TEXT RETRY:",
+		"- The previous focused enrichment returned shell/Python command text instead of executing a filesystem mutation.",
 		"- Your next response must be exactly one filesystem command, not a plan, not prose, not a status note.",
 		"- Do not print the command, fenced code, or a Python script as assistant text. The command must actually execute and mutate files before exit.",
-		"- A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed no-action enrichment.",
+		"- A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed command-text enrichment.",
 		"- The command must use python3, read bounded current-run evidence, and overwrite every markdown target listed below before it exits.",
 		"- Do not run or copy the earlier heredoc/bootstrap draft command.",
 		"- Do not write deterministic filler, raw JSON dumps, placeholder text, or recovery mechanics as final markdown.",
@@ -495,7 +495,7 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	}
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		lines = append(lines,
-			"- The previous retry printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
+			"- The previous enrichment printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
 		)
 	}
 	if draftEnrichmentValidationMentionsManifestShape(validationErr) {
@@ -533,7 +533,7 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			"- For step4, overwrite proposal.md and changelog.md.",
-			"- For step4 no-action retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files; do not run an open-ended repo or staged-artifact sweep before the first mutation.",
+			"- For step4 command-text retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files; do not run an open-ended repo or staged-artifact sweep before the first mutation.",
 			"- If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
 			"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, risks/gaps/out-of-scope.",
 			"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
@@ -570,10 +570,6 @@ func draftEnrichmentValidationMentionsDownstreamIndexClaim(err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
 		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
-}
-
-func draftEnrichmentValidationMentionsNoActionRetry(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_no_action_retry")
 }
 
 func draftEnrichmentValidationMentionsCommandTextRetry(err error) bool {

@@ -2470,7 +2470,7 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentMissingPython(t *testing.T) {
 	}
 }
 
-func TestRunHeadlessProviderRetriesDraftEnrichmentNoActionOnce(t *testing.T) {
+func TestRunHeadlessProviderRejectsDraftEnrichmentNoopOrScaffoldWithoutRetry(t *testing.T) {
 	t.Parallel()
 
 	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-no-action")
@@ -2479,7 +2479,6 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentNoActionOnce(t *testing.T) {
 		diagnostics = append(diagnostics, event)
 	}
 	noopScript := writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0"))
-	enrichmentScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
 	runner := &draftEnrichmentSequenceAdapter{
 		testAdapter: testAdapter{
 			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
@@ -2489,27 +2488,31 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentNoActionOnce(t *testing.T) {
 				RepairDraftArtifactEnrichmentOnce: true,
 			},
 		},
-		draftEnrichmentCommands: []string{noopScript, enrichmentScript},
+		draftEnrichmentCommands: []string{noopScript},
 	}
 
-	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
-		t.Fatalf("expected no-action draft enrichment retry to recover, got %v", err)
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected noop/scaffold draft enrichment to fail without a second enrichment retry")
 	}
-	if runner.draftCalls != 2 {
-		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected exactly one draft enrichment call, got %d", runner.draftCalls)
 	}
-	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
-		t.Fatalf("expected no-action retry stage diagnostic, got %#v", diagnostics)
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
+		t.Fatalf("noop/scaffold enrichment must not schedule no-action retry, got %#v", diagnostics)
 	}
-	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
-		t.Fatalf("successful no-action retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected exhausted draft enrichment diagnostic, got %#v", diagnostics)
 	}
-	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
-	if err != nil {
-		t.Fatalf("read enriched overview: %v", err)
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
 	}
-	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
-		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected noop/scaffold enrichment failure, got %v", err)
 	}
 }
 
@@ -2521,7 +2524,6 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.
 	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
 		diagnostics = append(diagnostics, event)
 	}
-	noopScript := writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0"))
 	printedCommandScript := writeEngineScript(t, strings.Join([]string{
 		"#!/usr/bin/env bash",
 		"set -eu",
@@ -2541,17 +2543,17 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.
 				RepairDraftArtifactEnrichmentOnce: true,
 			},
 		},
-		draftEnrichmentCommands: []string{noopScript, printedCommandScript, enrichmentScript},
+		draftEnrichmentCommands: []string{printedCommandScript, enrichmentScript},
 	}
 
 	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
 		t.Fatalf("expected printed-command draft enrichment retry to recover, got %v", err)
 	}
-	if runner.draftCalls != 3 {
-		t.Fatalf("expected three draft enrichment calls, got %d", runner.draftCalls)
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
 	}
-	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
-		t.Fatalf("expected no-action retry stage diagnostic, got %#v", diagnostics)
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
+		t.Fatalf("printed-command enrichment must not schedule no-action retry, got %#v", diagnostics)
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_command_text_retry") {
 		t.Fatalf("expected command-text retry stage diagnostic, got %#v", diagnostics)
@@ -2564,7 +2566,7 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.
 		t.Fatalf("read enriched overview: %v", err)
 	}
 	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
-		t.Fatalf("expected third enrichment output, got:\n%s", string(raw))
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
 	}
 }
 
@@ -2654,10 +2656,19 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testin
 	}
 }
 
-func TestRunHeadlessProviderRejectsRepeatedDraftEnrichmentNoAction(t *testing.T) {
+func TestRunHeadlessProviderRejectsDraftEnrichmentNoopAfterCommandTextRetry(t *testing.T) {
 	t.Parallel()
 
 	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-no-action-exhausted")
+	printedCommandScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"printf '%s\\n' \"python3 - <<'PY'\"",
+		"printf '%s\\n' \"from pathlib import Path\"",
+		"printf '%s\\n' \"# command text printed but not executed\"",
+		"printf '%s\\n' \"PY\"",
+		"exit 0",
+	}, "\n")+"\n")
 	noopScript := writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0"))
 	runner := &draftEnrichmentSequenceAdapter{
 		testAdapter: testAdapter{
@@ -2668,12 +2679,12 @@ func TestRunHeadlessProviderRejectsRepeatedDraftEnrichmentNoAction(t *testing.T)
 				RepairDraftArtifactEnrichmentOnce: true,
 			},
 		},
-		draftEnrichmentCommands: []string{noopScript, noopScript},
+		draftEnrichmentCommands: []string{printedCommandScript, noopScript},
 	}
 
 	_, err := RunHeadlessProvider(context.Background(), task, runner)
 	if err == nil {
-		t.Fatal("expected repeated no-action draft enrichment to fail")
+		t.Fatal("expected noop/scaffold output after command-text retry to fail")
 	}
 	if runner.draftCalls != 2 {
 		t.Fatalf("expected exactly two draft enrichment calls, got %d", runner.draftCalls)

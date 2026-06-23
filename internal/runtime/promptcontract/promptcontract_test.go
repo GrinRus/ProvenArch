@@ -1492,7 +1492,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *tes
 	}
 }
 
-func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T) {
+func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -1504,15 +1504,15 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
 		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
 	}
-	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[0].path "proposal.md" references bootstrap-only placeholder draft content`)
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
 
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
 	for _, token := range []string{
-		"draft artifact enrichment no-action retry mode",
-		"DRAFT ENRICHMENT NO-ACTION RETRY:",
+		"draft artifact enrichment command-text retry mode",
+		"DRAFT ENRICHMENT COMMAND-TEXT RETRY:",
 		"Your next response must be exactly one filesystem command",
 		"Do not print the command, fenced code, or a Python script as assistant text.",
-		"A plain-text response containing `python3 - <<'PY'` without filesystem mutation",
+		"A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed command-text enrichment.",
 		"The command must use python3",
 		"overwrite every markdown target listed below before it exits",
 		"/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json",
@@ -1531,7 +1531,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"Allowed output object keys are path, canonical_path, kind, and title only.",
 		"Draft surface initialized",
 		"For step4, overwrite proposal.md and changelog.md.",
-		"For step4 no-action retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files",
+		"For step4 command-text retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files",
 		"If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
@@ -1539,7 +1539,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"Previous draft artifact validation failure:",
 	} {
 		if !strings.Contains(prompt, token) {
-			t.Fatalf("expected no-action retry prompt to contain %q, got:\n%s", token, prompt)
+			t.Fatalf("expected command-text retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 	for _, forbidden := range []string{
@@ -1551,12 +1551,12 @@ func TestComposeDraftArtifactEnrichmentPromptAddsNoActionRetryMode(t *testing.T)
 		"Runtime proposal surface initialized for this analysis run.",
 	} {
 		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("no-action retry prompt must stay compact and avoid bootstrap/scaffold %q:\n%s", forbidden, prompt)
+			t.Fatalf("command-text retry prompt must stay compact and avoid bootstrap/scaffold %q:\n%s", forbidden, prompt)
 		}
 	}
 }
 
-func TestComposeDraftArtifactEnrichmentPromptStep2NoActionRetryRequiresTypedShardCompleteness(t *testing.T) {
+func TestComposeDraftArtifactEnrichmentPromptStep2CommandTextRetryRequiresTypedShardCompleteness(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -1569,11 +1569,11 @@ func TestComposeDraftArtifactEnrichmentPromptStep2NoActionRetryRequiresTypedShar
 		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns", "/tmp/workspace/reports/taskruns/run-1/staging/shards"},
 		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
 	}
-	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[1].path "summary.md" references bootstrap-only placeholder draft content`)
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
 
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
 	for _, token := range []string{
-		"draft artifact enrichment no-action retry mode",
+		"draft artifact enrichment command-text retry mode",
 		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
 		"If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
 		"summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
@@ -1581,12 +1581,12 @@ func TestComposeDraftArtifactEnrichmentPromptStep2NoActionRetryRequiresTypedShar
 		"Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 	} {
 		if !strings.Contains(prompt, token) {
-			t.Fatalf("expected step2 no-action retry prompt to contain %q, got:\n%s", token, prompt)
+			t.Fatalf("expected step2 command-text retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }
 
-func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCandidates(t *testing.T) {
+func TestComposeDraftArtifactEnrichmentPromptStep0CommandTextRetryNamesEvidenceCandidates(t *testing.T) {
 	t.Parallel()
 
 	workspaceDir := t.TempDir()
@@ -1605,11 +1605,11 @@ func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCand
 		ReadContextRoots:  []string{workspaceDir, repoDir},
 		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
 	}
-	err := errors.New(`draft_artifact_enrichment_no_action_retry: draft_artifact_enrichment_noop_or_scaffold: outputs[0].path "charter-overview.md" references bootstrap-only placeholder draft content`)
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
 
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
 	for _, token := range []string{
-		"draft artifact enrichment no-action retry mode",
+		"draft artifact enrichment command-text retry mode",
 		`Exact required constitution overview overwrite target: "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution/charter-overview.md".`,
 		"Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary",
 		"STEP0 bounded repository evidence candidates:",
@@ -1620,7 +1620,7 @@ func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCand
 		"never add status, enriched_at, metadata, validation, confidence, source",
 	} {
 		if !strings.Contains(prompt, token) {
-			t.Fatalf("expected step0 no-action retry prompt to contain %q, got:\n%s", token, prompt)
+			t.Fatalf("expected step0 command-text retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 	for _, forbidden := range []string{
@@ -1636,7 +1636,7 @@ func TestComposeDraftArtifactEnrichmentPromptStep0NoActionRetryNamesEvidenceCand
 		"Also read validator/finding/coverage/proposal summaries",
 	} {
 		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("step0 no-action retry prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
+			t.Fatalf("step0 command-text retry prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
 		}
 	}
 }
@@ -1657,8 +1657,8 @@ func TestComposeDraftArtifactEnrichmentPromptAddsPrintedCommandRetryMode(t *test
 
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
 	for _, token := range []string{
-		"draft artifact enrichment no-action retry mode",
-		"The previous retry printed a shell/Python command as text instead of executing it.",
+		"draft artifact enrichment command-text retry mode",
+		"The previous enrichment printed a shell/Python command as text instead of executing it.",
 		"This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
 		"Do not print the command, fenced code, or a Python script as assistant text.",
 		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
