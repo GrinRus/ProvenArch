@@ -92,7 +92,7 @@ func TestCollectArtifactPairRepairActivityPolicyRequiresFreshMutationAndExtendsW
 
 	policy := collectArtifactPairRepairActivityPolicy(ActivityPolicy{
 		PreArtifactStallWindow:     90 * time.Second,
-		PreArtifactWallClockWindow: 90 * time.Second,
+		PreArtifactWallClockWindow: 0,
 		PostArtifactStallWindow:    90 * time.Second,
 		PartialArtifactStallWindow: 90 * time.Second,
 	})
@@ -1218,6 +1218,171 @@ EOF
 	}
 	if strings.Contains(strings.ToLower(string(docRaw)), "bounded read") {
 		t.Fatalf("expected pair repair to remove process narration, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderRetriesSilentNoFreshCollectPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-no-fresh-retry")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte(`# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+`), 0o644); err != nil {
+		t.Fatalf("write stale collect doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName), []byte(collectManifestJSON(task)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stale collect manifest: %v", err)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'collect command completed with stale artifacts'
+`
+	firstPairRepairScript := `#!/usr/bin/env bash
+set -eu
+sleep 5
+`
+	secondPairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &pairRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, initialScript),
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          false,
+				PreArtifactStallWindow:      500 * time.Millisecond,
+				RetryPreArtifactStallWindow: 20 * time.Millisecond,
+				PreArtifactWallClockWindow:  3 * time.Second,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
+				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RepairCollectManifestOnce:                true,
+				RepairCollectArtifactPairOnce:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		pairRepairCommands: []string{
+			writeEngineScript(t, firstPairRepairScript),
+			writeEngineScript(t, secondPairRepairScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected silent no-fresh collect pair repair retry to succeed, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair retry scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("first silent no-fresh repair should retry before exhaustion, got %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(docRaw)), "bounded read") {
+		t.Fatalf("expected retry to replace process narration, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesExhaustedSilentNoFreshCollectPairRepairUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-no-fresh-exhausted")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte(`# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+`), 0o644); err != nil {
+		t.Fatalf("write stale collect doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName), []byte(collectManifestJSON(task)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stale collect manifest: %v", err)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'collect command completed with stale artifacts'
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+sleep 5
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          false,
+			PreArtifactStallWindow:      500 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PreArtifactWallClockWindow:  3 * time.Second,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectManifestOnce:                true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted silent no-fresh collect pair repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable for exhausted silent no-fresh repair, got %s (%v)", runnerErr.Code, err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair retry scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair exhausted diagnostic after retry, got %#v", diagnostics)
 	}
 }
 
@@ -3577,6 +3742,13 @@ type sequenceAdapter struct {
 	calls    int
 }
 
+type pairRepairSequenceAdapter struct {
+	testAdapter
+	pairRepairCommands []string
+	mu                 sync.Mutex
+	pairRepairCalls    int
+}
+
 type draftEnrichmentSequenceAdapter struct {
 	testAdapter
 	draftEnrichmentCommands []string
@@ -3596,6 +3768,20 @@ func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	}
 	a.calls++
 	return CommandSpec{Command: a.commands[index], PromptBytes: a.promptBytes}, nil
+}
+
+func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.pairRepairCommands) == 0 {
+		return CommandSpec{}, errors.New("collect pair repair command is unavailable")
+	}
+	index := a.pairRepairCalls
+	if index >= len(a.pairRepairCommands) {
+		index = len(a.pairRepairCommands) - 1
+	}
+	a.pairRepairCalls++
+	return CommandSpec{Command: a.pairRepairCommands[index]}, nil
 }
 
 func (a *draftEnrichmentSequenceAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {

@@ -226,13 +226,66 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 					return true, repairResult, nil
 				}
 			}
+			if shouldRetrySilentNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic) {
+				emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairErr)
+				retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+				if retryCommandErr != nil {
+					return true, acpruntime.Result{}, retryCommandErr
+				}
+				if writeSetErr := validateCollectArtifactPairRepairWriteSet(task, beforeRepairFiles); writeSetErr != nil {
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery wrote outside the collect pair write set", writeSetErr)
+				}
+				if retryErr != nil {
+					var retryStalled StallError
+					if errors.As(retryErr, &retryStalled) {
+						if policy.AcceptValidArtifactsAfterStop {
+							if err := adapter.ValidateArtifacts(task); err == nil {
+								if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+									emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, outcomeErr)
+									return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+								}
+								emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
+								return true, retryResult, nil
+							}
+						}
+						emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
+						if options.allowManifestFallback {
+							if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial"); recovered {
+								return true, recoveredResult, recoveredErr
+							}
+						}
+						if shouldClassifySilentNoFreshArtifactRepairStall(policy, retryResult, retryStalled.Diagnostic) ||
+							shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
+							return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", retryResult, "provider unavailable during collect pair recovery", retryErr)
+						}
+						return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery stalled before valid artifacts were available", retryErr)
+					}
+					return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, retryResult, retryErr)
+				}
+				if err := adapter.ValidateArtifacts(task); err != nil {
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+					if options.allowManifestFallback {
+						if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid"); recovered {
+							return true, recoveredResult, recoveredErr
+						}
+					}
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
+				}
+				if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), outcomeErr)
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+				}
+				emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
+				return true, retryResult, nil
+			}
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic, repairErr)
 			if options.allowManifestFallback {
 				if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, repairResult, repairErr, "collect_pair_repair_partial"); recovered {
 					return true, recoveredResult, recoveredErr
 				}
 			}
-			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
+			if shouldClassifySilentNoFreshArtifactRepairStall(policy, repairResult, repairStalled.Diagnostic) ||
+				shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", repairResult, "provider unavailable during collect pair recovery", repairErr)
 			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery stalled before valid artifacts were available", repairErr)
@@ -342,6 +395,21 @@ func validateCollectArtifactPairRepairOutcome(task acpruntime.Task, before write
 	}
 	sort.Strings(missing)
 	return fmt.Errorf("collect_pair_repair_noop_or_stale_markdown: existing authored markdown was not rewritten: %s", strings.Join(missing, ", "))
+}
+
+func shouldRetrySilentNoFreshCollectPairRepair(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	return policy.RetryInvalidOrMissingArtifactsOnce &&
+		policy.RetryZeroOutputPreArtifactStallOnce &&
+		shouldClassifySilentNoFreshArtifactRepairStall(policy, result, diagnostic)
+}
+
+func shouldClassifySilentNoFreshArtifactRepairStall(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	return policy.ClassifySilentRetryExhaustionUnavailable &&
+		diagnostic.StallPhase == StallPhasePreArtifact &&
+		strings.TrimSpace(result.Stdout) == "" &&
+		strings.TrimSpace(result.Stderr) == "" &&
+		!diagnostic.ArtifactObserved &&
+		diagnostic.AuthoredFileCount == 0
 }
 
 func resultHasProviderDiagnostics(result acpruntime.Result) bool {
@@ -1057,14 +1125,16 @@ func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, 
 }
 
 func runCollectArtifactPairRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
-	return runFocusedArtifactRepairCommandWithPolicy(
-		ctx,
-		task,
-		adapter,
-		baseResult,
-		buildSpec,
-		collectArtifactPairRepairActivityPolicy,
-	)
+	spec, err := buildSpec()
+	if err != nil {
+		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
+	}
+	repairPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
+	repairPolicy.MonitorArtifacts = true
+	repairPolicy.MonitorPreArtifact = true
+	repairPolicy = collectArtifactPairRepairActivityPolicy(repairPolicy)
+	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	return repairResult, repairErr, nil
 }
 
 func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error), configure func(ActivityPolicy) ActivityPolicy) (acpruntime.Result, error, error) {
@@ -1085,7 +1155,7 @@ func collectArtifactPairRepairActivityPolicy(policy ActivityPolicy) ActivityPoli
 	if policy.PreArtifactStallWindow < defaultCollectRepairWindow {
 		policy.PreArtifactStallWindow = defaultCollectRepairWindow
 	}
-	if policy.PreArtifactWallClockWindow < defaultCollectRepairWindow {
+	if policy.PreArtifactWallClockWindow <= 0 {
 		policy.PreArtifactWallClockWindow = defaultCollectRepairWindow
 	}
 	if policy.PostArtifactStallWindow < defaultCollectRepairWindow {
@@ -1093,6 +1163,9 @@ func collectArtifactPairRepairActivityPolicy(policy ActivityPolicy) ActivityPoli
 	}
 	if policy.PartialArtifactStallWindow < defaultCollectRepairWindow {
 		policy.PartialArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.ValidArtifactStopWindow <= 0 {
+		policy.ValidArtifactStopWindow = defaultRepairValidStopWindow
 	}
 	return policy
 }

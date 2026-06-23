@@ -1346,6 +1346,32 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 
 ---
 
+## Live E2E Collect Pair Silent No-Fresh Retry
+
+### Context
+- 2026-06-23 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T182236Z` ran from clean commit `f5c35cc` with selected provider `claude-code` only.
+- PostHog backend passed init/refresh, frontend desktop smoke passed, `execution_report_*` replaced legacy quality reports, and artifact-quality telemetry stayed out of the machine verdict.
+- FTGO failed in `init.step1.collect`: 15/16 shards succeeded, but shard `ftgo-application-ftgo-kitchen-service-api-ftgo-kitchen-service-contracts-ftgo-order-cc671c29a0aa` wrote stale/invalid collect files, then focused `collect_pair_repair` stalled pre-artifact with `stdout=0`, `stderr=0` and no fresh authored mutation. Reports preserved the root as collect partial execution failure (`runtime_contract_failed`, `partial_failure_count=1`), with frontend skipped for that profile.
+- Root issue: collect-pair repair treated a silent no-fresh pre-artifact repair stall over stale artifacts as final exhaustion. It needed one bounded provider-authored retry, without deterministic artifact synthesis and without treating artifact quality as a machine gate.
+
+### Plan
+- [x] Give collect-pair repair its own activity policy so production/default collect repair windows remain bounded for live providers while tests can exercise explicit wall-clock caps.
+- [x] Add one focused retry when collect-pair repair stalls before fresh authored mutation with empty stdout/stderr and the provider policy allows zero-output retry.
+- [x] Keep success provider-authored only: retry must write markdown + `shard-pack-manifest.json` and pass strict validation.
+- [x] Classify repeated silent no-fresh collect-pair repair exhaustion as `runner_unavailable`; classify fresh-but-invalid repair output as `runtime_contract_failed`.
+- [x] Add providercommon regression tests for successful silent/no-fresh retry and exhausted silent/no-fresh classification.
+- [x] Update live E2E runbook, pipeline spec, architecture and testing strategy.
+- [ ] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] First silent/no-fresh collect-pair repair does not emit final exhausted telemetry before the allowed retry.
+- [x] Second provider-authored repair can recover stale/process-contaminated collect artifacts only by fresh rewriting the markdown and manifest.
+- [x] Repeated silent/no-fresh repair exhaustion is `runner_unavailable`.
+- [ ] Latest strict medium `claude-code` rerun no longer fails from the FTGO silent/no-fresh collect-pair repair stall.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
