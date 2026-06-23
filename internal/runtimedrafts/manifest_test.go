@@ -1349,6 +1349,108 @@ Citation/index surface:
 	}
 }
 
+func TestValidateRequiredManifestRejectsMetadataOnlyEvidenceBullet(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+Evidence: reports/findings/findings.md and final-run-index.json.
+
+High-signal staged files sampled for proposal context:
+- "version": 1, (taskruns/run_20260620_184900_001/staging/final/final-run-index.json)
+- FTGO Order Service Overview (reports/as-is/ftgo-order-service/overview.md)
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected metadata-only evidence bullet to be rejected")
+	}
+	if !strings.Contains(err.Error(), "metadata-only JSON keys") {
+		t.Fatalf("expected metadata-only evidence error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsMismatchedFinalIndexCounts(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "final-run-index.json"), []byte(`{"canonical_documents":[{"id":"doc.a"},{"id":"doc.b"},{"id":"doc.c"}]}`), 0o644); err != nil {
+		t.Fatalf("write final index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "citation-index.json"), []byte(`{"citations":[{"id":"cite.a"},{"id":"cite.b"}]}`), 0o644); err != nil {
+		t.Fatalf("write citation index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
+
+Evidence: reports/findings/findings.md and cite.ftgo.accounting.authorize.contract.
+- Final run index: final-run-index.json with 2 canonical documents observed from canonical_documents.
+- Citation index: citation-index.json with 2 citations observed.
+`), 0o644); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
+		t.Fatalf("write changelog: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected mismatched final-run-index count to be rejected")
+	}
+	if !strings.Contains(err.Error(), "claims final-run-index canonical document count 2 but current-run index contains 3") {
+		t.Fatalf("expected final index count mismatch error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsMalformedMarkdownEvidenceReferences(t *testing.T) {
 	t.Parallel()
 

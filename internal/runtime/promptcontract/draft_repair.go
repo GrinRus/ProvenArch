@@ -380,6 +380,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
 			"- If final-run-index.json exists but canonical_documents[] cannot be parsed, write an explicit parse gap or omit the count; never infer that the current run has 0 observed documents from a missing documents[] field.",
 			"- When final-run-index.json or citation-index.json are present for current_run_id, summarize counts, selected document titles, citation ids, and repo/path references. Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
+			"- If you include final-run-index or citation-index counts, compute them inside the write command from top-level canonical_documents[] and citations[] variables, then write those exact variables into markdown. Approximate, stale, or manually guessed non-zero counts are invalid.",
+			"- Do not list JSON metadata-only lines such as `\"version\": 1`, `\"run_id\": ...`, `\"pipeline\": ...`, `\"generated_at\": ...`, or `\"citation_index_path\": ...` as high-signal staged evidence. Use architecture/proposal document titles, citation ids, findings, questions, and repo/path refs instead.",
 			"- Do not paste sampled shard markdown snippets with inline-code markers into proposal.md or changelog.md. If a sampled signal includes backticks, paraphrase it in plain text or use a fully balanced path reference.",
 			"- Do not write stale index availability claims such as `No current-run final-run-index document list was available`; if final-run-index.json is absent, omit that index status, and if it is present, summarize the observed canonical document count.",
 			"- Do not write stale zero-count claims such as `final-run-index.json contains 0 observed document entries` unless you have validated a current-run zero-document index; normally, summarize the observed canonical document count or omit the count.",
@@ -485,6 +487,8 @@ func composeDraftArtifactEnrichmentNoActionRetryPrompt(provider acpruntime.Provi
 			"- For final-run-index.json, count documents from top-level canonical_documents[] only; never infer 0 observed documents from a missing documents[] field.",
 			"- For citation-index.json, count citations from top-level citations[] only.",
 			"- Also read validator/finding/coverage/proposal summaries and up to 6 high-signal staging/shards manifests or authored markdown docs.",
+			"- Any final-run-index/citation-index counts included in markdown must be computed by the command from parsed JSON variables and must match the current files exactly; otherwise omit counts.",
+			"- Do not list metadata-only JSON keys such as `\"version\": 1`, `\"run_id\"`, `\"pipeline\"`, `\"generated_at\"`, or `\"citation_index_path\"` as evidence bullets.",
 			"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
 			"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
 		)

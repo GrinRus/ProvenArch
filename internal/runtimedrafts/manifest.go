@@ -20,6 +20,17 @@ const (
 	ProposalsManifestFile    = "proposals-draft-manifest.json"
 )
 
+var (
+	finalIndexDocumentCountPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(\d+)\s+(?:top-level\s+)?canonical document(?:s| entries)?\b`),
+		regexp.MustCompile(`(?i)\b(\d+)\s+observed document entries\b`),
+		regexp.MustCompile(`(?i)\b(\d+)\s+indexed document(?:s)?\b`),
+	}
+	citationIndexCountPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(\d+)\s+citation(?:s| entries)?\b`),
+	}
+)
+
 type Manifest struct {
 	Version      int      `json:"version"`
 	RunID        string   `json:"run_id"`
@@ -229,6 +240,12 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		}
 		if runtimeDraftTextHasRawStructuredEvidenceDump(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes raw structured evidence dumps instead of readable summaries", idx, output.Path))
+		}
+		if runtimeDraftTextHasMetadataOnlyEvidenceBullet(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes metadata-only JSON keys as evidence instead of architecture or proposal signals", idx, output.Path))
+		}
+		if mismatch := runtimeDraftTextIndexCountMismatch(text, cleanDraftRoot); mismatch != "" {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 		}
 		if runtimeDraftTextHasMalformedMarkdown(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q contains malformed markdown inline-code or code-fence syntax", idx, output.Path))
@@ -643,6 +660,94 @@ func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
 		}
 	}
 	return false
+}
+
+func runtimeDraftTextHasMetadataOnlyEvidenceBullet(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		lower := strings.ToLower(trimmed)
+		for _, marker := range []string{
+			`"version":`,
+			`"generated_at":`,
+			`"run_id":`,
+			`"pipeline":`,
+			`"citation_index_path":`,
+		} {
+			if strings.HasPrefix(lower, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextIndexCountMismatch(text string, draftRoot string) string {
+	finalDocumentCount, hasFinalDocumentCount := readRuntimeDraftFinalDocumentCount(draftRoot)
+	citationCount, hasCitationCount := readRuntimeDraftCitationCount(draftRoot)
+	for _, line := range strings.Split(text, "\n") {
+		lower := strings.ToLower(line)
+		if hasFinalDocumentCount && (strings.Contains(lower, "final-run-index") || strings.Contains(lower, "final run index")) {
+			for _, claimed := range extractRuntimeDraftCounts(line, finalIndexDocumentCountPatterns) {
+				if claimed != finalDocumentCount {
+					return fmt.Sprintf("claims final-run-index canonical document count %d but current-run index contains %d", claimed, finalDocumentCount)
+				}
+			}
+		}
+		if hasCitationCount && (strings.Contains(lower, "citation-index") || strings.Contains(lower, "citation index")) {
+			for _, claimed := range extractRuntimeDraftCounts(line, citationIndexCountPatterns) {
+				if claimed != citationCount {
+					return fmt.Sprintf("claims citation-index citation count %d but current-run index contains %d", claimed, citationCount)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func extractRuntimeDraftCounts(line string, patterns []*regexp.Regexp) []int {
+	counts := []int{}
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(line, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			var value int
+			if _, err := fmt.Sscanf(match[1], "%d", &value); err == nil {
+				counts = append(counts, value)
+			}
+		}
+	}
+	return counts
+}
+
+func readRuntimeDraftFinalDocumentCount(draftRoot string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(draftRoot, "final-run-index.json"))
+	if err != nil {
+		return 0, false
+	}
+	var index struct {
+		CanonicalDocuments []json.RawMessage `json:"canonical_documents"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return 0, false
+	}
+	return len(index.CanonicalDocuments), true
+}
+
+func readRuntimeDraftCitationCount(draftRoot string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(draftRoot, "citation-index.json"))
+	if err != nil {
+		return 0, false
+	}
+	var index struct {
+		Citations []json.RawMessage `json:"citations"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return 0, false
+	}
+	return len(index.Citations), true
 }
 
 func runtimeDraftStep0TextHasDownstreamEvidenceLeak(text string) bool {
