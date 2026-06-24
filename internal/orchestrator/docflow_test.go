@@ -625,6 +625,110 @@ func TestDocflowIndexesUseConsistentManifestDocumentIDs(t *testing.T) {
 	}
 }
 
+func TestDocflowIndexesDeduplicateRepeatedManifestDocumentIDs(t *testing.T) {
+	t.Parallel()
+
+	manifests := []contracts.ShardPackManifest{
+		{
+			ShardID:      "gateway",
+			ArtifactRoot: "/tmp/workspace/reports/taskruns/run-1/staging/shards/gateway",
+			Documents: []contracts.AuthoredDocument{
+				{
+					ID:            "doc.overview",
+					Kind:          "report",
+					Title:         "Gateway Overview",
+					Path:          "gateway-overview.md",
+					CanonicalPath: "reports/as-is/gateway/gateway-overview.md",
+					CitationIDs:   []string{"cite.gateway"},
+				},
+			},
+			Citations: []contracts.DocumentCitation{
+				{
+					ID:          "cite.gateway",
+					Repo:        "ftgo-application",
+					Path:        "ftgo-api-gateway/build.gradle",
+					ClaimIDs:    []string{"claim.gateway"},
+					DocumentIDs: []string{"doc.overview"},
+				},
+			},
+		},
+		{
+			ShardID:      "restaurant",
+			ArtifactRoot: "/tmp/workspace/reports/taskruns/run-1/staging/shards/restaurant",
+			Documents: []contracts.AuthoredDocument{
+				{
+					ID:            "doc.overview",
+					Kind:          "report",
+					Title:         "Restaurant Overview",
+					Path:          "restaurant-overview.md",
+					CanonicalPath: "reports/as-is/restaurant/restaurant-overview.md",
+					CitationIDs:   []string{"cite.restaurant"},
+				},
+			},
+			Citations: []contracts.DocumentCitation{
+				{
+					ID:          "cite.restaurant",
+					Repo:        "ftgo-application",
+					Path:        "ftgo-restaurant-service/build.gradle",
+					ClaimIDs:    []string{"claim.restaurant"},
+					DocumentIDs: []string{"doc.overview"},
+				},
+			},
+		},
+	}
+	documentInfos := aggregateDocumentInfos(manifests)
+	citationIndex := aggregateCitationIndex("run-1", time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC), manifests, documentInfos)
+	finalIndex, err := buildFinalRunIndex(
+		"run-1",
+		string(PipelineInit),
+		time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC),
+		[]Artifact{
+			{
+				Path:  "reports/taskruns/run-1/staging/final/reports/as-is/gateway/gateway-overview.md",
+				Kind:  "report",
+				Label: "Gateway Overview",
+			},
+			{
+				Path:  "reports/taskruns/run-1/staging/final/reports/as-is/restaurant/restaurant-overview.md",
+				Kind:  "report",
+				Label: "Restaurant Overview",
+			},
+		},
+		manifests,
+		documentInfos,
+		citationIndex,
+		contracts.SemanticSnapshot{Coverage: contracts.Coverage{}, Questions: []contracts.Question{}, Entities: []contracts.Entity{}, Edges: []contracts.Edge{}, Findings: []contracts.Finding{}},
+	)
+	if err != nil {
+		t.Fatalf("build final run index: %v", err)
+	}
+	if got := len(finalIndex.CanonicalDocuments); got != 2 {
+		t.Fatalf("unexpected canonical document count: got=%d want=2", got)
+	}
+	docIDsByPath := map[string]string{}
+	seenDocIDs := map[string]struct{}{}
+	for _, document := range finalIndex.CanonicalDocuments {
+		if document.ID == "doc.overview" {
+			t.Fatalf("duplicate source document id should not be promoted as canonical id")
+		}
+		if _, exists := seenDocIDs[document.ID]; exists {
+			t.Fatalf("canonical document id was not unique: %q", document.ID)
+		}
+		seenDocIDs[document.ID] = struct{}{}
+		docIDsByPath[document.CanonicalPath] = document.ID
+	}
+	citationsByID := map[string]contracts.DocumentCitation{}
+	for _, citation := range citationIndex.Citations {
+		citationsByID[citation.ID] = citation
+	}
+	if got, want := citationsByID["cite.gateway"].DocumentIDs, []string{docIDsByPath["reports/as-is/gateway/gateway-overview.md"]}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("gateway citation was not remapped to unique document id: got=%v want=%v", got, want)
+	}
+	if got, want := citationsByID["cite.restaurant"].DocumentIDs, []string{docIDsByPath["reports/as-is/restaurant/restaurant-overview.md"]}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("restaurant citation was not remapped to unique document id: got=%v want=%v", got, want)
+	}
+}
+
 func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(t *testing.T) {
 	t.Parallel()
 

@@ -1410,7 +1410,7 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 - [x] Add providercommon and promptcontract regression tests for both retry modes.
 - [x] Stabilize the existing silent/no-fresh collect-pair retry test window so package tests are not timing-sensitive on loaded trusted hosts.
 - [x] Update live E2E runbook, pipeline spec, architecture and testing strategy.
-- [ ] Run full DoD.
+- [x] Run full DoD.
 - [ ] Commit and rerun strict medium live E2E.
 
 ### Acceptance
@@ -1418,6 +1418,29 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 - [x] Byte-identical draft markdown duplicates in `write_root` get one cleanup retry that deletes only those misplaced duplicates.
 - [x] `extra.md`/unreferenced write-set violations remain `runtime_contract_failed`.
 - [ ] Latest strict medium `claude-code` rerun no longer fails from PostHog generic shard wording or FTGO duplicated write_root drafts.
+
+---
+
+## Live E2E Final Index Document ID Collision
+
+### Context
+- 2026-06-24 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260624T101459Z` preserved selected-provider totals and no legacy mixed quality-gate artifacts, but still failed both backend slots.
+- PostHog reached `init.step4.proposals` and correctly failed scaffold/noop proposal enrichment: `proposal.md` and `changelog.md` still contained bootstrap placeholder content.
+- FTGO completed collect `16/16` and step2 enrichment produced readable, decision-ready as-is markdown with exact shard completeness, but staged final assembly failed before writing `final-run-index.json`: two distinct shard documents reused provider id `doc.overview`, causing `canonical_documents[12].id must be unique`.
+
+### Plan
+- [x] Keep unique provider-authored `manifest.Documents[*].id` values when they identify one canonical path.
+- [x] Remap repeated provider-authored document ids across distinct `canonical_path` values to deterministic canonical-path-derived ids before final index validation.
+- [x] Remap citation `document_ids` into the same canonical document namespace.
+- [x] Add docflow regression coverage for repeated `doc.overview` across distinct canonical paths.
+- [x] Update pipeline/runbook/testing docs.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] Duplicate source document ids no longer produce duplicate `final-run-index.json.canonical_documents[].id`.
+- [x] Citation index references the remapped unique document ids.
+- [ ] Latest strict medium `claude-code` rerun no longer fails FTGO at final-index assembly.
 
 ---
 

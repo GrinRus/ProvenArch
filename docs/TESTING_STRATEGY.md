@@ -201,6 +201,7 @@ Release workflow hardening:
 - invalid `workspace.yaml`
 - valid docs-first contracts (`shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
 - negative docs-first contract cases (missing citations, duplicate claim/topic ids, broken topic refs)
+- docflow index assembly with repeated provider-authored document ids across distinct canonical paths; final/citation indexes must remap them to globally unique canonical document ids
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
