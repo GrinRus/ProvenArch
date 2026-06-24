@@ -422,6 +422,28 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 				"- If a current-run final-run-index.json is present, count only top-level canonical_documents[]. If citation-index.json is present, count only top-level citations[].",
 			)
 		}
+		if draftEnrichmentValidationMentionsMarkerCleanup(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
+				"- The previous enrichment changed markdown, but final content still included runtime-process, scaffold, or step0-downstream wording.",
+				"- Rewrite every referenced markdown target again in one filesystem command; do not only edit the flagged sentence.",
+				"- Do not use these phrases or close variants anywhere in final markdown: bounded read root, bounded read roots, bounded evidence, current draft manifest, draft manifest, draft space, manifest target, manifest retains, recovery, enrichment, placeholder, scaffold, runtime provider, taskrun, generated, validator output, later passes.",
+				"- If evidence is sparse, say the concrete architecture evidence was not found in the current run inputs or selected repository files; do not explain runtime read limits or recovery mechanics.",
+			)
+			switch strings.TrimSpace(task.StepID) {
+			case "init.step0.constitution":
+				lines = append(lines,
+					"- For step0, do not mention downstream pipeline surfaces, validation artifacts, proposal/change artifacts, shard/final/citation indexes, baseline-subagents.yaml, draft files, or future/later pipeline passes.",
+					"- Rewrite charter-overview.md as a repository constitution: target identity, repo/path evidence, architecture scope, operating constraints, coverage gaps, and immediate operator decision.",
+					"- Use plain wording such as \"not inspected in this constitution pass\" for gaps; do not write \"later passes\", \"validator output\", or \"pipeline artifacts\".",
+				)
+			case "init.step4.proposals", "refresh.step4.proposals":
+				lines = append(lines,
+					"- For step4, rewrite both proposal.md and changelog.md so they discuss proposal decisions, evidence files, shard completeness, citation/index counts, risks, and gaps without saying \"bounded read roots\" or describing the provider's recovery process.",
+					"- If finding summaries are absent, write \"No structured finding summary was present in current-run proposal evidence\" rather than mentioning bounded roots.",
+				)
+			}
+		}
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
@@ -548,6 +570,15 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 
 func draftEnrichmentValidationMentionsMalformedMarkdown(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func draftEnrichmentValidationMentionsMarkerCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "bootstrap-only placeholder draft content") ||
+		strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content")
 }
 
 func isStep0DraftEnrichmentStep(stepID string) bool {

@@ -1361,7 +1361,7 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 - [x] Classify repeated silent no-fresh collect-pair repair exhaustion as `runner_unavailable`; classify fresh-but-invalid repair output as `runtime_contract_failed`.
 - [x] Add providercommon regression tests for successful silent/no-fresh retry and exhausted silent/no-fresh classification.
 - [x] Update live E2E runbook, pipeline spec, architecture and testing strategy.
-- [ ] Run full DoD.
+- [x] Run full DoD.
 - [ ] Commit and rerun strict medium live E2E.
 
 ### Acceptance
@@ -1369,6 +1369,30 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 - [x] Second provider-authored repair can recover stale/process-contaminated collect artifacts only by fresh rewriting the markdown and manifest.
 - [x] Repeated silent/no-fresh repair exhaustion is `runner_unavailable`.
 - [ ] Latest strict medium `claude-code` rerun no longer fails from the FTGO silent/no-fresh collect-pair repair stall.
+
+---
+
+## Live E2E Draft Enrichment Marker Cleanup Retry
+
+### Context
+- 2026-06-24 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T230003Z` proved the silent collect-pair retry and draft enrichment paths were active, but still failed both selected backend slots.
+- PostHog `refresh.step4.proposals` fresh-rewrote `proposal.md` and `changelog.md`, but `changelog.md` leaked process wording (`bounded read roots`) into operator-facing markdown. Runtime correctly rejected it as `runtime_contract_failed`, but had no targeted cleanup retry after a real markdown mutation.
+- FTGO `init.step0.constitution` fresh-rewrote `charter-overview.md`, but leaked step0-invalid process/downstream wording (`validator output`, `draft manifest`, `later passes`). Runtime correctly rejected it as `runtime_contract_failed`.
+
+### Plan
+- [x] Add one provider-authored `draft_artifact_enrichment_marker_cleanup` retry when every referenced markdown target changed, but strict validation only rejects scaffold/process/downstream wording.
+- [x] Keep unchanged scaffold/noop enrichment terminal: cleanup retry is not available when markdown targets did not fresh-mutate.
+- [x] Extend enrichment prompts with marker-cleanup instructions for step0 and step4.
+- [x] Add providercommon and promptcontract regression tests for proposals marker cleanup and step0 downstream/process cleanup.
+- [x] Update live E2E runbook, pipeline spec, architecture and testing strategy.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] Fresh-rewritten proposal/changelog content with process marker contamination gets one provider-authored cleanup retry.
+- [x] Fresh-rewritten step0 constitution content with downstream/process wording gets one provider-authored cleanup retry.
+- [x] Repeated marker contamination or unchanged scaffold remains `runtime_contract_failed`.
+- [ ] Latest strict medium `claude-code` rerun no longer fails from PostHog `bounded read roots` or FTGO step0 marker leakage.
 
 ---
 

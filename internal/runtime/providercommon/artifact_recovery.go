@@ -948,6 +948,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
 					}
+					if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+					}
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
@@ -955,6 +958,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
 				} else if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+				} else if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
 				}
 			}
 			emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -978,6 +983,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 			if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
 				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
 			}
+			if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+			}
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
 		}
@@ -986,6 +994,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+		}
+		if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
 		}
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
@@ -1071,6 +1082,97 @@ func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) boo
 	text := err.Error()
 	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
 		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
+}
+
+func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_marker_cleanup" || err == nil {
+		return false
+	}
+	text := err.Error()
+	if !strings.Contains(text, "bootstrap-only placeholder draft content") &&
+		!strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") {
+		return false
+	}
+	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot) && draftMarkdownContainsMarkerCleanupCandidate(task)
+}
+
+func draftMarkdownContainsMarkerCleanupCandidate(task acpruntime.Task) bool {
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), rel))
+		if err != nil {
+			continue
+		}
+		lower := strings.ToLower(string(raw))
+		if draftMarkdownHasDirectScaffoldMarker(lower) {
+			continue
+		}
+		if draftMarkdownHasProcessMarkerCleanupCandidate(lower) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftMarkdownHasDirectScaffoldMarker(lower string) bool {
+	markers := []string{
+		"provider wrote this draft artifact",
+		"drafted required runtime artifacts",
+		"draft surface initialized",
+		"runtime proposal surface initialized",
+		"runtime draft recovery initialized",
+		"draft recovery initialized",
+		"treat this as diagnostic evidence until",
+		"bootstrap-only placeholder",
+		"placeholder draft content",
+		"placeholder draft text",
+		"placeholder content",
+		"placeholder proposal content",
+		"replace placeholder",
+		"replaced placeholder",
+		"replacing placeholders",
+		"current run evidence should be reviewed before promotion",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftMarkdownHasProcessMarkerCleanupCandidate(lower string) bool {
+	markers := []string{
+		"bounded read root",
+		"bounded read roots",
+		"bounded staged evidence",
+		"bounded evidence read",
+		"bounded read pass",
+		"current draft manifest",
+		"draft manifest",
+		"draft space",
+		"manifest target",
+		"manifest retains",
+		"recovery pass",
+		"recovery action",
+		"enrichment read",
+		"enrichment pass",
+		"validator output",
+		"pipeline artifacts",
+		"later passes",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldRetryDraftPrintedCommandEnrichment(stage string, result acpruntime.Result, err error) bool {

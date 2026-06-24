@@ -1492,6 +1492,67 @@ func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *tes
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsMarkerCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_noop_or_scaffold: runtime draft manifest outputs are invalid: outputs[1].path "changelog.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
+		"The previous enrichment changed markdown, but final content still included runtime-process, scaffold, or step0-downstream wording.",
+		"Rewrite every referenced markdown target again in one filesystem command",
+		"bounded read root, bounded read roots, bounded evidence, current draft manifest, draft manifest",
+		"If evidence is sparse, say the concrete architecture evidence was not found in the current run inputs",
+		"For step4, rewrite both proposal.md and changelog.md",
+		"No structured finding summary was present in current-run proposal evidence",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected marker-cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsStep0MarkerCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "charter-overview.md" mentions downstream or runtime-only evidence in step0 constitution content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
+		"For step0, do not mention downstream pipeline surfaces",
+		"validation artifacts, proposal/change artifacts, shard/final/citation indexes",
+		"baseline-subagents.yaml, draft files, or future/later pipeline passes.",
+		"Rewrite charter-overview.md as a repository constitution",
+		"Use plain wording such as \"not inspected in this constitution pass\"",
+		"do not write \"later passes\", \"validator output\", or \"pipeline artifacts\"",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 marker-cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
 	t.Parallel()
 

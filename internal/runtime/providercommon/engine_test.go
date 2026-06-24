@@ -2821,6 +2821,150 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testin
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-enrichment-marker-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"- Runtime proposal surface initialized for this analysis run.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"- Runtime proposal surface initialized for this analysis run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	markerContaminatedScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"## Decision / recommended operator action",
+		"Accept the current proposal package as no-actionable-change evidence.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"## Findings/proposals summary",
+		"No validator/finding summary artifacts with structured findings were observed in the bounded read roots.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"## Decision / recommended operator action",
+		"Accept the current proposal package as no-actionable-change evidence.",
+		"",
+		"## Evidence used",
+		"- reports/findings/findings.md",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"## Findings/proposals summary",
+		"No structured finding summary was present in current-run proposal evidence.",
+		"",
+		"## Evidence index or citation references",
+		"- cite.ftgo.accounting.authorize.contract",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{markerContaminatedScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected marker cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_marker_cleanup") {
+		t.Fatalf("expected marker cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful marker cleanup retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesStep0DraftEnrichmentMarkerCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-constitution-draft-enrichment-marker-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"Draft surface initialized for the scoped repository analysis.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	downstreamContaminatedScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Operating Principles",
+		"- This constitution does not depend on validator output or pipeline artifacts.",
+		"- The draft manifest retains its existing outputs array.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Repository Evidence",
+		"- README.md describes the target service surface.",
+		"",
+		"## Operator Decision",
+		"Proceed with service-level analysis and record any missing repository evidence as a gap.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{downstreamContaminatedScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected step0 marker cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_marker_cleanup") {
+		t.Fatalf("expected step0 marker cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRejectsDraftEnrichmentNoopAfterCommandTextRetry(t *testing.T) {
 	t.Parallel()
 
