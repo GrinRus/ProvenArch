@@ -434,16 +434,29 @@ func validateValidatorVerdictRepairWriteSet(task acpruntime.Task, before writeRo
 }
 
 func validateDraftArtifactRepairWriteSet(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot) error {
+	return validateDraftArtifactRepairWriteSetForStage(task, beforeWriteRoot, beforeDraftRoot, "")
+}
+
+func validateDraftArtifactRepairWriteSetForStage(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, stage string) error {
 	afterWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
 		return err
 	}
 	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
-	writeRootChanges := unexpectedRepairMutations(beforeWriteRoot, afterWriteRoot, func(path string, _ writeRootFileState) bool {
-		return strings.TrimSpace(manifestFile) != "" && path == manifestFile
+	writeRootChanges := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		if strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile {
+			return true
+		}
+		if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" &&
+			change.Op == "deleted" &&
+			isAllowedDraftMarkdownOutputPath(task, change.Path) &&
+			writeRootPathWasDraftDuplicate(beforeWriteRoot, beforeDraftRoot, change.Path) {
+			return true
+		}
+		return false
 	})
 	if len(writeRootChanges) > 0 {
-		return fmt.Errorf("draft repair wrote forbidden write_root files: %s", strings.Join(writeRootChanges, "; "))
+		return fmt.Errorf("draft repair wrote forbidden write_root files: %s", strings.Join(describeRepairMutations(writeRootChanges), "; "))
 	}
 	if strings.TrimSpace(task.DraftFinalRoot) == "" {
 		return nil
@@ -458,6 +471,34 @@ func validateDraftArtifactRepairWriteSet(task acpruntime.Task, beforeWriteRoot w
 		return fmt.Errorf("draft repair wrote forbidden draft_final_root files: %s", strings.Join(draftRootChanges, "; "))
 	}
 	return nil
+}
+
+func isAllowedDraftMarkdownOutputPath(task acpruntime.Task, path string) bool {
+	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if path == "" || path == "." || strings.HasPrefix(path, "../") || filepath.IsAbs(path) {
+		return false
+	}
+	if strings.ToLower(filepath.Ext(path)) != ".md" {
+		return false
+	}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == path {
+			return true
+		}
+	}
+	return false
+}
+
+func writeRootPathWasDraftDuplicate(beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, path string) bool {
+	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	writeState, writeOK := beforeWriteRoot[path]
+	draftState, draftOK := beforeDraftRoot[path]
+	return writeOK && draftOK && sameWriteRootFileContent(writeState, draftState)
+}
+
+func sameWriteRootFileContent(a writeRootFileState, b writeRootFileState) bool {
+	return !a.IsDir && !b.IsDir && a.Size == b.Size && a.SHA256 == b.SHA256
 }
 
 func allowedDraftRootRepairMutation(task acpruntime.Task) func(string, writeRootFileState) bool {
@@ -506,6 +547,21 @@ func loadAllowedDraftOutputs(task acpruntime.Task) []runtimedrafts.Output {
 }
 
 func unexpectedRepairMutations(before writeRootFileSnapshot, after writeRootFileSnapshot, allowed func(string, writeRootFileState) bool) []string {
+	return describeRepairMutations(unexpectedRepairMutationDetails(before, after, func(change repairMutation) bool {
+		if allowed == nil {
+			return false
+		}
+		return allowed(change.Path, change.State)
+	}))
+}
+
+type repairMutation struct {
+	Op    string
+	Path  string
+	State writeRootFileState
+}
+
+func unexpectedRepairMutationDetails(before writeRootFileSnapshot, after writeRootFileSnapshot, allowed func(repairMutation) bool) []repairMutation {
 	paths := map[string]struct{}{}
 	for path := range before {
 		paths[path] = struct{}{}
@@ -513,30 +569,47 @@ func unexpectedRepairMutations(before writeRootFileSnapshot, after writeRootFile
 	for path := range after {
 		paths[path] = struct{}{}
 	}
-	changes := make([]string, 0)
+	changes := make([]repairMutation, 0)
 	for path := range paths {
 		beforeState, beforeExists := before[path]
 		afterState, afterExists := after[path]
 		switch {
 		case !beforeExists && afterExists:
-			if allowed != nil && allowed(path, afterState) {
+			change := repairMutation{Op: "created", Path: path, State: afterState}
+			if allowed != nil && allowed(change) {
 				continue
 			}
-			changes = append(changes, "created "+describeWriteRootPath(path, afterState))
+			changes = append(changes, change)
 		case beforeExists && !afterExists:
-			if allowed != nil && allowed(path, beforeState) {
+			change := repairMutation{Op: "deleted", Path: path, State: beforeState}
+			if allowed != nil && allowed(change) {
 				continue
 			}
-			changes = append(changes, "deleted "+describeWriteRootPath(path, beforeState))
+			changes = append(changes, change)
 		case beforeExists && afterExists && beforeState != afterState:
-			if allowed != nil && allowed(path, afterState) {
+			change := repairMutation{Op: "modified", Path: path, State: afterState}
+			if allowed != nil && allowed(change) {
 				continue
 			}
-			changes = append(changes, "modified "+describeWriteRootPath(path, afterState))
+			changes = append(changes, change)
 		}
 	}
-	sort.Strings(changes)
+	sort.Slice(changes, func(i, j int) bool {
+		if changes[i].Path == changes[j].Path {
+			return changes[i].Op < changes[j].Op
+		}
+		return changes[i].Path < changes[j].Path
+	})
 	return changes
+}
+
+func describeRepairMutations(changes []repairMutation) []string {
+	out := make([]string, 0, len(changes))
+	for _, change := range changes {
+		out = append(out, change.Op+" "+describeWriteRootPath(change.Path, change.State))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func describeWriteRootPath(path string, state writeRootFileState) string {

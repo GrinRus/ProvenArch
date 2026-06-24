@@ -1396,6 +1396,31 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 
 ---
 
+## Live E2E Draft Enrichment Shard Status And Write-Set Cleanup
+
+### Context
+- 2026-06-24 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260624T055541Z` ran selected provider `claude-code` only with selected-provider totals preserved and no legacy mixed quality artifacts, but both backend slots failed as `runtime_contract_failed`.
+- PostHog `refresh.step2.asis_docs` completed collect 16/16 and fresh-rewrote step2 drafts, but `architect-summary.md` still used generic conditional shard-gap wording instead of exact current-run typed shard status.
+- FTGO completed collect 16/16 and wrote valid step2 markdown under `draft_final_root`, but duplicated `overview.md`, `summary.md`, and `architect-summary.md` in `write_root`, causing a write-set failure even though the final draft files were otherwise valid.
+
+### Plan
+- [x] Add one provider-authored `draft_artifact_enrichment_shard_status_cleanup` retry for fresh step2 markdown rejected only by generic conditional shard-gap wording.
+- [x] Add one provider-authored `draft_artifact_enrichment_write_set_cleanup` retry that deletes only byte-identical referenced markdown duplicates from `write_root` while keeping arbitrary extra writes terminal.
+- [x] Keep success provider-authored only: no ACP-side synthesis of step2 draft markdown or manifest shape.
+- [x] Add providercommon and promptcontract regression tests for both retry modes.
+- [x] Stabilize the existing silent/no-fresh collect-pair retry test window so package tests are not timing-sensitive on loaded trusted hosts.
+- [x] Update live E2E runbook, pipeline spec, architecture and testing strategy.
+- [ ] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] Fresh step2 markdown with generic shard-gap caveats gets one provider-authored shard-status cleanup retry.
+- [x] Byte-identical draft markdown duplicates in `write_root` get one cleanup retry that deletes only those misplaced duplicates.
+- [x] `extra.md`/unreferenced write-set violations remain `runtime_contract_failed`.
+- [ ] Latest strict medium `claude-code` rerun no longer fails from PostHog generic shard wording or FTGO duplicated write_root drafts.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

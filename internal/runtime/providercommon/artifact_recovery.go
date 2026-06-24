@@ -928,19 +928,30 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
-	if writeSetErr := validateDraftArtifactRepairWriteSet(task, beforeWriteRoot, beforeDraftRoot); writeSetErr != nil {
+	if writeSetErr := validateDraftArtifactRepairWriteSetForStage(task, beforeWriteRoot, beforeDraftRoot, stage); writeSetErr != nil {
+		if shouldRetryDraftWriteSetCleanupEnrichment(stage, task, beforeWriteRoot, beforeDraftRoot, writeSetErr) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteSetCleanupRetryError(writeSetErr), "draft_artifact_enrichment_write_set_cleanup")
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", writeSetErr)
+	}
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" {
+		if leftovers := draftWriteRootOutputFiles(task); len(leftovers) > 0 {
+			err := fmt.Errorf("draft artifact enrichment write-set cleanup left misplaced write_root draft files: %s", strings.Join(leftovers, ", "))
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", err)
+		}
 	}
 	if enrichmentErr != nil {
 		var enrichmentStalled StallError
 		if errors.As(enrichmentErr, &enrichmentStalled) {
 			if policy.AcceptValidArtifactsAfterStop {
-				if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err == nil {
+				if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err == nil {
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
 				} else if shouldRetryDraftManifestShapeEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
+				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
 				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
@@ -961,6 +972,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
 				} else if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
 				} else if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
 				}
@@ -974,10 +987,13 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, enrichmentResult, enrichmentErr)
 	}
-	if err := validateDraftArtifactEnrichmentOutcome(task, beforeDraftRoot, adapter.ValidateArtifacts(task)); err != nil {
+	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		if shouldRetryDraftManifestShapeEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
+		}
+		if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
 		}
 		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
@@ -997,6 +1013,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+		}
+		if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
 		}
 		if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
@@ -1022,17 +1041,109 @@ func draftArtifactEnrichmentActivityPolicy(task acpruntime.Task, policy Activity
 	return policy
 }
 
-func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, validationErr error) error {
+func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, validationErr error, stage string) error {
 	if validationErr != nil {
 		if isDraftBootstrapOnlyValidationFailure(validationErr) {
 			return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: %w", validationErr)
 		}
 		return validationErr
 	}
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" && draftWriteRootDuplicateCleanupOccurred(task, beforeWriteRoot, beforeDraftRoot) {
+		return nil
+	}
 	if !allDraftMarkdownOutputsChanged(task, beforeDraftRoot) {
 		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed")
 	}
 	return nil
+}
+
+func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" || err == nil {
+		return false
+	}
+	if !strings.Contains(err.Error(), "draft repair wrote forbidden write_root files") {
+		return false
+	}
+	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
+	if writeErr != nil {
+		return false
+	}
+	afterDraftRoot, draftErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if draftErr != nil {
+		return false
+	}
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	draftRootChanges := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		return allowedDraftRootChange(change.Path, change.State)
+	})
+	if len(draftRootChanges) > 0 {
+		return false
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	changes := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		return strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile
+	})
+	if len(changes) == 0 {
+		return false
+	}
+	for _, change := range changes {
+		if change.Op != "created" && change.Op != "modified" {
+			return false
+		}
+		if !isAllowedDraftMarkdownOutputPath(task, change.Path) || change.State.IsDir {
+			return false
+		}
+		draftState, ok := afterDraftRoot[change.Path]
+		if !ok || !sameWriteRootFileContent(change.State, draftState) {
+			return false
+		}
+	}
+	return true
+}
+
+func draftWriteRootDuplicateCleanupOccurred(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return false
+	}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		if !writeRootPathWasDraftDuplicate(beforeWriteRoot, beforeDraftRoot, rel) {
+			continue
+		}
+		if _, stillExists := afterWriteRoot[rel]; !stillExists {
+			return true
+		}
+	}
+	return false
+}
+
+func draftWriteRootOutputFiles(task acpruntime.Task) []string {
+	writeRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		if state, ok := writeRoot[rel]; ok && !state.IsDir {
+			out = append(out, rel)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func allDraftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
@@ -1085,6 +1196,16 @@ func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) boo
 	text := err.Error()
 	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
 		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
+}
+
+func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_shard_status_cleanup" || err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
+		strings.Contains(text, "generic conditional shard-gap wording") ||
+		strings.Contains(text, "does not report exact current-run shard status")
 }
 
 func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
@@ -1220,6 +1341,13 @@ func draftWriteFirstRetryError(err error) error {
 		return errors.New("draft_artifact_enrichment_write_first_retry")
 	}
 	return fmt.Errorf("draft_artifact_enrichment_write_first_retry: %w", err)
+}
+
+func draftWriteSetCleanupRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_write_set_cleanup")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_write_set_cleanup: %w", err)
 }
 
 func draftCommandTextRetryError(err error) error {

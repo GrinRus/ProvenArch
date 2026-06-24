@@ -422,6 +422,17 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 				"- If a current-run final-run-index.json is present, count only top-level canonical_documents[]. If citation-index.json is present, count only top-level citations[].",
 			)
 		}
+		if draftEnrichmentValidationMentionsShardStatusCleanup(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+				"- The previous enrichment freshly rewrote markdown, but at least one step2 target still used generic conditional shard-gap wording instead of exact current-run shard status.",
+				"- Rewrite every referenced markdown target again in one filesystem command, with special attention to architect-summary.md.",
+				"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
+				"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
+				"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
+				"- The operator decision summary must say what is complete now, what residual artifact-quality risks remain, and what the operator should inspect next without suggesting nonexistent shard failures.",
+			)
+		}
 		if draftEnrichmentValidationMentionsMarkerCleanup(validationErr) {
 			lines = append(lines,
 				"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
@@ -443,6 +454,17 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 					"- If finding summaries are absent, write \"No structured finding summary was present in current-run proposal evidence\" rather than mentioning bounded roots.",
 				)
 			}
+		}
+		if draftEnrichmentValidationMentionsWriteSetCleanup(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
+				"- The previous enrichment wrote otherwise valid referenced draft markdown into write_root as misplaced duplicates.",
+				"- Your next filesystem action must delete only the misplaced referenced markdown duplicates from write_root and leave draft markdown only under draft_final_root.",
+				"- Keep the step draft manifest in write_root. Do not delete, rename, or rewrite repository files, staged evidence, raw logs, sibling taskruns, or workspace source-of-truth files.",
+				"- Do not create overview.md, summary.md, architect-summary.md, proposal.md, changelog.md, or charter-overview.md in write_root.",
+				"- If you refresh content, write only referenced markdown targets under draft_final_root and preserve strict manifest outputs[].",
+				"- Final self-check: write_root contains the step draft manifest but no referenced markdown output files; draft_final_root contains all referenced markdown outputs.",
+			)
 		}
 		if draftEnrichmentValidationMentionsWriteFirstRetry(validationErr) {
 			lines = append(lines,
@@ -620,6 +642,20 @@ func draftEnrichmentValidationMentionsCommandTextRetry(err error) bool {
 
 func draftEnrichmentValidationMentionsWriteFirstRetry(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_write_first_retry")
+}
+
+func draftEnrichmentValidationMentionsWriteSetCleanup(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_write_set_cleanup")
+}
+
+func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "draft_artifact_enrichment_shard_status_cleanup") ||
+		strings.Contains(text, "generic conditional shard-gap wording") ||
+		strings.Contains(text, "uses generic conditional shard-gap wording")
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {

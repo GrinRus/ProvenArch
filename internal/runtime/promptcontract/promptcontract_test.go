@@ -1492,6 +1492,70 @@ func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *tes
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsShardStatusCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[2].path "architect-summary.md" uses generic conditional shard-gap wording instead of exact current-run shard status`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+		"generic conditional shard-gap wording instead of exact current-run shard status",
+		"special attention to architect-summary.md",
+		"compute planned, succeeded, failed, and incomplete counts from items[].status",
+		"exact counts and an explicit no-shard-coverage-blocker statement",
+		"Do not use generic conditional phrases such as any failed or incomplete shards",
+		"failed shards require rerun",
+		"what is complete now, what residual artifact-quality risks remain",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected shard-status cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsWriteSetCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`draft_artifact_enrichment_write_set_cleanup: draft repair wrote forbidden write_root files: created architect-summary.md; created overview.md; created summary.md`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
+		"misplaced referenced markdown duplicates from write_root",
+		"draft markdown only under draft_final_root",
+		"Keep the step draft manifest in write_root",
+		"Do not delete, rename, or rewrite repository files",
+		"Do not create overview.md, summary.md, architect-summary.md",
+		"If you refresh content, write only referenced markdown targets under draft_final_root",
+		"write_root contains the step draft manifest but no referenced markdown output files",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected write-set cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsMarkerCleanupRetryHint(t *testing.T) {
 	t.Parallel()
 

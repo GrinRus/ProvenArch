@@ -1240,7 +1240,7 @@ printf '%s\n' 'collect command completed with stale artifacts'
 `
 	firstPairRepairScript := `#!/usr/bin/env bash
 set -eu
-sleep 5
+sleep 30
 `
 	secondPairRepairScript := `#!/usr/bin/env bash
 set -eu
@@ -1268,8 +1268,8 @@ EOF
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          false,
 				PreArtifactStallWindow:      500 * time.Millisecond,
-				RetryPreArtifactStallWindow: 20 * time.Millisecond,
-				PreArtifactWallClockWindow:  3 * time.Second,
+				RetryPreArtifactStallWindow: 250 * time.Millisecond,
+				PreArtifactWallClockWindow:  5 * time.Second,
 				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,
@@ -2862,6 +2862,63 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testin
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentShardStatusCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-shard-status")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	genericShardStatusScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"## Operator Decision",
+		"- Review any failed or incomplete shards from the typed summary and re-run collection if needed.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Coverage Summary",
+		"",
+		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
+		"EOF",
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"## Operator Decision",
+		"Shard completeness is complete for the current run: 16 planned, 16 succeeded, 0 failed, and 0 incomplete shard statuses. The operator should inspect architecture evidence density and proposal readiness next.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{genericShardStatusScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected shard-status cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_shard_status_cleanup") {
+		t.Fatalf("expected shard-status cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful shard-status cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {
 	t.Parallel()
 
@@ -3003,6 +3060,109 @@ func TestRunHeadlessProviderRetriesStep0DraftEnrichmentMarkerCleanup(t *testing.
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_marker_cleanup") {
 		t.Fatalf("expected step0 marker cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentWriteSetCleanupForDuplicatedWriteRootDrafts(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-write-set-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	duplicateScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cp \"$draft_root/$name\" \"$write_root/$name\"",
+		"done",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"rm -f \"$write_root/overview.md\" \"$write_root/summary.md\" \"$write_root/architect-summary.md\"",
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{duplicateScript, cleanupScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected write-set cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if _, err := os.Stat(filepath.Join(task.WriteRoot, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s duplicate to be absent from write_root, got err=%v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, name)); err != nil {
+			t.Fatalf("expected %s to remain under draft_final_root: %v", name, err)
+		}
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_write_set_cleanup") {
+		t.Fatalf("expected write-set cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful write-set cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderDoesNotRetryDraftEnrichmentWriteSetCleanupWithExtraDraftRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-write-set-cleanup-extra-draft")
+	duplicateAndExtraScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cp \"$draft_root/$name\" \"$write_root/$name\"",
+		"done",
+		"printf '%s\\n' '# Extra' > \"$draft_root/extra.md\"",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"rm -f " + shellQuote(filepath.Join(task.WriteRoot, "overview.md")),
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{duplicateAndExtraScript, cleanupScript},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected write-set cleanup to be unavailable when draft_final_root has extra files")
+	}
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected no cleanup retry for mixed write-root/draft-root violation, got %d calls", runner.draftCalls)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
 	}
 }
 
