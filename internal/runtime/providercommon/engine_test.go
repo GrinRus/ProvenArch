@@ -1221,6 +1221,75 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderFallsBackToManifestRepairAfterProcessPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-pair-manifest-fallback")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	badManifest := strings.Replace(collectManifestJSON(task), `,
+      "document_ids": ["doc.bank.overview"]`, "", 1)
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected manifest-only fallback after process pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("expected collect_manifest_repair fallback diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderRetriesSilentNoFreshCollectPairRepair(t *testing.T) {
 	t.Parallel()
 
@@ -2916,6 +2985,18 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentShardStatusCleanup(t *testing.
 	}
 	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
 		t.Fatalf("successful shard-status cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestShouldRetryDraftShardStatusCleanupEnrichmentMatchesShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" does not report exact current-run shard completeness from typed shard summary: planned=16 succeeded=16 failed=0 incomplete=0`)
+	if !shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment", err) {
+		t.Fatalf("expected exact shard-completeness error to trigger cleanup retry")
+	}
+	if shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment_shard_status_cleanup", err) {
+		t.Fatalf("cleanup retry must not recursively schedule itself")
 	}
 }
 

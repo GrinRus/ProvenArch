@@ -423,10 +423,11 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			)
 		}
 		if draftEnrichmentValidationMentionsShardStatusCleanup(validationErr) {
+			focusTarget := draftEnrichmentShardStatusCleanupFocusTarget(validationErr)
 			lines = append(lines,
 				"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
 				"- The previous enrichment freshly rewrote markdown, but at least one step2 target still used generic conditional shard-gap wording instead of exact current-run shard status.",
-				"- Rewrite every referenced markdown target again in one filesystem command, with special attention to architect-summary.md.",
+				fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
 				"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
 				"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
 				"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
@@ -655,7 +656,26 @@ func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "draft_artifact_enrichment_shard_status_cleanup") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
-		strings.Contains(text, "uses generic conditional shard-gap wording")
+		strings.Contains(text, "uses generic conditional shard-gap wording") ||
+		strings.Contains(text, "does not report exact current-run shard completeness")
+}
+
+func draftEnrichmentShardStatusCleanupFocusTarget(err error) string {
+	if err == nil {
+		return "architect-summary.md"
+	}
+	text := err.Error()
+	for _, target := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if strings.Contains(text, `path "`+target+`"`) {
+			return target
+		}
+	}
+	for _, target := range []string{"summary.md", "architect-summary.md", "overview.md"} {
+		if strings.Contains(text, `"`+target+`"`) || strings.Contains(text, target) {
+			return target
+		}
+	}
+	return "architect-summary.md"
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {

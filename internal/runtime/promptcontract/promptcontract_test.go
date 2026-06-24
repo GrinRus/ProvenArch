@@ -823,6 +823,7 @@ func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(
 		"documents[0].path must be \"root-overview.md\"",
 		"documents[0].canonical_path must be exactly \"reports/as-is/payments/root-overview.md\"",
 		"documents[].canonical_path must never contain reports/taskruns, /staging/",
+		"Every citations[] item must include a non-empty document_ids array that references an id from documents[].id.",
 		"CANONICAL SEMANTIC SHAPE:",
 		`coverage.notes shape: "notes": ["observed config/runtime/deploy surface"]; a bare string is invalid.`,
 		`entity object shape: {"id":"svc.example","name":"Example","type":"service","provenance":{"kind":"observation","confidence":0.8,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
@@ -1520,6 +1521,34 @@ func TestComposeDraftArtifactEnrichmentPromptAddsShardStatusCleanupRetryHint(t *
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected shard-status cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsShardCompletenessCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" does not report exact current-run shard completeness from typed shard summary: planned=16 succeeded=16 failed=0 incomplete=0`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+		"does not report exact current-run shard completeness from typed shard summary",
+		"compute planned, succeeded, failed, and incomplete counts from items[].status",
+		"exact counts and an explicit no-shard-coverage-blocker statement",
+		"special attention to summary.md",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected shard-completeness cleanup retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }

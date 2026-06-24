@@ -224,6 +224,8 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 					}
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic.StallPhase)
 					return true, repairResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, err, "collect_pair_repair_post_artifact_invalid", beforeRepairFiles, options); recovered {
+					return true, recoveredResult, recoveredErr
 				}
 			}
 			if shouldRetrySilentNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic) {
@@ -246,13 +248,13 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 								}
 								emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
 								return true, retryResult, nil
+							} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_post_artifact_invalid", beforeRepairFiles, options); recovered {
+								return true, recoveredResult, recoveredErr
 							}
 						}
 						emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
-						if options.allowManifestFallback {
-							if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial"); recovered {
-								return true, recoveredResult, recoveredErr
-							}
+						if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial", beforeRepairFiles, options); recovered {
+							return true, recoveredResult, recoveredErr
 						}
 						if shouldClassifySilentNoFreshArtifactRepairStall(policy, retryResult, retryStalled.Diagnostic) ||
 							shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
@@ -264,10 +266,8 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 				}
 				if err := adapter.ValidateArtifacts(task); err != nil {
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-					if options.allowManifestFallback {
-						if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid"); recovered {
-							return true, recoveredResult, recoveredErr
-						}
+					if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid", beforeRepairFiles, options); recovered {
+						return true, recoveredResult, recoveredErr
 					}
 					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
 				}
@@ -279,10 +279,8 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 				return true, retryResult, nil
 			}
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic, repairErr)
-			if options.allowManifestFallback {
-				if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, repairResult, repairErr, "collect_pair_repair_partial"); recovered {
-					return true, recoveredResult, recoveredErr
-				}
+			if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, repairErr, "collect_pair_repair_partial", beforeRepairFiles, options); recovered {
+				return true, recoveredResult, recoveredErr
 			}
 			if shouldClassifySilentNoFreshArtifactRepairStall(policy, repairResult, repairStalled.Diagnostic) ||
 				shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
@@ -313,13 +311,13 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 							}
 							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
 							return true, retryResult, nil
+						} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_post_artifact_invalid", beforeRepairFiles, options); recovered {
+							return true, recoveredResult, recoveredErr
 						}
 					}
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
-					if options.allowManifestFallback {
-						if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial"); recovered {
-							return true, recoveredResult, recoveredErr
-						}
+					if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial", beforeRepairFiles, options); recovered {
+						return true, recoveredResult, recoveredErr
 					}
 					if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 						return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", retryResult, "provider unavailable during collect pair recovery", retryErr)
@@ -330,10 +328,8 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 			}
 			if err := adapter.ValidateArtifacts(task); err != nil {
 				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-				if options.allowManifestFallback {
-					if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid"); recovered {
-						return true, recoveredResult, recoveredErr
-					}
+				if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid", beforeRepairFiles, options); recovered {
+					return true, recoveredResult, recoveredErr
 				}
 				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
 			}
@@ -345,10 +341,8 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 			return true, retryResult, nil
 		}
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-		if options.allowManifestFallback {
-			if recovered, recoveredResult, recoveredErr := recoverCollectManifestRepair(ctx, task, adapter, repairResult, err, "collect_pair_repair_invalid"); recovered {
-				return true, recoveredResult, recoveredErr
-			}
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, err, "collect_pair_repair_invalid", beforeRepairFiles, options); recovered {
+			return true, recoveredResult, recoveredErr
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
 	}
@@ -358,6 +352,38 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 	}
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
 	return true, repairResult, nil
+}
+
+func recoverCollectManifestFallbackAfterPairRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string, before writeRootFileSnapshot, options collectArtifactPairRepairOptions) (bool, acpruntime.Result, error) {
+	if !shouldRecoverCollectManifestAfterPairRepair(task, before, options, validationErr) {
+		return false, acpruntime.Result{}, nil
+	}
+	return recoverCollectManifestRepair(ctx, task, adapter, result, validationErr, stage)
+}
+
+func shouldRecoverCollectManifestAfterPairRepair(task acpruntime.Task, before writeRootFileSnapshot, options collectArtifactPairRepairOptions, validationErr error) bool {
+	if validationErr == nil {
+		return false
+	}
+	if options.allowManifestFallback {
+		return true
+	}
+	if len(options.requiredExistingAuthoredDocMutationPaths) == 0 {
+		return false
+	}
+	if err := validateCollectArtifactPairRepairOutcome(task, before, options); err != nil {
+		return false
+	}
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
+		return false
+	}
+	if len(collectProcessContaminatedAuthoredDocs(task)) > 0 {
+		return false
+	}
+	if len(collectAuthoredDocsMentioningMissingRepoEvidencePaths(task, validationErr)) > 0 {
+		return false
+	}
+	return true
 }
 
 func validateCollectArtifactPairRepairOutcome(task acpruntime.Task, before writeRootFileSnapshot, options collectArtifactPairRepairOptions) error {
@@ -1205,7 +1231,8 @@ func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool 
 	text := err.Error()
 	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
-		strings.Contains(text, "does not report exact current-run shard status")
+		strings.Contains(text, "does not report exact current-run shard status") ||
+		strings.Contains(text, "does not report exact current-run shard completeness")
 }
 
 func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
