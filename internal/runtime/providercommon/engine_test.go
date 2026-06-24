@@ -2681,6 +2681,47 @@ func TestRunHeadlessProviderRejectsDraftEnrichmentNoopOrScaffoldWithoutRetry(t *
 	}
 }
 
+func TestShouldRetryDraftSilentWriteFirstEnrichmentOnlyForPreArtifactNoFreshMutation(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-silent-write-first")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime draft recovery initialized this artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent pre-artifact noop/scaffold enrichment to allow one write-first retry")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("write-first retry must not retry itself")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("analysis/status stdout must not trigger silent write-first retry")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must not trigger silent write-first retry")
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored as-is draft artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must use cleanup-specific retries or fail, not silent write-first retry")
+	}
+}
+
 func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.T) {
 	t.Parallel()
 

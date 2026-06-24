@@ -444,6 +444,17 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 				)
 			}
 		}
+		if draftEnrichmentValidationMentionsWriteFirstRetry(validationErr) {
+			lines = append(lines,
+				"DRAFT ENRICHMENT SILENT WRITE-FIRST RETRY:",
+				"- The previous enrichment was stopped before any fresh markdown mutation and produced no provider stdout/stderr.",
+				"- This is one narrow retry for a silent no-write enrichment, not a generic no-action retry.",
+				"- Your next response must execute exactly one bounded filesystem command before any prose or extra analysis.",
+				"- The command must read the current draft manifest plus bounded current-run evidence and overwrite every referenced markdown target under draft_final_root before it exits.",
+				"- Do not repeat the bootstrap/heredoc draft command, do not re-save unchanged scaffold, and do not print a plan/status note.",
+				"- Success still requires provider-authored fresh marker-free markdown for every referenced markdown target; repeated silent/noop/scaffold output remains runtime_contract_failed.",
+			)
+		}
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
@@ -605,6 +616,10 @@ func draftEnrichmentValidationMentionsDownstreamIndexClaim(err error) bool {
 
 func draftEnrichmentValidationMentionsCommandTextRetry(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_command_text_retry")
+}
+
+func draftEnrichmentValidationMentionsWriteFirstRetry(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_write_first_retry")
 }
 
 func draftEnrichmentShardStatusEvidenceFiles(task acpruntime.Task) []string {

@@ -1553,6 +1553,49 @@ func TestComposeDraftArtifactEnrichmentPromptAddsStep0MarkerCleanupRetryHint(t *
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsSilentWriteFirstRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_write_first_retry: draft_artifact_enrichment_noop_or_scaffold: runtime draft manifest outputs are invalid: outputs[0].path "overview.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"DRAFT ENRICHMENT SILENT WRITE-FIRST RETRY:",
+		"The previous enrichment was stopped before any fresh markdown mutation and produced no provider stdout/stderr.",
+		"This is one narrow retry for a silent no-write enrichment, not a generic no-action retry.",
+		"Your next response must execute exactly one bounded filesystem command before any prose or extra analysis.",
+		"overwrite every referenced markdown target under draft_final_root before it exits.",
+		"Do not repeat the bootstrap/heredoc draft command",
+		"Success still requires provider-authored fresh marker-free markdown",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected silent write-first retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"DRAFT ENRICHMENT COMMAND-TEXT RETRY:",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"cat >",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("silent write-first retry prompt must avoid command-text/bootstrap token %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
 	t.Parallel()
 
