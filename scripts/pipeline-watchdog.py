@@ -79,10 +79,26 @@ def write_status(
     )
 
 
+def useful_stdout_chunk(chunk: bytes) -> bool:
+    text = chunk.decode("utf-8", errors="replace")
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if "runtime task heartbeat" in line:
+            continue
+        if line.startswith("[pipeline-watchdog] progress "):
+            continue
+        return True
+    return False
+
+
 def newest_mtime(root: Path) -> float | None:
     if not root.exists():
         return None
     latest: float | None = None
+    skip_dirs = {".git", "node_modules", "logs", "raw"}
+    skip_files = {"run-history.json"}
     roots = [
         root / "reports" / "taskruns",
         root / "reports",
@@ -95,15 +111,11 @@ def newest_mtime(root: Path) -> float | None:
         if not scan_root.exists():
             continue
         for current, dirs, files in os.walk(scan_root):
-            dirs[:] = [item for item in dirs if item not in {".git", "node_modules"}]
+            dirs[:] = [item for item in dirs if item not in skip_dirs]
             current_path = Path(current)
-            try:
-                mtime = current_path.stat().st_mtime
-            except OSError:
-                mtime = None
-            if mtime is not None and (latest is None or mtime > latest):
-                latest = mtime
             for name in files:
+                if name in skip_files:
+                    continue
                 try:
                     mtime = (current_path / name).stat().st_mtime
                 except OSError:
@@ -179,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     clock_gap_detected = False
     last_progress_epoch = started_epoch
     last_progress_source = "process_start"
+    last_output_activity_epoch = started_epoch
     last_output_size = 0
     last_workspace_scan = 0.0
     next_heartbeat_epoch = started_epoch + heartbeat_sec if heartbeat_sec > 0 else 0.0
@@ -224,9 +237,18 @@ def main(argv: list[str] | None = None) -> int:
                 except OSError:
                     output_size = last_output_size
                 if output_size > last_output_size:
+                    chunk = b""
+                    try:
+                        with args.output.open("rb") as output_reader:
+                            output_reader.seek(last_output_size)
+                            chunk = output_reader.read(output_size - last_output_size)
+                    except OSError:
+                        chunk = b""
                     last_output_size = output_size
-                    last_progress_epoch = now_epoch
-                    last_progress_source = "stdout_stderr"
+                    last_output_activity_epoch = now_epoch
+                    if useful_stdout_chunk(chunk):
+                        last_progress_epoch = now_epoch
+                        last_progress_source = "stdout_stderr"
 
                 if args.workspace is not None and now_epoch - last_workspace_scan >= max(5.0, poll_sec):
                     last_workspace_scan = now_epoch
@@ -275,6 +297,8 @@ def main(argv: list[str] | None = None) -> int:
                     break
 
                 if rc is not None:
+                    last_progress_epoch = now_epoch
+                    last_progress_source = "process_exit"
                     process_exit = rc
                     break
 
@@ -327,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         "last_progress_at": iso_from_epoch(last_progress_epoch),
         "last_progress_epoch": last_progress_epoch,
         "last_progress_source": last_progress_source,
+        "last_output_activity_at": iso_from_epoch(last_output_activity_epoch),
+        "last_output_activity_epoch": last_output_activity_epoch,
         "last_watchdog_tick_at": iso_from_epoch(finished_epoch),
         "max_watchdog_tick_gap_sec": round(max_tick_gap, 3),
         "infra_host_sleep_or_clock_jump_detected": clock_gap_detected,
