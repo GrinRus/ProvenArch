@@ -674,7 +674,7 @@ Artifact-quality findings:
 
 Проверяем:
 - consistency `strategy`, `max_parallel_tasks`, `failure_policy`, `shard_discovery_mode` по effective surfaces + shard artifacts + run results;
-- headless provider command line включает не только `arch-workspace`, но и source repo directories для selected repo scopes; для canonical `path` inputs child backend cycle сначала проверяет pinned checkout, затем подменяет active repos file на run-local isolated detached clones under batch temp root, поэтому canonical `/tmp/provenarch-live-e2e/...` checkout является prerequisite/source input, а не provider write surface;
+- headless provider command line включает не только `arch-workspace`, но и source repo directories для selected repo scopes; для canonical `path` inputs child backend cycle сначала проверяет pinned checkout, затем подменяет active repos file на run-local isolated detached clones under batch temp root, поэтому canonical `/tmp/provenarch-live-e2e/...` checkout является prerequisite/source input, а не provider write surface; runtime write audit для таких read-only clones использует lightweight HEAD/index/mode snapshot with `GIT_OPTIONAL_LOCKS=0`, а не writable `git status`, чтобы isolated source repo не падал из-за index lock/refresh;
 - корректную реакцию на partial shard failures по policy.
 - для sequential `best_effort` collect пять подряд `runner_unavailable` shard failures должны остановить оставшиеся shards, записать их как failed с provider error class и сохранить collect-level root cause; это execution failure, а не artifact-quality verdict.
 

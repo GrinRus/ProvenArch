@@ -236,7 +236,7 @@ func runtimeAuditRootIsExcluded(root string, task acpruntime.Task) bool {
 func gitTopLevel(root string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--show-toplevel").Output()
+	output, err := gitReadOnlyCommand(ctx, root, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", err
 	}
@@ -248,9 +248,16 @@ func gitTopLevel(root string) (string, error) {
 }
 
 func gitStatusSnapshot(root string) ([]string, error) {
+	if repoRootAppearsReadOnly(root) {
+		return gitReadOnlyRepoSnapshot(root)
+	}
+	return gitPorcelainStatusSnapshot(root)
+}
+
+func gitPorcelainStatusSnapshot(root string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "git", "-C", root, "status", "--porcelain", "--untracked-files=all").Output()
+	output, err := gitReadOnlyCommand(ctx, root, "status", "--porcelain", "--untracked-files=all").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +270,67 @@ func gitStatusSnapshot(root string) ([]string, error) {
 	}
 	sort.Strings(lines)
 	return lines, nil
+}
+
+func gitReadOnlyRepoSnapshot(root string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, err := gitReadOnlyCommand(ctx, root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return nil, err
+	}
+	head := strings.TrimSpace(string(output))
+	if head == "" {
+		return nil, errors.New("empty git HEAD")
+	}
+
+	lines := []string{"readonly:head:" + head}
+	for _, rel := range []string{".", ".git", filepath.Join(".git", "HEAD"), filepath.Join(".git", "index"), filepath.Join(".git", "config")} {
+		path := filepath.Join(root, rel)
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			lines = append(lines, "readonly:missing:"+filepath.ToSlash(rel))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("readonly:mode:%s:%04o", filepath.ToSlash(rel), info.Mode().Perm()))
+		if !info.IsDir() {
+			if digest, ok := fileDigest(path); ok {
+				lines = append(lines, "readonly:digest:"+filepath.ToSlash(rel)+":"+digest)
+			}
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".git", "index.lock")); err == nil {
+		lines = append(lines, "readonly:index-lock:present")
+	} else {
+		lines = append(lines, "readonly:index-lock:absent")
+	}
+	sort.Strings(lines)
+	return lines, nil
+}
+
+func gitReadOnlyCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	return cmd
+}
+
+func repoRootAppearsReadOnly(root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	checked := 0
+	for _, rel := range []string{".", ".git", filepath.Join(".git", "index")} {
+		info, err := os.Lstat(filepath.Join(root, rel))
+		if err != nil {
+			return false
+		}
+		checked++
+		if info.Mode().Perm()&0o222 != 0 {
+			return false
+		}
+	}
+	return checked > 0
 }
 
 func changedSnapshotPaths(before map[string]string, after map[string]string) []string {

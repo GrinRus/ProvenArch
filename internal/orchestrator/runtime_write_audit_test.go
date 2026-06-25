@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,6 +85,45 @@ func TestRuntimeWriteAuditFailsOnRepoMutation(t *testing.T) {
 	}
 	if !hasLogField(logs, "category", "repo") {
 		t.Fatalf("expected repo mutation log category, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditAllowsReadOnlyRepoSnapshot(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	ws := writeAuditWorkspace(t)
+	repoRoot := writeAuditGitRepo(t)
+	t.Cleanup(func() {
+		chmodTreeForAudit(t, repoRoot, 0o755, 0o644)
+	})
+	chmodTreeForAudit(t, repoRoot, 0o555, 0o444)
+	task := writeAuditTask(ws, []string{repoRoot})
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	var snapshot []string
+	for _, status := range before.repoStatuses {
+		snapshot = status
+	}
+	if len(snapshot) == 0 {
+		t.Fatal("expected read-only repo snapshot")
+	}
+	if !stringSliceContainsPrefix(snapshot, "readonly:head:") {
+		t.Fatalf("expected read-only snapshot, got %#v", snapshot)
+	}
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
+
+	if err != nil {
+		t.Fatalf("did not expect runtime write audit error for unchanged read-only repo: %v", err)
+	}
+	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) || hasWarningContaining(execution.warnings, runtimeWriteAuditRepoSkipped) {
+		t.Fatalf("did not expect read-only repo audit warnings, got %#v", execution.warnings)
+	}
+	if hasLogWithMessage(logs, runtimeWriteAuditUnexpectedMutation) || hasLogWithMessage(logs, runtimeWriteAuditRepoSkipped) {
+		t.Fatalf("did not expect read-only repo audit logs, got %#v", logs)
 	}
 }
 
@@ -238,6 +278,22 @@ func runGitForAudit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func chmodTreeForAudit(t *testing.T, root string, dirMode fs.FileMode, fileMode fs.FileMode) {
+	t.Helper()
+
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil {
+			return nil
+		}
+		mode := fileMode
+		if entry.IsDir() {
+			mode = dirMode
+		}
+		_ = os.Chmod(path, mode)
+		return nil
+	})
+}
+
 func hasLogWithMessage(logs *[]RunLogEntry, message string) bool {
 	if logs == nil {
 		return false
@@ -268,6 +324,15 @@ func hasLogField(logs *[]RunLogEntry, key string, value string) bool {
 func stringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContainsPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
 			return true
 		}
 	}
