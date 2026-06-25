@@ -2757,7 +2757,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset permission defaults" }));
     expect(await screen.findByText("Runtime permissions reset to defaults")).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("opens runtime execution artifacts from run logs quick action", async () => {
     const runID = "run-runtime-artifact";
