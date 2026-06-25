@@ -6,6 +6,8 @@ import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
+const artifactSource = (process.env.UI_E2E_ARTIFACT_SOURCE ?? "live").trim().toLowerCase();
+const snapshotRunID = (process.env.UI_E2E_SNAPSHOT_RUN_ID ?? "").trim();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
 
@@ -18,6 +20,15 @@ type RunStatusPollResponse = {
 
 type RunArtifactsPollResponse = {
   artifacts?: unknown[];
+};
+
+type RunListPollResponse = {
+  items?: Array<{
+    run_id?: string;
+    status?: string;
+    pipeline?: string;
+    started_at?: string;
+  }>;
 };
 
 type RunObservation = {
@@ -34,6 +45,7 @@ async function sleep(ms: number): Promise<void> {
 
 async function fetchRunObservation(api: APIRequestContext, runID: string): Promise<RunObservation> {
   const response = await api.get(`/api/pipeline/runs/${runID}`);
+  expect(response.ok(), `run status API should return ${runID}`).toBe(true);
   const payload = (await response.json()) as RunStatusPollResponse;
   let artifactCount = 0;
   const artifactsResponse = await api.get(`/api/pipeline/runs/${runID}/artifacts`);
@@ -48,6 +60,30 @@ async function fetchRunObservation(api: APIRequestContext, runID: string): Promi
     warningsCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
     artifactCount
   };
+}
+
+async function resolveSnapshotRunID(api: APIRequestContext): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  let lastPayload: RunListPollResponse | null = null;
+  while (Date.now() < deadline) {
+    const response = await api.get("/api/pipeline/runs?limit=100");
+    expect(response.ok(), "run list API should be available in snapshot mode").toBe(true);
+    const payload = (await response.json()) as RunListPollResponse;
+    lastPayload = payload;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const requested = snapshotRunID
+      ? items.find((item) => item.run_id === snapshotRunID && item.status === "succeeded")
+      : null;
+    const latestSucceeded = items.find((item) => item.status === "succeeded" && item.run_id);
+    const selected = requested ?? latestSucceeded;
+    if (selected?.run_id) {
+      return selected.run_id;
+    }
+    await sleep(250);
+  }
+  throw new Error(
+    `snapshot mode could not find a succeeded run_id=${snapshotRunID || "<latest>"} in /api/pipeline/runs; last_payload=${JSON.stringify(lastPayload)}`
+  );
 }
 
 async function fetchArtifactText(api: APIRequestContext, artifactPath: string): Promise<string> {
@@ -259,16 +295,28 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await page.getByTestId("run-init-btn").click();
-  await expect(page.getByTestId("run-status-panel")).toBeVisible();
-  const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+  let runID = "";
+  if (artifactSource === "snapshot") {
+    runID = await resolveSnapshotRunID(request);
+    const snapshotRunButton = page.getByRole("button", { name: runID }).first();
+    await expect(snapshotRunButton, `snapshot run ${runID} should be selectable`).toBeVisible({ timeout: 30_000 });
+    await snapshotRunButton.click();
+    const snapshotObservation = await fetchRunObservation(request, runID);
+    expect(snapshotObservation.status, `snapshot run ${runID} should be succeeded`).toBe("succeeded");
+  } else {
+    await page.getByTestId("run-init-btn").click();
+    await expect(page.getByTestId("run-status-panel")).toBeVisible();
+    runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+  }
   expect(runID).not.toBe("");
   console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
   await test.info().attach("run-id", {
     body: runID,
     contentType: "text/plain"
   });
-  await waitForInitInspectRun(request, page, runID);
+  if (artifactSource !== "snapshot") {
+    await waitForInitInspectRun(request, page, runID);
+  }
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();

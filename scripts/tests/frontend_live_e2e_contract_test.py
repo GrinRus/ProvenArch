@@ -133,9 +133,29 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertIn('UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"', body)
         self.assertIn('UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE"', body)
 
+    def test_snapshot_artifact_source_is_supported_and_forwarded(self) -> None:
+        body = self.script_path.read_text(encoding="utf-8")
+        self.assertIn('UI_E2E_ARTIFACT_SOURCE="${UI_E2E_ARTIFACT_SOURCE:-live}"', body)
+        self.assertIn('UI_E2E_SNAPSHOT_RUN_ID="${UI_E2E_SNAPSHOT_RUN_ID:-}"', body)
+        self.assertIn("UI_E2E_ARTIFACT_SOURCE must be live or snapshot", body)
+        self.assertIn("UI_E2E_SNAPSHOT_RUN_ID is required when UI_E2E_ARTIFACT_SOURCE=snapshot", body)
+        self.assertIn('UI_E2E_ARTIFACT_SOURCE="$UI_E2E_ARTIFACT_SOURCE"', body)
+        self.assertIn('UI_E2E_SNAPSHOT_RUN_ID="$UI_E2E_SNAPSHOT_RUN_ID"', body)
+
+    def test_live_flow_uses_snapshot_run_without_starting_init(self) -> None:
+        spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
+        body = spec_path.read_text(encoding="utf-8")
+        self.assertIn('const artifactSource = (process.env.UI_E2E_ARTIFACT_SOURCE ?? "live")', body)
+        self.assertIn("resolveSnapshotRunID", body)
+        self.assertIn('if (artifactSource === "snapshot")', body)
+        self.assertIn('await page.getByTestId("run-init-btn").click();', body)
+        self.assertIn('if (artifactSource !== "snapshot")', body)
+
     def test_success_result_includes_screenshot_refs(self) -> None:
         result = self._run_frontend_harness("success_with_screenshots", expect_success=True)
         self.assertEqual("passed", result["status"])
+        self.assertEqual("live", result["artifact_source"])
+        self.assertIsNone(result["snapshot_run_id"])
         screenshots = result["diagnostic_refs"]["screenshots"]
         self.assertEqual(7, len(screenshots))
         for name in [
@@ -149,6 +169,16 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         ]:
             self.assertTrue(any(str(path).endswith(name) for path in screenshots))
         self.assertEqual("run_stub", result["run_id"])
+
+    def test_snapshot_success_result_records_snapshot_run(self) -> None:
+        result = self._run_frontend_harness(
+            "success_with_screenshots",
+            expect_success=True,
+            extra_env={"UI_E2E_ARTIFACT_SOURCE": "snapshot", "UI_E2E_SNAPSHOT_RUN_ID": "run_snapshot"},
+        )
+        self.assertEqual("passed", result["status"])
+        self.assertEqual("snapshot", result["artifact_source"])
+        self.assertEqual("run_snapshot", result["snapshot_run_id"])
 
     def test_server_exit_is_classified(self) -> None:
         result = self._run_frontend_harness("server_exited", acp_mode="server_exited")
@@ -189,7 +219,13 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertEqual("runner_unavailable", result["last_run_error_code"])
         self.assertEqual("init.step2.asis_docs", result["last_run_current_step"])
 
-    def _run_frontend_harness(self, npm_mode: str, acp_mode: str = "healthy", expect_success: bool = False) -> dict[str, object]:
+    def _run_frontend_harness(
+        self,
+        npm_mode: str,
+        acp_mode: str = "healthy",
+        expect_success: bool = False,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             workspace = tmp / "workspace"
@@ -235,6 +271,8 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 "FAKE_NPM_MODE": npm_mode,
                 "FAKE_HEALTH_FAIL_MARKER": str(marker),
             }
+            if extra_env:
+                env.update(extra_env)
             completed = subprocess.run(
                 ["bash", str(self.script_path)],
                 cwd=self.repo_root,

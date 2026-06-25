@@ -21,6 +21,8 @@ UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
 UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE="${UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE:-0}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"
+UI_E2E_ARTIFACT_SOURCE="${UI_E2E_ARTIFACT_SOURCE:-live}"
+UI_E2E_SNAPSHOT_RUN_ID="${UI_E2E_SNAPSHOT_RUN_ID:-}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
 
 DEFAULT_UI_INIT_POLL_TIMEOUT_SEC=900
@@ -276,6 +278,16 @@ case "$UI_E2E_QA_SMOKE" in
     die "UI_E2E_QA_SMOKE must be 0 or 1, got '$UI_E2E_QA_SMOKE'"
     ;;
 esac
+case "$UI_E2E_ARTIFACT_SOURCE" in
+  live|snapshot)
+    ;;
+  *)
+    die "UI_E2E_ARTIFACT_SOURCE must be live or snapshot, got '$UI_E2E_ARTIFACT_SOURCE'"
+    ;;
+esac
+if [[ "$UI_E2E_ARTIFACT_SOURCE" == "snapshot" && -z "$UI_E2E_SNAPSHOT_RUN_ID" ]]; then
+  die "UI_E2E_SNAPSHOT_RUN_ID is required when UI_E2E_ARTIFACT_SOURCE=snapshot"
+fi
 
 require_cmd curl
 require_cmd python3
@@ -327,6 +339,8 @@ write_frontend_result_json() {
   export FRONTEND_E2E_WORKSPACE="$WORKSPACE"
   export FRONTEND_E2E_RUNTIME_CMD="$runtime_cmd"
   export FRONTEND_E2E_SCENARIO="$UI_E2E_SCENARIO"
+  export FRONTEND_E2E_ARTIFACT_SOURCE="$UI_E2E_ARTIFACT_SOURCE"
+  export FRONTEND_E2E_SNAPSHOT_RUN_ID="$UI_E2E_SNAPSHOT_RUN_ID"
   export FRONTEND_E2E_SERVER_LOG="$SERVER_LOG"
   export FRONTEND_E2E_PLAYWRIGHT_LOG="$PLAYWRIGHT_LOG"
   export FRONTEND_E2E_REASON="$reason"
@@ -354,6 +368,8 @@ payload = {
     "workspace": os.environ.get("FRONTEND_E2E_WORKSPACE"),
     "runtime_command": os.environ.get("FRONTEND_E2E_RUNTIME_CMD"),
     "scenario": os.environ.get("FRONTEND_E2E_SCENARIO"),
+    "artifact_source": os.environ.get("FRONTEND_E2E_ARTIFACT_SOURCE"),
+    "snapshot_run_id": os.environ.get("FRONTEND_E2E_SNAPSHOT_RUN_ID") or None,
     "reason": os.environ.get("FRONTEND_E2E_REASON", "unknown"),
     "server_log": os.environ.get("FRONTEND_E2E_SERVER_LOG"),
     "playwright_log": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_LOG"),
@@ -492,6 +508,8 @@ if ! (
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE" \
+  UI_E2E_ARTIFACT_SOURCE="$UI_E2E_ARTIFACT_SOURCE" \
+  UI_E2E_SNAPSHOT_RUN_ID="$UI_E2E_SNAPSHOT_RUN_ID" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
   ACP_UI_INIT_POLL_TIMEOUT_SEC="$UI_INIT_POLL_TIMEOUT_SEC" \
   UI_E2E_OUTPUT_DIR="$PLAYWRIGHT_RESULTS_DIR" \

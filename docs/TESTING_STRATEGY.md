@@ -271,7 +271,7 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, run, inspect evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
+- UI path: open workspace, validate, inspect the selected completed run evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init. `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
 - UI run logs surface:
   - compact activity drawer render
   - log polling/append without duplicates
@@ -329,7 +329,7 @@ Release workflow hardening:
   - `artifact_quality:*` remains artifact-quality telemetry for SWE review and must not be converted into an execution failure before dependent frontend checks
   - placeholder promoted-artifact checks distinguish bootstrap/generic proposal text from evidence-backed proposal/changelog artifacts: boilerplate validation notes alone are not blockers when the artifact carries concrete finding/question ids and findings/coverage traceability
   - artifact-quality report tests cover misleading/off-topic interpretation, weak evidence density, useless C4/Mermaid and missing cross-repo truthfulness as manual SWE assessment criteria, not machine execution hard-fail checks
-  - frontend smoke работает на отдельной `frontend-workspace` копии run snapshot и не мутирует backend baseline; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression; shell tests закрепляют, что failed headless refresh row remains ineligible for frontend smoke even if a triage snapshot directory exists
+  - frontend smoke работает на отдельной `frontend-workspace` копии backend workspace, merge-ит выбранный run snapshot reports поверх copied reports tree и не мутирует backend baseline; batch harness создает frontend-only `reports/taskruns/run-history.json` для выбранного succeeded backend `refresh_run_id`, чтобы Playwright выбирал completed snapshot run instead of starting a second provider-backed init; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression; shell tests закрепляют, что failed headless refresh row remains ineligible for frontend smoke even if a triage snapshot directory exists
   - terminal-success backend runs (`result=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
   - legacy terminal quality fields are unsupported migration evidence; active harness must not emit old quality-gate fields or classify them as release blockers
   - execution report/matrix telemetry counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; counters читаются из snapshot quality JSON, а для failed/non-snapshot runs — из actual workspace `reports/taskruns/<run_id>-quality.json` без превращения такого run в snapshot hard-pass; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers
@@ -351,13 +351,13 @@ Release workflow hardening:
   - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт проверяет release-mode contract/providers/run indexes/records plus matching accepted SWE reports и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
-  - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_OUTPUT_DIR`
-  - release-facing `init-inspect` validates the Console V2 operator journey: `Source -> Readiness -> Analysis -> Review -> Publish`
+  - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_ARTIFACT_SOURCE=snapshot`, `UI_E2E_SNAPSHOT_RUN_ID`, `UI_E2E_OUTPUT_DIR`
+  - release-facing `init-inspect` validates the Console V2 operator journey over the copied backend refresh snapshot: `Source -> Readiness -> Analysis -> Review -> Publish`
   - durable V2 screenshot refs are diagnostic evidence only: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png`, default Ask evidence `frontend-ask-desktop.png`, and `frontend-review-mobile.png`
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
-  - init poll budget берётся из effective runtime timeouts and is not raised to `ACP_PIPELINE_TIMEOUT_SEC+30` by default; follow-pipeline mode requires explicit `UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE=1`, and `UI_E2E_INIT_TIMEOUT_CAP_SEC` is an optional diagnostic cap
+  - init poll budget берётся из effective runtime timeouts and is not raised to `ACP_PIPELINE_TIMEOUT_SEC+30` by default; canonical snapshot mode uses this budget for UI/API/artifact inspection, not a fresh provider-backed init; follow-pipeline mode requires explicit `UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE=1`, and `UI_E2E_INIT_TIMEOUT_CAP_SEC` is an optional diagnostic cap
   - `frontend-e2e-result.json` keeps scenario, reason, run id, last run status/error/current step and diagnostic refs stable; screenshots, traces and videos remain evidence metadata and do not change release verdict semantics
   - live UI smoke раскрывает Activity / Events drawer before interacting with log-mode controls, and Playwright action timeouts are bounded so hidden controls fail as `frontend_failed` instead of consuming the full runtime polling budget
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
