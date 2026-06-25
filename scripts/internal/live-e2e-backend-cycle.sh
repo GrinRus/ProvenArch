@@ -51,6 +51,7 @@ HEADLESS_CMD=""
 TARGET_PROFILE="generic"
 RESOLVED_TARGET_REPOS_FILE=""
 ORIGINAL_RESOLVED_TARGET_REPOS_FILE=""
+ISOLATED_TARGET_REPOS_DIR=""
 TARGET_REPOS_META_JSON=""
 EXPECTED_REPO_COUNT_RESOLVED=0
 EXPECTED_RUNS=0
@@ -536,10 +537,17 @@ prepare_isolated_target_repos_file() {
     --out "$isolated_repos_file" \
     --make-read-only
   RESOLVED_TARGET_REPOS_FILE="$isolated_repos_file"
+  ISOLATED_TARGET_REPOS_DIR="$isolated_repos_dir"
   TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.live-isolated.json"
   validate_target_repos_file
   read_target_repos_meta
   log "target path repos isolated: original=$ORIGINAL_RESOLVED_TARGET_REPOS_FILE active=$RESOLVED_TARGET_REPOS_FILE source_repos=$isolated_repos_dir"
+}
+
+restore_isolated_target_repos_write_bits() {
+  if [[ -n "$ISOLATED_TARGET_REPOS_DIR" && -d "$ISOLATED_TARGET_REPOS_DIR" ]]; then
+    chmod -R u+w "$ISOLATED_TARGET_REPOS_DIR" 2>/dev/null || true
+  fi
 }
 
 resolve_effective_timeouts_from_workspace() {
@@ -1384,6 +1392,7 @@ cleanup() {
   fi
 
   cat "$SUMMARY_PATH" >&4
+  restore_isolated_target_repos_write_bits
   rm -rf "$TMP_ROOT"
   log "temporary artifacts removed (set KEEP_TMP=1 to keep)"
 }

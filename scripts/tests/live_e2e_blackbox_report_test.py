@@ -38,6 +38,13 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         self.assertIn("current_step=${init_current_step:-unknown}", helper)
         self.assertIn("last_progress_age_sec", helper)
 
+    def test_backend_cycle_restores_isolated_repo_permissions_before_cleanup(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        self.assertIn("ISOLATED_TARGET_REPOS_DIR", helper)
+        self.assertIn("restore_isolated_target_repos_write_bits", helper)
+        self.assertIn('chmod -R u+w "$ISOLATED_TARGET_REPOS_DIR"', helper)
+        self.assertIn("restore_isolated_target_repos_write_bits\n  rm -rf \"$TMP_ROOT\"", helper)
+
     def test_matrix_harness_has_no_script_authored_operator_decisions(self) -> None:
         matrix_script = (self.repo_root / "scripts" / "full-run-batch-matrix.sh").read_text(encoding="utf-8")
         self.assertIn('BATCH_SCRIPT="${BATCH_SCRIPT:-$PROVENARCH_ROOT/scripts/full-run-batch.sh}"', matrix_script)
