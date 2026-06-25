@@ -18,6 +18,7 @@ UI_E2E_EXPECTED_REPO_COUNT="${UI_E2E_EXPECTED_REPO_COUNT:-1}"
 UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
+UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE="${UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE:-0}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"
 FRONTEND_RESULT_FILENAME="${FRONTEND_RESULT_FILENAME:-frontend-e2e-result.json}"
@@ -447,19 +448,26 @@ if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
   if [[ ! "$UI_E2E_INIT_TIMEOUT_CAP_SEC" =~ ^[0-9]+$ ]]; then
     die "UI_E2E_INIT_TIMEOUT_CAP_SEC must be a non-negative integer, got '$UI_E2E_INIT_TIMEOUT_CAP_SEC'"
   fi
+  if [[ "$UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE" != "0" && "$UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE" != "1" ]]; then
+    die "UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE must be 0 or 1, got '$UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE'"
+  fi
   init_timeout_cap_sec=$((10#$UI_E2E_INIT_TIMEOUT_CAP_SEC))
   if [[ -n "${ACP_PIPELINE_TIMEOUT_SEC:-}" ]]; then
     pipeline_timeout_sec="$(parse_positive_int_or_die "$ACP_PIPELINE_TIMEOUT_SEC" "ACP_PIPELINE_TIMEOUT_SEC")"
   fi
   if (( pipeline_timeout_sec > 0 )); then
-    min_init_timeout_sec=$((pipeline_timeout_sec + 30))
-    if (( init_timeout_cap_sec > 0 && min_init_timeout_sec > init_timeout_cap_sec )); then
-      log "init-inspect timeout guard: suggested=${min_init_timeout_sec}s exceeds cap=${init_timeout_cap_sec}s; applying bounded cap"
-      min_init_timeout_sec="$init_timeout_cap_sec"
-    fi
-    if (( init_timeout_sec < min_init_timeout_sec )); then
-      log "init-inspect timeout guard: bump ACP_UI_INIT_POLL_TIMEOUT_SEC ${init_timeout_sec}s -> ${min_init_timeout_sec}s (pipeline_timeout=${pipeline_timeout_sec}s, cap=${init_timeout_cap_sec}s)"
-      UI_INIT_POLL_TIMEOUT_SEC="$min_init_timeout_sec"
+    if [[ "$UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE" == "1" ]]; then
+      min_init_timeout_sec=$((pipeline_timeout_sec + 30))
+      if (( init_timeout_cap_sec > 0 && min_init_timeout_sec > init_timeout_cap_sec )); then
+        log "init-inspect timeout guard: suggested=${min_init_timeout_sec}s exceeds cap=${init_timeout_cap_sec}s; applying bounded cap"
+        min_init_timeout_sec="$init_timeout_cap_sec"
+      fi
+      if (( init_timeout_sec < min_init_timeout_sec )); then
+        log "init-inspect timeout guard: diagnostic follow-pipeline bump ACP_UI_INIT_POLL_TIMEOUT_SEC ${init_timeout_sec}s -> ${min_init_timeout_sec}s (pipeline_timeout=${pipeline_timeout_sec}s, cap=${init_timeout_cap_sec}s)"
+        UI_INIT_POLL_TIMEOUT_SEC="$min_init_timeout_sec"
+      fi
+    else
+      log "init-inspect timeout guard: keeping ACP_UI_INIT_POLL_TIMEOUT_SEC ${init_timeout_sec}s (pipeline_timeout=${pipeline_timeout_sec}s, follow_pipeline=0)"
     fi
   fi
 fi

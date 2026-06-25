@@ -357,7 +357,7 @@ Release workflow hardening:
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
-  - init poll budget берётся из effective runtime timeouts and may be raised to `ACP_PIPELINE_TIMEOUT_SEC+30`; fixed cap is opt-in diagnostic only
+  - init poll budget берётся из effective runtime timeouts and is not raised to `ACP_PIPELINE_TIMEOUT_SEC+30` by default; follow-pipeline mode requires explicit `UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE=1`, and `UI_E2E_INIT_TIMEOUT_CAP_SEC` is an optional diagnostic cap
   - `frontend-e2e-result.json` keeps scenario, reason, run id, last run status/error/current step and diagnostic refs stable; screenshots, traces and videos remain evidence metadata and do not change release verdict semantics
   - live UI smoke раскрывает Activity / Events drawer before interacting with log-mode controls, and Playwright action timeouts are bounded so hidden controls fail as `frontend_failed` instead of consuming the full runtime polling budget
 - Этот документ фиксирует policy, invariants и required gates; пошаговые live/release cookbook команды не дублируются здесь.
