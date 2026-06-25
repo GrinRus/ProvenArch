@@ -43,6 +43,8 @@ TERMINATION_SIGNAL=""
 API_SIM_STATUS="not_started"
 API_INIT_RUN_ID=""
 API_INIT_FINAL_STATUS=""
+API_INIT_PROGRESS_GRACE_SEC=""
+API_INIT_LAST_PROGRESS_AT=""
 LAST_SIGNAL=""
 HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
@@ -1198,6 +1200,12 @@ write_summary() {
     echo "- pipeline_kill_grace_sec: $PIPELINE_KILL_GRACE_SEC"
     echo "- api_ready_timeout_sec: $API_READY_TIMEOUT_SEC"
     echo "- api_init_timeout_sec: $API_INIT_TIMEOUT_SEC"
+    if [[ -n "$API_INIT_PROGRESS_GRACE_SEC" ]]; then
+      echo "- api_init_progress_grace_sec: $API_INIT_PROGRESS_GRACE_SEC"
+    fi
+    if [[ -n "$API_INIT_LAST_PROGRESS_AT" ]]; then
+      echo "- api_init_last_progress_at: $API_INIT_LAST_PROGRESS_AT"
+    fi
     echo "- ui_init_poll_timeout_sec: $UI_INIT_POLL_TIMEOUT_SEC"
     echo "- ui_cancel_poll_timeout_sec: $UI_CANCEL_POLL_TIMEOUT_SEC"
     echo "- apply_timeouts_via_api: $APPLY_TIMEOUTS_VIA_API"
@@ -1527,17 +1535,52 @@ PY
 )"
 
 init_status=""
+init_current_step=""
+init_artifact_count="0"
+init_warning_count="0"
+api_init_started_at=$SECONDS
 api_init_deadline=$((SECONDS + API_INIT_TIMEOUT_SEC))
+API_INIT_PROGRESS_GRACE_SEC=$((RUNTIME_HEARTBEAT_SEC * 2))
+if (( API_INIT_PROGRESS_GRACE_SEC < 60 )); then
+  API_INIT_PROGRESS_GRACE_SEC=60
+fi
+api_init_hard_deadline=$((api_init_deadline + API_INIT_PROGRESS_GRACE_SEC))
 last_api_init_progress=0
-while (( SECONDS < api_init_deadline )); do
+api_init_last_signature=""
+api_init_last_progress_second=$SECONDS
+API_INIT_LAST_PROGRESS_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+while :; do
+  if (( SECONDS >= api_init_deadline )); then
+    api_init_last_progress_age=$((SECONDS - api_init_last_progress_second))
+    if [[ "$init_status" != "running" && "$init_status" != "queued" && -n "$init_status" ]]; then
+      break
+    fi
+    if (( SECONDS >= api_init_hard_deadline || api_init_last_progress_age > API_INIT_PROGRESS_GRACE_SEC )); then
+      break
+    fi
+  fi
   curl -fsS "$API_BASE/api/pipeline/runs/$API_INIT_RUN_ID" > "$API_INIT_STATUS_JSON"
-  init_status="$(python3 - "$API_INIT_STATUS_JSON" <<'PY'
+  init_fields="$(python3 - "$API_INIT_STATUS_JSON" <<'PY'
 import json
 import sys
 payload = json.load(open(sys.argv[1], encoding='utf-8'))
-print(payload.get('status', ''))
+status = str(payload.get('status') or '')
+step = str(payload.get('current_step') or '')
+artifacts = payload.get('artifacts') or []
+warnings = payload.get('warnings') or []
+print("\t".join([status, step, str(len(artifacts)), str(len(warnings))]))
 PY
 )"
+  IFS=$'\t' read -r init_status init_current_step init_artifact_count init_warning_count <<< "$init_fields"
+  init_signature="${init_status}|${init_current_step}|${init_artifact_count}|${init_warning_count}"
+  if [[ -n "$init_signature" && "$init_signature" != "$api_init_last_signature" ]]; then
+    if [[ -n "$api_init_last_signature" ]]; then
+      log "api init observed progress: run_id=$API_INIT_RUN_ID status=$init_status current_step=${init_current_step:-unknown} artifacts=$init_artifact_count warnings=$init_warning_count"
+    fi
+    api_init_last_signature="$init_signature"
+    api_init_last_progress_second=$SECONDS
+    API_INIT_LAST_PROGRESS_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  fi
   if [[ "$init_status" == "succeeded" ]]; then
     break
   fi
@@ -1546,9 +1589,9 @@ PY
     append_api_init_run_result_row "$init_status"
     die "API init run failed (see $API_INIT_STATUS_JSON and $SERVER_LOG)"
   fi
-  api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
+  api_init_elapsed=$((SECONDS - api_init_started_at))
   if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( api_init_elapsed > 0 )) && (( api_init_elapsed % RUNTIME_HEARTBEAT_SEC == 0 )) && (( api_init_elapsed != last_api_init_progress )); then
-    log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC"
+    log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status current_step=${init_current_step:-unknown} elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC progress_grace_sec=$API_INIT_PROGRESS_GRACE_SEC"
     LAST_PIPELINE_STAGE="api.pipeline.init.poll"
     write_running_run_status_heartbeat
     last_api_init_progress="$api_init_elapsed"
@@ -1558,7 +1601,9 @@ done
 if [[ "$init_status" != "succeeded" ]]; then
   API_INIT_FINAL_STATUS="$init_status"
   append_api_init_run_result_row "${init_status:-failed}"
-  die "API init run did not finish in time (run_id=$API_INIT_RUN_ID)"
+  api_init_elapsed=$((SECONDS - api_init_started_at))
+  api_init_last_progress_age=$((SECONDS - api_init_last_progress_second))
+  die "API init run did not finish in time (run_id=$API_INIT_RUN_ID elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC progress_grace_sec=$API_INIT_PROGRESS_GRACE_SEC last_progress_age_sec=$api_init_last_progress_age current_step=${init_current_step:-unknown})"
 fi
 API_INIT_FINAL_STATUS="$init_status"
 
