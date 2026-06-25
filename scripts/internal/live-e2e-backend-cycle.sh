@@ -62,6 +62,16 @@ SUMMARY_RESULT=""
 SUMMARY_WRITTEN="no"
 LAST_PIPELINE_STAGE="not_started"
 LAST_RUNTIME_PROVIDER="unset"
+LAST_PROGRESS_AT_UTC=""
+LAST_PIPELINE_DEADLINE_AT=""
+LAST_PIPELINE_TIMEOUT_ELAPSED_SEC=""
+LAST_PIPELINE_DEADLINE_MISSED_BY_SEC=""
+LAST_PIPELINE_LAST_PROGRESS_AT=""
+LAST_WATCHDOG_TICK_AT=""
+LAST_WATCHDOG_TICK_GAP_SEC=""
+HOST_CLOCK_GAP_DETECTED="no"
+LAST_PIPELINE_TIMED_OUT="no"
+TERMINAL_PROCESS_EXIT_OVERRIDE=""
 TIMEOUTS_API_APPLY_BASELINE_STATUS="not_applied"
 TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE=""
 TIMEOUTS_API_APPLY_BASELINE_SOURCE=""
@@ -951,53 +961,82 @@ run_cli_pipeline() {
     run_cmd+=(--runtime-provider "$runtime_provider")
   fi
 
-  local timeout_flag="$TMP_ROOT/.pipeline-timeout-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.flag"
-  rm -f "$timeout_flag"
-  local run_started_at="$SECONDS"
-  "${run_cmd[@]}" >"$output_path" 2>&1 &
-  local run_pid=$!
-  (
-    sleep "$PIPELINE_TIMEOUT_SEC"
-    if kill -0 "$run_pid" >/dev/null 2>&1; then
-      echo "timeout" >"$timeout_flag"
-      kill -TERM "$run_pid" >/dev/null 2>&1 || true
-      sleep "$PIPELINE_KILL_GRACE_SEC"
-      if kill -0 "$run_pid" >/dev/null 2>&1; then
-        kill -KILL "$run_pid" >/dev/null 2>&1 || true
-      fi
-    fi
-  ) &
-  local watchdog_pid=$!
-  local last_progress_emit=-1
-  while kill -0 "$run_pid" >/dev/null 2>&1; do
-    sleep 1
-    local elapsed_sec=$((SECONDS - run_started_at))
-    if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( elapsed_sec > 0 )) && (( elapsed_sec % RUNTIME_HEARTBEAT_SEC == 0 )) && (( elapsed_sec != last_progress_emit )); then
-      log "pipeline progress: iteration=$iteration runtime=$runtime_label pipeline=$pipeline elapsed_sec=$elapsed_sec timeout_sec=$PIPELINE_TIMEOUT_SEC"
-      write_running_run_status_heartbeat
-      last_progress_emit="$elapsed_sec"
-    fi
-  done
+  local monitor_meta="$TMP_ROOT/.pipeline-monitor-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.json"
+  rm -f "$monitor_meta"
+  LAST_PIPELINE_DEADLINE_AT=""
+  LAST_PIPELINE_TIMEOUT_ELAPSED_SEC=""
+  LAST_PIPELINE_DEADLINE_MISSED_BY_SEC=""
+  LAST_PIPELINE_LAST_PROGRESS_AT=""
+  LAST_WATCHDOG_TICK_AT=""
+  LAST_WATCHDOG_TICK_GAP_SEC=""
+  HOST_CLOCK_GAP_DETECTED="no"
+  LAST_PIPELINE_TIMED_OUT="no"
+  local watchdog_cmd=(
+    python3 "$PROVENARCH_ROOT/scripts/pipeline-watchdog.py"
+    --timeout-sec "$PIPELINE_TIMEOUT_SEC"
+    --grace-sec "$PIPELINE_KILL_GRACE_SEC"
+    --heartbeat-sec "$RUNTIME_HEARTBEAT_SEC"
+    --output "$output_path"
+    --metadata "$monitor_meta"
+    --workspace "$workspace_path"
+  )
+  if [[ -n "${RUN_STATUS_FILE:-}" ]]; then
+    watchdog_cmd+=(--status-file "$RUN_STATUS_FILE")
+  fi
+  watchdog_cmd+=(
+    --last-pipeline-stage "$LAST_PIPELINE_STAGE"
+    --last-runtime-provider "$LAST_RUNTIME_PROVIDER"
+    --progress-label "iteration=$iteration runtime=$runtime_label pipeline=$pipeline"
+    -- "${run_cmd[@]}"
+  )
   local run_exit=0
-  if wait "$run_pid"; then
+  if "${watchdog_cmd[@]}"; then
     run_exit=0
   else
     run_exit=$?
   fi
-  kill "$watchdog_pid" >/dev/null 2>&1 || true
-  wait "$watchdog_pid" >/dev/null 2>&1 || true
 
-  if [[ -f "$timeout_flag" ]]; then
-    rm -f "$timeout_flag"
+  if [[ -f "$monitor_meta" ]]; then
+    local monitor_exports
+    monitor_exports="$(python3 - "$monitor_meta" <<'PY'
+import json
+import shlex
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+fields = {
+    "LAST_PIPELINE_DEADLINE_AT": payload.get("pipeline_deadline_at", ""),
+    "LAST_PIPELINE_TIMEOUT_ELAPSED_SEC": str(payload.get("pipeline_timeout_elapsed_sec", "")),
+    "LAST_PIPELINE_DEADLINE_MISSED_BY_SEC": str(payload.get("deadline_missed_by_sec", "")),
+    "LAST_PIPELINE_LAST_PROGRESS_AT": payload.get("last_progress_at", ""),
+    "LAST_PROGRESS_AT_UTC": payload.get("last_progress_at", ""),
+    "LAST_WATCHDOG_TICK_AT": payload.get("last_watchdog_tick_at", ""),
+    "LAST_WATCHDOG_TICK_GAP_SEC": str(payload.get("max_watchdog_tick_gap_sec", "")),
+    "HOST_CLOCK_GAP_DETECTED": "yes" if payload.get("infra_host_sleep_or_clock_jump_detected") else "no",
+    "LAST_PIPELINE_TIMED_OUT": "yes" if payload.get("timed_out") else "no",
+}
+for key, value in fields.items():
+    print(f"{key}={shlex.quote(str(value))}")
+PY
+)"
+    eval "$monitor_exports"
+  fi
+
+  if [[ "$HOST_CLOCK_GAP_DETECTED" == "yes" ]]; then
+    log "diagnostic infra_host_sleep_or_clock_jump_detected: iteration=$iteration runtime=$runtime_label pipeline=$pipeline max_tick_gap_sec=${LAST_WATCHDOG_TICK_GAP_SEC:-unknown}"
+  fi
+
+  if [[ "$run_exit" -eq 124 && "$LAST_PIPELINE_TIMED_OUT" == "yes" ]]; then
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
     run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
     reconcile_active_runs_in_history "$workspace_path" "runtime_timeout" "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s)"
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     FAILURE_REASON="runtime_timeout"
     TERMINATION_SIGNAL="timeout"
+    TERMINAL_PROCESS_EXIT_OVERRIDE="124"
+    write_terminal_run_status "process_failed" "124" "timeout" "runtime_timeout" "$SUMMARY_WRITTEN"
     die "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s): runtime=$runtime_label pipeline=$pipeline (see $output_path)"
   fi
-  rm -f "$timeout_flag"
 
   if [[ "$run_exit" -ne 0 ]]; then
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
@@ -1163,6 +1202,25 @@ write_summary() {
     echo "- running_runs_detected: $RUNNING_RUNS_DETECTED"
     echo "- last_pipeline_stage: $LAST_PIPELINE_STAGE"
     echo "- last_runtime_provider: $LAST_RUNTIME_PROVIDER"
+    if [[ -n "$LAST_PIPELINE_DEADLINE_AT" ]]; then
+      echo "- pipeline_deadline_at: $LAST_PIPELINE_DEADLINE_AT"
+    fi
+    if [[ -n "$LAST_PIPELINE_TIMEOUT_ELAPSED_SEC" ]]; then
+      echo "- pipeline_timeout_elapsed_sec: $LAST_PIPELINE_TIMEOUT_ELAPSED_SEC"
+    fi
+    if [[ -n "$LAST_PIPELINE_DEADLINE_MISSED_BY_SEC" ]]; then
+      echo "- deadline_missed_by_sec: $LAST_PIPELINE_DEADLINE_MISSED_BY_SEC"
+    fi
+    if [[ -n "$LAST_PIPELINE_LAST_PROGRESS_AT" ]]; then
+      echo "- last_progress_at: $LAST_PIPELINE_LAST_PROGRESS_AT"
+    fi
+    if [[ -n "$LAST_WATCHDOG_TICK_AT" ]]; then
+      echo "- last_watchdog_tick_at: $LAST_WATCHDOG_TICK_AT"
+    fi
+    if [[ -n "$LAST_WATCHDOG_TICK_GAP_SEC" ]]; then
+      echo "- max_watchdog_tick_gap_sec: $LAST_WATCHDOG_TICK_GAP_SEC"
+    fi
+    echo "- host_clock_gap_detected: $HOST_CLOCK_GAP_DETECTED"
     if [[ -n "$TERMINATION_SIGNAL" ]]; then
       echo "- termination_signal: $TERMINATION_SIGNAL"
     else
@@ -1264,7 +1322,11 @@ cleanup() {
   local terminal_state="completed"
   local terminal_signal="none"
   local terminal_exit="$exit_code"
-  if [[ -n "$TERMINATION_SIGNAL" ]]; then
+  if [[ "$TERMINATION_SIGNAL" == "timeout" ]]; then
+    terminal_state="process_failed"
+    terminal_signal="timeout"
+    terminal_exit="${TERMINAL_PROCESS_EXIT_OVERRIDE:-124}"
+  elif [[ -n "$TERMINATION_SIGNAL" ]]; then
     terminal_state="signal_terminated"
     terminal_signal="$(signal_status_token "$TERMINATION_SIGNAL")"
     terminal_exit="$(signal_exit_code "$TERMINATION_SIGNAL")"

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -704,6 +705,72 @@ func TestRunHeadlessProviderClassifiesContextDeadlineAsRuntimeTimeout(t *testing
 	}
 	if strings.TrimSpace(runnerErr.RawOutputRefs.Metadata) == "" {
 		t.Fatal("expected raw output metadata reference")
+	}
+	rawMeta, readErr := os.ReadFile(filepath.Join(task.Workspace, filepath.FromSlash(runnerErr.RawOutputRefs.Metadata)))
+	if readErr != nil {
+		t.Fatalf("read raw metadata: %v", readErr)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatalf("decode raw metadata: %v", err)
+	}
+	diagnostics, ok := meta["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected diagnostics block in timeout metadata: %#v", meta)
+	}
+	lifecycle, ok := diagnostics["provider_lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected provider lifecycle diagnostics: %#v", diagnostics)
+	}
+	if _, ok := lifecycle["last_pipe_activity_at"].(string); !ok {
+		t.Fatalf("expected last pipe activity diagnostic, got %#v", lifecycle)
+	}
+	if _, ok := lifecycle["no_progress_duration_ms"].(float64); !ok {
+		t.Fatalf("expected no-progress duration diagnostic, got %#v", lifecycle)
+	}
+	if got := lifecycle["artifact_observed"]; got != false {
+		t.Fatalf("expected artifact_observed=false before artifacts, got %#v", got)
+	}
+	if got := lifecycle["artifact_valid"]; got != false {
+		t.Fatalf("expected artifact_valid=false before artifacts, got %#v", got)
+	}
+}
+
+func TestRunHeadlessProviderContextDeadlineKillsChildProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group kill semantics are Unix-only")
+	}
+
+	task := newDraftTask(t, "run-timeout-process-group")
+	survivorMarker := filepath.Join(task.Workspace, "child-survived")
+	script := strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"(",
+		"  trap '' TERM",
+		"  sleep 1",
+		"  printf '%s\\n' survived > " + shellQuote(survivorMarker),
+		") &",
+		"wait",
+	}, "\n") + "\n"
+	runner := testAdapter{command: writeEngineScript(t, script)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeTimeout {
+		t.Fatalf("expected runtime_timeout, got %s (%v)", runnerErr.Code, err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, statErr := os.Stat(survivorMarker); !os.IsNotExist(statErr) {
+		t.Fatalf("expected child process group to be killed before marker write, stat err=%v", statErr)
 	}
 }
 

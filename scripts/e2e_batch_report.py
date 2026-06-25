@@ -1313,6 +1313,11 @@ def evaluate_run(
     result_value = first_token(parse_markdown_scalar(summary_text, "result")) if summary_text else ""
     failure_reason = first_token(parse_markdown_scalar(summary_text, "failure_reason")) if summary_text else ""
     termination_signal = first_token(parse_markdown_scalar(summary_text, "termination_signal")) if summary_text else ""
+    host_clock_gap_detected = first_token(parse_markdown_scalar(summary_text, "host_clock_gap_detected")) if summary_text else ""
+    max_watchdog_tick_gap_sec = first_token(parse_markdown_scalar(summary_text, "max_watchdog_tick_gap_sec")) if summary_text else ""
+    pipeline_deadline_at = parse_markdown_scalar(summary_text, "pipeline_deadline_at") if summary_text else ""
+    pipeline_timeout_elapsed_sec = first_token(parse_markdown_scalar(summary_text, "pipeline_timeout_elapsed_sec")) if summary_text else ""
+    deadline_missed_by_sec = first_token(parse_markdown_scalar(summary_text, "deadline_missed_by_sec")) if summary_text else ""
     expected_runs = parse_int(parse_markdown_scalar(summary_text, "expected_runs"), 0) if summary_text else 0
     completed_runs = parse_int(parse_markdown_scalar(summary_text, "completed_runs"), 0) if summary_text else 0
     expected_headless_runs = parse_int(parse_markdown_scalar(summary_text, "expected_headless_runs"), 0) if summary_text else 0
@@ -1581,6 +1586,19 @@ def evaluate_run(
         issues.append("reliability:runtime-timeout")
         details.append(
             f"reliability/runtime-timeout -> {summary_path}: failure_reason={failure_reason or '-'} termination_signal={termination_signal or '-'}"
+        )
+        if pipeline_deadline_at or pipeline_timeout_elapsed_sec or deadline_missed_by_sec:
+            details.append(
+                "reliability/runtime-timeout -> "
+                f"pipeline_deadline_at={pipeline_deadline_at or '-'} "
+                f"elapsed_sec={pipeline_timeout_elapsed_sec or '-'} "
+                f"deadline_missed_by_sec={deadline_missed_by_sec or '-'}"
+            )
+    if host_clock_gap_detected.lower() in {"yes", "true", "1"}:
+        details.append(
+            "reliability/infra-host-clock-gap -> "
+            f"host_clock_gap_detected={host_clock_gap_detected} "
+            f"max_watchdog_tick_gap_sec={max_watchdog_tick_gap_sec or '-'}"
         )
     if infra_signal_terminated:
         issues.append("reliability:infra-signal-terminated")

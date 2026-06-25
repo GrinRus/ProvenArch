@@ -1468,6 +1468,63 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
 
+    def test_python_report_surfaces_timeout_deadline_and_clock_gap_evidence(self) -> None:
+        run_dir = self.root / "run-timeout-clock-gap"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- execution_gate: live runtime/frontend evidence only",
+                    "- failure_reason: runtime_timeout",
+                    "- expected_runs: 4",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 0",
+                    "- running_runs_detected: 1",
+                    "- last_pipeline_stage: iteration=1 runtime=headless:codex-code pipeline=refresh",
+                    "- pipeline_deadline_at: 2026-06-25T00:00:00Z",
+                    "- pipeline_timeout_elapsed_sec: 14405",
+                    "- deadline_missed_by_sec: 5",
+                    "- last_progress_at: 2026-06-24T23:40:00Z",
+                    "- last_watchdog_tick_at: 2026-06-25T00:00:05Z",
+                    "- max_watchdog_tick_gap_sec: 120.5",
+                    "- host_clock_gap_detected: yes",
+                    "- termination_signal: timeout",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="codex-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_timeout",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "124",
+            },
+        )
+
+        self.assertEqual("runtime_timeout", result.failure_class)
+        self.assertTrue(
+            any("pipeline_deadline_at=2026-06-25T00:00:00Z" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+        self.assertTrue(
+            any("reliability/infra-host-clock-gap" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
     def test_python_report_detects_runner_unavailable_capacity_signal(self) -> None:
         run_dir = self.root / "run-capacity-python"
         self._create_fixture_run_dir(run_dir)
