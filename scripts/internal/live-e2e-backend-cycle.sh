@@ -48,6 +48,7 @@ HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
 TARGET_PROFILE="generic"
 RESOLVED_TARGET_REPOS_FILE=""
+ORIGINAL_RESOLVED_TARGET_REPOS_FILE=""
 TARGET_REPOS_META_JSON=""
 EXPECTED_REPO_COUNT_RESOLVED=0
 EXPECTED_RUNS=0
@@ -487,7 +488,7 @@ prepare_target_repos_file() {
 }
 
 validate_target_repos_file() {
-  TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.json"
+  TARGET_REPOS_META_JSON="${TARGET_REPOS_META_JSON:-$TMP_ROOT/target-repos-meta.json}"
   python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
     --repos-file "$RESOLVED_TARGET_REPOS_FILE" \
     --expected-repo-count "$EXPECTED_REPO_COUNT" \
@@ -513,6 +514,30 @@ read_target_repos_meta() {
   TARGET_PROFILE="${resolved_target_profile:-generic}"
   PROFILE_SOURCE_KIND_EFFECTIVE="${resolved_source_kind:-mixed}"
   EXPECTED_REPO_COUNT_RESOLVED="${resolved_expected_count:-0}"
+}
+
+prepare_isolated_target_repos_file() {
+  case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
+    path|mixed)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  ORIGINAL_RESOLVED_TARGET_REPOS_FILE="$RESOLVED_TARGET_REPOS_FILE"
+  local isolated_repos_file="$TMP_ROOT/target-repos.live-isolated.yaml"
+  local isolated_repos_dir="$TMP_ROOT/source-repos"
+  python3 "$PROVENARCH_ROOT/scripts/prepare-live-repos-file.py" \
+    --repos-file "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" \
+    --work-dir "$isolated_repos_dir" \
+    --out "$isolated_repos_file" \
+    --make-read-only
+  RESOLVED_TARGET_REPOS_FILE="$isolated_repos_file"
+  TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.live-isolated.json"
+  validate_target_repos_file
+  read_target_repos_meta
+  log "target path repos isolated: original=$ORIGINAL_RESOLVED_TARGET_REPOS_FILE active=$RESOLVED_TARGET_REPOS_FILE source_repos=$isolated_repos_dir"
 }
 
 resolve_effective_timeouts_from_workspace() {
@@ -1152,6 +1177,9 @@ write_summary() {
     echo "- provenarch_root: $PROVENARCH_ROOT"
     echo "- target_input_mode: repos-file"
     echo "- target_repos_file: ${RESOLVED_TARGET_REPOS_FILE:-unset}"
+    if [[ -n "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" ]]; then
+      echo "- original_target_repos_file: $ORIGINAL_RESOLVED_TARGET_REPOS_FILE"
+    fi
     echo "- profile_id: ${PROFILE_ID:-adhoc}"
     echo "- profile_source_kind: $PROFILE_SOURCE_KIND_EFFECTIVE"
     echo "- expected_repo_count: $EXPECTED_REPO_COUNT_RESOLVED"
@@ -1371,6 +1399,7 @@ fi
 prepare_target_repos_file
 validate_target_repos_file
 read_target_repos_meta
+prepare_isolated_target_repos_file
 case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
   path|git_url|mixed)
     ;;
@@ -1378,7 +1407,11 @@ case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
     die "invalid target repos metadata profile_source_kind '$PROFILE_SOURCE_KIND_EFFECTIVE' (expected path|git_url|mixed)"
     ;;
 esac
-log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+if [[ -n "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" ]]; then
+  log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE original_repos_file=$ORIGINAL_RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+else
+  log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+fi
 
 HEADLESS_PROVIDER="${ACP_RUNTIME_PROVIDER:-claude-code}"
 case "$HEADLESS_PROVIDER" in

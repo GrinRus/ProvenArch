@@ -164,7 +164,7 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 
 	writeAudit := beginRuntimeWriteAudit(task)
 	result, err := runner.Run(taskCtx, task)
-	e.completeRuntimeWriteAudit(stepID, domainID, task, writeAudit)
+	auditErr := e.completeRuntimeWriteAudit(stepID, domainID, resolvedProvider, task, writeAudit)
 	if err != nil {
 		if isDraftOnlyRuntimeStep(stepID) {
 			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
@@ -194,6 +194,10 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		}
 		e.logError(stepID, domainID, "runtime task failed", runtimeFailureLogFields(task, err, "", ""))
 		return runtimePreparedExecution{}, err
+	}
+	if auditErr != nil {
+		e.logError(stepID, domainID, "runtime write audit failed", runtimeFailureLogFields(task, auditErr, "", ""))
+		return runtimePreparedExecution{}, auditErr
 	}
 	execution := contracts.NormalizeRuntimeExecution(result.Execution)
 	if strings.TrimSpace(execution.TaskID) == "" {

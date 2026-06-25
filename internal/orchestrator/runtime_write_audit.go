@@ -42,10 +42,11 @@ func beginRuntimeWriteAudit(task acpruntime.Task) runtimeWriteAuditSnapshot {
 	}
 }
 
-func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID string, task acpruntime.Task, before runtimeWriteAuditSnapshot) {
+func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID string, provider acpruntime.Provider, task acpruntime.Task, before runtimeWriteAuditSnapshot) error {
+	violations := []string{}
 	afterProtected := snapshotProtectedWorkspaceFiles(task.Workspace)
 	if changed := changedSnapshotPaths(before.protectedFiles, afterProtected); len(changed) > 0 {
-		e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "workspace", strings.TrimSpace(task.Workspace), changed)
+		violations = append(violations, e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "workspace", strings.TrimSpace(task.Workspace), changed))
 	}
 
 	afterStatuses := snapshotAuditedRepoStatuses(task)
@@ -53,16 +54,26 @@ func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID st
 		afterStatus, ok := afterStatuses[root]
 		if !ok {
 			e.reportRuntimeWriteAuditRepoSkipped(stepID, domainID, task, root, "status_unavailable_after_runtime")
+			violations = append(violations, fmt.Sprintf("%s: repo status unavailable after runtime under %s", runtimeWriteAuditUnexpectedMutation, root))
 			continue
 		}
 		if !sameStringSlice(beforeStatus, afterStatus) {
-			e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "repo", root, changedRepoStatusPaths(beforeStatus, afterStatus))
+			violations = append(violations, e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "repo", root, changedRepoStatusPaths(beforeStatus, afterStatus)))
 		}
 	}
 
 	for _, skipped := range before.skippedRepos {
 		e.reportRuntimeWriteAuditRepoSkipped(stepID, domainID, task, skipped.Root, skipped.Reason)
 	}
+	violations = normalizeAuditPaths(violations)
+	if len(violations) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(string(provider)) == "" {
+		provider = acpruntime.ProviderClaudeCode
+	}
+	message := strings.Join(violations, "; ")
+	return acpruntime.WrapRunnerError(provider, acpruntime.ErrorCodeRuntimeContract, message, nil)
 }
 
 func (e *pipelineExecution) reportRuntimeWriteAuditRepoSkipped(stepID string, domainID string, task acpruntime.Task, root string, reason string) {
@@ -75,16 +86,17 @@ func (e *pipelineExecution) reportRuntimeWriteAuditRepoSkipped(stepID string, do
 	})
 }
 
-func (e *pipelineExecution) reportRuntimeWriteAuditWarning(stepID string, domainID string, task acpruntime.Task, category string, root string, changed []string) {
+func (e *pipelineExecution) reportRuntimeWriteAuditWarning(stepID string, domainID string, task acpruntime.Task, category string, root string, changed []string) string {
 	changed = normalizeAuditPaths(changed)
 	if len(changed) == 0 {
-		return
+		return ""
 	}
 	limited := changed
 	if len(limited) > runtimeWriteAuditMaxPaths {
 		limited = limited[:runtimeWriteAuditMaxPaths]
 	}
-	e.addWarning(fmt.Sprintf("%s: %s changed %d path(s) under %s", runtimeWriteAuditUnexpectedMutation, category, len(changed), root))
+	message := fmt.Sprintf("%s: %s changed %d path(s) under %s", runtimeWriteAuditUnexpectedMutation, category, len(changed), root)
+	e.addWarning(message)
 	e.logWarn(stepID, domainID, runtimeWriteAuditUnexpectedMutation, map[string]any{
 		"audit_code":    runtimeWriteAuditUnexpectedMutation,
 		"task_id":       task.TaskID,
@@ -93,6 +105,7 @@ func (e *pipelineExecution) reportRuntimeWriteAuditWarning(stepID string, domain
 		"changed_count": len(changed),
 		"changed_paths": limited,
 	})
+	return message
 }
 
 func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {

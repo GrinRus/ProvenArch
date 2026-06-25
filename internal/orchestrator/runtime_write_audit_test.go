@@ -26,14 +26,16 @@ func TestRuntimeWriteAuditIgnoresStagedRootWrites(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(task.WriteRoot, "diagnostic.txt"), []byte("staged only"), 0o644); err != nil {
 		t.Fatalf("write staged file: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err != nil {
+		t.Fatalf("did not expect runtime write audit error for staged write: %v", err)
+	}
 
 	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("did not expect runtime write audit warning for staged write: %#v", execution.warnings)
 	}
 }
 
-func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
+func TestRuntimeWriteAuditFailsOnProtectedWorkspaceMutation(t *testing.T) {
 	t.Parallel()
 
 	ws := writeAuditWorkspace(t)
@@ -44,8 +46,11 @@ func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws.Path, "workspace.yaml"), []byte("version: 1\nrepos: []\n# mutated\n"), 0o644); err != nil {
 		t.Fatalf("mutate workspace manifest: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("expected runtime write audit warning, got %#v", execution.warnings)
 	}
@@ -54,7 +59,7 @@ func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
+func TestRuntimeWriteAuditFailsOnRepoMutation(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
@@ -69,8 +74,11 @@ func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# changed\n"), 0o644); err != nil {
 		t.Fatalf("mutate repo file: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("expected repo mutation warning, got %#v", execution.warnings)
 	}
@@ -79,7 +87,7 @@ func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeWriteAuditReportsUnavailableRepoStatusAsSkipped(t *testing.T) {
+func TestRuntimeWriteAuditFailsWhenAuditedRepoStatusBecomesUnavailable(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
@@ -97,8 +105,11 @@ func TestRuntimeWriteAuditReportsUnavailableRepoStatusAsSkipped(t *testing.T) {
 	if err := os.RemoveAll(repoRoot); err != nil {
 		t.Fatalf("remove repo root: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("unavailable repo status must not be reported as mutation: %#v", execution.warnings)
 	}
@@ -142,7 +153,9 @@ func TestRuntimeWriteAuditLogsNonGitRepoSkip(t *testing.T) {
 	execution, logs := newWriteAuditExecution(ws)
 
 	before := beginRuntimeWriteAudit(task)
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err != nil {
+		t.Fatalf("did not expect runtime write audit error for initial non-git skip: %v", err)
+	}
 
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditRepoSkipped) {
 		t.Fatalf("expected repo skipped warning, got %#v", execution.warnings)
@@ -259,4 +272,9 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func isRuntimeContractError(err error) bool {
+	code, _, ok := acpruntime.ClassifyError(err)
+	return ok && code == string(acpruntime.ErrorCodeRuntimeContract)
 }
