@@ -3228,6 +3228,10 @@ func TestShouldRetryDraftShardStatusCleanupEnrichmentMatchesShardCompleteness(t 
 	if shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment_shard_status_cleanup", err) {
 		t.Fatalf("cleanup retry must not recursively schedule itself")
 	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: " + err.Error())
+	if shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment", noopErr) {
+		t.Fatalf("noop/scaffold enrichment must use write-first/compact retry before shard-status cleanup")
+	}
 }
 
 func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {

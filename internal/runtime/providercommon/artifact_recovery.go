@@ -1371,6 +1371,9 @@ func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool 
 	if strings.TrimSpace(stage) == "draft_artifact_enrichment_shard_status_cleanup" || err == nil {
 		return false
 	}
+	if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
 	text := err.Error()
 	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
