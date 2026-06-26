@@ -465,13 +465,25 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		if draftEnrichmentValidationMentionsWriteSetCleanup(validationErr) {
 			lines = append(lines,
 				"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
-				"- The previous enrichment wrote otherwise valid referenced draft markdown into write_root as misplaced duplicates.",
-				"- Your next filesystem action must delete only the misplaced referenced markdown duplicates from write_root and leave draft markdown only under draft_final_root.",
 				"- Keep the step draft manifest in write_root. Do not delete, rename, or rewrite repository files, staged evidence, raw logs, sibling taskruns, or workspace source-of-truth files.",
-				"- Do not create overview.md, summary.md, architect-summary.md, proposal.md, changelog.md, or charter-overview.md in write_root.",
-				"- If you refresh content, write only referenced markdown targets under draft_final_root and preserve strict manifest outputs[].",
-				"- Final self-check: write_root contains the step draft manifest but no referenced markdown output files; draft_final_root contains all referenced markdown outputs.",
 			)
+			if draftEnrichmentValidationMentionsStep0CanonicalPathCleanup(validationErr) {
+				lines = append(lines,
+					"- The previous step0 enrichment created the canonical publish path draft_final_root/skills/subagents.yaml. That path is forbidden during draft enrichment; the allowed draft bundle remains draft_final_root/baseline-subagents.yaml.",
+					"- Your next filesystem action must delete only draft_final_root/skills/subagents.yaml and remove draft_final_root/skills only if it is empty.",
+					"- Do not delete, rewrite, rename, or move draft_final_root/baseline-subagents.yaml.",
+					"- Do not create or keep draft_final_root/skills/subagents.yaml; outputs[].canonical_path is publish metadata, not a draft write path.",
+					"- Final self-check: draft_final_root/baseline-subagents.yaml exists, draft_final_root/skills/subagents.yaml is absent, and charter-overview.md remains the freshly enriched constitution markdown.",
+				)
+			} else {
+				lines = append(lines,
+					"- The previous enrichment wrote otherwise valid referenced draft markdown into write_root as misplaced duplicates.",
+					"- Your next filesystem action must delete only the misplaced referenced markdown duplicates from write_root and leave draft markdown only under draft_final_root.",
+					"- Do not create overview.md, summary.md, architect-summary.md, proposal.md, changelog.md, or charter-overview.md in write_root.",
+					"- If you refresh content, write only referenced markdown targets under draft_final_root and preserve strict manifest outputs[].",
+					"- Final self-check: write_root contains the step draft manifest but no referenced markdown output files; draft_final_root contains all referenced markdown outputs.",
+				)
+			}
 		}
 		if draftEnrichmentValidationMentionsWriteFirstRetry(validationErr) {
 			lines = append(lines,
@@ -802,6 +814,15 @@ func draftEnrichmentValidationMentionsWriteFirstRetry(err error) bool {
 
 func draftEnrichmentValidationMentionsWriteSetCleanup(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_write_set_cleanup")
+}
+
+func draftEnrichmentValidationMentionsStep0CanonicalPathCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "forbidden draft_final_root files") &&
+		strings.Contains(text, "skills/subagents.yaml")
 }
 
 func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {

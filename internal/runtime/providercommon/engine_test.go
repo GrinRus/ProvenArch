@@ -3429,6 +3429,76 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentWriteSetCleanupForDuplicatedWr
 	}
 }
 
+func TestRunHeadlessProviderRetriesStep0DraftEnrichmentCanonicalPathCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-constitution-draft-enrichment-canonical-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"Draft surface initialized for the scoped repository analysis.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	canonicalDuplicateScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Repository Evidence",
+		"- README.md identifies the selected repository entrypoint.",
+		"",
+		"## Operator Decision",
+		"Proceed with the architecture pass and inspect missing entrypoint evidence as an explicit gap.",
+		"EOF",
+		"mkdir -p \"$draft_root/skills\"",
+		"cp \"$draft_root/baseline-subagents.yaml\" \"$draft_root/skills/subagents.yaml\"",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"rm -f \"$draft_root/skills/subagents.yaml\"",
+		"rmdir \"$draft_root/skills\" 2>/dev/null || true",
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{canonicalDuplicateScript, cleanupScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected step0 canonical path cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, "baseline-subagents.yaml")); err != nil {
+		t.Fatalf("expected baseline-subagents.yaml to remain under draft_final_root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, "skills", "subagents.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected canonical duplicate to be absent from draft_final_root, got err=%v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_write_set_cleanup") {
+		t.Fatalf("expected write-set cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful canonical cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderDoesNotRetryDraftEnrichmentWriteSetCleanupWithExtraDraftRootFiles(t *testing.T) {
 	t.Parallel()
 

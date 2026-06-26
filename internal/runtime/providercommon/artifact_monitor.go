@@ -466,9 +466,15 @@ func validateDraftArtifactRepairWriteSetForStage(task acpruntime.Task, beforeWri
 		return err
 	}
 	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
-	draftRootChanges := unexpectedRepairMutations(beforeDraftRoot, afterDraftRoot, allowedDraftRootChange)
+	draftRootChanges := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		if allowedDraftRootChange(change.Path, change.State) {
+			return true
+		}
+		return strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" &&
+			isStep0CanonicalDraftDuplicateCleanupMutation(task, change)
+	})
 	if len(draftRootChanges) > 0 {
-		return fmt.Errorf("draft repair wrote forbidden draft_final_root files: %s", strings.Join(draftRootChanges, "; "))
+		return fmt.Errorf("draft repair wrote forbidden draft_final_root files: %s", strings.Join(describeRepairMutations(draftRootChanges), "; "))
 	}
 	return nil
 }

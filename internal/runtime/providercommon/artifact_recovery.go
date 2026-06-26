@@ -1132,8 +1132,11 @@ func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoo
 		}
 		return validationErr
 	}
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" && draftWriteRootDuplicateCleanupOccurred(task, beforeWriteRoot, beforeDraftRoot) {
-		return nil
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" {
+		if draftWriteRootDuplicateCleanupOccurred(task, beforeWriteRoot, beforeDraftRoot) ||
+			draftStep0CanonicalDuplicateCleanupOccurred(task, beforeDraftRoot) {
+			return nil
+		}
 	}
 	if !allDraftMarkdownOutputsChanged(task, beforeDraftRoot) {
 		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed")
@@ -1144,6 +1147,9 @@ func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoo
 func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
 	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" || err == nil {
 		return false
+	}
+	if shouldRetryDraftStep0CanonicalDuplicateCleanup(task, beforeWriteRoot, beforeDraftRoot, err) {
+		return true
 	}
 	if !strings.Contains(err.Error(), "draft repair wrote forbidden write_root files") {
 		return false
@@ -1185,6 +1191,44 @@ func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Tas
 	return true
 }
 
+func shouldRetryDraftStep0CanonicalDuplicateCleanup(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if err == nil || !strings.Contains(err.Error(), "draft repair wrote forbidden draft_final_root files") {
+		return false
+	}
+	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
+	if writeErr != nil {
+		return false
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	writeRootChanges := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		return strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile
+	})
+	if len(writeRootChanges) > 0 {
+		return false
+	}
+	afterDraftRoot, draftErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if draftErr != nil {
+		return false
+	}
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	draftRootChanges := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		return allowedDraftRootChange(change.Path, change.State)
+	})
+	if len(draftRootChanges) == 0 {
+		return false
+	}
+	hasCanonicalDuplicate := false
+	for _, change := range draftRootChanges {
+		if !isStep0CanonicalDraftDuplicateCreation(task, change) {
+			return false
+		}
+		if filepath.ToSlash(filepath.Clean(change.Path)) == "skills/subagents.yaml" && !change.State.IsDir {
+			hasCanonicalDuplicate = true
+		}
+	}
+	return hasCanonicalDuplicate
+}
+
 func draftWriteRootDuplicateCleanupOccurred(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot) bool {
 	afterWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
@@ -1204,6 +1248,47 @@ func draftWriteRootDuplicateCleanupOccurred(task acpruntime.Task, beforeWriteRoo
 		if _, stillExists := afterWriteRoot[rel]; !stillExists {
 			return true
 		}
+	}
+	return false
+}
+
+func draftStep0CanonicalDuplicateCleanupOccurred(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false
+	}
+	filePath := "skills/subagents.yaml"
+	beforeState, beforeOK := beforeDraftRoot[filePath]
+	if !beforeOK || beforeState.IsDir {
+		return false
+	}
+	_, afterOK := afterDraftRoot[filePath]
+	return !afterOK
+}
+
+func isStep0CanonicalDraftDuplicateCreation(task acpruntime.Task, change repairMutation) bool {
+	return change.Op == "created" && step0CanonicalDraftDuplicatePathMatches(task, change.Path, change.State.IsDir)
+}
+
+func isStep0CanonicalDraftDuplicateCleanupMutation(task acpruntime.Task, change repairMutation) bool {
+	return change.Op == "deleted" && step0CanonicalDraftDuplicatePathMatches(task, change.Path, change.State.IsDir)
+}
+
+func step0CanonicalDraftDuplicatePathMatches(task acpruntime.Task, rawPath string, isDir bool) bool {
+	if strings.TrimSpace(task.StepID) != "init.step0.constitution" {
+		return false
+	}
+	path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(rawPath)))
+	for _, output := range loadAllowedDraftOutputs(task) {
+		outputPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		canonicalPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if outputPath != "baseline-subagents.yaml" || canonicalPath != "skills/subagents.yaml" {
+			continue
+		}
+		if isDir {
+			return path == "skills"
+		}
+		return path == "skills/subagents.yaml"
 	}
 	return false
 }

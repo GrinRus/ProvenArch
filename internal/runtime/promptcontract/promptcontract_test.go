@@ -1257,6 +1257,50 @@ func TestComposeDraftArtifactEnrichmentPromptForConstitutionRequiresWriteFirstRe
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptForStep0CanonicalPathCleanup(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step0_constitution"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step0_constitution"),
+		ReadContextRoots:  []string{workspace},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`draft_artifact_enrichment_write_set_cleanup: draft repair wrote forbidden draft_final_root files: created directory skills; created skills/subagents.yaml`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
+		"created the canonical publish path draft_final_root/skills/subagents.yaml",
+		"allowed draft bundle remains draft_final_root/baseline-subagents.yaml",
+		"delete only draft_final_root/skills/subagents.yaml",
+		"remove draft_final_root/skills only if it is empty",
+		"outputs[].canonical_path is publish metadata, not a draft write path",
+		"draft_final_root/baseline-subagents.yaml exists",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 canonical cleanup prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"misplaced referenced markdown duplicates from write_root",
+		"Do not create overview.md, summary.md, architect-summary.md",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 canonical cleanup prompt must not use generic write_root cleanup wording %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetIdentity(t *testing.T) {
 	t.Parallel()
 
