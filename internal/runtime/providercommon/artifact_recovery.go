@@ -501,7 +501,10 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required when partial collect output contains no authored markdown", validationErr)
 	}
-	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) || isCollectManifestEmptyPayloadFailure(validationErr) {
+	if collectManifestFileMissing(task) ||
+		isCollectManifestSemanticScaffoldFailure(validationErr) ||
+		isCollectManifestEmptyPayloadFailure(validationErr) ||
+		isCollectManifestCitationClaimBindingFailure(validationErr) {
 		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
 			return true, recoveredResult, recoveredErr
 		}
@@ -627,6 +630,19 @@ func isCollectManifestEmptyPayloadFailure(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "shard-pack-manifest.schema.json validation failed: empty payload")
+}
+
+func isCollectManifestCitationClaimBindingFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := err.Error()
+	if strings.Contains(detail, "repo evidence path") ||
+		strings.Contains(detail, "process-contaminated") ||
+		strings.Contains(detail, "process contaminated") {
+		return false
+	}
+	return strings.Contains(detail, ".claim_ids is required")
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {

@@ -823,6 +823,7 @@ func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(
 		"documents[0].path must be \"root-overview.md\"",
 		"documents[0].canonical_path must be exactly \"reports/as-is/payments/root-overview.md\"",
 		"documents[].canonical_path must never contain reports/taskruns, /staging/",
+		"Every citations[] item must include a non-empty claim_ids array; empty claim_ids means the manifest is invalid.",
 		"Every citations[] item must include a non-empty document_ids array that references an id from documents[].id.",
 		"CANONICAL SEMANTIC SHAPE:",
 		`coverage.notes shape: "notes": ["observed config/runtime/deploy surface"]; a bare string is invalid.`,

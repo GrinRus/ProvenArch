@@ -1497,6 +1497,90 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRuntimeRecoversClaimlessManifestAfterProcessPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-pair-claimless-manifest")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	badManifest := strings.Replace(collectManifestJSON(task), `"claim_ids": ["claim.bank.readme"]`, `"claim_ids": []`, 1)
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Runtime surfaces
+- The scoped shard records a README-backed architecture overview for the bank runtime.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestRepairMarker := filepath.Join(task.Workspace, "claimless-manifest-repair-called")
+	manifestRepairScript := `#!/usr/bin/env bash
+set -eu
+printf called > ` + shellQuote(manifestRepairMarker) + `
+exit 7
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic claim binding recovery after pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, statErr := os.Stat(manifestRepairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("provider manifest-only repair should not run for claim_ids-only binding recovery, statErr=%v", statErr)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("provider manifest-only repair should not run for claim_ids-only binding recovery: %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("expected collect_manifest_runtime_recovery completed diagnostic, got %#v", diagnostics)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"claim_ids"`) || !strings.Contains(string(raw), "runtime_recovery") {
+		t.Fatalf("expected recovered manifest to include non-empty claim ids and runtime recovery marker, got %s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRetriesSilentNoFreshCollectPairRepair(t *testing.T) {
 	t.Parallel()
 
