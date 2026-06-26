@@ -491,6 +491,16 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for authored markdown that cites missing repo evidence", validationErr)
 	}
+	if !collectWriteRootHasAuthoredMarkdownDoc(task) {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_missing_authored_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics: true,
+			allowExistingAuthoredFiles: true,
+			allowManifestFallback:      true,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required when partial collect output contains no authored markdown", validationErr)
+	}
 	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) || isCollectManifestEmptyPayloadFailure(validationErr) {
 		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
 			return true, recoveredResult, recoveredErr
@@ -678,6 +688,31 @@ func collectWhitespaceOnlyAuthoredDocs(task acpruntime.Task) []string {
 		return nil
 	})
 	sort.Strings(found)
+	return found
+}
+
+func collectWriteRootHasAuthoredMarkdownDoc(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	found := false
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".md", ".markdown":
+			found = true
+			return filepath.SkipAll
+		default:
+			return nil
+		}
+	})
 	return found
 }
 
