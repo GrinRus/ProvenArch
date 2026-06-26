@@ -34,6 +34,7 @@ BATCH_RUN_SELECTION="${BATCH_RUN_SELECTION:-all}"
 BATCH_SKIP_PRECHECK="${BATCH_SKIP_PRECHECK:-0}"
 BATCH_FRONTEND_MODE="${BATCH_FRONTEND_MODE:-auto}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
+ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC="${ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC:-3600}"
 ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC="${ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC:-1800}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT:-/tmp/provenarch-test_arch_project}"
 BATCH_ROOT="${BATCH_ROOT:-$E2E_TMP_ROOT/runs/$BATCH_ID}"
@@ -86,6 +87,8 @@ TIMEOUT_PRECHECK_UNSET_KEYS=(
   BATCH_ROOT
   BATCH_SKIP_PRECHECK
   BATCH_FRONTEND_MODE
+  ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC
+  ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC
   E2E_MATRIX_FILE
   E2E_MATRIX_RELEASE_MODE
   E2E_TMP_ROOT
@@ -1578,6 +1581,9 @@ fi
 if [[ "$BATCH_SKIP_PRECHECK" == "1" && "${ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK:-0}" != "1" ]]; then
   die "BATCH_SKIP_PRECHECK is no longer a public live E2E shortcut; run precheck or set ACP_TEST_ALLOW_BATCH_SKIP_PRECHECK=1 only in hermetic tests"
 fi
+if [[ ! "$ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC" =~ ^[0-9]+$ ]] || [[ "$ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC" -le 0 ]]; then
+  die "ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC must be a positive integer number of seconds, got '$ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC'"
+fi
 if [[ ! "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" =~ ^[0-9]+$ ]] || [[ "$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC" -le 0 ]]; then
   die "ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC must be a positive integer number of seconds, got '$ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC'"
 fi
@@ -1715,11 +1721,26 @@ else
     finalize_precheck_failure "Node.js/npm toolchain precheck failed (see $BATCH_ROOT/precheck-node-toolchain.log)"
   fi
 
-  log "running DoD precheck: make contracts test lint build"
-  if ! (
+  log "running DoD precheck: make contracts test lint build (timeout=${ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC}s)"
+  dod_precheck_cmd=(env)
+  for key in "${TIMEOUT_PRECHECK_UNSET_KEYS[@]}"; do
+    dod_precheck_cmd+=("-u" "$key")
+  done
+  dod_precheck_cmd+=(make contracts test lint build)
+  set +e
+  (
     cd "$PROVENARCH_ROOT"
-    run_dod_precheck_make >"$BATCH_ROOT/precheck-make.log" 2>&1
-  ); then
+    run_precheck_command_with_timeout \
+      "make contracts test lint build" \
+      "$ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC" \
+      "$BATCH_ROOT/precheck-make.log" \
+      "${dod_precheck_cmd[@]}"
+  )
+  dod_precheck_rc=$?
+  set -e
+  if [[ "$dod_precheck_rc" -eq 124 ]]; then
+    finalize_precheck_failure "make contracts test lint build timed out after ${ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC}s (see $BATCH_ROOT/precheck-make.log)"
+  elif [[ "$dod_precheck_rc" -ne 0 ]]; then
     finalize_precheck_failure "make contracts test lint build failed (see $BATCH_ROOT/precheck-make.log)"
   fi
 

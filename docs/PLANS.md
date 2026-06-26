@@ -1448,6 +1448,29 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 
 ---
 
+## Live E2E DoD Precheck Timeout
+
+### Context
+- 2026-06-26 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260625T224145Z` completed the PostHog backend/frontend slot, then the FTGO profile stalled before runtime in `make contracts test lint build`.
+- Existing harness hard timeout covered provider pipelines and UI dependency/browser prechecks, but DoD precheck still ran as an unbounded direct shell command.
+- This left the matrix profile `running` until manual interrupt and produced no useful headless taskrun evidence because runtime had not started.
+
+### Plan
+- [x] Add `ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC` and run `make contracts test lint build` through the existing process-group precheck timeout helper.
+- [x] Keep terminal classification as `precheck_failed`, with `[precheck-timeout]` evidence in `precheck-make.log`.
+- [x] Keep DoD timeout separate from provider runtime timeout and artifact/UX quality.
+- [x] Add a script regression test for a hung DoD precheck.
+- [x] Update runbook, pipeline spec, architecture and testing strategy.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] A hung `make contracts test lint build` no longer leaves a child batch/profile indefinitely running.
+- [x] Reports retain `execution_report_<batch-id>.md`; legacy mixed quality-gate artifacts stay absent.
+- [ ] Latest strict medium rerun reaches runtime or fails with a bounded, classified precheck/provider/runtime reason.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
