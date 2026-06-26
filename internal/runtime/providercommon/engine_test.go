@@ -2858,6 +2858,54 @@ func TestShouldRetryDraftSilentWriteFirstEnrichmentOnlyForPreArtifactNoFreshMuta
 	}
 }
 
+func TestShouldRetryDraftCompactStep2EnrichmentOnlyAfterSilentWriteFirstRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-compact-step2")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime draft recovery initialized this artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent no-fresh write-first step2 retry to schedule compact step2 enrichment")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_compact_step2_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must not recursively schedule itself")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must only follow the write-first enrichment retry")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("stdout/status output must not trigger compact step2 retry")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must use cleanup-specific retries or fail")
+	}
+	step4 := newProposalsDraftTask(t, "run-proposals-draft-enrichment-compact-denied")
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", step4, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must not apply to non-step2 draft stages")
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored as-is draft artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must not schedule compact step2 retry")
+	}
+}
+
 func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.T) {
 	t.Parallel()
 

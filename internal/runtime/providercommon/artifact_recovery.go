@@ -988,6 +988,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					if shouldRetryDraftSilentWriteFirstEnrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteFirstRetryError(err), "draft_artifact_enrichment_write_first_retry")
 					}
+					if shouldRetryDraftCompactStep2Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep2RetryError(err), "draft_artifact_enrichment_compact_step2_retry")
+					}
 					if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
 					}
@@ -1363,11 +1366,36 @@ func shouldRetryDraftSilentWriteFirstEnrichment(stage string, task acpruntime.Ta
 	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
 }
 
+func shouldRetryDraftCompactStep2Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+	default:
+		return false
+	}
+	if diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
+}
+
 func draftWriteFirstRetryError(err error) error {
 	if err == nil {
 		return errors.New("draft_artifact_enrichment_write_first_retry")
 	}
 	return fmt.Errorf("draft_artifact_enrichment_write_first_retry: %w", err)
+}
+
+func draftCompactStep2RetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_compact_step2_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_compact_step2_retry: %w", err)
 }
 
 func draftWriteSetCleanupRetryError(err error) error {

@@ -1689,6 +1689,69 @@ func TestComposeDraftArtifactEnrichmentPromptAddsSilentWriteFirstRetryHint(t *te
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-summary-ftgo-application.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"succeeded"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		DomainID:          "ftgo-application",
+		RepoScope:         "ftgo-application",
+		RepoScopes:        []string{"ftgo-application"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging/shards"},
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_compact_step2_retry: draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"compact step2 draft enrichment retry mode",
+		"DRAFT ENRICHMENT COMPACT STEP2 RETRY:",
+		"silent write-first enrichment made no fresh markdown mutation",
+		"execute exactly one bounded filesystem command before any prose",
+		"overwrite every step2 markdown target under draft_final_root before it exits",
+		"Compact evidence set: current asis-draft-manifest.json, typed shard-plan/shard-summary files listed below, observed staging/shards/*/shard-pack-manifest.json counts, at most 3 authored shard docs or manifests",
+		summaryPath,
+		"compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
+		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
+		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
+		"summary.md must summarize shard completeness",
+		"architect-summary.md must give a decision-ready operator summary",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact step2 retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"STEP4 WRITE-FIRST SEQUENCE",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact step2 retry prompt must stay narrow and avoid %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
 	t.Parallel()
 
