@@ -212,6 +212,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	if draftEnrichmentValidationMentionsCompactStep2Retry(validationErr) {
 		return composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
 	}
+	if draftEnrichmentValidationMentionsCompactStep4Retry(validationErr) {
+		return composeDraftArtifactEnrichmentCompactStep4RetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
+	}
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		return composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider, task, manifestFile, manifestTarget, outputs, statusEvidenceFiles, validationErr)
 	}
@@ -557,6 +560,76 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 	return strings.Join(lines, "\n")
 }
 
+func composeDraftArtifactEnrichmentCompactStep4RetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
+	lines := []string{
+		fmt.Sprintf("You are ACP runtime provider %q in compact step4 draft enrichment retry mode.", provider),
+		"DRAFT ENRICHMENT COMPACT STEP4 RETRY:",
+		"- This retry is only for init|refresh.step4.proposals after a silent write-first enrichment made no fresh proposal/changelog markdown mutation.",
+		"- Your next response must execute exactly one bounded filesystem command before any prose, plan, or status note.",
+		"- The command must read a small current-run proposal evidence set and overwrite every step4 markdown target under draft_final_root before it exits.",
+		"- Do not run the earlier heredoc/bootstrap draft command and do not perform an open-ended workspace, repository, or sibling-taskrun sweep.",
+		"- Do not return semantic JSON or use stdout as the artifact. Success requires fresh provider-authored proposal/changelog markdown mutations on disk.",
+		fmt.Sprintf("- Read/preserve the current manifest target: %q.", manifestTarget),
+		fmt.Sprintf("- Draft root for markdown overwrites: %q.", strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- write_root = %q`, strings.TrimSpace(task.WriteRoot)),
+		fmt.Sprintf(`- draft_final_root = %q`, strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- manifest_file = %q`, manifestFile),
+		fmt.Sprintf(`- current_run_id = %q`, strings.TrimSpace(task.RunID)),
+		fmt.Sprintf(`- current_step_id = %q`, strings.TrimSpace(task.StepID)),
+		fmt.Sprintf(`- bounded_read_context_roots = %q`, strings.Join(task.ReadContextRoots, ", ")),
+		"- Allowed writes: the existing proposals draft manifest in write_root and referenced draft files under draft_final_root only.",
+		"- Prefer not to rewrite the manifest. If touched, keep only top-level version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs.",
+		"- Preserve each outputs[] path/canonical_path/kind/title exactly; never add status, content_digest, logical_path, target, output_path, publish_path, metadata, validation, confidence, or source fields.",
+		"- Compact evidence set: current proposals-draft-manifest.json, typed shard-plan/shard-summary files listed below, current-run validator/finding/proposal/coverage summaries if present, current-run final-run-index.json/citation-index.json if present, and at most 3 staged shard docs or manifests.",
+		"- If proposal/finding evidence is sparse, still overwrite both files with an explicit no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
+	}
+	if len(statusEvidenceFiles) == 0 {
+		lines = append(lines,
+			"- No current-run typed shard-plan/shard-summary files were visible; count observed shard-pack-manifest.json files and state typed shard status as unknown.",
+		)
+	} else {
+		lines = append(lines, "- Read these exact current-run typed shard-plan/shard-summary files first:")
+		for _, file := range statusEvidenceFiles {
+			lines = append(lines, "- "+file)
+		}
+	}
+	lines = append(lines,
+		"- If typed shard-summary items[] is readable, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
+		"- When typed shard-summary shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md.",
+		"- Do not infer shard counts from lexical occurrences of failed/error in markdown or manifests.",
+		"- Required markdown overwrite targets:",
+	)
+	markdownTargets := 0
+	for _, output := range outputs {
+		if strings.ToLower(filepath.Ext(strings.TrimSpace(output.Path))) != ".md" {
+			continue
+		}
+		markdownTargets++
+		lines = append(lines, fmt.Sprintf(
+			"- %s -> %s; exact target %q",
+			strings.TrimSpace(output.Path),
+			strings.TrimSpace(output.CanonicalPath),
+			filepath.Join(strings.TrimSpace(task.DraftFinalRoot), filepath.FromSlash(strings.TrimSpace(output.Path))),
+		))
+	}
+	if markdownTargets == 0 {
+		for _, target := range []string{"proposal.md", "changelog.md"} {
+			lines = append(lines, fmt.Sprintf("- %s; exact target %q", target, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), target)))
+		}
+	}
+	lines = append(lines,
+		"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, and risks/gaps/out-of-scope.",
+		"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
+		"- Final markdown must be readable operator-facing proposal content, not a runtime process report. Do not paste raw JSON/Python object dumps, documents=[...], citations=[...], {'id': ...}, or metadata-only keys as evidence.",
+		"- Final markdown must not include scaffold or process markers: Runtime draft recovery initialized; Runtime proposal surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded evidence read; bounded read roots; recovery pass; enrichment read; bootstrap-only placeholder; placeholder proposal content; replace placeholder; replacing placeholders.",
+		"- Final self-check inside the command: proposal.md and changelog.md were freshly overwritten, have balanced backticks/fences, include current-run evidence or explicit gaps, and contain none of the banned markers.",
+	)
+	if validationErr != nil {
+		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in draft artifact enrichment command-text retry mode.", provider),
@@ -717,6 +790,10 @@ func draftEnrichmentValidationMentionsCommandTextRetry(err error) bool {
 
 func draftEnrichmentValidationMentionsCompactStep2Retry(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_compact_step2_retry")
+}
+
+func draftEnrichmentValidationMentionsCompactStep4Retry(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_compact_step4_retry")
 }
 
 func draftEnrichmentValidationMentionsWriteFirstRetry(err error) bool {

@@ -1752,6 +1752,67 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 	}
 }
 
+func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep4RetryMode(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-posthog.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"succeeded"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step4_proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step4_proposals",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging"},
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_compact_step4_retry: draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"compact step4 draft enrichment retry mode",
+		"DRAFT ENRICHMENT COMPACT STEP4 RETRY:",
+		"silent write-first enrichment made no fresh proposal/changelog markdown mutation",
+		"execute exactly one bounded filesystem command before any prose",
+		"overwrite every step4 markdown target under draft_final_root before it exits",
+		"Compact evidence set: current proposals-draft-manifest.json, typed shard-plan/shard-summary files listed below, current-run validator/finding/proposal/coverage summaries if present",
+		summaryPath,
+		"proposal.md -> proposals/runtime-recommendations.md; exact target",
+		"proposal.md must include Decision / recommended operator action",
+		"changelog.md must include updated architecture/proposal surfaces",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact step4 retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"STEP2 WRITE-FIRST SEQUENCE",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact step4 retry prompt must stay narrow and avoid %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
 	t.Parallel()
 

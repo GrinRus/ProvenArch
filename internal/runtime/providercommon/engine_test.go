@@ -1215,6 +1215,73 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderEscalatesEmptyCollectMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-empty-markdown-pair-repair")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+: > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+: > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for empty authored markdown' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected empty collect markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for empty authored markdown: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if !strings.Contains(string(docRaw), "README.md identifies Bank of Anthos") {
+		t.Fatalf("expected pair repair to write evidence-backed markdown, got:\n%s", docRaw)
+	}
+}
+
 func TestRunHeadlessProviderEscalatesProcessContaminatedMarkdownToPairRepair(t *testing.T) {
 	t.Parallel()
 
@@ -2903,6 +2970,54 @@ func TestShouldRetryDraftCompactStep2EnrichmentOnlyAfterSilentWriteFirstRetry(t 
 	}
 	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
 		t.Fatal("fresh markdown mutation must not schedule compact step2 retry")
+	}
+}
+
+func TestShouldRetryDraftCompactStep4EnrichmentOnlyAfterSilentWriteFirstRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-enrichment-compact-step4")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"proposal.md", "changelog.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime proposal surface initialized for this run.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent no-fresh write-first step4 retry to schedule compact step4 enrichment")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_compact_step4_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must not recursively schedule itself")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must only follow the write-first enrichment retry")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("stdout/status output must not trigger compact step4 retry")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must use cleanup-specific retries or fail")
+	}
+	step2 := newAsIsDraftTask(t, "run-asis-draft-enrichment-compact-denied")
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", step2, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must not apply to non-step4 draft stages")
+	}
+	for _, name := range []string{"proposal.md", "changelog.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored proposal artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must not schedule compact step4 retry")
 	}
 }
 

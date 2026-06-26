@@ -469,6 +469,17 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
 		return false, acpruntime.Result{}, nil
 	}
+	if emptyDocs := collectWhitespaceOnlyAuthoredDocs(task); len(emptyDocs) > 0 {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_empty_authored_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics:               true,
+			allowExistingAuthoredFiles:               true,
+			requiredExistingAuthoredDocMutationPaths: stringSliceSet(emptyDocs),
+			allowManifestFallback:                    false,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for empty authored markdown", validationErr)
+	}
 	if staleDocs := collectAuthoredDocsMentioningMissingRepoEvidencePaths(task, validationErr); len(staleDocs) > 0 {
 		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_repo_evidence_mismatch", collectArtifactPairRepairOptions{
 			allowNoProviderDiagnostics:               true,
@@ -480,7 +491,7 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for authored markdown that cites missing repo evidence", validationErr)
 	}
-	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) {
+	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) || isCollectManifestEmptyPayloadFailure(validationErr) {
 		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
 			return true, recoveredResult, recoveredErr
 		}
@@ -601,6 +612,13 @@ func isCollectManifestSemanticScaffoldFailure(err error) bool {
 	return strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold")
 }
 
+func isCollectManifestEmptyPayloadFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "shard-pack-manifest.schema.json validation failed: empty payload")
+}
+
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
 	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
 	if root == "" || root == "." {
@@ -627,6 +645,40 @@ func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
 		}
 	}
 	return false
+}
+
+func collectWhitespaceOnlyAuthoredDocs(task acpruntime.Task) []string {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return nil
+	}
+	found := []string{}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(name)) != ".md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if strings.TrimSpace(string(raw)) == "" {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(found)
+	return found
 }
 
 func collectProcessContaminatedAuthoredDocs(task acpruntime.Task) []string {
@@ -990,6 +1042,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					}
 					if shouldRetryDraftCompactStep2Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep2RetryError(err), "draft_artifact_enrichment_compact_step2_retry")
+					}
+					if shouldRetryDraftCompactStep4Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep4RetryError(err), "draft_artifact_enrichment_compact_step4_retry")
 					}
 					if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
@@ -1384,6 +1439,24 @@ func shouldRetryDraftCompactStep2Enrichment(stage string, task acpruntime.Task, 
 	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
 }
 
+func shouldRetryDraftCompactStep4Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step4.proposals", "refresh.step4.proposals":
+	default:
+		return false
+	}
+	if diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
+}
+
 func draftWriteFirstRetryError(err error) error {
 	if err == nil {
 		return errors.New("draft_artifact_enrichment_write_first_retry")
@@ -1396,6 +1469,13 @@ func draftCompactStep2RetryError(err error) error {
 		return errors.New("draft_artifact_enrichment_compact_step2_retry")
 	}
 	return fmt.Errorf("draft_artifact_enrichment_compact_step2_retry: %w", err)
+}
+
+func draftCompactStep4RetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_compact_step4_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_compact_step4_retry: %w", err)
 }
 
 func draftWriteSetCleanupRetryError(err error) error {
