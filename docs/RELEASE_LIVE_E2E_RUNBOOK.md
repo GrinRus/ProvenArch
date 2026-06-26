@@ -104,6 +104,7 @@ Execution/reporting policy для generated regress/release команд:
 - `execution_report_<batch-id>.md` агрегирует только реально выбранные providers/run indexes;
 - `artifact_quality:*` warnings are preserved as artifact-quality evidence and never convert batch/matrix/release execution verdict into `FAIL`;
 - `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts` являются visible execution telemetry в execution/matrix reports;
+- malformed provider-authored semantic artifacts, including markdown accidentally written to `shard-pack-manifest.json`, must be emitted as `analysis:malformed-semantic-json` evidence in `execution_report_*` instead of crashing report generation;
 - non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся execution/runtime-flow blocker.
 - Diagnostic-only provider activity windows can be raised with `ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_POST_ARTIFACT_STALL_SEC`, `ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC` and `ACP_PROVIDER_VALID_ARTIFACT_STOP_SEC`; the matrix harness treats them as timeout overrides and blocks them in release mode.
 

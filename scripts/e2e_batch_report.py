@@ -136,6 +136,13 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def try_read_json(path: Path) -> tuple[dict[str, Any] | None, str]:
+    try:
+        return read_json(path), ""
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 def read_text_file(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
@@ -1873,10 +1880,31 @@ def evaluate_run(
 
     if refresh_step_files:
         non_power_target = not is_power_target(repo_roots, declared_meta)
-        step1_files = [path for path in refresh_step_files if path.name == "shard-pack-manifest.json"]
+        parsed_refresh_step_files: list[tuple[Path, dict[str, Any]]] = []
+        malformed_semantic_files: list[str] = []
+        for step_file in refresh_step_files:
+            payload, error = try_read_json(step_file)
+            if payload is None:
+                malformed_semantic_files.append(f"{step_file}: {error}")
+                continue
+            parsed_refresh_step_files.append((step_file, payload))
+        if malformed_semantic_files:
+            semantic_hard_fail = True
+            issues.append("analysis:malformed-semantic-json")
+            for item in malformed_semantic_files[:8]:
+                details.append(f"analysis/malformed-semantic-json -> {item}")
+            if len(malformed_semantic_files) > 8:
+                details.append(
+                    f"analysis/malformed-semantic-json -> +{len(malformed_semantic_files) - 8} more malformed files"
+                )
+
+        step1_files = [
+            (path, payload)
+            for path, payload in parsed_refresh_step_files
+            if path.name == "shard-pack-manifest.json"
+        ]
         if non_power_target:
-            for step_file in step1_files:
-                payload = read_json(step_file)
+            for step_file, payload in step1_files:
                 hits = collect_off_topic_hits(payload)
                 if hits:
                     off_topic_hits += len(hits)
@@ -1885,8 +1913,7 @@ def evaluate_run(
                     details.append(f"analysis/off-topic -> {step_file}: hits={','.join(hits)}")
 
         invalid_evidence: list[str] = []
-        for step_file in refresh_step_files:
-            payload = read_json(step_file)
+        for step_file, payload in parsed_refresh_step_files:
             for evidence_path in collect_evidence_paths(payload):
                 ok, reason = evidence_path_resolves(evidence_path, repo_roots, workspace)
                 if not ok:
@@ -1908,8 +1935,7 @@ def evaluate_run(
                 repo_mentions: set[str] = set()
                 edge_upserts = 0
                 cross_repo_semantic_links = 0
-                for step_file in refresh_step_files:
-                    payload = read_json(step_file)
+                for _step_file, payload in parsed_refresh_step_files:
                     repo_mentions.update(collect_repo_mentions(payload))
                     edge_upserts += count_semantic_edges(payload)
                     cross_repo_semantic_links += count_cross_repo_semantic_links(payload)

@@ -3366,6 +3366,48 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.runtime_flow_failed)
         self.assertNotIn("analysis:cross-repo-missing", result.issues)
 
+    def test_python_report_records_malformed_refresh_semantic_json_without_crashing(self) -> None:
+        run_dir = self.root / "run-malformed-refresh-semantic-json"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        manifest_path = (
+            run_dir
+            / "snapshots/refresh-run/reports/taskruns/refresh-run/staging/shards/domain-a/shard-pack-manifest.json"
+        )
+        write_text(
+            manifest_path,
+            "# Provider wrote markdown into the manifest path\n\nThis is malformed JSON and must stay reportable.\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "expected_repo_count": 1,
+                "execution_profile": {
+                    "strategy": "sequential",
+                    "max_parallel_tasks": 1,
+                    "failure_policy": "best_effort",
+                    "shard_discovery_mode": "heuristics",
+                },
+            },
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("none", result.failure_class)
+        self.assertIn("analysis:malformed-semantic-json", result.issues)
+        self.assertTrue(result.semantic_hard_fail)
+        self.assertTrue(
+            any("analysis/malformed-semantic-json" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
     def test_python_report_accepts_multi_repo_citations_and_cross_repo_findings_without_edges(self) -> None:
         run_dir = self.root / "run-multi-repo-citations-finding-links"
         self._create_passed_run_dir_with_raw_runner_noise(run_dir)
