@@ -1121,24 +1121,45 @@ func readRuntimeDraftShardCompletenessFile(filename string) (runtimeDraftShardCo
 func runtimeDraftTextClaimsShardCompleteness(text string, counts runtimeDraftShardCompleteness) bool {
 	lower := strings.ToLower(text)
 	exactSucceeded := fmt.Sprintf("%d/%d succeeded", counts.succeeded, counts.planned)
-	if strings.Contains(lower, exactSucceeded) {
-		if counts.failed == 0 && counts.incomplete == 0 {
-			return strings.Contains(lower, "no failed") &&
-				(strings.Contains(lower, "no failed, pending, or incomplete") ||
-					strings.Contains(lower, "no failed or incomplete") ||
-					strings.Contains(lower, "failed=0"))
-		}
-		return true
+	hasExactSucceeded := strings.Contains(lower, exactSucceeded)
+	hasPlanned := hasExactSucceeded || runtimeDraftTextHasShardCompletenessCount(lower, "planned", counts.planned)
+	hasSucceeded := hasExactSucceeded || runtimeDraftTextHasShardCompletenessCount(lower, "succeeded", counts.succeeded)
+	hasFailed := runtimeDraftTextHasShardCompletenessCount(lower, "failed", counts.failed)
+	if counts.failed == 0 {
+		hasFailed = hasFailed || runtimeDraftTextClaimsNoFailedShard(lower)
 	}
-	if strings.Contains(lower, fmt.Sprintf("planned=%d", counts.planned)) &&
-		strings.Contains(lower, fmt.Sprintf("succeeded=%d", counts.succeeded)) &&
-		strings.Contains(lower, fmt.Sprintf("failed=%d", counts.failed)) {
-		if counts.incomplete == 0 {
-			return strings.Contains(lower, "incomplete=0") || strings.Contains(lower, "pending=0")
+	hasIncomplete := runtimeDraftTextHasShardCompletenessCount(lower, "incomplete", counts.incomplete) ||
+		runtimeDraftTextHasShardCompletenessCount(lower, "pending", counts.incomplete)
+	if counts.incomplete == 0 {
+		hasIncomplete = hasIncomplete || runtimeDraftTextClaimsNoIncompleteShard(lower)
+	}
+	return hasPlanned && hasSucceeded && hasFailed && hasIncomplete
+}
+
+func runtimeDraftTextHasShardCompletenessCount(lower string, label string, count int) bool {
+	quoted := regexp.QuoteMeta(strings.ToLower(strings.TrimSpace(label)))
+	patterns := []string{
+		fmt.Sprintf(`\b%d\s+%s\b`, count, quoted),
+		fmt.Sprintf(`\b%s\s*(?:=|:)?\s*%d\b`, quoted, count),
+	}
+	for _, pattern := range patterns {
+		if regexp.MustCompile(pattern).FindStringIndex(lower) != nil {
+			return true
 		}
-		return strings.Contains(lower, fmt.Sprintf("incomplete=%d", counts.incomplete))
 	}
 	return false
+}
+
+func runtimeDraftTextClaimsNoFailedShard(lower string) bool {
+	return strings.Contains(lower, "no failed") || strings.Contains(lower, "failed=0")
+}
+
+func runtimeDraftTextClaimsNoIncompleteShard(lower string) bool {
+	return strings.Contains(lower, "no failed, pending, or incomplete") ||
+		strings.Contains(lower, "no failed or incomplete") ||
+		strings.Contains(lower, "no incomplete") ||
+		strings.Contains(lower, "incomplete=0") ||
+		strings.Contains(lower, "pending=0")
 }
 
 func runtimeDraftTextIndexCountMismatch(text string, draftRoot string) string {

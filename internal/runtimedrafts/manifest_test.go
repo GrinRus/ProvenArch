@@ -1657,6 +1657,19 @@ Proceed without a shard coverage blocker for this current run. Evidence: current
 	}
 }
 
+func TestRuntimeDraftTextClaimsShardCompletenessAcceptsNaturalCounts(t *testing.T) {
+	t.Parallel()
+
+	counts := runtimeDraftShardCompleteness{planned: 16, succeeded: 16, failed: 0, incomplete: 0}
+	text := "Current-run typed shard summary: 16 planned, 16 succeeded, 0 failed, 0 incomplete."
+	if !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+		t.Fatalf("expected natural planned/succeeded/failed/incomplete counts to validate")
+	}
+	if runtimeDraftTextClaimsShardCompleteness("Current-run typed shard summary: 16 planned, 16 succeeded, 0 failed.", counts) {
+		t.Fatalf("expected incomplete/pending count to remain required")
+	}
+}
+
 func TestValidateRequiredManifestRejectsStaleFinalIndexAvailabilityClaim(t *testing.T) {
 	t.Parallel()
 
