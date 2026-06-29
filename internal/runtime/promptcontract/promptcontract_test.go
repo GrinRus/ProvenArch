@@ -1401,6 +1401,9 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"changelog.md must contain: Updated architecture/proposal surfaces",
 		"Evidence index or citation references",
 		"Residual coverage gaps",
+		"Required proposal/changelog sections must not be empty",
+		"Do not write dangling references such as `prioritize each finding above`",
+		"The proposed changes/follow-up plan must include at least one concrete operator action",
 		"Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md",
 		"Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0",
 		"write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
@@ -1838,6 +1841,9 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep4RetryMode(t *testin
 		"proposal.md -> proposals/runtime-recommendations.md; exact target",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
+		"Required proposal/changelog sections must not be empty",
+		"Do not use dangling references like `findings above`",
+		"The proposed changes/follow-up plan must include a concrete evidence-backed operator action",
 		"Previous draft artifact validation failure:",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1902,6 +1908,8 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing
 		"If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
+		"None of those required proposal/changelog sections may be empty",
+		"The proposed changes/follow-up plan must contain at least one concrete operator action",
 		"no-shard-coverage-blocker statement",
 		"Previous draft artifact validation failure:",
 	} {

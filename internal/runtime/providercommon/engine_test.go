@@ -3418,12 +3418,30 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {
 		"",
 		"## Decision / recommended operator action",
 		"Accept the current proposal package as no-actionable-change evidence.",
+		"",
+		"## Evidence used",
+		"- reports/findings/findings.md",
+		"",
+		"## Proposed changes or follow-up plan",
+		"- No actionable proposal evidence was present in the current-run findings; keep the operator decision on reports/findings/findings.md.",
+		"",
+		"## Risks, gaps, and out-of-scope notes",
+		"- No validator/finding summary artifacts with structured findings were observed in the bounded read roots.",
 		"EOF",
 		"cat >\"$draft_root/changelog.md\" <<'EOF'",
 		"# Runtime Proposal Changelog",
 		"",
+		"## Updated architecture/proposal surfaces",
+		"- proposals/runtime-recommendations.md was rewritten during bounded read roots cleanup.",
+		"",
 		"## Findings/proposals summary",
 		"No validator/finding summary artifacts with structured findings were observed in the bounded read roots.",
+		"",
+		"## Evidence index or citation references",
+		"- cite.ftgo.accounting.authorize.contract",
+		"",
+		"## Residual coverage gaps",
+		"- Proposal evidence remains absent after bounded read roots cleanup.",
 		"EOF",
 		"exit 0",
 	}, "\n")))
@@ -3436,15 +3454,27 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {
 		"",
 		"## Evidence used",
 		"- reports/findings/findings.md",
+		"",
+		"## Proposed changes or follow-up plan",
+		"- No actionable proposal evidence was present in the current-run findings; keep the operator decision on reports/findings/findings.md.",
+		"",
+		"## Risks, gaps, and out-of-scope notes",
+		"- Proposal evidence remains absent for this current run.",
 		"EOF",
 		"cat >\"$draft_root/changelog.md\" <<'EOF'",
 		"# Runtime Proposal Changelog",
+		"",
+		"## Updated architecture/proposal surfaces",
+		"- proposals/runtime-recommendations.md records that no proposal was promoted from the current run.",
 		"",
 		"## Findings/proposals summary",
 		"No structured finding summary was present in current-run proposal evidence.",
 		"",
 		"## Evidence index or citation references",
 		"- cite.ftgo.accounting.authorize.contract",
+		"",
+		"## Residual coverage gaps",
+		"- Proposal evidence remains absent for this current run.",
 		"EOF",
 		"exit 0",
 	}, "\n")))
@@ -5143,14 +5173,34 @@ EOF
 cat >"$draft_root/proposal.md" <<'EOF'
 # Runtime Recommendations
 
-## Summary
-- Provider authored proposal draft.
+## Decision / recommended operator action
+Accept the provider-authored proposal draft as a no-actionable-change record for this test run.
+
+## Evidence used
+- reports/findings/findings.md
+- cite.ftgo.accounting.authorize.contract
+
+## Proposed changes or follow-up plan
+- No actionable proposal evidence was present in the current-run findings; keep the operator decision anchored to reports/findings/findings.md.
+
+## Risks, gaps, and out-of-scope notes
+- This fixture does not request shard repair.
 EOF
 cat >"$draft_root/changelog.md" <<'EOF'
 # Runtime Proposal Changelog
 
-## Changes
-- Provider authored proposal changelog.
+## Updated architecture/proposal surfaces
+- proposals/runtime-recommendations.md records the provider-authored no-actionable-change decision.
+
+## Findings/proposals summary
+- No actionable proposal evidence was present in the current-run findings.
+
+## Evidence index or citation references
+- reports/findings/findings.md
+- cite.ftgo.accounting.authorize.contract
+
+## Residual coverage gaps
+- Proposal evidence remains absent for this current run.
 EOF
 ` + tail + "\n"
 }

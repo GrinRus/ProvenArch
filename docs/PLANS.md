@@ -71,13 +71,15 @@ Task selection rules:
 EP-20260629-live-e2e-artifact-summary-finalization
 
 ### Context
-The latest accepted `claude-code` strict medium diagnostic proved the new execution gate shape (`execution_report_*`, selected-provider totals, no legacy mixed quality gate artifacts), but manual artifact review rejected FTGO artifact quality. The machine execution verdict was correctly separate from manual artifact quality, yet key FTGO markdown could still claim `Shard pack manifests: none observed` or stale final/citation index availability while current-run shard summaries and downstream indexes existed. This slice closes the machine-checkable contradiction before opening the PR, while leaving broader truthfulness/readability to the SWE artifact-quality report.
+The latest accepted `claude-code` strict medium diagnostic proved the new execution gate shape (`execution_report_*`, selected-provider totals, no legacy mixed quality gate artifacts), but manual artifact review rejected FTGO artifact quality. The machine execution verdict was correctly separate from manual artifact quality, yet key FTGO markdown could still claim `Shard pack manifests: none observed` or stale final/citation index availability while current-run shard summaries and downstream indexes existed. The same run also showed that `step4.proposals` could pass with formally present but weak proposal/changelog markdown: empty findings/gaps sections, dangling references to findings "above", and generic follow-up actions. This slice closes those machine-checkable contradictions before opening the PR, while leaving broader truthfulness/readability to the SWE artifact-quality report.
 
 ### Goals (must have)
 - [ ] Reject step2 as-is markdown that claims shard manifests/evidence are absent when current-run typed shard summary has planned shards.
 - [ ] Reject stale `final-run-index` / `citation-index` availability claims, including `not yet present` variants, instead of promoting them as operator evidence.
 - [ ] Require step2 overview to include concrete repo/path, citation, or staged artifact references when typed shard status is visible.
 - [ ] Require step2 architect summary to include a decision-ready operator cue when typed shard status is visible.
+- [ ] Require step4 proposal/changelog drafts to have non-empty required sections, current-run evidence refs and exact shard completeness when typed status is visible.
+- [ ] Reject dangling proposal wording such as `findings above` and generic follow-up plans unless the proposed plan contains an explicit no-actionable-proposal gap tied to current-run evidence.
 - [ ] Route these validation failures to the existing provider-authored shard-status/downstream-index enrichment retries; repeated noop/scaffold/stale output remains `runtime_contract_failed`.
 - [ ] Keep `release_verdict_*` execution-only; artifact/UX acceptance remains separate SWE reports.
 - [ ] Treat current `codex-code` quota/permission/readiness as an external operational blocker, not a repo-code blocker for this PR.
@@ -118,6 +120,7 @@ The latest accepted `claude-code` strict medium diagnostic proved the new execut
 
 ### Progress log
 - 2026-06-29: Started finalization slice after manual review rejected the latest Claude FTGO artifacts despite clean machine execution separation.
+- 2026-06-29: Added the observed weak FTGO `step4` proposal/changelog shape to the plan: proposal sections must be non-empty, evidence-backed and actionable, or explicitly state a no-actionable-proposal gap.
 
 ### Plan ID
 EP-20260616-live-e2e-recovery-rerun-loop

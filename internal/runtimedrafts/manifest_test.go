@@ -961,8 +961,35 @@ func TestValidateRequiredManifestAcceptsCanonicalProposalsDraft(t *testing.T) {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 	for relPath, content := range map[string]string{
-		"proposal.md":  "# Proposal\n",
-		"changelog.md": "# Changelog\n",
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Accept the CODEOWNERS follow-up because ` + "`reports/findings/findings.md`" + ` identifies uncovered service ownership.
+
+## Evidence used
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`cite.posthog.services.owner-gap`" + `
+
+## Proposed changes or follow-up plan
+- Add CODEOWNERS entries for ` + "`services/llm-gateway`" + ` and ` + "`services/mcp`" + `, then re-run ownership coverage.
+
+## Risks, gaps, and out-of-scope notes
+- Deployment SLO evidence remains out of scope for this proposal.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` now records the service ownership proposal.
+
+## Findings/proposals summary
+- Ownership gaps from ` + "`reports/findings/findings.md`" + ` are converted into a concrete CODEOWNERS follow-up.
+
+## Evidence index or citation references
+- ` + "`cite.posthog.services.owner-gap`" + `
+
+## Residual coverage gaps
+- Deployment SLO evidence is still missing.
+`,
 	} {
 		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
 			t.Fatalf("write draft file %s: %v", relPath, err)
@@ -1050,6 +1077,150 @@ func TestValidateRequiredManifestRejectsProposalsBootstrapDraftContent(t *testin
 	}
 	if !strings.Contains(err.Error(), "bootstrap-only placeholder draft content") {
 		t.Fatalf("expected bootstrap placeholder error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsNonActionableProposalsDraft(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations — ftgo-application
+
+## Decision / recommended operator action
+Proceed with the architecture proposals captured in the current-run shard analysis for ftgo-application.
+
+## Evidence used
+- Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.
+- final-run-index.json lists 85 canonical documents.
+- citation-index.json lists 102 citations.
+
+## Proposed changes or follow-up plan
+1. Prioritize each finding above in dependency order.
+2. Update the architecture model and source files in ftgo-application.
+3. Re-run the collect/validate pipeline after changes.
+
+## Risks, gaps, and out-of-scope notes
+- Sibling repositories or matrix targets are out of scope.
+`,
+		"changelog.md": `# Runtime Proposals Changelog — ftgo-application
+
+## Updated architecture/proposal surfaces
+- proposals/runtime-recommendations.md was refreshed from current-run evidence.
+
+## Findings/proposals summary
+
+## Evidence index or citation references
+- Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.
+- final-run-index.json: 85 documents.
+- citation-index.json: 102 citations.
+
+## Residual coverage gaps
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected non-actionable proposals draft content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "substantive findings/proposals") &&
+		!strings.Contains(err.Error(), "actionable proposal") &&
+		!strings.Contains(err.Error(), "proposal changelog section") {
+		t.Fatalf("expected non-actionable proposal/changelog error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestAllowsExplicitNoActionableProposalGap(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Do not promote a new architecture change from this run; preserve the current publish decision until proposal evidence appears.
+
+## Evidence used
+- Current-run evidence: ` + "`reports/findings/findings.md`" + ` did not expose an actionable proposal candidate.
+- Citation index reference: ` + "`cite.ftgo.accounting.contracts.authorize`" + `.
+
+## Proposed changes or follow-up plan
+- No actionable proposal evidence was present in the current-run findings; record the gap and ask the operator to inspect ` + "`reports/findings/findings.md`" + ` before proposing a source change.
+
+## Risks, gaps, and out-of-scope notes
+- This is a decision gap, not a request to repair successful shards.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` records that no proposal was promoted from the current run.
+
+## Findings/proposals summary
+- No actionable proposal evidence was present in the current-run findings; the proposal surface records that operator-facing gap.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`cite.ftgo.accounting.contracts.authorize`" + `
+
+## Residual coverage gaps
+- Proposal evidence remains absent for this current run.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err != nil {
+		t.Fatalf("expected explicit no-actionable-proposal gap to pass validation, got %v", err)
 	}
 }
 
@@ -1441,12 +1612,18 @@ Proceed without a shard coverage blocker for this current run. Evidence: current
 ## Evidence Used
 - cite.ftgo.accounting.contracts.authorize -> ftgo-order-service/src/main/java/net/chrisrichardson/ftgo/orderservice/domain/Order.java
 
+## Proposed Changes or Follow-Up Plan
+- Document the authorization contract path in the accounting-service proposal notes and link it to the order-service domain evidence.
+
 ## Risks, Gaps, and Out-of-Scope Notes
 - There are no failed or incomplete shards in the current-run typed shard summary.
 `), 0o644); err != nil {
 		t.Fatalf("write proposal: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte(`# Runtime Proposal Changelog
+
+## Updated Architecture/Proposal Surfaces
+- proposals/runtime-recommendations.md now records the no-shard-coverage-blocker decision for the accounting contract evidence.
 
 ## Findings/Proposals Summary
 - Current-run shard coverage is complete: 16 planned, 16 succeeded, 0 failed, and 0 incomplete typed shard statuses.
@@ -1863,13 +2040,37 @@ func TestValidateRequiredManifestAllowsReadableIndexSummary(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(draftRoot, "proposal.md"), []byte(`# Runtime Recommendations
 
-Evidence: current-run final-run-index.json present with 51 canonical documents and citation-index.json present with 103 citations.
-Selected citations: cite.ftgo.accounting.authorize.contract -> ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy.
-There are no failed or incomplete shards in the current typed shard summary.
+## Decision / recommended operator action
+Accept the accounting contract follow-up because the current-run evidence links `+"`cite.ftgo.accounting.authorize.contract`"+` to the service contract.
+
+## Evidence used
+- Current-run final-run-index.json present with 51 canonical documents and citation-index.json present with 103 citations.
+- Selected citations: `+"`cite.ftgo.accounting.authorize.contract`"+` -> `+"`ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy`"+`.
+- There are no failed or incomplete shards in the current typed shard summary.
+
+## Proposed changes or follow-up plan
+- Add an owner-reviewed contract documentation update for `+"`ftgo-accounting-service-contracts/src/main/resources/contracts/Authorize.groovy`"+` and link it from the accounting service overview.
+
+## Risks, gaps, and out-of-scope notes
+- Deployment and runtime SLO evidence remain outside this contract-focused proposal.
 `), 0o644); err != nil {
 		t.Fatalf("write proposal: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte("# Runtime Proposal Changelog\n\nEvidence: reports/changelog/runtime-proposals.md and cite.ftgo.accounting.authorize.contract.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(draftRoot, "changelog.md"), []byte(`# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- `+"`proposals/runtime-recommendations.md`"+` now records the accounting contract documentation follow-up.
+
+## Findings/proposals summary
+- Contract evidence from `+"`cite.ftgo.accounting.authorize.contract`"+` is converted into an owner-reviewed documentation proposal.
+
+## Evidence index or citation references
+- `+"`reports/changelog/runtime-proposals.md`"+`
+- `+"`cite.ftgo.accounting.authorize.contract`"+`
+
+## Residual coverage gaps
+- Deployment and runtime SLO evidence remain outside this contract-focused proposal.
+`), 0o644); err != nil {
 		t.Fatalf("write changelog: %v", err)
 	}
 	manifest := `{

@@ -380,6 +380,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			fmt.Sprintf("- Exact required changelog draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
 			"- proposal.md must contain: Decision / recommended operator action; Evidence used with repo/path or staged artifact references; Proposed changes or follow-up plan; Risks, gaps, and out-of-scope notes.",
 			"- changelog.md must contain: Updated architecture/proposal surfaces; Findings/proposals summary; Evidence index or citation references; Residual coverage gaps.",
+			"- Required proposal/changelog sections must not be empty. If structured finding/proposal evidence is absent, put an explicit no-actionable-proposal gap in the Findings/proposals summary and proposed plan instead of leaving the section blank.",
+			"- Do not write dangling references such as `prioritize each finding above` or `findings listed above` unless the same proposal/changelog contains substantive findings/proposals above that sentence.",
+			"- The proposed changes/follow-up plan must include at least one concrete operator action tied to current-run evidence, or an explicit no-actionable-proposal gap tied to the observed evidence set.",
 			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
 			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
@@ -633,6 +636,8 @@ func composeDraftArtifactEnrichmentCompactStep4RetryPrompt(provider acpruntime.P
 	lines = append(lines,
 		"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, and risks/gaps/out-of-scope.",
 		"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
+		"- Required proposal/changelog sections must not be empty. Do not use dangling references like `findings above`; include the findings/proposals inline or state an explicit no-actionable-proposal gap tied to current-run evidence.",
+		"- The proposed changes/follow-up plan must include a concrete evidence-backed operator action, unless the proposal explicitly says no actionable proposal evidence was present.",
 		"- Final markdown must be readable operator-facing proposal content, not a runtime process report. Do not paste raw JSON/Python object dumps, documents=[...], citations=[...], {'id': ...}, or metadata-only keys as evidence.",
 		"- Final markdown must not include scaffold or process markers: Runtime draft recovery initialized; Runtime proposal surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded evidence read; bounded read roots; recovery pass; enrichment read; bootstrap-only placeholder; placeholder proposal content; replace placeholder; replacing placeholders.",
 		"- Final self-check inside the command: proposal.md and changelog.md were freshly overwritten, have balanced backticks/fences, include current-run evidence or explicit gaps, and contain none of the banned markers.",
@@ -754,6 +759,8 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
 			"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, risks/gaps/out-of-scope.",
 			"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
+			"- None of those required proposal/changelog sections may be empty; avoid dangling references to findings above unless the same file includes those findings.",
+			"- The proposed changes/follow-up plan must contain at least one concrete operator action tied to current-run evidence, or an explicit no-actionable-proposal gap.",
 			"- If typed shard status shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement.",
 		)
 	}

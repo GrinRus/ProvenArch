@@ -249,6 +249,11 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 			}
 		}
+		if strings.TrimSpace(stepID) == "init.step4.proposals" || strings.TrimSpace(stepID) == "refresh.step4.proposals" {
+			if mismatch := runtimeDraftTextProposalCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
+				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
+			}
+		}
 		if mismatch := runtimeDraftTextIndexCountMismatch(text, cleanDraftRoot); mismatch != "" {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 		}
@@ -745,6 +750,225 @@ func runtimeDraftTextAsIsShardCompletenessMismatch(text string, draftRoot string
 		return strings.Join(summaryProblems, " and ")
 	}
 	return ""
+}
+
+func runtimeDraftTextProposalCompletenessMismatch(text string, draftRoot string, runID string, output Output) string {
+	canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+	if !strings.HasSuffix(strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))), ".md") {
+		return ""
+	}
+	isPrimaryProposal := canonicalPath == "proposals/runtime-recommendations.md"
+	isChangelog := strings.HasPrefix(canonicalPath, "reports/changelog/")
+	if !isPrimaryProposal && !isChangelog {
+		return ""
+	}
+
+	counts, ok := readRuntimeDraftShardCompleteness(draftRoot, runID)
+	if ok && counts.planned > 0 && !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+		return fmt.Sprintf("does not report exact current-run proposal shard completeness from typed shard summary: planned=%d succeeded=%d failed=%d incomplete=%d", counts.planned, counts.succeeded, counts.failed, counts.incomplete)
+	}
+	if !runtimeDraftTextHasConcreteEvidenceRef(text) {
+		return "does not include concrete repo/path, citation, or staged artifact evidence references"
+	}
+	if runtimeDraftTextHasDanglingProposalReference(text) {
+		return "references findings/proposals above without including substantive findings/proposals"
+	}
+
+	if isPrimaryProposal {
+		return runtimeDraftTextProposalBodyMismatch(text)
+	}
+	if isChangelog {
+		return runtimeDraftTextProposalChangelogMismatch(text)
+	}
+	return ""
+}
+
+func runtimeDraftTextProposalBodyMismatch(text string) string {
+	required := []runtimeDraftMarkdownSectionSpec{
+		{name: "Decision / recommended operator action", alternatives: [][]string{{"decision"}, {"recommended", "operator", "action"}}},
+		{name: "Evidence used", alternatives: [][]string{{"evidence"}}},
+		{name: "Proposed changes or follow-up plan", alternatives: [][]string{{"proposed", "changes"}, {"follow-up", "plan"}, {"follow up", "plan"}}},
+		{name: "Risks, gaps, and out-of-scope notes", alternatives: [][]string{{"risk"}, {"gap"}, {"out-of-scope"}, {"out of scope"}}},
+	}
+	if missing := runtimeDraftMissingMarkdownSections(text, required); len(missing) > 0 {
+		return "is missing substantive proposal section(s): " + strings.Join(missing, ", ")
+	}
+	body, ok := runtimeDraftMarkdownSectionBody(text, runtimeDraftMarkdownSectionSpec{
+		name:         "Proposed changes or follow-up plan",
+		alternatives: [][]string{{"proposed", "changes"}, {"follow-up", "plan"}, {"follow up", "plan"}},
+	})
+	if !ok {
+		return "is missing substantive proposal section(s): Proposed changes or follow-up plan"
+	}
+	if runtimeDraftTextHasExplicitNoActionableProposalGap(body) {
+		return ""
+	}
+	if !runtimeDraftProposalBodyHasActionableLine(body) {
+		return "does not include an actionable proposal or explicit no-actionable-proposal gap"
+	}
+	return ""
+}
+
+func runtimeDraftTextProposalChangelogMismatch(text string) string {
+	required := []runtimeDraftMarkdownSectionSpec{
+		{name: "Updated architecture/proposal surfaces", alternatives: [][]string{{"updated", "surface"}, {"architecture", "proposal", "surface"}}},
+		{name: "Findings/proposals summary", alternatives: [][]string{{"findings", "summary"}, {"proposals", "summary"}, {"findings/proposals"}}},
+		{name: "Evidence index or citation references", alternatives: [][]string{{"evidence"}, {"citation"}}},
+		{name: "Residual coverage gaps", alternatives: [][]string{{"residual", "gap"}, {"coverage", "gap"}}},
+	}
+	if missing := runtimeDraftMissingMarkdownSections(text, required); len(missing) > 0 {
+		return "is missing substantive proposal changelog section(s): " + strings.Join(missing, ", ")
+	}
+	return ""
+}
+
+type runtimeDraftMarkdownSectionSpec struct {
+	name         string
+	alternatives [][]string
+}
+
+func runtimeDraftMissingMarkdownSections(text string, specs []runtimeDraftMarkdownSectionSpec) []string {
+	missing := []string{}
+	for _, spec := range specs {
+		body, ok := runtimeDraftMarkdownSectionBody(text, spec)
+		if !ok || !runtimeDraftMarkdownBodyHasSubstantiveContent(body) {
+			missing = append(missing, spec.name)
+		}
+	}
+	return missing
+}
+
+func runtimeDraftMarkdownSectionBody(text string, spec runtimeDraftMarkdownSectionSpec) (string, bool) {
+	lines := strings.Split(text, "\n")
+	start := -1
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		heading := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
+		if runtimeDraftHeadingMatches(heading, spec.alternatives) {
+			start = idx + 1
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for idx := start; idx < len(lines); idx++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[idx]), "#") {
+			end = idx
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), true
+}
+
+func runtimeDraftHeadingMatches(heading string, alternatives [][]string) bool {
+	for _, terms := range alternatives {
+		matched := true
+		for _, term := range terms {
+			if !strings.Contains(heading, strings.ToLower(strings.TrimSpace(term))) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftMarkdownBodyHasSubstantiveContent(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		if len(trimmed) >= 12 {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasDanglingProposalReference(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"finding above",
+		"findings above",
+		"proposal above",
+		"proposals above",
+		"each finding above",
+		"each proposal above",
+		"findings listed above",
+		"proposals listed above",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasExplicitNoActionableProposalGap(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no actionable proposal evidence",
+		"no actionable proposals",
+		"no actionable proposal",
+		"no structured finding summary was present",
+		"no structured findings were present",
+		"no proposal candidates were present",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftProposalBodyHasActionableLine(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		if len(trimmed) < 20 {
+			continue
+		}
+		if runtimeDraftProposalLineIsGeneric(trimmed) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func runtimeDraftProposalLineIsGeneric(line string) bool {
+	lower := strings.ToLower(line)
+	markers := []string{
+		"prioritize each finding",
+		"prioritise each finding",
+		"address the surfaced findings",
+		"update the architecture model and source files",
+		"re-run the collect/validate pipeline",
+		"rerun the collect/validate pipeline",
+		"use the cited documents as the source of truth",
+		"use the cited documents as source of truth",
+		"review current-run evidence",
+		"current-run evidence should be reviewed",
+		"current run evidence should be reviewed",
+		"follow-up surfaces",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeDraftTextClaimsShardEvidenceAbsent(lower string) bool {
