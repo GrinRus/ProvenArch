@@ -359,6 +359,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- If final-run-index.json or citation-index.json are present for current_run_id, summarize counts, document titles, citation ids, and repo/path references in concise markdown. Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 			"- Do not write broken path bullets such as a lone backtick, partial prose inside backticks, or unbalanced inline-code/path references.",
 			"- Do not paste sampled authored-shard snippets as semicolon-separated prose when they contain inline-code markers. Convert sampled evidence into short paraphrased facts and balanced path references.",
+			"- Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 			"- architect-summary.md must contain: decision-ready operator summary with what is complete, what is missing, what the operator should inspect or decide next, and any residual risk.",
 			"- Include enough repository/path and staged artifact references for an operator to understand the architecture surface and remaining coverage gaps.",
 			"- Include a decision-ready operator summary: what is complete, what is missing, and what the operator should inspect or decide next.",
@@ -423,7 +424,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			lines = append(lines,
 				"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
 				"- The previous enrichment wrote stale current-run final/citation index availability text.",
-				"- Rewrite every referenced markdown file again and remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not readable, or has 0 observed documents without a validated zero-document index.",
+				"- Rewrite every referenced markdown file again and remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not yet present, not yet available, not readable, or has 0 observed documents without a validated zero-document index.",
 				"- For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely and focus on shard completeness, evidence density, readable architecture facts, coverage gaps, and operator decisions.",
 				"- If a current-run final-run-index.json is present, count only top-level canonical_documents[]. If citation-index.json is present, count only top-level citations[].",
 			)
@@ -744,6 +745,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- When typed shard-summary shows all shards succeeded, summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
 			"- Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
 			"- Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
+			"- Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 		)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
@@ -833,7 +835,10 @@ func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
 	return strings.Contains(text, "draft_artifact_enrichment_shard_status_cleanup") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
 		strings.Contains(text, "uses generic conditional shard-gap wording") ||
-		strings.Contains(text, "does not report exact current-run shard completeness")
+		strings.Contains(text, "does not report exact current-run shard completeness") ||
+		strings.Contains(text, "claims staging shard evidence is empty") ||
+		strings.Contains(text, "does not include concrete repo/path, citation, or staged artifact evidence references") ||
+		strings.Contains(text, "does not include a decision-ready operator summary")
 }
 
 func draftEnrichmentShardStatusCleanupFocusTarget(err error) string {

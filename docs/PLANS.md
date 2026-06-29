@@ -68,6 +68,58 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260629-live-e2e-artifact-summary-finalization
+
+### Context
+The latest accepted `claude-code` strict medium diagnostic proved the new execution gate shape (`execution_report_*`, selected-provider totals, no legacy mixed quality gate artifacts), but manual artifact review rejected FTGO artifact quality. The machine execution verdict was correctly separate from manual artifact quality, yet key FTGO markdown could still claim `Shard pack manifests: none observed` or stale final/citation index availability while current-run shard summaries and downstream indexes existed. This slice closes the machine-checkable contradiction before opening the PR, while leaving broader truthfulness/readability to the SWE artifact-quality report.
+
+### Goals (must have)
+- [ ] Reject step2 as-is markdown that claims shard manifests/evidence are absent when current-run typed shard summary has planned shards.
+- [ ] Reject stale `final-run-index` / `citation-index` availability claims, including `not yet present` variants, instead of promoting them as operator evidence.
+- [ ] Require step2 overview to include concrete repo/path, citation, or staged artifact references when typed shard status is visible.
+- [ ] Require step2 architect summary to include a decision-ready operator cue when typed shard status is visible.
+- [ ] Route these validation failures to the existing provider-authored shard-status/downstream-index enrichment retries; repeated noop/scaffold/stale output remains `runtime_contract_failed`.
+- [ ] Keep `release_verdict_*` execution-only; artifact/UX acceptance remains separate SWE reports.
+- [ ] Treat current `codex-code` quota/permission/readiness as an external operational blocker, not a repo-code blocker for this PR.
+
+### Non-goals
+- [ ] Do not change product UI/API behavior.
+- [ ] Do not edit canonical matrix files or curated repo files.
+- [ ] Do not add deterministic synthesis as a hidden success path.
+- [ ] Do not commit generated live E2E evidence unless it is an intentional fixture/golden.
+
+### Approach
+1) Tighten shared runtime draft validation for FTGO-style stale/contradictory as-is markdown.
+2) Update prompt contract tests and runtime draft tests for the observed failure shape.
+3) Synchronize live E2E runbook, pipeline spec, architecture and testing strategy.
+4) Run targeted tests, then full DoD.
+5) Commit, run Claude strict medium diagnostic from a clean tree if host/provider preflight passes, push branch, open draft PR, and squash-merge only after CI is green.
+
+### Files expected to change
+- `internal/runtimedrafts/manifest.go`
+- `internal/runtimedrafts/manifest_test.go`
+- `internal/runtime/promptcontract/draft_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `docs/PLANS.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+
+### Acceptance criteria
+- [ ] Targeted `go test ./internal/runtimedrafts ./internal/runtime/promptcontract` passes.
+- [ ] Full DoD passes with exact Node toolchain.
+- [ ] Claude strict medium diagnostic either passes with accepted manual artifact/UX assessment or records a concrete remaining blocker.
+- [ ] PR body documents Codex readiness as external operational blocker if it is still not runnable.
+
+### Risks
+- Stricter markdown validation can convert previously passing provider output into `runtime_contract_failed`; this is intentional for machine-checkable contradictions, while subjective truthfulness remains manual artifact quality.
+- Live rerun can still fail on host/provider quota, auth, network or timeout; classify those separately and do not bypass with test-only flags.
+
+### Progress log
+- 2026-06-29: Started finalization slice after manual review rejected the latest Claude FTGO artifacts despite clean machine execution separation.
+
+### Plan ID
 EP-20260616-live-e2e-recovery-rerun-loop
 
 ### Context

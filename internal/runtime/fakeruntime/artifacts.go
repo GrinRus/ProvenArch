@@ -208,13 +208,14 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 	}
 	overview := strings.Builder{}
 	overview.WriteString("# As-Is Overview (Runtime Draft)\n\n")
-	overview.WriteString("Prepared by the step-scoped runtime synthesizer.\n\n")
+	overview.WriteString("This deterministic as-is draft summarizes the current workspace evidence for operator review.\n\n")
 	if strings.TrimSpace(summary) != "" {
-		overview.WriteString("- Runtime summary: " + strings.TrimSpace(summary) + "\n")
+		overview.WriteString("- Summary: " + strings.TrimSpace(summary) + "\n")
 	}
 	if len(task.RepoScopes) > 0 {
 		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
 	}
+	overview.WriteString("- Evidence refs: reports/as-is/overview.md, reports/coverage/summary.md, reports/taskruns/" + strings.TrimSpace(task.RunID) + "/staging/final/final-run-index.json\n")
 
 	coverage := strings.Builder{}
 	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")
@@ -237,11 +238,23 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 		coverage.WriteString("\n")
 	}
 
-	architect := "# Architect Summary\n\n" + strings.TrimSpace(summary) + "\n"
+	architect := strings.Builder{}
+	architect.WriteString("# Architect Summary\n\n")
+	if strings.TrimSpace(summary) != "" {
+		architect.WriteString("## What Is Complete\n\n")
+		architect.WriteString("- " + strings.TrimSpace(summary) + "\n\n")
+	}
+	if completeness, ok := runtimeDraftShardCompletenessLine(task); ok {
+		architect.WriteString("## Coverage Status\n\n")
+		architect.WriteString("- " + completeness + "\n\n")
+	}
+	architect.WriteString("## Operator Decision\n\n")
+	architect.WriteString("- Inspect `reports/as-is/overview.md`, `reports/coverage/summary.md`, and the current final/citation indexes before publishing.\n")
+	architect.WriteString("- Treat missing semantic coverage or sparse citations as residual artifact-quality risk for manual SWE assessment.\n")
 	if err := writeRuntimeDraftFinals(task, map[string]string{
 		"overview.md":          overview.String(),
 		"summary.md":           coverage.String(),
-		"architect-summary.md": architect,
+		"architect-summary.md": architect.String(),
 	}); err != nil {
 		return err
 	}

@@ -1158,6 +1158,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 		"Do not write broken path bullets such as a lone backtick",
 		"Do not paste sampled authored-shard snippets as semicolon-separated prose",
+		"Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims",
 		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1527,7 +1528,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *tes
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
 	for _, token := range []string{
 		"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
-		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not readable",
+		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not yet present, not yet available, not readable",
 		"For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely",
 		"count only top-level canonical_documents[]",
 		"count only top-level citations[]",

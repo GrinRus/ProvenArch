@@ -590,12 +590,28 @@ func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
 		"current-run final-run-index.json or citation-index.json was not present",
 		"current-run final-run-index.json or citation-index.json was unavailable",
 		"current-run final-run-index.json or citation-index.json were unavailable",
+		"current-run final-run-index.json or citation-index.json was not yet present",
+		"current-run final-run-index.json or citation-index.json were not yet present",
+		"current-run final-run-index.json or citation-index.json was not yet available",
+		"current-run final-run-index.json or citation-index.json were not yet available",
+		"current-run final-run-index.json and citation-index.json were not yet present",
+		"current-run final-run-index.json and citation-index.json were not yet available",
 		"final-run-index.json and citation-index.json were not present",
 		"final-run-index.json and citation-index.json unavailable",
+		"final-run-index.json and citation-index.json were not yet present",
+		"final-run-index.json and citation-index.json were not yet available",
+		"final-run-index.json and citation-index.json are not yet present",
+		"final-run-index.json and citation-index.json are not yet available",
+		"final-run-index and citation-index are not yet present",
+		"final-run-index and citation-index are not yet available",
+		"final-run-index and citation-index were not yet present",
+		"final-run-index and citation-index were not yet available",
 		"no current-run final-run-index document list was available",
 		"no current-run final-run-index document list is available",
 		"final-run-index document list was unavailable",
 		"final-run-index document list is unavailable",
+		"final-run-index document list is not yet available",
+		"final-run-index document list was not yet available",
 	}
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
@@ -704,16 +720,17 @@ func runtimeDraftTextAsIsShardCompletenessMismatch(text string, draftRoot string
 		return ""
 	}
 	lower := strings.ToLower(text)
-	if strings.Contains(lower, "staging shard directory contains 0 file") ||
-		strings.Contains(lower, "staging shards directory contains 0 file") ||
-		strings.Contains(lower, "staging shard directory contains zero file") ||
-		strings.Contains(lower, "staging shards directory contains zero file") ||
-		strings.Contains(lower, "staging shard directory contains 0 shard") ||
-		strings.Contains(lower, "staging shards directory contains 0 shard") {
+	if runtimeDraftTextClaimsShardEvidenceAbsent(lower) {
 		return fmt.Sprintf("claims staging shard evidence is empty but current-run typed shard summary contains %d planned shard(s)", counts.planned)
 	}
 
 	canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+	if canonicalPath == "reports/as-is/overview.md" && !runtimeDraftTextHasConcreteEvidenceRef(text) {
+		return "does not include concrete repo/path, citation, or staged artifact evidence references"
+	}
+	if canonicalPath == "reports/agent-outputs/architect/summary.md" && !runtimeDraftTextHasOperatorDecisionCue(text) {
+		return "does not include a decision-ready operator summary with next inspection or decision cues"
+	}
 	if canonicalPath != "reports/coverage/summary.md" {
 		return ""
 	}
@@ -728,6 +745,82 @@ func runtimeDraftTextAsIsShardCompletenessMismatch(text string, draftRoot string
 		return strings.Join(summaryProblems, " and ")
 	}
 	return ""
+}
+
+func runtimeDraftTextClaimsShardEvidenceAbsent(lower string) bool {
+	markers := []string{
+		"staging shard directory contains 0 file",
+		"staging shards directory contains 0 file",
+		"staging shard directory contains zero file",
+		"staging shards directory contains zero file",
+		"staging shard directory contains 0 shard",
+		"staging shards directory contains 0 shard",
+		"shard pack manifests: none observed",
+		"shard-pack manifests: none observed",
+		"shard manifests: none observed",
+		"collected shard manifests: none observed",
+		"shard-pack-manifest.json: none observed",
+		"no shard pack manifests observed",
+		"no shard-pack manifests observed",
+		"no shard manifests observed",
+		"no collected shard manifests observed",
+		"no shard-pack-manifest.json",
+		"0 shard-pack-manifest",
+		"zero shard-pack-manifest",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasConcreteEvidenceRef(text string) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "cite.") ||
+		strings.Contains(lower, "reports/as-is/") ||
+		strings.Contains(lower, "reports/coverage/") ||
+		strings.Contains(lower, "reports/findings/") ||
+		strings.Contains(lower, "final-run-index.json") ||
+		strings.Contains(lower, "citation-index.json") ||
+		strings.Contains(lower, "shard-pack-manifest.json") {
+		return true
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, " -> ") && strings.Contains(trimmed, "/") {
+			return true
+		}
+		if strings.Contains(trimmed, ".") && strings.Contains(trimmed, "/") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasOperatorDecisionCue(text string) bool {
+	lower := strings.ToLower(text)
+	decisionMarkers := []string{
+		"operator",
+		"decision",
+		"decide",
+		"inspect next",
+		"what to inspect next",
+		"next inspection",
+		"what is complete",
+		"what is missing",
+		"review next",
+		"publish",
+		"accept",
+		"residual risk",
+	}
+	for _, marker := range decisionMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeDraftTextHasShardSummaryMetadataDump(text string) bool {
