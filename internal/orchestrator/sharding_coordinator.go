@@ -54,21 +54,36 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 	})
 
 	results, terminalErr := e.scheduleRuntimeShardRuns(ctx, stepID, domainID, plans, summaryState, options, taskSuffixPrefix)
-	if terminalErr != nil && !options.BestEffort {
-		e.logWarn(stepID, domainID, "runtime shard scheduler stopped after terminal failure", map[string]any{
-			"error": strings.TrimSpace(terminalErr.Error()),
-		})
+	if terminalErr != nil {
+		if options.BestEffort {
+			e.logWarn(stepID, domainID, "runtime shard scheduler stopped best-effort run after repeated provider failure", map[string]any{
+				"error": strings.TrimSpace(terminalErr.Error()),
+			})
+		} else {
+			e.logWarn(stepID, domainID, "runtime shard scheduler stopped after terminal failure", map[string]any{
+				"error": strings.TrimSpace(terminalErr.Error()),
+			})
+		}
 	}
 
 	executions := make([]runtimeTaskExecution, 0, len(plans))
 	outcome := runtimeShardOutcome{PlannedShards: len(plans)}
 
 	for _, result := range results {
-		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil && !options.BestEffort {
-			if err := summaryState.markAborted(result.Plan); err != nil {
+		if result.Err == nil && result.Prepared.Task.TaskID == "" && terminalErr != nil {
+			var err error
+			if options.BestEffort {
+				err = summaryState.markAbortedWith(result.Plan, terminalErr.Error(), shardErrorCode(terminalErr))
+			} else {
+				err = summaryState.markAborted(result.Plan)
+			}
+			if err != nil {
 				return nil, runtimeShardOutcome{}, err
 			}
 			outcome.FailedShards++
+			if options.BestEffort {
+				e.registerPartialShardFailure(stepID, domainID, result.Plan, terminalErr)
+			}
 			continue
 		}
 		if result.Err != nil {
@@ -91,7 +106,7 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 		if err != nil {
 			outcome.FailedShards++
-			if markErr := summaryState.markFailed(result.Plan, result.Prepared.Task.TaskID, strings.TrimSpace(err.Error())); markErr != nil {
+			if markErr := summaryState.markFailedError(result.Plan, result.Prepared.Task.TaskID, err); markErr != nil {
 				return nil, runtimeShardOutcome{}, markErr
 			}
 			if options.BestEffort {

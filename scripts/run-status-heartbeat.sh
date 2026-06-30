@@ -63,6 +63,10 @@ write_terminal_run_status() {
   provider="$(read_run_status_seed_field "provider")"
   local run_index
   run_index="$(read_run_status_seed_field "run_index")"
+  local now_utc
+  now_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  local last_progress_at
+  last_progress_at="${LAST_PROGRESS_AT_UTC:-$now_utc}"
   {
     echo "provider=${provider}"
     echo "run_index=${run_index}"
@@ -71,10 +75,10 @@ write_terminal_run_status() {
     echo "termination_signal=${termination_signal}"
     echo "failure_reason=${failure_reason}"
     echo "summary_written=${summary_written}"
-    echo "updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    echo "updated_at=${now_utc}"
     echo "last_pipeline_stage=${LAST_PIPELINE_STAGE:-not_started}"
     echo "last_runtime_provider=${LAST_RUNTIME_PROVIDER:-unset}"
-    echo "last_progress_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+    echo "last_progress_at=${last_progress_at}"
   } >"$RUN_STATUS_FILE"
 }
 
@@ -108,6 +112,8 @@ write_running_run_status_heartbeat() {
   fi
   local now_utc
   now_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  local last_progress_at
+  last_progress_at="${LAST_PROGRESS_AT_UTC:-$now_utc}"
   {
     echo "provider=${provider}"
     echo "run_index=${run_index}"
@@ -119,6 +125,6 @@ write_running_run_status_heartbeat() {
     echo "updated_at=${now_utc}"
     echo "last_pipeline_stage=${LAST_PIPELINE_STAGE:-not_started}"
     echo "last_runtime_provider=${LAST_RUNTIME_PROVIDER:-unset}"
-    echo "last_progress_at=${now_utc}"
+    echo "last_progress_at=${last_progress_at}"
   } >"$RUN_STATUS_FILE"
 }

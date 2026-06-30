@@ -164,12 +164,19 @@ execution_policies:
       - Release slices keep the existing matrix contract unchanged.
       - Each runnable matrix file must contain exactly one single-* and one multi-* profile.
 
-quality_policy:
-  artifact_quality_warnings_block: true
-  source:
+execution_reporting:
+  machine_report:
+    - execution_report_<batch-id>.md
     - reports/taskruns/<run_id>-quality.json
-    - quality_report_<batch-id>.md
-  blocking_failure_class: quality_gates_failed
+  notes:
+    - Taskrun quality JSON is runtime telemetry and SWE assessment evidence.
+    - Artifact quality warnings do not block matrix or release execution verdicts.
+manual_assessments:
+  required_for_release: true
+  source:
+    - reports/swe_ux_assessment_<matrix-id>.md
+    - reports/swe_artifact_quality_assessment_<matrix-id>.md
+  accepted_decision: accepted
 
 selectors:
   - slug: smoke-tiny
@@ -184,7 +191,6 @@ selectors:
     default_run_count: 1
     default_run_selection: "1"
     default_frontend_mode: never
-    quality_required: true
     target_repo_sets:
       - bank-of-anthos
     matrix_invocations:
@@ -201,7 +207,6 @@ selectors:
       - qwen-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - bank-of-anthos
       - openedx-ecosystem
@@ -222,7 +227,6 @@ selectors:
       - qwen-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - posthog
       - ftgo-application
@@ -240,7 +244,6 @@ selectors:
       - qwen-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - bank-of-anthos
       - openedx-ecosystem
@@ -269,7 +272,6 @@ selectors:
     default_run_count: 1
     default_run_selection: all
     default_frontend_mode: never
-    quality_required: true
     target_repo_sets:
       - temporal-platform
       - backstage-portal
@@ -303,7 +305,6 @@ selectors:
       - codex-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - bank-of-anthos
       - openedx-ecosystem
@@ -323,7 +324,6 @@ selectors:
       - codex-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - posthog
       - openstack-ecosystem
@@ -343,7 +343,6 @@ selectors:
       - codex-code
     default_run_count: 1
     default_run_selection: all
-    quality_required: true
     target_repo_sets:
       - bank-of-anthos
       - openedx-ecosystem

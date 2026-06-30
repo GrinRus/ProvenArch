@@ -20,12 +20,30 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         helper_path = self.repo_root / "scripts" / "internal" / "live-e2e-evaluator.sh"
         self.assertFalse(helper_path.exists())
 
-    def test_backend_cycle_fail_fasts_headless_artifact_quality_blockers(self) -> None:
+    def test_backend_cycle_keeps_artifact_quality_as_telemetry(self) -> None:
         helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
         self.assertIn("artifact_quality_count", helper)
         self.assertIn("startswith('artifact_quality:')", helper)
-        self.assertIn("headless run $run_id produced artifact_quality blockers", helper)
-        self.assertIn('FAILURE_REASON="quality"', helper)
+        self.assertIn("headless run $run_id produced artifact_quality telemetry findings", helper)
+        self.assertIn("leaving for SWE artifact assessment", helper)
+        self.assertIn("resolve_failed_run_id_from_workspace", helper)
+        self.assertIn('run_id="$(resolve_failed_run_id_from_workspace "$workspace_path" "$pipeline" || true)"', helper)
+        self.assertNotIn('FAILURE_REASON="quality"', helper)
+
+    def test_backend_cycle_api_init_poll_has_progress_grace(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        self.assertIn("API_INIT_PROGRESS_GRACE_SEC", helper)
+        self.assertIn("api_init_last_signature", helper)
+        self.assertIn("api init observed progress", helper)
+        self.assertIn("current_step=${init_current_step:-unknown}", helper)
+        self.assertIn("last_progress_age_sec", helper)
+
+    def test_backend_cycle_restores_isolated_repo_permissions_before_cleanup(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        self.assertIn("ISOLATED_TARGET_REPOS_DIR", helper)
+        self.assertIn("restore_isolated_target_repos_write_bits", helper)
+        self.assertIn('chmod -R u+w "$ISOLATED_TARGET_REPOS_DIR"', helper)
+        self.assertIn("restore_isolated_target_repos_write_bits\n  rm -rf \"$TMP_ROOT\"", helper)
 
     def test_matrix_harness_has_no_script_authored_operator_decisions(self) -> None:
         matrix_script = (self.repo_root / "scripts" / "full-run-batch-matrix.sh").read_text(encoding="utf-8")

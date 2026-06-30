@@ -51,6 +51,19 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertCodexArg(t, args, "--json")
 	assertCodexArg(t, args, "--color")
 	assertCodexArg(t, args, "never")
+	for _, feature := range []string{
+		"plugins",
+		"remote_plugin",
+		"plugin_sharing",
+		"apps",
+		"enable_mcp_apps",
+		"tool_suggest",
+		"skill_mcp_dependency_install",
+	} {
+		assertCodexFlagValue(t, args, "--disable", feature)
+	}
+	assertCodexArg(t, args, "--ignore-user-config")
+	assertCodexArg(t, args, "--ignore-rules")
 	assertCodexArg(t, args, "--skip-git-repo-check")
 	assertCodexArg(t, args, "--sandbox")
 	assertCodexArg(t, args, "danger-full-access")
@@ -73,6 +86,66 @@ func TestManagedCodexArgsOmitDangerFullAccess(t *testing.T) {
 	assertCodexArg(t, args, "workspace-write")
 }
 
+func TestCodexCommandSpecUsesIsolatedAuthOnlyHome(t *testing.T) {
+	sourceHome := t.TempDir()
+	isolatedBase := t.TempDir()
+	t.Setenv("CODEX_HOME", sourceHome)
+	t.Setenv("ACP_CODEX_ISOLATED_HOME_BASE", isolatedBase)
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte(`{"OPENAI_API_KEY":"test"}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceHome, "installation_id"), []byte("install-test\n"), 0o644); err != nil {
+		t.Fatalf("write installation id: %v", err)
+	}
+	for _, rel := range []string{"config.toml", "rules/live.rules", "skills/custom/SKILL.md", ".tmp/plugins/plugin.json"} {
+		path := filepath.Join(sourceHome, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte("ambient"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	workspaceDir := t.TempDir()
+	writeRoot := filepath.Join(workspaceDir, "reports", "taskruns", "run-codex", "staging", "shards", "root")
+	task := acpruntime.Task{
+		TaskID:    "task-codex",
+		RunID:     "run-codex",
+		StepID:    "init.step1.collect",
+		Workspace: workspaceDir,
+		WriteRoot: writeRoot,
+	}
+	spec, err := (codexAdapter{runner: HeadlessRunner{Command: "codex-test"}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("command spec: %v", err)
+	}
+	isolatedHome := strings.TrimSpace(spec.Env["CODEX_HOME"])
+	if isolatedHome == "" {
+		t.Fatalf("expected CODEX_HOME override in command spec")
+	}
+	assertCodexFlagValue(t, spec.Args, "--disable", "plugins")
+	assertCodexFlagValue(t, spec.Args, "--disable", "remote_plugin")
+	assertCodexFlagValue(t, spec.Args, "--disable", "apps")
+	if isolatedHome == sourceHome {
+		t.Fatalf("expected isolated home, got source home %s", isolatedHome)
+	}
+	if !strings.HasPrefix(isolatedHome, filepath.Clean(isolatedBase)+string(os.PathSeparator)) {
+		t.Fatalf("expected isolated home under base %s, got %s", isolatedBase, isolatedHome)
+	}
+	if _, err := os.Stat(filepath.Join(isolatedHome, "auth.json")); err != nil {
+		t.Fatalf("expected copied auth: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(isolatedHome, "installation_id")); err != nil {
+		t.Fatalf("expected copied installation id: %v", err)
+	}
+	for _, rel := range []string{"config.toml", "rules", "skills", ".tmp", "plugins"} {
+		if _, err := os.Stat(filepath.Join(isolatedHome, filepath.FromSlash(rel))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s to be absent from isolated home, stat err=%v", rel, err)
+		}
+	}
+}
+
 func TestCodexAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	t.Parallel()
 
@@ -89,8 +162,8 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected collect artifact and pre-artifact monitoring, got %+v", policy)
 	}
-	if policy.PreArtifactStallWindow != 0 {
-		t.Fatalf("codex must keep default shared pre-artifact window, got %+v", policy)
+	if got, want := policy.PreArtifactStallWindow, 3*time.Minute; got != want {
+		t.Fatalf("expected codex collect pre-artifact window %s, got %s", want, got)
 	}
 	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
 		t.Fatalf("expected codex collect post-artifact enrichment window %s, got %s", want, got)
@@ -356,6 +429,16 @@ func assertCodexArg(t *testing.T, args []string, want string) {
 	if !codexSliceContains(args, want) {
 		t.Fatalf("expected arg %q in %v", want, args)
 	}
+}
+
+func assertCodexFlagValue(t *testing.T, args []string, flag string, value string) {
+	t.Helper()
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return
+		}
+	}
+	t.Fatalf("expected %s %s in %v", flag, value, args)
 }
 
 func codexSliceContains(values []string, want string) bool {

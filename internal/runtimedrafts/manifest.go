@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -19,6 +20,17 @@ const (
 	ProposalsManifestFile    = "proposals-draft-manifest.json"
 )
 
+var (
+	finalIndexDocumentCountPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(\d+)\s+(?:top-level\s+)?canonical document(?:s| entries)?\b`),
+		regexp.MustCompile(`(?i)\b(\d+)\s+observed document entries\b`),
+		regexp.MustCompile(`(?i)\b(\d+)\s+indexed document(?:s)?\b`),
+	}
+	citationIndexCountPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(\d+)\s+citation(?:s| entries)?\b`),
+	}
+)
+
 type Manifest struct {
 	Version      int      `json:"version"`
 	RunID        string   `json:"run_id"`
@@ -26,6 +38,7 @@ type Manifest struct {
 	StepContract string   `json:"step_contract"`
 	AgentRole    string   `json:"agent_role"`
 	Summary      string   `json:"summary,omitempty"`
+	UpdatedAt    string   `json:"updated_at,omitempty"`
 	Outputs      []Output `json:"outputs"`
 }
 
@@ -115,7 +128,7 @@ func ValidateRequiredManifest(
 	if err := ValidateOutputsExist(draftRoot, manifest); err != nil {
 		return Manifest{}, nil, err
 	}
-	if err := ValidateOutputContent(draftRoot, manifest, stepID); err != nil {
+	if err := ValidateOutputContent(draftRoot, manifest, stepID, runID); err != nil {
 		return Manifest{}, nil, err
 	}
 	return manifest, raw, nil
@@ -187,7 +200,7 @@ func ValidateOutputsExist(draftRoot string, manifest Manifest) error {
 	return nil
 }
 
-func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) error {
+func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, runID string) error {
 	switch strings.TrimSpace(stepID) {
 	case "init.step0.constitution", "init.step2.asis_docs", "refresh.step2.asis_docs", "init.step4.proposals", "refresh.step4.proposals":
 	default:
@@ -206,8 +219,46 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string) e
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q cannot be read for content validation: %v", idx, output.Path, err))
 			continue
 		}
-		if runtimeDraftTextBootstrapOnly(string(raw)) {
+		text := string(raw)
+		if runtimeDraftTextBootstrapOnly(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references bootstrap-only placeholder draft content", idx, output.Path))
+		}
+		if strings.TrimSpace(stepID) == "init.step0.constitution" && runtimeDraftStep0TextHasDownstreamEvidenceLeak(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q mentions downstream or runtime-only evidence in step0 constitution content", idx, output.Path))
+		}
+		if foreignRunID := runtimeDraftTextForeignRunID(text, runID); foreignRunID != "" {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references foreign taskrun %q instead of current run_id %q", idx, output.Path, foreignRunID, strings.TrimSpace(runID)))
+		}
+		if runtimeDraftTextHasGenericShardGapWording(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q uses generic conditional shard-gap wording instead of exact current-run shard status", idx, output.Path))
+		}
+		if runtimeDraftTextHasStaleIndexAvailabilityClaim(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q claims current-run final/citation indexes are unavailable instead of omitting downstream index status", idx, output.Path))
+		}
+		if runtimeDraftTextHasStaleIndexZeroClaim(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q claims current-run final-run-index has zero observed documents without validated zero-document evidence", idx, output.Path))
+		}
+		if runtimeDraftTextHasRawStructuredEvidenceDump(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes raw structured evidence dumps instead of readable summaries", idx, output.Path))
+		}
+		if runtimeDraftTextHasMetadataOnlyEvidenceBullet(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes metadata-only JSON keys as evidence instead of architecture or proposal signals", idx, output.Path))
+		}
+		if strings.TrimSpace(stepID) == "init.step2.asis_docs" || strings.TrimSpace(stepID) == "refresh.step2.asis_docs" {
+			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
+				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
+			}
+		}
+		if strings.TrimSpace(stepID) == "init.step4.proposals" || strings.TrimSpace(stepID) == "refresh.step4.proposals" {
+			if mismatch := runtimeDraftTextProposalCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
+				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
+			}
+		}
+		if mismatch := runtimeDraftTextIndexCountMismatch(text, cleanDraftRoot); mismatch != "" {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
+		}
+		if runtimeDraftTextHasMalformedMarkdown(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q contains malformed markdown inline-code or code-fence syntax", idx, output.Path))
 		}
 	}
 	if len(problems) == 0 {
@@ -408,12 +459,38 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 	hardMarkers := []string{
 		"provider wrote this draft artifact",
 		"drafted required runtime artifacts",
+		"draft surface initialized",
 		"draft surface initialized for the scoped repository analysis",
+		"this draft is grounded in the current step manifest",
+		"current draft manifest",
+		"manifest target remains",
+		"draft final root",
+		"draft_final_root",
+		"bounded staged evidence",
+		"bounded evidence read",
+		"bounded read root",
+		"bounded read roots",
+		"bounded read pass",
+		"bounded read_context_roots",
+		"recovery pass",
+		"recovery action",
+		"enrichment read",
+		"enrichment pass",
 		"final content must stay tied to collected shard evidence and validator output",
 		"runtime proposal surface initialized for this analysis run",
 		"runtime draft recovery initialized",
 		"draft recovery initialized",
 		"treat this as diagnostic evidence until",
+		"bootstrap-only placeholder",
+		"placeholder draft content",
+		"placeholder draft text",
+		"placeholder content",
+		"placeholder proposal content",
+		"replace placeholder content",
+		"replace placeholder proposal content",
+		"replaced placeholder content",
+		"replaced placeholder proposal content",
+		"replacing placeholders",
 	}
 	for _, marker := range hardMarkers {
 		if strings.Contains(lower, marker) {
@@ -437,6 +514,811 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 		}
 	}
 	return false
+}
+
+var liveRunIDPattern = regexp.MustCompile(`\brun_[0-9]{8}_[0-9]{6}_[0-9]{3}\b`)
+
+func runtimeDraftTextForeignRunID(text string, expectedRunID string) string {
+	expected := strings.TrimSpace(expectedRunID)
+	if expected == "" {
+		return ""
+	}
+	for _, match := range liveRunIDPattern.FindAllString(text, -1) {
+		if match != expected {
+			return match
+		}
+	}
+	return ""
+}
+
+func runtimeDraftTextHasGenericShardGapWording(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"if present above",
+		"if failed or incomplete shard",
+		"any failed or incomplete shard",
+		"any failed, pending, checkpointed",
+		"failed or incomplete shards remain",
+		"failed or incomplete typed shard statuses",
+		"re-run or repair any non-succeeded collection shards",
+		"failed shards require rerun",
+		"incomplete statuses require confirmation",
+	}
+	for _, marker := range markers {
+		if runtimeDraftTextContainsGenericShardGapMarker(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextContainsGenericShardGapMarker(lower string, marker string) bool {
+	searchFrom := 0
+	for {
+		rel := strings.Index(lower[searchFrom:], marker)
+		if rel < 0 {
+			return false
+		}
+		idx := searchFrom + rel
+		if marker == "failed or incomplete shards remain" && runtimeDraftTextAllowedNoShardCoverageBlockerLine(lower, idx) {
+			searchFrom = idx + len(marker)
+			continue
+		}
+		return true
+	}
+}
+
+func runtimeDraftTextAllowedNoShardCoverageBlockerLine(lower string, markerIdx int) bool {
+	lineStart := strings.LastIndex(lower[:markerIdx], "\n")
+	if lineStart < 0 {
+		lineStart = 0
+	} else {
+		lineStart++
+	}
+	lineEndRel := strings.Index(lower[markerIdx:], "\n")
+	lineEnd := len(lower)
+	if lineEndRel >= 0 {
+		lineEnd = markerIdx + lineEndRel
+	}
+	line := strings.TrimSpace(lower[lineStart:lineEnd])
+	line = strings.TrimLeft(line, "-*0123456789. )\t")
+	if !strings.HasPrefix(line, "no failed or incomplete shards remain") {
+		return false
+	}
+	return strings.Contains(line, "current-run") && (strings.Contains(line, "typed shard summary") || strings.Contains(line, "typed shard status"))
+}
+
+func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no readable current-run final-run-index.json",
+		"no current-run final-run-index.json",
+		"current-run final index and citation index availability is: not present",
+		"current-run final-run-index.json or citation-index.json was not present",
+		"current-run final-run-index.json or citation-index.json was unavailable",
+		"current-run final-run-index.json or citation-index.json were unavailable",
+		"current-run final-run-index.json or citation-index.json was not yet present",
+		"current-run final-run-index.json or citation-index.json were not yet present",
+		"current-run final-run-index.json or citation-index.json was not yet available",
+		"current-run final-run-index.json or citation-index.json were not yet available",
+		"current-run final-run-index.json and citation-index.json were not yet present",
+		"current-run final-run-index.json and citation-index.json were not yet available",
+		"final-run-index.json and citation-index.json were not present",
+		"final-run-index.json and citation-index.json unavailable",
+		"final-run-index.json and citation-index.json were not yet present",
+		"final-run-index.json and citation-index.json were not yet available",
+		"final-run-index.json and citation-index.json are not yet present",
+		"final-run-index.json and citation-index.json are not yet available",
+		"final-run-index and citation-index are not yet present",
+		"final-run-index and citation-index are not yet available",
+		"final-run-index and citation-index were not yet present",
+		"final-run-index and citation-index were not yet available",
+		"no current-run final-run-index document list was available",
+		"no current-run final-run-index document list is available",
+		"final-run-index document list was unavailable",
+		"final-run-index document list is unavailable",
+		"final-run-index document list is not yet available",
+		"final-run-index document list was not yet available",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		if !runtimeDraftLineMentionsIndex(line) {
+			continue
+		}
+		if runtimeDraftLineClaimsIndexUnavailable(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftLineMentionsIndex(line string) bool {
+	return strings.Contains(line, "final-run-index") ||
+		strings.Contains(line, "citation-index")
+}
+
+func runtimeDraftLineClaimsIndexUnavailable(line string) bool {
+	for _, marker := range []string{
+		"not observed",
+		"not found",
+		"not available",
+		"not present",
+		"not readable",
+		"not yet observed",
+		"not yet found",
+		"not yet available",
+		"not yet present",
+		"was unavailable",
+		"were unavailable",
+		"is unavailable",
+		"are unavailable",
+	} {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasStaleIndexZeroClaim(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"final-run-index.json contains 0 observed document entries",
+		"final-run-index contains 0 observed document entries",
+		"current-run final-run-index document entries: 0",
+		"current-run final-run-index documents: 0",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		if !strings.Contains(line, "final-run-index") {
+			continue
+		}
+		for _, zeroMarker := range []string{
+			"0 observed document entries",
+			"0 observed documents",
+			"0 canonical document",
+			"0 indexed document",
+			"0 document entries",
+		} {
+			if strings.Contains(line, zeroMarker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasRawStructuredEvidenceDump(text string) bool {
+	markers := []string{
+		"{'id':",
+		"{ 'id':",
+		"documents=[{",
+		"citations=[{",
+		"claim_ids':",
+		"document_ids':",
+		"'repo':",
+		"'path':",
+	}
+	hits := 0
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			hits++
+		}
+	}
+	if hits >= 2 {
+		return true
+	}
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- {'") || strings.HasPrefix(trimmed, "* {'") {
+			return true
+		}
+		if strings.Contains(trimmed, "documents=[{") || strings.Contains(trimmed, "citations=[{") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasMetadataOnlyEvidenceBullet(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		lower := strings.ToLower(trimmed)
+		for _, marker := range []string{
+			`"version":`,
+			`"generated_at":`,
+			`"run_id":`,
+			`"pipeline":`,
+			`"citation_index_path":`,
+		} {
+			if strings.HasPrefix(lower, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type runtimeDraftShardCompleteness struct {
+	planned    int
+	succeeded  int
+	failed     int
+	incomplete int
+}
+
+func runtimeDraftTextAsIsShardCompletenessMismatch(text string, draftRoot string, runID string, output Output) string {
+	counts, ok := readRuntimeDraftShardCompleteness(draftRoot, runID)
+	if !ok || counts.planned == 0 {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	if runtimeDraftTextClaimsShardEvidenceAbsent(lower) {
+		return fmt.Sprintf("claims staging shard evidence is empty but current-run typed shard summary contains %d planned shard(s)", counts.planned)
+	}
+
+	canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+	if canonicalPath == "reports/as-is/overview.md" && !runtimeDraftTextHasConcreteEvidenceRef(text) {
+		return "does not include concrete repo/path, citation, or staged artifact evidence references"
+	}
+	if canonicalPath == "reports/agent-outputs/architect/summary.md" && !runtimeDraftTextHasOperatorDecisionCue(text) {
+		return "does not include a decision-ready operator summary with next inspection or decision cues"
+	}
+	if canonicalPath != "reports/coverage/summary.md" {
+		return ""
+	}
+	summaryProblems := []string{}
+	if runtimeDraftTextHasShardSummaryMetadataDump(text) {
+		summaryProblems = append(summaryProblems, "includes metadata-only shard-summary keys instead of architecture coverage evidence")
+	}
+	if !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+		summaryProblems = append(summaryProblems, fmt.Sprintf("does not report exact current-run shard completeness from typed shard summary: planned=%d succeeded=%d failed=%d incomplete=%d", counts.planned, counts.succeeded, counts.failed, counts.incomplete))
+	}
+	if len(summaryProblems) > 0 {
+		return strings.Join(summaryProblems, " and ")
+	}
+	return ""
+}
+
+func runtimeDraftTextProposalCompletenessMismatch(text string, draftRoot string, runID string, output Output) string {
+	canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
+	if !strings.HasSuffix(strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))), ".md") {
+		return ""
+	}
+	isPrimaryProposal := canonicalPath == "proposals/runtime-recommendations.md"
+	isChangelog := strings.HasPrefix(canonicalPath, "reports/changelog/")
+	if !isPrimaryProposal && !isChangelog {
+		return ""
+	}
+
+	counts, ok := readRuntimeDraftShardCompleteness(draftRoot, runID)
+	if ok && counts.planned > 0 && !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+		return fmt.Sprintf("does not report exact current-run proposal shard completeness from typed shard summary: planned=%d succeeded=%d failed=%d incomplete=%d", counts.planned, counts.succeeded, counts.failed, counts.incomplete)
+	}
+	if !runtimeDraftTextHasConcreteEvidenceRef(text) {
+		return "does not include concrete repo/path, citation, or staged artifact evidence references"
+	}
+	if runtimeDraftTextHasDanglingProposalReference(text) {
+		return "references findings/proposals above without including substantive findings/proposals"
+	}
+
+	if isPrimaryProposal {
+		return runtimeDraftTextProposalBodyMismatch(text)
+	}
+	if isChangelog {
+		return runtimeDraftTextProposalChangelogMismatch(text)
+	}
+	return ""
+}
+
+func runtimeDraftTextProposalBodyMismatch(text string) string {
+	required := []runtimeDraftMarkdownSectionSpec{
+		{name: "Decision / recommended operator action", alternatives: [][]string{{"decision"}, {"recommended", "operator", "action"}}},
+		{name: "Evidence used", alternatives: [][]string{{"evidence"}}},
+		{name: "Proposed changes or follow-up plan", alternatives: [][]string{{"proposed", "changes"}, {"follow-up", "plan"}, {"follow up", "plan"}}},
+		{name: "Risks, gaps, and out-of-scope notes", alternatives: [][]string{{"risk"}, {"gap"}, {"out-of-scope"}, {"out of scope"}}},
+	}
+	if missing := runtimeDraftMissingMarkdownSections(text, required); len(missing) > 0 {
+		return "is missing substantive proposal section(s): " + strings.Join(missing, ", ")
+	}
+	body, ok := runtimeDraftMarkdownSectionBody(text, runtimeDraftMarkdownSectionSpec{
+		name:         "Proposed changes or follow-up plan",
+		alternatives: [][]string{{"proposed", "changes"}, {"follow-up", "plan"}, {"follow up", "plan"}},
+	})
+	if !ok {
+		return "is missing substantive proposal section(s): Proposed changes or follow-up plan"
+	}
+	if runtimeDraftTextHasExplicitNoActionableProposalGap(body) {
+		return ""
+	}
+	if !runtimeDraftProposalBodyHasActionableLine(body) {
+		return "does not include an actionable proposal or explicit no-actionable-proposal gap"
+	}
+	return ""
+}
+
+func runtimeDraftTextProposalChangelogMismatch(text string) string {
+	required := []runtimeDraftMarkdownSectionSpec{
+		{name: "Updated architecture/proposal surfaces", alternatives: [][]string{{"updated", "surface"}, {"architecture", "proposal", "surface"}}},
+		{name: "Findings/proposals summary", alternatives: [][]string{{"findings", "summary"}, {"proposals", "summary"}, {"findings/proposals"}}},
+		{name: "Evidence index or citation references", alternatives: [][]string{{"evidence"}, {"citation"}}},
+		{name: "Residual coverage gaps", alternatives: [][]string{{"residual", "gap"}, {"coverage", "gap"}}},
+	}
+	if missing := runtimeDraftMissingMarkdownSections(text, required); len(missing) > 0 {
+		return "is missing substantive proposal changelog section(s): " + strings.Join(missing, ", ")
+	}
+	return ""
+}
+
+type runtimeDraftMarkdownSectionSpec struct {
+	name         string
+	alternatives [][]string
+}
+
+func runtimeDraftMissingMarkdownSections(text string, specs []runtimeDraftMarkdownSectionSpec) []string {
+	missing := []string{}
+	for _, spec := range specs {
+		body, ok := runtimeDraftMarkdownSectionBody(text, spec)
+		if !ok || !runtimeDraftMarkdownBodyHasSubstantiveContent(body) {
+			missing = append(missing, spec.name)
+		}
+	}
+	return missing
+}
+
+func runtimeDraftMarkdownSectionBody(text string, spec runtimeDraftMarkdownSectionSpec) (string, bool) {
+	lines := strings.Split(text, "\n")
+	start := -1
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		heading := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
+		if runtimeDraftHeadingMatches(heading, spec.alternatives) {
+			start = idx + 1
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for idx := start; idx < len(lines); idx++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[idx]), "#") {
+			end = idx
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n"), true
+}
+
+func runtimeDraftHeadingMatches(heading string, alternatives [][]string) bool {
+	for _, terms := range alternatives {
+		matched := true
+		for _, term := range terms {
+			if !strings.Contains(heading, strings.ToLower(strings.TrimSpace(term))) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftMarkdownBodyHasSubstantiveContent(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		if len(trimmed) >= 12 {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasDanglingProposalReference(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"finding above",
+		"findings above",
+		"proposal above",
+		"proposals above",
+		"each finding above",
+		"each proposal above",
+		"findings listed above",
+		"proposals listed above",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasExplicitNoActionableProposalGap(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no actionable proposal evidence",
+		"no actionable proposals",
+		"no actionable proposal",
+		"no structured finding summary was present",
+		"no structured findings were present",
+		"no proposal candidates were present",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftProposalBodyHasActionableLine(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		trimmed = strings.TrimSpace(trimmed)
+		if len(trimmed) < 20 {
+			continue
+		}
+		if runtimeDraftProposalLineIsGeneric(trimmed) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func runtimeDraftProposalLineIsGeneric(line string) bool {
+	lower := strings.ToLower(line)
+	markers := []string{
+		"prioritize each finding",
+		"prioritise each finding",
+		"address the surfaced findings",
+		"update the architecture model and source files",
+		"re-run the collect/validate pipeline",
+		"rerun the collect/validate pipeline",
+		"use the cited documents as the source of truth",
+		"use the cited documents as source of truth",
+		"review current-run evidence",
+		"current-run evidence should be reviewed",
+		"current run evidence should be reviewed",
+		"follow-up surfaces",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextClaimsShardEvidenceAbsent(lower string) bool {
+	markers := []string{
+		"staging shard directory contains 0 file",
+		"staging shards directory contains 0 file",
+		"staging shard directory contains zero file",
+		"staging shards directory contains zero file",
+		"staging shard directory contains 0 shard",
+		"staging shards directory contains 0 shard",
+		"shard pack manifests: none observed",
+		"shard-pack manifests: none observed",
+		"shard manifests: none observed",
+		"collected shard manifests: none observed",
+		"shard-pack-manifest.json: none observed",
+		"no shard pack manifests observed",
+		"no shard-pack manifests observed",
+		"no shard manifests observed",
+		"no collected shard manifests observed",
+		"no shard-pack-manifest.json",
+		"0 shard-pack-manifest",
+		"zero shard-pack-manifest",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasConcreteEvidenceRef(text string) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "cite.") ||
+		strings.Contains(lower, "reports/as-is/") ||
+		strings.Contains(lower, "reports/coverage/") ||
+		strings.Contains(lower, "reports/findings/") ||
+		strings.Contains(lower, "final-run-index.json") ||
+		strings.Contains(lower, "citation-index.json") ||
+		strings.Contains(lower, "shard-pack-manifest.json") {
+		return true
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, " -> ") && strings.Contains(trimmed, "/") {
+			return true
+		}
+		if strings.Contains(trimmed, ".") && strings.Contains(trimmed, "/") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasOperatorDecisionCue(text string) bool {
+	lower := strings.ToLower(text)
+	decisionMarkers := []string{
+		"operator",
+		"decision",
+		"decide",
+		"inspect next",
+		"what to inspect next",
+		"next inspection",
+		"what is complete",
+		"what is missing",
+		"review next",
+		"publish",
+		"accept",
+		"residual risk",
+	}
+	for _, marker := range decisionMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasShardSummaryMetadataDump(text string) bool {
+	hits := 0
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
+		lower := strings.ToLower(strings.TrimSpace(trimmed))
+		for _, marker := range []string{
+			"meta:",
+			"step_id:",
+			"domain_id:",
+			"strategy:",
+			"max_parallel_tasks:",
+			"failure_policy:",
+			"shard_discovery_mode:",
+		} {
+			if strings.HasPrefix(lower, marker) {
+				hits++
+				break
+			}
+		}
+	}
+	return hits >= 2
+}
+
+func readRuntimeDraftShardCompleteness(draftRoot string, runID string) (runtimeDraftShardCompleteness, bool) {
+	taskrunsRoot := filepath.Clean(filepath.Join(strings.TrimSpace(draftRoot), "..", "..", "..", ".."))
+	if strings.TrimSpace(runID) == "" {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	pattern := filepath.Join(taskrunsRoot, strings.TrimSpace(runID)+"-*-step1-collect-shard-summary-*.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	sort.Strings(matches)
+	for _, match := range matches {
+		counts, ok := readRuntimeDraftShardCompletenessFile(match)
+		if ok && counts.planned > 0 {
+			return counts, true
+		}
+	}
+	return runtimeDraftShardCompleteness{}, false
+}
+
+func readRuntimeDraftShardCompletenessFile(filename string) (runtimeDraftShardCompleteness, bool) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	var summary struct {
+		Items []struct {
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+		return runtimeDraftShardCompleteness{}, false
+	}
+	counts := runtimeDraftShardCompleteness{planned: len(summary.Items)}
+	for _, item := range summary.Items {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "succeeded":
+			counts.succeeded++
+		case "failed":
+			counts.failed++
+		default:
+			counts.incomplete++
+		}
+	}
+	return counts, true
+}
+
+func runtimeDraftTextClaimsShardCompleteness(text string, counts runtimeDraftShardCompleteness) bool {
+	lower := strings.ToLower(text)
+	exactSucceeded := fmt.Sprintf("%d/%d succeeded", counts.succeeded, counts.planned)
+	hasExactSucceeded := strings.Contains(lower, exactSucceeded)
+	hasPlanned := hasExactSucceeded || runtimeDraftTextHasShardCompletenessCount(lower, "planned", counts.planned)
+	hasSucceeded := hasExactSucceeded || runtimeDraftTextHasShardCompletenessCount(lower, "succeeded", counts.succeeded)
+	hasFailed := runtimeDraftTextHasShardCompletenessCount(lower, "failed", counts.failed)
+	if counts.failed == 0 {
+		hasFailed = hasFailed || runtimeDraftTextClaimsNoFailedShard(lower)
+	}
+	hasIncomplete := runtimeDraftTextHasShardCompletenessCount(lower, "incomplete", counts.incomplete) ||
+		runtimeDraftTextHasShardCompletenessCount(lower, "pending", counts.incomplete)
+	if counts.incomplete == 0 {
+		hasIncomplete = hasIncomplete || runtimeDraftTextClaimsNoIncompleteShard(lower)
+	}
+	return hasPlanned && hasSucceeded && hasFailed && hasIncomplete
+}
+
+func runtimeDraftTextHasShardCompletenessCount(lower string, label string, count int) bool {
+	quoted := regexp.QuoteMeta(strings.ToLower(strings.TrimSpace(label)))
+	patterns := []string{
+		fmt.Sprintf(`\b%d\s+%s\b`, count, quoted),
+		fmt.Sprintf(`\b%d\s+(?:[a-z][a-z0-9_-]*\s+){1,3}%s\b`, count, quoted),
+		fmt.Sprintf(`\b%s\s*(?:=|:)?\s*%d\b`, quoted, count),
+	}
+	for _, pattern := range patterns {
+		if regexp.MustCompile(pattern).FindStringIndex(lower) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextClaimsNoFailedShard(lower string) bool {
+	return strings.Contains(lower, "no failed") || strings.Contains(lower, "failed=0")
+}
+
+func runtimeDraftTextClaimsNoIncompleteShard(lower string) bool {
+	return strings.Contains(lower, "no failed, pending, or incomplete") ||
+		strings.Contains(lower, "no failed or incomplete") ||
+		strings.Contains(lower, "no incomplete") ||
+		strings.Contains(lower, "incomplete=0") ||
+		strings.Contains(lower, "pending=0")
+}
+
+func runtimeDraftTextIndexCountMismatch(text string, draftRoot string) string {
+	finalDocumentCount, hasFinalDocumentCount := readRuntimeDraftFinalDocumentCount(draftRoot)
+	citationCount, hasCitationCount := readRuntimeDraftCitationCount(draftRoot)
+	for _, line := range strings.Split(text, "\n") {
+		lower := strings.ToLower(line)
+		if hasFinalDocumentCount && (strings.Contains(lower, "final-run-index") || strings.Contains(lower, "final run index")) {
+			for _, claimed := range extractRuntimeDraftCounts(line, finalIndexDocumentCountPatterns) {
+				if claimed != finalDocumentCount {
+					return fmt.Sprintf("claims final-run-index canonical document count %d but current-run index contains %d", claimed, finalDocumentCount)
+				}
+			}
+		}
+		if hasCitationCount && (strings.Contains(lower, "citation-index") || strings.Contains(lower, "citation index")) {
+			for _, claimed := range extractRuntimeDraftCounts(line, citationIndexCountPatterns) {
+				if claimed != citationCount {
+					return fmt.Sprintf("claims citation-index citation count %d but current-run index contains %d", claimed, citationCount)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func extractRuntimeDraftCounts(line string, patterns []*regexp.Regexp) []int {
+	counts := []int{}
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(line, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			var value int
+			if _, err := fmt.Sscanf(match[1], "%d", &value); err == nil {
+				counts = append(counts, value)
+			}
+		}
+	}
+	return counts
+}
+
+func readRuntimeDraftFinalDocumentCount(draftRoot string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(draftRoot, "final-run-index.json"))
+	if err != nil {
+		return 0, false
+	}
+	var index struct {
+		CanonicalDocuments []json.RawMessage `json:"canonical_documents"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return 0, false
+	}
+	return len(index.CanonicalDocuments), true
+}
+
+func readRuntimeDraftCitationCount(draftRoot string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(draftRoot, "citation-index.json"))
+	if err != nil {
+		return 0, false
+	}
+	var index struct {
+		Citations []json.RawMessage `json:"citations"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return 0, false
+	}
+	return len(index.Citations), true
+}
+
+func runtimeDraftStep0TextHasDownstreamEvidenceLeak(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"reports/changelog/",
+		"reports/taskruns/",
+		"staging/final",
+		"staging/shards",
+		"collected shard",
+		"shard manifest",
+		"validator output",
+		"runtime provider",
+		"produced by:",
+		"draft manifest",
+		"draft root",
+		"manifest mutation",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- generated:") || strings.HasPrefix(trimmed, "generated:") {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextHasMalformedMarkdown(text string) bool {
+	inFence := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.Count(line, "`")%2 != 0 {
+			return true
+		}
+	}
+	return inFence
 }
 
 func runtimeDraftTextHasEvidenceMarker(lower string) bool {

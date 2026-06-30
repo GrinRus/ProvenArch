@@ -100,8 +100,11 @@ func TestClaudeAdapterUsesExtendedPreArtifactWindowForArtifactSteps(t *testing.T
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected claude collect artifact monitoring, got %+v", policy)
 	}
-	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
+	if got, want := policy.PreArtifactStallWindow, 5*time.Minute; got != want {
 		t.Fatalf("expected claude pre-artifact window %s, got %s", want, got)
+	}
+	if got, want := policy.RetryPreArtifactStallWindow, 5*time.Minute; got != want {
+		t.Fatalf("expected claude retry pre-artifact window %s, got %s", want, got)
 	}
 	if got, want := policy.PostArtifactStallWindow, 90*time.Second; got != want {
 		t.Fatalf("expected claude collect post-artifact enrichment window %s, got %s", want, got)
@@ -116,6 +119,9 @@ func TestClaudeAdapterUsesExtendedPreArtifactWindowForArtifactSteps(t *testing.T
 	}
 	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
 		t.Fatalf("expected claude draft pre-artifact window %s, got %s", want, got)
+	}
+	if got, want := policy.RetryPreArtifactStallWindow, time.Duration(0); got != want {
+		t.Fatalf("expected claude draft retry pre-artifact window %s, got %s", want, got)
 	}
 	if policy.PostArtifactStallWindow != 0 || policy.PartialArtifactStallWindow != 0 {
 		t.Fatalf("draft steps must keep shared post-artifact defaults, got %+v", policy)

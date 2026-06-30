@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 E2E_BATCH_REPORT_PATH = REPO_ROOT / "scripts" / "e2e_batch_report.py"
 FULL_RUN_BATCH_SCRIPT = REPO_ROOT / "scripts" / "full-run-batch.sh"
+BACKEND_CYCLE_SCRIPT = REPO_ROOT / "scripts" / "internal" / "live-e2e-backend-cycle.sh"
 
 
 def load_e2e_batch_report_module():
@@ -101,7 +102,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: infra_incomplete_cycle",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -265,7 +266,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         for path in [
             reports_root / f"run_matrix_{batch_id}.md",
             reports_root / f"run_matrix_{batch_id}.tsv",
-            reports_root / f"quality_report_{batch_id}.md",
+            reports_root / f"execution_report_{batch_id}.md",
             reports_root / f"frontend_e2e_matrix_{batch_id}.md",
             e2e_root / "runs" / batch_id / "report-paths.txt",
         ]:
@@ -408,6 +409,302 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
         self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
 
+    def test_full_run_batch_dod_precheck_timeout_records_evidence(self) -> None:
+        repos_file = self.root / "repos.yaml"
+        write_text(
+            repos_file,
+            "\n".join(
+                [
+                    "repos:",
+                    "  - name: dod-precheck",
+                    "    git_url: https://example.invalid/dod-precheck.git",
+                    "    ref: 1111111111111111111111111111111111111111",
+                    "",
+                ]
+            ),
+        )
+        qwen_stub = self.root / "qwen-ready-stub.sh"
+        write_text(
+            qwen_stub,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  printf '%s\n' 'Done.'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'unexpected args: %s\\n' \"$*\" >&2\n"
+            "exit 2\n",
+        )
+        qwen_stub.chmod(0o755)
+
+        required_node_version = (REPO_ROOT / ".node-version").read_text(encoding="utf-8").strip()
+        node_dir = self.root / "node-dod-timeout"
+        node_dir.mkdir()
+        node = node_dir / "node"
+        write_text(
+            node,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '-p' ]]; then\n"
+            "  case \"${2:-}\" in\n"
+            f"    *process.versions.node*) printf '%s\\n' '{required_node_version}' ;;\n"
+            "    *process.arch*) case \"$(uname -m 2>/dev/null || true)\" in arm64|aarch64) printf '%s\\n' 'arm64' ;; *) printf '%s\\n' 'x64' ;; esac ;;\n"
+            "    *) printf '\\n' ;;\n"
+            "  esac\n"
+            "  exit 0\n"
+            "fi\n"
+            f"if [[ \"${{1:-}}\" == '--version' ]]; then printf '%s\\n' 'v{required_node_version}'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        npm = node_dir / "npm"
+        write_text(
+            npm,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '--version' ]]; then printf '%s\\n' '10.9.8'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        node.chmod(0o755)
+        npm.chmod(0o755)
+
+        fake_host_bin = self.root / "fake-host-bin-dod-timeout"
+        fake_host_bin.mkdir()
+        fake_make = fake_host_bin / "make"
+        write_text(
+            fake_make,
+            "#!/bin/sh\n"
+            "printf 'fake make intentionally hanging: %s\\n' \"$*\"\n"
+            "sleep 60\n",
+        )
+        fake_make.chmod(0o755)
+
+        batch_id = "dod-precheck-timeout"
+        e2e_root = self.root / "e2e-dod-timeout"
+        reports_root = e2e_root / "reports"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "USER",
+                "LOGNAME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "SHELL",
+                "PYENV_ROOT",
+            }
+        }
+        env.update(
+            {
+                "BATCH_ID": batch_id,
+                "E2E_TMP_ROOT": str(e2e_root),
+                "REPORTS_ROOT": str(reports_root),
+                "TARGET_REPOS_FILE": str(repos_file),
+                "PROFILE_ID": "single-git_url",
+                "PROFILE_SOURCE_KIND": "git_url",
+                "PROFILE_EXPECTED_REPO_COUNT": "1",
+                "RUN_COUNT": "1",
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_RUN_SELECTION": "1",
+                "BATCH_FRONTEND_MODE": "never",
+                "ACP_QWEN_CMD_BIN": str(qwen_stub),
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "ACP_NODE_TOOL_CANDIDATES": str(node_dir),
+                "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
+                "ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC": "5",
+                "ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC": "1",
+                "BATCH_OWNER_HEARTBEAT_SEC": "1",
+            }
+        )
+        env["PATH"] = f"{node_dir}{os.pathsep}{fake_host_bin}{os.pathsep}{env.get('PATH', '')}"
+
+        completed = subprocess.run(
+            [str(FULL_RUN_BATCH_SCRIPT)],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
+        combined_output = completed.stderr + completed.stdout
+        self.assertIn("make contracts test lint build timed out after 1s", combined_output)
+        self.assertIn("precheck_failed", combined_output)
+        make_log = e2e_root / "runs" / batch_id / "precheck-make.log"
+        self.assertTrue(make_log.exists())
+        make_log_text = make_log.read_text(encoding="utf-8")
+        self.assertIn("[precheck-timeout] make contracts test lint build timed out", make_log_text)
+        self.assertIn("fake make intentionally hanging", make_log_text)
+
+        run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
+        execution_report = (reports_root / f"execution_report_{batch_id}.md").read_text(encoding="utf-8")
+        self.assertIn("precheck_failed", run_matrix)
+        self.assertIn("precheck_failed", execution_report)
+        self.assertFalse((reports_root / f"quality_report_{batch_id}.md").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
+
+    def test_full_run_batch_ui_precheck_timeout_records_evidence(self) -> None:
+        repos_file = self.root / "repos.yaml"
+        write_text(
+            repos_file,
+            "\n".join(
+                [
+                    "repos:",
+                    "  - name: ui-precheck",
+                    "    git_url: https://example.invalid/ui-precheck.git",
+                    "    ref: 1111111111111111111111111111111111111111",
+                    "",
+                ]
+            ),
+        )
+        qwen_stub = self.root / "qwen-ready-stub.sh"
+        write_text(
+            qwen_stub,
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"--chat-recording\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  printf '%s\n' 'Done.'\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf 'unexpected args: %s\\n' \"$*\" >&2\n"
+            "exit 2\n",
+        )
+        qwen_stub.chmod(0o755)
+
+        required_node_version = (REPO_ROOT / ".node-version").read_text(encoding="utf-8").strip()
+        node_dir = self.root / "node-timeout"
+        node_dir.mkdir()
+        node = node_dir / "node"
+        write_text(
+            node,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '-p' ]]; then\n"
+            "  case \"${2:-}\" in\n"
+            f"    *process.versions.node*) printf '%s\\n' '{required_node_version}' ;;\n"
+            "    *process.arch*) case \"$(uname -m 2>/dev/null || true)\" in arm64|aarch64) printf '%s\\n' 'arm64' ;; *) printf '%s\\n' 'x64' ;; esac ;;\n"
+            "    *) printf '\\n' ;;\n"
+            "  esac\n"
+            "  exit 0\n"
+            "fi\n"
+            f"if [[ \"${{1:-}}\" == '--version' ]]; then printf '%s\\n' 'v{required_node_version}'; exit 0; fi\n"
+            "printf '%s\\n' \"$0\"\n",
+        )
+        npm = node_dir / "npm"
+        write_text(
+            npm,
+            "#!/usr/bin/env bash\n"
+            "set -Eeuo pipefail\n"
+            "if [[ \"${1:-}\" == '--version' ]]; then printf '%s\\n' '10.9.8'; exit 0; fi\n"
+            "printf 'fake npm intentionally hanging for args: %s\\n' \"$*\" >&2\n"
+            "sleep 60\n",
+        )
+        node.chmod(0o755)
+        npm.chmod(0o755)
+        fake_host_bin = self.root / "fake-host-bin-ui-timeout"
+        fake_host_bin.mkdir()
+        fake_make = fake_host_bin / "make"
+        write_text(
+            fake_make,
+            "#!/bin/sh\n"
+            "printf 'fake make succeeded: %s\\n' \"$*\"\n"
+            "exit 0\n",
+        )
+        fake_make.chmod(0o755)
+
+        batch_id = "ui-precheck-timeout"
+        e2e_root = self.root / "e2e-ui-timeout"
+        reports_root = e2e_root / "reports"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "USER",
+                "LOGNAME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "SHELL",
+                "PYENV_ROOT",
+            }
+        }
+        env.update(
+            {
+                "BATCH_ID": batch_id,
+                "E2E_TMP_ROOT": str(e2e_root),
+                "REPORTS_ROOT": str(reports_root),
+                "TARGET_REPOS_FILE": str(repos_file),
+                "PROFILE_ID": "single-git_url",
+                "PROFILE_SOURCE_KIND": "git_url",
+                "PROFILE_EXPECTED_REPO_COUNT": "1",
+                "RUN_COUNT": "1",
+                "BATCH_PROVIDER_FILTER": "qwen-code",
+                "BATCH_RUN_SELECTION": "1",
+                "BATCH_FRONTEND_MODE": "never",
+                "ACP_QWEN_CMD_BIN": str(qwen_stub),
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "ACP_NODE_TOOL_CANDIDATES": str(node_dir),
+                "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
+                "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
+                "ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC": "5",
+                "ACP_LIVE_PRECHECK_UI_TIMEOUT_SEC": "1",
+                "BATCH_OWNER_HEARTBEAT_SEC": "1",
+            }
+        )
+        env["PATH"] = f"{node_dir}{os.pathsep}{fake_host_bin}{os.pathsep}{env.get('PATH', '')}"
+
+        completed = subprocess.run(
+            [str(FULL_RUN_BATCH_SCRIPT)],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
+        combined_output = completed.stderr + completed.stdout
+        self.assertIn("UI npm install precheck timed out after 1s", combined_output)
+        self.assertIn("precheck_failed", combined_output)
+        ui_log = e2e_root / "runs" / batch_id / "precheck-ui-npm.log"
+        self.assertTrue(ui_log.exists())
+        ui_log_text = ui_log.read_text(encoding="utf-8")
+        self.assertIn("[precheck-timeout] npm ci --prefix ui timed out", ui_log_text)
+        self.assertIn("fake npm intentionally hanging", ui_log_text)
+
+        run_matrix = (reports_root / f"run_matrix_{batch_id}.md").read_text(encoding="utf-8")
+        execution_report = (reports_root / f"execution_report_{batch_id}.md").read_text(encoding="utf-8")
+        self.assertIn("precheck_failed", run_matrix)
+        self.assertIn("precheck_failed", execution_report)
+        self.assertFalse((reports_root / f"quality_report_{batch_id}.md").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.jsonl").exists())
+        self.assertFalse((reports_root / f"blackbox_e2e_steps_{batch_id}.md").exists())
+
     def _create_passed_run_dir_with_raw_runner_noise(self, run_dir: Path) -> None:
         self._create_fixture_run_dir(run_dir)
         write_text(
@@ -417,7 +714,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: passed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: none",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -744,7 +1041,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: passed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: none",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -846,6 +1143,60 @@ class BatchFailureClassificationTest(unittest.TestCase):
     def test_frontend_live_passes_codex_command_env(self) -> None:
         script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('"ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN"', script)
+        self.assertIn('"UI_E2E_ARTIFACT_SOURCE=snapshot"', script)
+        self.assertIn('"UI_E2E_SNAPSHOT_RUN_ID=$refresh_run_id"', script)
+        self.assertIn('cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/', script)
+        self.assertNotIn('rm -rf "$frontend_workspace/reports"', script)
+
+    def test_shell_prepares_frontend_snapshot_run_history(self) -> None:
+        workspace = self.root / "frontend-snapshot-workspace"
+        write_text(workspace / "reports/as-is/overview.md", "# Overview\nEvidence-backed content.\n")
+        write_text(workspace / "reports/coverage/summary.md", "# Coverage\n")
+        write_text(workspace / "reports/diagrams/c4-context.mmd", "graph TD\nA-->B\n")
+        write_text(workspace / "reports/taskruns/refresh-run/staging/final/final-run-index.json", '{"canonical_documents": []}\n')
+        write_text(workspace / "reports/taskruns/refresh-run/staging/final/citation-index.json", '{"citations": []}\n')
+        write_json(
+            workspace / "reports/taskruns/refresh-run-quality.json",
+            {
+                "version": 1,
+                "run_id": "refresh-run",
+                "pipeline": "refresh",
+                "status": "succeeded",
+                "generated_at": "2026-06-25T12:00:00Z",
+                "run_warnings": ["artifact_quality: telemetry only"],
+            },
+        )
+        write_text(workspace / "proposals/proposal.md", "# Proposal\n")
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        command = (
+            prelude
+            + "\n"
+            + f'prepare_frontend_snapshot_run_history {shlex.quote(str(workspace))} "refresh-run" "codex-code" "refresh"\n'
+            + "python3 - <<'PY'\n"
+            + "import json\n"
+            + f"from pathlib import Path\np = Path({str(workspace / 'reports/taskruns/run-history.json')!r})\n"
+            + "payload = json.loads(p.read_text(encoding='utf-8'))\n"
+            + "item = payload['items'][0]\n"
+            + "print(item['run_id'] + ':' + item['status'] + ':' + item['pipeline'])\n"
+            + "print(item['step_providers']['*'])\n"
+            + "print('\\n'.join(sorted(a['path'] for a in item['artifacts'])))\n"
+            + "PY\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+
+        self.assertIn("refresh-run:succeeded:refresh", completed.stdout)
+        self.assertIn("codex-code", completed.stdout)
+        self.assertIn("reports/as-is/overview.md", completed.stdout)
+        self.assertIn("reports/taskruns/refresh-run/staging/final/final-run-index.json", completed.stdout)
+        self.assertIn("proposals/proposal.md", completed.stdout)
 
     def test_python_report_aggregates_runtime_repair_stall_counters(self) -> None:
         quality_path = self.run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
@@ -885,10 +1236,126 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(1, result.zero_output_pre_artifact_stalls)
         self.assertEqual(1, result.partial_failure_count)
         self.assertEqual(1, result.quality_alerts)
-        self.assertIn("quality:repair-heavy", result.issues)
-        self.assertIn("quality:stall-pressure", result.issues)
-        self.assertIn("quality:partial-failures", result.issues)
-        self.assertTrue(result.quality_gates_failed)
+        self.assertIn("execution:repair-heavy", result.issues)
+        self.assertIn("execution:stall-pressure", result.issues)
+        self.assertIn("execution:partial-failures", result.issues)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+
+    def test_python_report_keeps_provider_class_primary_for_partial_collect_classifier(self) -> None:
+        run_dir = self.root / "run-partial-vs-runner-unavailable-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- execution_gate: live runtime/frontend evidence only",
+                    "- failure_reason: run_partial_failed",
+                    "- expected_runs: 4",
+                    "- completed_runs: 4",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 2",
+                    "- running_runs_detected: 0",
+                    "- termination_signal: none",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+        write_text(run_dir / "full-run.log", "run failed (run_partial_failed): partial shard failures (1)\n")
+        write_text(run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson", '{"level":"info","message":"partial shard failure evidence"}\n')
+        write_text(run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt", "partial shard failure evidence\n")
+        quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {})["partial_failure_count"] = 1
+        write_json(quality_path, payload)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runner_unavailable",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runner_unavailable", result.failure_class)
+        self.assertTrue(result.runtime_flow_failed)
+        self.assertTrue(result.runner_unavailable)
+        self.assertEqual(1, result.partial_failure_count)
+        self.assertTrue(
+            any("partial shard failures were recorded during execution" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
+        contract_classifier_result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+        self.assertEqual("runtime_contract_failed", contract_classifier_result.failure_class)
+        self.assertTrue(contract_classifier_result.runtime_flow_failed)
+        self.assertTrue(contract_classifier_result.runtime_contract_failed)
+        self.assertTrue(
+            any("partial shard failures were recorded during execution" in detail for detail in contract_classifier_result.issue_details),
+            contract_classifier_result.issue_details,
+        )
+
+    def test_python_report_uses_workspace_quality_for_non_snapshot_failed_runs(self) -> None:
+        run_dir = self.root / "run-workspace-quality-fallback"
+        self._create_fixture_run_dir(run_dir)
+        workspace_reports = run_dir / "arch-workspace" / "reports"
+        shutil.copytree(run_dir / "snapshots" / "refresh-run" / "reports", workspace_reports, dirs_exist_ok=True)
+        shutil.rmtree(run_dir / "snapshots" / "refresh-run")
+
+        quality_path = workspace_reports / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {}).update(
+            {
+                "repair_attempts": 2,
+                "repair_exhausted": 1,
+                "fresh_retries": 0,
+                "focused_repairs": 2,
+                "stall_count": 1,
+                "pre_artifact_stalls": 0,
+                "post_artifact_stalls": 1,
+                "zero_output_pre_artifact_stalls": 0,
+                "partial_failure_count": 0,
+            }
+        )
+        write_json(quality_path, payload)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertEqual("workspace", result.artifact_source)
+        self.assertFalse(result.hard_pass)
+        self.assertEqual(2, result.repair_attempts)
+        self.assertEqual(1, result.repair_exhausted)
+        self.assertEqual(2, result.focused_repairs)
+        self.assertEqual(1, result.post_artifact_stalls)
+        self.assertIn("execution:repair-exhausted", result.issues)
+        self.assertTrue(any("using non-snapshot reports_root" in detail for detail in result.issue_details))
 
     def test_python_report_aggregates_failed_raw_stall_metadata(self) -> None:
         write_json(
@@ -918,8 +1385,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(1, result.pre_artifact_stalls)
         self.assertEqual(0, result.post_artifact_stalls)
         self.assertEqual(1, result.zero_output_pre_artifact_stalls)
-        self.assertIn("quality:stall-pressure", result.issues)
-        self.assertTrue(any("quality/runtime-stalls-raw" in detail for detail in result.issue_details))
+        self.assertIn("execution:stall-pressure", result.issues)
+        self.assertTrue(any("execution/runtime-stalls-raw" in detail for detail in result.issue_details))
 
     def test_python_report_prefers_runtime_flow_failed_when_validator_verdict_failed(self) -> None:
         run_dir = self.root / "run-validator-verdict-fail-python"
@@ -931,7 +1398,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -992,7 +1459,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1053,7 +1520,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1100,7 +1567,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1167,7 +1634,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: skipped",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_timeout",
                     "- expected_runs: 4",
                     "- completed_runs: 2",
@@ -1202,6 +1669,63 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertEqual("runtime_timeout", result.failure_class)
         self.assertTrue(result.runtime_timeout)
+
+    def test_python_report_surfaces_timeout_deadline_and_clock_gap_evidence(self) -> None:
+        run_dir = self.root / "run-timeout-clock-gap"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "session-summary.md",
+            "\n".join(
+                [
+                    "# Session Summary",
+                    "",
+                    "- result: failed",
+                    "- execution_gate: live runtime/frontend evidence only",
+                    "- failure_reason: runtime_timeout",
+                    "- expected_runs: 4",
+                    "- completed_runs: 2",
+                    "- expected_headless_runs: 2",
+                    "- completed_headless_runs: 0",
+                    "- running_runs_detected: 1",
+                    "- last_pipeline_stage: iteration=1 runtime=headless:codex-code pipeline=refresh",
+                    "- pipeline_deadline_at: 2026-06-25T00:00:00Z",
+                    "- pipeline_timeout_elapsed_sec: 14405",
+                    "- deadline_missed_by_sec: 5",
+                    "- last_progress_at: 2026-06-24T23:40:00Z",
+                    "- last_watchdog_tick_at: 2026-06-25T00:00:05Z",
+                    "- max_watchdog_tick_gap_sec: 120.5",
+                    "- host_clock_gap_detected: yes",
+                    "- termination_signal: timeout",
+                    "",
+                    "## API Simulation",
+                    "- status: succeeded",
+                    "",
+                ]
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="codex-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_timeout",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "124",
+            },
+        )
+
+        self.assertEqual("runtime_timeout", result.failure_class)
+        self.assertTrue(
+            any("pipeline_deadline_at=2026-06-25T00:00:00Z" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+        self.assertTrue(
+            any("reliability/infra-host-clock-gap" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
 
     def test_python_report_detects_runner_unavailable_capacity_signal(self) -> None:
         run_dir = self.root / "run-capacity-python"
@@ -1262,7 +1786,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1306,7 +1830,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1413,7 +1937,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
                     "- expected_headless_runs: 2",
@@ -1453,7 +1977,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
             "\n".join(
                 [
                     '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"collect_pair_repair"}',
                     '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
                 ]
             )
             + "\n",
@@ -1474,8 +2001,171 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         focused_details = "\n".join(result.issue_details)
         self.assertIn("reliability/focused-recovery", focused_details)
+        self.assertIn("collect_pair_repair_exhausted", focused_details)
         self.assertIn("validator_verdict_repair_exhausted", focused_details)
+        self.assertIn("draft_artifact_enrichment_exhausted", focused_details)
         self.assertIn("draft_artifact_repair_write_set_violation", focused_details)
+        self.assertEqual(5, result.focused_repairs)
+        self.assertEqual(4, result.repair_exhausted)
+        self.assertIn("execution:repair-exhausted", result.issues)
+
+    def test_python_report_does_not_double_count_focused_recovery_when_quality_counters_exist(self) -> None:
+        run_dir = self.root / "run-focused-recovery-no-double-count"
+        self._create_fixture_run_dir(run_dir)
+        quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        payload.setdefault("totals", {}).update(
+            {
+                "repair_attempts": 1,
+                "repair_exhausted": 1,
+                "fresh_retries": 0,
+                "focused_repairs": 1,
+                "stall_count": 0,
+                "pre_artifact_stalls": 0,
+                "post_artifact_stalls": 0,
+                "zero_output_pre_artifact_stalls": 0,
+                "partial_failure_count": 0,
+            }
+        )
+        write_json(quality_path, payload)
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            "\n".join(
+                [
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"validator_verdict_repair"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"collect_pair_repair"}',
+                    '{"level":"error","message":"draft recovery wrote outside the draft artifact write set"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                    '{"level":"error","message":"focused artifact repair exhausted","recovery_mode":"draft_artifact_enrichment"}',
+                ]
+            )
+            + "\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual(1, result.focused_repairs)
+        self.assertEqual(1, result.repair_exhausted)
+        self.assertIn("execution:repair-exhausted", result.issues)
+        self.assertTrue(any("reliability/focused-recovery" in detail for detail in result.issue_details))
+        self.assertFalse(any("source=focused-recovery-reasons" in detail for detail in result.issue_details))
+
+    def test_backend_cycle_appends_failed_headless_row_from_workspace_quality_fallback(self) -> None:
+        workspace = self.root / "headless-workspace"
+        taskruns = workspace / "reports" / "taskruns"
+        taskruns.mkdir(parents=True)
+        run_id = "run_20260615_120000_abcd"
+        write_json(taskruns / f"{run_id}-quality.json", {"totals": {}})
+        run_results = self.root / "run-results.tsv"
+        run_results.write_text("", encoding="utf-8")
+        functions = "\n".join(
+            [
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "run_result_row_exists"),
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "resolve_failed_run_id_from_workspace"),
+                extract_bash_function(BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8"), "append_run_result_row_once"),
+            ]
+        )
+        command = "\n".join(
+            [
+                "set -euo pipefail",
+                f"RUN_RESULTS_TSV={shlex.quote(str(run_results))}",
+                "RUN_RESULTS_EXPECTED_FIELDS=17",
+                "snapshot_run_artifacts() { return 0; }",
+                "quality_metrics() { return 1; }",
+                functions,
+                (
+                    "append_run_result_row_once 1 headless claude-code init '' failed "
+                    f"{shlex.quote(str(workspace))} reports"
+                ),
+                f"cat {shlex.quote(str(run_results))}",
+            ]
+        )
+
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        fields = completed.stdout.strip().split("\t")
+        self.assertEqual(17, len(fields), completed.stdout)
+        self.assertEqual(["1", "headless", "claude-code", "init", run_id, "failed"], fields[:6])
+
+    def test_backend_cycle_appends_failed_api_init_row(self) -> None:
+        workspace = self.root / "baseline-workspace"
+        taskruns = workspace / "reports" / "taskruns"
+        taskruns.mkdir(parents=True)
+        run_id = "run_20260619_071543_001"
+        write_json(
+            taskruns / f"{run_id}-quality.json",
+            {
+                "status": "failed",
+                "runtime_versions": ["fake@fake"],
+                "totals": {
+                    "signal_score": 0,
+                    "semantic_entities": 0,
+                    "semantic_edges": 0,
+                    "findings_count": 0,
+                    "questions_count": 0,
+                    "coverage_observed": 0,
+                    "coverage_missing": 0,
+                    "warnings_count": 16,
+                },
+            },
+        )
+        run_results = self.root / "run-results.tsv"
+        run_results.write_text("", encoding="utf-8")
+        script_text = BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8")
+        functions = "\n".join(
+            [
+                extract_bash_function(script_text, "run_result_row_exists"),
+                extract_bash_function(script_text, "resolve_failed_run_id_from_workspace"),
+                extract_bash_function(script_text, "append_run_result_row_once"),
+                extract_bash_function(script_text, "append_api_init_run_result_row"),
+            ]
+        )
+        command = "\n".join(
+            [
+                "set -euo pipefail",
+                f"RUN_RESULTS_TSV={shlex.quote(str(run_results))}",
+                "RUN_RESULTS_EXPECTED_FIELDS=17",
+                "HEADLESS_PROVIDER=codex-code",
+                f"WORKSPACE_BASELINE={shlex.quote(str(workspace))}",
+                f"API_INIT_RUN_ID={shlex.quote(run_id)}",
+                f"API_INIT_STATUS_JSON={shlex.quote(str(self.root / 'api-init-status.json'))}",
+                "snapshot_run_artifacts() { return 0; }",
+                "quality_metrics() { printf '%s\\n' $'failed\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t16\\t0\\t0\\t1\\t1\\tfake@fake'; }",
+                functions,
+                "append_api_init_run_result_row failed",
+                f"cat {shlex.quote(str(run_results))}",
+            ]
+        )
+
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        fields = completed.stdout.strip().split("\t")
+        self.assertEqual(17, len(fields), completed.stdout)
+        self.assertEqual(["1", "fake", "codex-code", "init", run_id, "failed"], fields[:6])
+        self.assertEqual("fake@fake", fields[14])
 
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
@@ -1634,7 +2324,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertNotIn("runtime:execution-semantics", issues)
 
-    def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
+    def test_python_report_records_artifact_quality_warning_without_execution_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
         self._create_artifact_quality_fixture_run_dir(run_dir)
 
@@ -1651,73 +2341,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("quality_gates_failed", result.failure_class)
-        self.assertTrue(result.quality_gates_failed)
-        self.assertFalse(result.hard_pass)
-        self.assertIn("quality:artifact-quality", result.issues)
-
-    def test_python_report_quality_failure_ignores_stale_runner_unavailable_classifier(self) -> None:
-        run_dir = self.root / "run-quality-with-stale-runner-classifier"
-        self._create_fixture_run_dir(run_dir)
-        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: failed",
-                    "- failure_reason: quality",
-                    "- expected_runs: 4",
-                    "- completed_runs: 4",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(
-            run_dir / "run-status.env",
-            "\n".join(
-                [
-                    "provider=codex-code",
-                    "run_index=1",
-                    "state=process_failed",
-                    "process_exit=1",
-                    "termination_signal=none",
-                    "failure_reason=quality",
-                    "summary_written=yes",
-                    "",
-                ]
-            ),
-        )
-
-        result = self.module.evaluate_run(
-            provider="qwen-code",
-            run_index=1,
-            run_dir=run_dir,
-            preflight={},
-            classification_row={
-                "failure_class": "runner_unavailable",
-                "failure_subclass": "none",
-                "cancellation_like": "0",
-                "process_exit": "1",
-            },
-        )
-
-        self.assertEqual("quality_gates_failed", result.failure_class)
-        self.assertTrue(result.quality_gates_failed)
-        self.assertFalse(result.runner_unavailable)
-        self.assertTrue(
-            any("ignored stale runner_unavailable" in detail for detail in result.issue_details),
-            result.issue_details,
-        )
+        self.assertEqual("none", result.failure_class)
+        self.assertEqual(1, result.artifact_quality_findings)
+        self.assertTrue(result.hard_pass)
+        self.assertIn("artifact:quality-warning", result.issues)
 
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -1751,7 +2378,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_contract_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1801,7 +2428,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1853,7 +2480,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -1919,7 +2546,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: skipped",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: runtime_timeout",
                     "- expected_runs: 4",
                     "- completed_runs: 2",
@@ -2056,70 +2683,6 @@ class BatchFailureClassificationTest(unittest.TestCase):
         fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
         self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
         self.assertEqual("none", fields[2], classifications_tsv.read_text(encoding="utf-8"))
-
-    def test_shell_classifier_prefers_quality_gate_failure_over_runner_noise(self) -> None:
-        run_dir = self.root / "run-quality-with-runner-noise-shell"
-        self._create_fixture_run_dir(run_dir)
-        shutil.rmtree(run_dir / "arch-workspace", ignore_errors=True)
-        write_text(
-            run_dir / "session-summary.md",
-            "\n".join(
-                [
-                    "# Session Summary",
-                    "",
-                    "- result: failed",
-                    "- quality_gates: failed",
-                    "- failure_reason: quality",
-                    "- expected_runs: 4",
-                    "- completed_runs: 4",
-                    "- expected_headless_runs: 2",
-                    "- completed_headless_runs: 2",
-                    "- running_runs_detected: 0",
-                    "- termination_signal: none",
-                    "",
-                    "## API Simulation",
-                    "- status: succeeded",
-                    "",
-                ]
-            ),
-        )
-        write_text(
-            run_dir / "run-status.env",
-            "\n".join(
-                [
-                    "provider=codex-code",
-                    "run_index=1",
-                    "state=process_failed",
-                    "process_exit=1",
-                    "termination_signal=none",
-                    "failure_reason=quality",
-                    "summary_written=yes",
-                    "",
-                ]
-            ),
-        )
-        write_text(run_dir / "full-run.log", "run failed (runner_unavailable): stale raw provider noise\n")
-
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        classifications_tsv = self.root / "backend-run-classifications-quality-vs-runner.tsv"
-        command = (
-            prelude
-            + "\n"
-            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
-            + f'classify_run_failure "codex-code" "1" {shlex.quote(str(run_dir))} "1"\n'
-        )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-        self.assertEqual("", completed.stdout.strip(), completed.stdout)
-        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
-        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
-        self.assertEqual("quality_gates_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_runner_unavailable_signature_keeps_real_capacity_when_noise_is_separate(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -2330,7 +2893,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -2399,7 +2962,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 10",
@@ -2687,7 +3250,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 10",
                     "- completed_runs: 2",
@@ -2761,7 +3324,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                     "# Session Summary",
                     "",
                     "- result: failed",
-                    "- quality_gates: passed",
+                    "- execution_gate: live runtime/frontend evidence only",
                     "- failure_reason: pipeline_command_failed",
                     "- expected_runs: 4",
                     "- completed_runs: 4",
@@ -2802,6 +3365,48 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runtime_contract_failed", result.failure_class)
         self.assertFalse(result.runtime_flow_failed)
         self.assertNotIn("analysis:cross-repo-missing", result.issues)
+
+    def test_python_report_records_malformed_refresh_semantic_json_without_crashing(self) -> None:
+        run_dir = self.root / "run-malformed-refresh-semantic-json"
+        self._create_passed_run_dir_with_raw_runner_noise(run_dir)
+
+        manifest_path = (
+            run_dir
+            / "snapshots/refresh-run/reports/taskruns/refresh-run/staging/shards/domain-a/shard-pack-manifest.json"
+        )
+        write_text(
+            manifest_path,
+            "# Provider wrote markdown into the manifest path\n\nThis is malformed JSON and must stay reportable.\n",
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={
+                "expected_repo_count": 1,
+                "execution_profile": {
+                    "strategy": "sequential",
+                    "max_parallel_tasks": 1,
+                    "failure_policy": "best_effort",
+                    "shard_discovery_mode": "heuristics",
+                },
+            },
+            classification_row={
+                "failure_class": "runtime_contract_failed",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("none", result.failure_class)
+        self.assertIn("analysis:malformed-semantic-json", result.issues)
+        self.assertTrue(result.semantic_hard_fail)
+        self.assertTrue(
+            any("analysis/malformed-semantic-json" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
 
     def test_python_report_accepts_multi_repo_citations_and_cross_repo_findings_without_edges(self) -> None:
         run_dir = self.root / "run-multi-repo-citations-finding-links"
@@ -3328,6 +3933,66 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self.assertIn("skipped:snapshot_reports_missing", completed.stdout.strip(), completed.stdout)
 
+    def test_shell_frontend_failed_refresh_snapshot_is_not_eligible(self) -> None:
+        backend_run_dir = self.root / "frontend-backend-failed-refresh-snapshot"
+        output_dir = self.root / "frontend-output-failed-refresh"
+        (backend_run_dir / "arch-workspace").mkdir(parents=True, exist_ok=True)
+        write_text(
+            backend_run_dir / "run-status.env",
+            "\n".join(
+                [
+                    "provider=codex-code",
+                    "run_index=1",
+                    "state=process_failed",
+                    "process_exit=1",
+                    "termination_signal=none",
+                    "failure_reason=runtime_contract_failed",
+                    "summary_written=yes",
+                ]
+            )
+            + "\n",
+        )
+        write_text(
+            backend_run_dir / "run-results.tsv",
+            "\n".join(
+                [
+                    "1\theadless\tcodex-code\tinit\tinit-run\tsucceeded\t0\t0\t0\t0\t0\t0\t0\t0\tcodex-code@headless\t/tmp/init-quality.json\t/tmp/init.log",
+                    "1\theadless\tcodex-code\trefresh\trefresh-run\tfailed\t0\t0\t0\t0\t0\t0\t0\t1\tcodex-code@headless\t/tmp/refresh-quality.json\t/tmp/refresh.log",
+                ]
+            )
+            + "\n",
+        )
+        (backend_run_dir / "snapshots/refresh-run/reports/as-is").mkdir(parents=True, exist_ok=True)
+        write_text(
+            backend_run_dir / "snapshots/refresh-run/reports/as-is/overview.md",
+            "# Failed Refresh Scaffold\n",
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        result_path = output_dir / "frontend-e2e-result.json"
+        command = (
+            prelude
+            + "\n"
+            + f'run_frontend_live_e2e "codex-code" {shlex.quote(str(backend_run_dir))} {shlex.quote(str(output_dir))} "1"\n'
+            + "python3 - <<'PY'\n"
+            + "import json\n"
+            + f"from pathlib import Path\np = Path({str(result_path)!r})\n"
+            + "payload = json.loads(p.read_text(encoding='utf-8'))\n"
+            + "print(payload['status'] + ':' + payload['reason'])\n"
+            + f"print('frontend_workspace_exists=' + str((Path({str(output_dir)!r}) / 'frontend-workspace').exists()).lower())\n"
+            + "PY\n"
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertIn("skipped:snapshot_reports_missing", completed.stdout.strip(), completed.stdout)
+        self.assertIn("frontend_workspace_exists=false", completed.stdout.strip(), completed.stdout)
+
     def test_python_frontend_matrix_supports_per_run_results(self) -> None:
         batch_root = self.root / "batch"
         reports_root = self.root / "reports"
@@ -3340,6 +4005,13 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "workspace": "/tmp/qwen-run1",
                 "base_url": "http://127.0.0.1:18081",
                 "runtime_command": "qwen",
+                "diagnostic_refs": {
+                    "playwright_results": "/tmp/qwen-run1/playwright-results",
+                    "screenshots": [
+                        "/tmp/qwen-run1/playwright-results/frontend-source-desktop.png",
+                        "/tmp/qwen-run1/playwright-results/frontend-ask-desktop.png",
+                    ],
+                },
             },
         )
         write_json(
@@ -3362,6 +4034,17 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "workspace": "/tmp/qwen-run4",
                 "base_url": "http://127.0.0.1:18084",
                 "runtime_command": "qwen",
+                "run_id": "run_frontend_failed",
+                "last_run_status": "failed",
+                "last_run_error_code": "run_partial_failed",
+                "last_run_current_step": "init.step4.proposals",
+                "diagnostic_refs": {
+                    "playwright_results": "/tmp/qwen-run4/playwright-results",
+                    "screenshots": [
+                        "/tmp/qwen-run4/playwright-results/frontend-source-desktop.png",
+                        "/tmp/qwen-run4/playwright-results/frontend-analysis-failed-desktop.png",
+                    ],
+                },
             },
         )
         write_json(
@@ -3388,8 +4071,14 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("| qwen-code | 1 | passed | ok |", matrix_text)
         self.assertIn("| qwen-code | 3 | failed | browser_closed |", matrix_text)
         self.assertIn("| qwen-code | 4 | failed | runtime_run_failed |", matrix_text)
+        self.assertIn("run_id=run_frontend_failed", matrix_text)
+        self.assertIn("error_code=run_partial_failed", matrix_text)
+        self.assertIn("current_step=init.step4.proposals", matrix_text)
+        self.assertIn("screenshots=2", matrix_text)
+        self.assertIn("ask_screenshot=present", matrix_text)
+        self.assertIn("ask_screenshot=missing", matrix_text)
 
-    def test_quality_report_respects_selected_provider_surface(self) -> None:
+    def test_execution_report_respects_selected_provider_surface(self) -> None:
         reports_root = self.root / "reports-selected"
         quality_path = reports_root / "quality.md"
         frontend = [
@@ -3433,7 +4122,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         }
 
-        self.module.write_quality_report(
+        self.module.write_execution_report(
             quality_path,
             "batch-qwen-only",
             runs,
@@ -3444,11 +4133,15 @@ class BatchFailureClassificationTest(unittest.TestCase):
         report = quality_path.read_text(encoding="utf-8")
         self.assertIn("`1/1` backend full-runs", report)
         self.assertIn("выбранных провайдеров (`1/1`)", report)
+        self.assertIn("## Backend Execution Verdict", report)
+        self.assertIn("Machine execution verdict is based on runtime/preflight/frontend execution evidence only.", report)
+        self.assertIn("## Runtime Recovery And Artifact Telemetry", report)
+        self.assertIn("- artifact_quality_findings: 0", report)
         self.assertNotIn("10/10", report)
         self.assertNotIn("2/2", report)
         self.assertNotIn("| claude-code |", report)
 
-    def test_quality_report_marks_frontend_skipped_as_not_run(self) -> None:
+    def test_execution_report_marks_frontend_skipped_as_not_run(self) -> None:
         reports_root = self.root / "reports-frontend-skipped"
         quality_path = reports_root / "quality.md"
         frontend = [
@@ -3491,7 +4184,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         }
 
-        self.module.write_quality_report(
+        self.module.write_execution_report(
             quality_path,
             "batch-codex-skipped-frontend",
             runs,

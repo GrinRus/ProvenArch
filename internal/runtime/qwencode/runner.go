@@ -91,6 +91,10 @@ func (a qwenAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, valida
 	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderQwenCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
+func (a qwenAdapter) DraftArtifactEnrichmentCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderQwenCode, providercommon.FocusedRepairDraftEnrichment, validationErr, a.commandSpecWithPrompt)
+}
+
 func (a qwenAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderQwenCode)
 }
@@ -116,6 +120,7 @@ func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPo
 		RepairCollectArtifactPairOnce:               true,
 		RepairValidatorVerdictOnce:                  true,
 		RepairDraftArtifactsOnce:                    true,
+		RepairDraftArtifactEnrichmentOnce:           true,
 		RetryInvalidOrMissingArtifactsOnce:          true,
 		RetryZeroOutputPreArtifactStallOnce:         true,
 		RetryTransientProviderUnavailableRepairOnce: true,

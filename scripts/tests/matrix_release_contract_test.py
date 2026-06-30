@@ -210,26 +210,28 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
                 run_matrix_tsv="${REPORTS_ROOT}/run_matrix_${BATCH_ID}.tsv"
                 run_matrix_md="${REPORTS_ROOT}/run_matrix_${BATCH_ID}.md"
-                quality_report_md="${REPORTS_ROOT}/quality_report_${BATCH_ID}.md"
+                execution_report_md="${REPORTS_ROOT}/execution_report_${BATCH_ID}.md"
                 frontend_matrix_md="${REPORTS_ROOT}/frontend_e2e_matrix_${BATCH_ID}.md"
 
                 {
-                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tquality_gates_failed\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
+                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
                   for provider in "${selected_providers[@]}"; do
                     for run_idx in $(seq 1 "${RUN_COUNT}"); do
                       if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n' "${provider}" "${run_idx}"
                       elif [[ "${MATRIX_TEST_QWEN_BACKEND_FAILURE:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\n' "${provider}" "${run_idx}"
+                      elif [[ "${MATRIX_TEST_ARTIFACT_TELEMETRY:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t2\\tsnapshot\\tanalysis:cross-repo-missing,artifact:quality-warning\\n' "${provider}" "${run_idx}"
                       else
-                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n' "${provider}" "${run_idx}"
                       fi
                     done
                   done
                 } > "${run_matrix_tsv}"
 
                 printf '# run matrix\\n' > "${run_matrix_md}"
-                printf '# quality\\n' > "${quality_report_md}"
+                printf '# execution\\n' > "${execution_report_md}"
                 if [[ "${MATRIX_TEST_RAW_METADATA:-0}" == "1" ]]; then
                   raw_dir="${BATCH_ROOT}/qwen-code/run1/arch-workspace/reports/taskruns/raw"
                   mkdir -p "${raw_dir}"
@@ -409,6 +411,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "E2E_TMP_ROOT": str(self.e2e_tmp_root),
                 "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "E2E_MATRIX_MIN_FREE_KB": "0",
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
                 "ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE": "1",
@@ -546,6 +549,15 @@ class MatrixReleaseContractTest(unittest.TestCase):
         verdict = self._load_verdict(matrix_id)
         self.assertEqual(verdict["verdict"], "PASS")
         self.assertEqual(verdict["release_state"], "RELEASE READY")
+        for artifact_quality_key in (
+            "semantic_hard_fail_runs",
+            "off_topic_hits",
+            "evidence_scope_hits",
+            "cross_repo_missing_hits",
+            "quality_alerts",
+        ):
+            self.assertNotIn(artifact_quality_key, verdict["backend"])
+            self.assertNotIn(artifact_quality_key, verdict["records"][0]["backend"])
         release_contract = verdict["release_contract"]
         self.assertEqual(release_contract["contract_status"], "passed")
         self.assertEqual(release_contract["required_sweeps"], ["baseline", "parallel-default"])
@@ -557,6 +569,25 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
         calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(calls), 4)
+
+    def test_artifact_quality_telemetry_does_not_enter_release_execution_verdict(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-artifact-telemetry"
+        result = self._run_matrix(matrix_file, matrix_id, extra_env={"MATRIX_TEST_ARTIFACT_TELEMETRY": "1"})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual("PASS", verdict["verdict"])
+        for artifact_quality_key in (
+            "semantic_hard_fail_runs",
+            "off_topic_hits",
+            "evidence_scope_hits",
+            "cross_repo_missing_hits",
+            "quality_alerts",
+        ):
+            self.assertNotIn(artifact_quality_key, verdict["backend"])
+            for record in verdict["records"]:
+                self.assertNotIn(artifact_quality_key, record["backend"])
 
     def test_release_matrix_runs_all_combinations_when_child_batch_reads_stdin(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
@@ -775,6 +806,33 @@ class MatrixReleaseContractTest(unittest.TestCase):
         inventory_path = Path(status["inventory_json"])
         self.assertTrue(inventory_path.exists(), f"missing operational inventory: {inventory_path}")
 
+    def test_low_disk_preflight_materializes_operational_blocker_report(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-low-disk-preflight"
+        result = self._run_matrix(
+            matrix_file,
+            matrix_id,
+            extra_env={"E2E_MATRIX_MIN_FREE_KB": str(10**15)},
+            release_mode="0",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.sentinel_path.exists(), "child batch must not start after low-disk preflight")
+
+        verdict = self._load_matrix_result(matrix_id)
+        self.assertEqual("FAIL", verdict["result"])
+        self.assertEqual("non-release", verdict["mode"])
+        self.assertIn("insufficient free disk space", verdict["blocking_reasons"][0])
+
+        status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "matrix-operational-preflight.json"
+        self.assertTrue(status_path.exists(), f"missing operational profile status: {status_path}")
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+        self.assertEqual("failed", status["status"])
+        self.assertEqual("operational_host_preflight_failed", status["failure_reason"])
+        self.assertIn("insufficient free disk space", status["operational_blocker"])
+
+        inventory_path = Path(status["inventory_json"])
+        self.assertTrue(inventory_path.exists(), f"missing operational inventory: {inventory_path}")
+
     def test_path_sha_mismatch_materializes_profile_operational_blocker_without_child_run(self) -> None:
         repo, _head = self._create_git_repo("sha-mismatch")
         repos_file = self.tmp_root / "matrix-inputs" / "single-path-sha-mismatch.repos.yaml"
@@ -827,6 +885,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "E2E_TMP_ROOT": str(self.e2e_tmp_root),
                 "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
                 "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "E2E_MATRIX_MIN_FREE_KB": "0",
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
                 "MATRIX_TEST_SLEEP_SEC": "3",

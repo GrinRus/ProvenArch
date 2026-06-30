@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -17,8 +18,10 @@ import (
 )
 
 const (
-	successfulZeroOutputRetryWindow  = 30 * time.Second
-	successfulZeroOutputRetryTimeout = 45 * time.Second
+	successfulZeroOutputRetryWindow      = 30 * time.Second
+	successfulZeroOutputRetryTimeout     = 45 * time.Second
+	successfulArtifactWriteWindow        = 500 * time.Millisecond
+	successfulCollectPairRecoveryTimeout = 30 * time.Second
 )
 
 func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
@@ -38,6 +41,7 @@ func TestRunHeadlessProviderSucceedsWithValidArtifacts(t *testing.T) {
 
 func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "301")
+	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_WALL_CLOCK_SEC", "306")
 	t.Setenv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC", "302")
 	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "303")
 	t.Setenv("ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC", "304")
@@ -47,6 +51,9 @@ func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 
 	if got, want := policy.PreArtifactStallWindow, 301*time.Second; got != want {
 		t.Fatalf("pre artifact window = %s, want %s", got, want)
+	}
+	if got, want := policy.PreArtifactWallClockWindow, 306*time.Second; got != want {
+		t.Fatalf("pre artifact wall clock window = %s, want %s", got, want)
 	}
 	if got, want := policy.RetryPreArtifactStallWindow, 302*time.Second; got != want {
 		t.Fatalf("retry pre artifact window = %s, want %s", got, want)
@@ -62,6 +69,52 @@ func TestNormalizeActivityPolicyAppliesDiagnosticEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestDraftArtifactEnrichmentActivityPolicyExtendsPreArtifactWindow(t *testing.T) {
+	t.Parallel()
+
+	policy := draftArtifactEnrichmentActivityPolicy(acpruntime.Task{StepID: "init.step4.proposals"}, ActivityPolicy{
+		PreArtifactStallWindow:     90 * time.Second,
+		PreArtifactWallClockWindow: 90 * time.Second,
+	})
+
+	if got, want := policy.PreArtifactStallWindow, minDraftArtifactEnrichmentPreArtifactWindow; got != want {
+		t.Fatalf("pre artifact stall window = %s, want %s", got, want)
+	}
+	if got, want := policy.PreArtifactWallClockWindow, minDraftArtifactEnrichmentPreArtifactWindow; got != want {
+		t.Fatalf("pre artifact wall clock window = %s, want %s", got, want)
+	}
+	if policy.FreshArtifactMutationAfter.IsZero() {
+		t.Fatalf("expected fresh artifact mutation threshold to be set")
+	}
+}
+
+func TestCollectArtifactPairRepairActivityPolicyRequiresFreshMutationAndExtendsWindows(t *testing.T) {
+	t.Parallel()
+
+	policy := collectArtifactPairRepairActivityPolicy(ActivityPolicy{
+		PreArtifactStallWindow:     90 * time.Second,
+		PreArtifactWallClockWindow: 0,
+		PostArtifactStallWindow:    90 * time.Second,
+		PartialArtifactStallWindow: 90 * time.Second,
+	})
+
+	if got, want := policy.PreArtifactStallWindow, defaultCollectRepairWindow; got != want {
+		t.Fatalf("pre artifact stall window = %s, want %s", got, want)
+	}
+	if got, want := policy.PreArtifactWallClockWindow, defaultCollectRepairWindow; got != want {
+		t.Fatalf("pre artifact wall clock window = %s, want %s", got, want)
+	}
+	if got, want := policy.PostArtifactStallWindow, defaultCollectRepairWindow; got != want {
+		t.Fatalf("post artifact stall window = %s, want %s", got, want)
+	}
+	if got, want := policy.PartialArtifactStallWindow, defaultCollectRepairWindow; got != want {
+		t.Fatalf("partial artifact stall window = %s, want %s", got, want)
+	}
+	if policy.FreshArtifactMutationAfter.IsZero() {
+		t.Fatalf("expected fresh artifact mutation threshold to be set")
+	}
+}
+
 func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.T) {
 	t.Setenv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC", "bad")
 	t.Setenv("ACP_PROVIDER_POST_ARTIFACT_STALL_SEC", "-1")
@@ -73,6 +126,26 @@ func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.
 	}
 	if got, want := policy.PostArtifactStallWindow, defaultPostArtifactStallWindow; got != want {
 		t.Fatalf("post artifact window = %s, want default %s", got, want)
+	}
+}
+
+func TestFocusedRepairActivityPolicyUsesPreArtifactWallClockCap(t *testing.T) {
+	t.Parallel()
+
+	policy := focusedRepairActivityPolicy(ActivityPolicy{
+		MonitorArtifacts:           true,
+		MonitorPreArtifact:         true,
+		PreArtifactStallWindow:     time.Hour,
+		PreArtifactWallClockWindow: time.Hour,
+		PostArtifactStallWindow:    time.Hour,
+		PartialArtifactStallWindow: time.Hour,
+	}, true)
+
+	if got, want := policy.PreArtifactWallClockWindow, defaultFocusedRepairWindow; got != want {
+		t.Fatalf("focused repair pre-artifact wall clock window = %s, want %s", got, want)
+	}
+	if !policy.MonitorPreArtifact {
+		t.Fatal("focused repair should monitor pre-artifact activity")
 	}
 }
 
@@ -133,9 +206,11 @@ done`
 	runner := testAdapter{
 		command: writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, tail)),
 		activity: ActivityPolicy{
-			MonitorArtifacts:           true,
-			MonitorPreArtifact:         true,
-			PreArtifactStallWindow:     5 * time.Second,
+			MonitorArtifacts:   true,
+			MonitorPreArtifact: true,
+			// This test exercises the valid-artifact stop path; keep the
+			// pre-artifact budget roomy enough for loaded live prechecks.
+			PreArtifactStallWindow:     20 * time.Second,
 			PostArtifactStallWindow:    time.Second,
 			PartialArtifactStallWindow: time.Second,
 			ValidArtifactStopWindow:    50 * time.Millisecond,
@@ -146,7 +221,7 @@ done`
 		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -249,6 +324,9 @@ func TestRunHeadlessProviderClassifiesSilentRetryExhaustionUnavailable(t *testin
 	}
 	if got := int(activityPolicy["pre_artifact_stall_window_ms"].(float64)); got != 1000 {
 		t.Fatalf("expected pre-artifact window diagnostic 1000ms, got %d", got)
+	}
+	if _, ok := activityPolicy["pre_artifact_wall_clock_window_ms"].(float64); !ok {
+		t.Fatalf("expected pre-artifact wall clock diagnostic, got %#v", activityPolicy)
 	}
 }
 
@@ -470,6 +548,28 @@ func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
 	}
 }
 
+func TestMergedCommandEnvAppliesOverrides(t *testing.T) {
+	t.Parallel()
+
+	env := mergedCommandEnv([]string{"A=old", "B=keep"}, map[string]string{"A": "new", "CODEX_HOME": "/tmp/codex-home"})
+	got := map[string]string{}
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			got[key] = value
+		}
+	}
+	if got["A"] != "new" {
+		t.Fatalf("expected A override, got %q from %v", got["A"], env)
+	}
+	if got["B"] != "keep" {
+		t.Fatalf("expected existing B to remain, got %q from %v", got["B"], env)
+	}
+	if got["CODEX_HOME"] != "/tmp/codex-home" {
+		t.Fatalf("expected CODEX_HOME override, got %q from %v", got["CODEX_HOME"], env)
+	}
+}
+
 func TestForwardStreamOutputRedactsSecretLikeText(t *testing.T) {
 	t.Parallel()
 
@@ -606,6 +706,72 @@ func TestRunHeadlessProviderClassifiesContextDeadlineAsRuntimeTimeout(t *testing
 	if strings.TrimSpace(runnerErr.RawOutputRefs.Metadata) == "" {
 		t.Fatal("expected raw output metadata reference")
 	}
+	rawMeta, readErr := os.ReadFile(filepath.Join(task.Workspace, filepath.FromSlash(runnerErr.RawOutputRefs.Metadata)))
+	if readErr != nil {
+		t.Fatalf("read raw metadata: %v", readErr)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(rawMeta, &meta); err != nil {
+		t.Fatalf("decode raw metadata: %v", err)
+	}
+	diagnostics, ok := meta["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected diagnostics block in timeout metadata: %#v", meta)
+	}
+	lifecycle, ok := diagnostics["provider_lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected provider lifecycle diagnostics: %#v", diagnostics)
+	}
+	if _, ok := lifecycle["last_pipe_activity_at"].(string); !ok {
+		t.Fatalf("expected last pipe activity diagnostic, got %#v", lifecycle)
+	}
+	if _, ok := lifecycle["no_progress_duration_ms"].(float64); !ok {
+		t.Fatalf("expected no-progress duration diagnostic, got %#v", lifecycle)
+	}
+	if got := lifecycle["artifact_observed"]; got != false {
+		t.Fatalf("expected artifact_observed=false before artifacts, got %#v", got)
+	}
+	if got := lifecycle["artifact_valid"]; got != false {
+		t.Fatalf("expected artifact_valid=false before artifacts, got %#v", got)
+	}
+}
+
+func TestRunHeadlessProviderContextDeadlineKillsChildProcessGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group kill semantics are Unix-only")
+	}
+
+	task := newDraftTask(t, "run-timeout-process-group")
+	survivorMarker := filepath.Join(task.Workspace, "child-survived")
+	script := strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"(",
+		"  trap '' TERM",
+		"  sleep 1",
+		"  printf '%s\\n' survived > " + shellQuote(survivorMarker),
+		") &",
+		"wait",
+	}, "\n") + "\n"
+	runner := testAdapter{command: writeEngineScript(t, script)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeTimeout {
+		t.Fatalf("expected runtime_timeout, got %s (%v)", runnerErr.Code, err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, statErr := os.Stat(survivorMarker); !os.IsNotExist(statErr) {
+		t.Fatalf("expected child process group to be killed before marker write, stat err=%v", statErr)
+	}
 }
 
 func TestRunHeadlessProviderRetriesArtifactValidationFailureWhenPolicyAllows(t *testing.T) {
@@ -704,9 +870,11 @@ done
 		command:       writeEngineScript(t, initialScript),
 		repairCommand: writeEngineScript(t, repairScript),
 		activity: ActivityPolicy{
-			PollInterval:       5 * time.Millisecond,
-			PostTerminateDrain: 10 * time.Millisecond,
-			TerminateGrace:     10 * time.Millisecond,
+			MonitorArtifacts:        true,
+			ValidArtifactStopWindow: 50 * time.Millisecond,
+			PollInterval:            5 * time.Millisecond,
+			PostTerminateDrain:      10 * time.Millisecond,
+			TerminateGrace:          10 * time.Millisecond,
 		},
 		recovery: RecoveryPolicy{
 			AcceptValidArtifactsAfterStop: true,
@@ -714,7 +882,7 @@ done
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -774,6 +942,12 @@ exit 0
 	}
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	if recovery, ok := result.Diagnostics["collect_manifest_runtime_recovery"].(map[string]any); !ok || recovery["source"] != "runtime_recovery" || recovery["provider_authored"] != false {
+		t.Fatalf("expected explicit runtime recovery diagnostics, got %#v", result.Diagnostics)
 	}
 	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
 	if err != nil {
@@ -898,6 +1072,748 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRejectsStructuralInvalidCollectManifestAfterRepairExhaustion(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-structural-invalid-exhausted")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+exit 0
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted structural manifest repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "manifest-only collect repair did not produce valid collect artifacts") {
+		t.Fatalf("expected manifest repair exhaustion to remain terminal, got %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest repair exhausted", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("expected collect manifest repair exhausted diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("structural-invalid manifest repair exhaustion must not be converted into deterministic recovery success: %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderEscalatesMissingRepoEvidenceInMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-missing-repo-evidence-pair-repair")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- missing-evidence.md is the configured runtime evidence file.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run when markdown cites missing repo evidence' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Gap
+- The previous missing-evidence.md reference was not present in the repo and is excluded from citations.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected missing repo evidence markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for markdown with missing repo evidence claims: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if !strings.Contains(string(docRaw), "README.md identifies Bank of Anthos") {
+		t.Fatalf("expected pair repair to rewrite authored markdown, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderEscalatesEmptyCollectMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-empty-markdown-pair-repair")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+: > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+: > ` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + `
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for empty authored markdown' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected empty collect markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for empty authored markdown: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if !strings.Contains(string(docRaw), "README.md identifies Bank of Anthos") {
+		t.Fatalf("expected pair repair to write evidence-backed markdown, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderEscalatesDigestOnlyPartialCollectToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-digest-only-pair-repair")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	docPath := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	manifest = strings.Replace(manifest, `"canonical_path": "reports/as-is/bank/overview.md"`, `"canonical_path": "`+steppolicy.CollectManifestCanonicalPath(task, docRel)+`"`, 1)
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "collect-digest.txt")) + ` <<'EOF'
+=== BIN DIRECTORY LISTING ===
+bin/docker
+bin/migrate
+bin/posthog-node
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run when no authored markdown exists' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docPath)) + `
+cat >` + shellQuote(docPath) + ` <<'EOF'
+# Bank Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the scoped runtime surface.
+- The digest-only partial output listed executable entrypoints but did not provide an authored collect document.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected digest-only partial collect to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for digest-only partial collect output: %#v", diagnostics)
+	}
+	if _, err := os.Stat(docPath); err != nil {
+		t.Fatalf("expected pair repair to create authored markdown %s: %v", docRel, err)
+	}
+}
+
+func TestRunHeadlessProviderEscalatesProcessContaminatedMarkdownToPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-contaminated-pair-repair")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	manifestOnlyRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'manifest-only repair must not run for process-contaminated markdown' >&2
+exit 9
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestOnlyRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected process-contaminated markdown to be repaired as a pair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("manifest-only repair must not run for process-contaminated markdown: %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(docRaw)), "bounded read") {
+		t.Fatalf("expected pair repair to remove process narration, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderFallsBackToManifestRepairAfterProcessPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-pair-manifest-fallback")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	badManifest := strings.Replace(collectManifestJSON(task), `,
+      "document_ids": ["doc.bank.overview"]`, "", 1)
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected manifest-only fallback after process pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("expected collect_manifest_repair fallback diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRuntimeRecoversClaimlessManifestAfterProcessPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-process-pair-claimless-manifest")
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	badManifest := strings.Replace(collectManifestJSON(task), `"claim_ids": ["claim.bank.readme"]`, `"claim_ids": []`, 1)
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Runtime surfaces
+- The scoped shard records a README-backed architecture overview for the bank runtime.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	manifestRepairMarker := filepath.Join(task.Workspace, "claimless-manifest-repair-called")
+	manifestRepairScript := `#!/usr/bin/env bash
+set -eu
+printf called > ` + shellQuote(manifestRepairMarker) + `
+exit 7
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		repairCommand:     writeEngineScript(t, manifestRepairScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected deterministic claim binding recovery after pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, statErr := os.Stat(manifestRepairMarker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("provider manifest-only repair should not run for claim_ids-only binding recovery, statErr=%v", statErr)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "collect manifest repair scheduled", "recovery_mode", "collect_manifest_repair") {
+		t.Fatalf("provider manifest-only repair should not run for claim_ids-only binding recovery: %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("expected collect_manifest_runtime_recovery completed diagnostic, got %#v", diagnostics)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"claim_ids"`) || !strings.Contains(string(raw), "runtime_recovery") {
+		t.Fatalf("expected recovered manifest to include non-empty claim ids and runtime recovery marker, got %s", raw)
+	}
+}
+
+func TestRunHeadlessProviderRetriesSilentNoFreshCollectPairRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-no-fresh-retry")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte(`# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+`), 0o644); err != nil {
+		t.Fatalf("write stale collect doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName), []byte(collectManifestJSON(task)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stale collect manifest: %v", err)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'collect command completed with stale artifacts'
+`
+	firstPairRepairScript := `#!/usr/bin/env bash
+set -eu
+sleep 30
+`
+	secondPairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &pairRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, initialScript),
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          false,
+				PreArtifactStallWindow:      500 * time.Millisecond,
+				RetryPreArtifactStallWindow: 250 * time.Millisecond,
+				PreArtifactWallClockWindow:  5 * time.Second,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
+				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RepairCollectManifestOnce:                true,
+				RepairCollectArtifactPairOnce:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		pairRepairCommands: []string{
+			writeEngineScript(t, firstPairRepairScript),
+			writeEngineScript(t, secondPairRepairScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected silent no-fresh collect pair repair retry to succeed, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair retry scheduled diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("first silent no-fresh repair should retry before exhaustion, got %#v", diagnostics)
+	}
+	docRaw, err := os.ReadFile(filepath.Join(task.WriteRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read repaired doc: %v", err)
+	}
+	if strings.Contains(strings.ToLower(string(docRaw)), "bounded read") {
+		t.Fatalf("expected retry to replace process narration, got:\n%s", docRaw)
+	}
+}
+
+func TestRunHeadlessProviderClassifiesExhaustedSilentNoFreshCollectPairRepairUnavailable(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-no-fresh-exhausted")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte(`# Collect Overview
+
+The initial bounded read includes README.md, but this artifact still records runtime collection mechanics instead of operator-facing architecture evidence.
+`), 0o644); err != nil {
+		t.Fatalf("write stale collect doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName), []byte(collectManifestJSON(task)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stale collect manifest: %v", err)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'collect command completed with stale artifacts'
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+sleep 5
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          false,
+			PreArtifactStallWindow:      500 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PreArtifactWallClockWindow:  3 * time.Second,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectManifestOnce:                true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected exhausted silent no-fresh collect pair repair to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
+		t.Fatalf("expected runner_unavailable for exhausted silent no-fresh repair, got %s (%v)", runnerErr.Code, err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair retry scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair exhausted diagnostic after retry, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRejectsMissingRepoEvidencePairRepairNoopMarkdown(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-missing-repo-evidence-pair-noop")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badManifest := strings.ReplaceAll(collectManifestJSON(task), `"path": "README.md"`, `"path": "missing-evidence.md"`)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- missing-evidence.md is the configured runtime evidence file.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "aaa-general.md")) + ` <<'EOF'
+# General Note
+
+README.md exists but this file did not contain the stale missing evidence claim.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	pairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "aaa-general.md")) + ` <<'EOF'
+# General Note
+
+README.md was rewritten, but the stale overview.md claim remains untouched.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:           writeEngineScript(t, initialScript),
+		pairRepairCommand: writeEngineScript(t, pairRepairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+			RepairCollectArtifactPairOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected pair repair that leaves stale markdown unchanged to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "collect_pair_repair_noop_or_stale_markdown") {
+		t.Fatalf("expected stale markdown repair failure, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRejectsBootstrapOnlyAuthoredDocWithoutPairRepair(t *testing.T) {
 	t.Parallel()
 
@@ -1002,8 +1918,8 @@ EOF
 			MonitorPreArtifact:          false,
 			PreArtifactStallWindow:      250 * time.Millisecond,
 			RetryPreArtifactStallWindow: 250 * time.Millisecond,
-			PostArtifactStallWindow:     20 * time.Millisecond,
-			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
 			TerminateGrace:              10 * time.Millisecond,
@@ -1014,7 +1930,7 @@ EOF
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
 	if err != nil {
@@ -1144,8 +2060,8 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 			MonitorPreArtifact:          false,
 			PreArtifactStallWindow:      250 * time.Millisecond,
 			RetryPreArtifactStallWindow: 250 * time.Millisecond,
-			PostArtifactStallWindow:     20 * time.Millisecond,
-			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 			PollInterval:                5 * time.Millisecond,
 			PostTerminateDrain:          10 * time.Millisecond,
 			TerminateGrace:              10 * time.Millisecond,
@@ -1156,7 +2072,7 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
@@ -1177,12 +2093,81 @@ printf '%s\n' '# Repair Notes' > ` + shellQuote(filepath.Join(task.WriteRoot, "r
 	}
 }
 
-func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
+func TestRunHeadlessProviderRepairsSilentRetryExhaustedCollectWithPairRepair(t *testing.T) {
 	t.Parallel()
 
-	task := newCollectTask(t, "run-collect-pair-repair-silent")
+	task := newCollectTask(t, "run-collect-pair-repair-silent-retry")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	docAbs := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docAbs)) + `
+cat >` + shellQuote(docAbs) + ` <<'EOF'
+# Collect Overview
+
+## Observations
+- README.md identifies the assigned collect surface for this shard.
+- Deployment and source files should be reviewed before downstream recommendations.
+
+## Evidence
+- README.md
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
 	runner := testAdapter{
-		command: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     successfulArtifactWriteWindow,
+			PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectArtifactPairOnce:            true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected silent collect retry exhaustion to run collect pair repair, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderFailsSilentCollectWhenPairRepairProducesNoArtifacts(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-repair-silent-empty")
+	runner := testAdapter{
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
 		activity: ActivityPolicy{
 			MonitorArtifacts:            true,
 			MonitorPreArtifact:          true,
@@ -1198,15 +2183,16 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 			AcceptValidArtifactsAfterStop:            true,
 			RepairCollectArtifactPairOnce:            true,
 			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
 			ClassifySilentRetryExhaustionUnavailable: true,
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, err := RunHeadlessProvider(ctx, task, runner)
 	if err == nil {
-		t.Fatal("expected silent collect to remain provider unavailable")
+		t.Fatal("expected empty collect pair repair to fail")
 	}
 	var runnerErr acpruntime.RunnerError
 	if !errors.As(err, &runnerErr) {
@@ -1215,8 +2201,85 @@ func TestCollectPairRepairDoesNotMaskSilentNoArtifactCollect(t *testing.T) {
 	if runnerErr.Code != acpruntime.ErrorCodeRunnerUnavailable {
 		t.Fatalf("expected runner_unavailable, got %s (%v)", runnerErr.Code, err)
 	}
-	if strings.Contains(runnerErr.Error(), "collect_pair_repair") {
-		t.Fatalf("silent no-artifact collect should not enter collect pair repair, got %v", err)
+	if !strings.Contains(runnerErr.Error(), "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRecoversManifestAfterPartialPairRepairStall(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-pair-partial-manifest-recovery")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	docAbs := filepath.Join(task.WriteRoot, filepath.FromSlash(docRel))
+	repairScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(filepath.Dir(docAbs)) + `
+cat >` + shellQuote(docAbs) + ` <<'EOF'
+# Collect Repair Overview
+
+## Runtime Surfaces
+- **Payments API** exposes request handlers for account activity.
+- **Ledger Worker** persists balance changes.
+- **Postgres** stores transaction state.
+
+## Operational Gaps
+- Ownership and escalation are not confirmed in this shard.
+EOF
+sleep 5
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := testAdapter{
+		command:           writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nsleep 5\n"),
+		pairRepairCommand: writeEngineScript(t, repairScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:            true,
+			MonitorPreArtifact:          true,
+			PreArtifactStallWindow:      20 * time.Millisecond,
+			RetryPreArtifactStallWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:     20 * time.Millisecond,
+			PartialArtifactStallWindow:  20 * time.Millisecond,
+			PollInterval:                5 * time.Millisecond,
+			PostTerminateDrain:          10 * time.Millisecond,
+			TerminateGrace:              10 * time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:            true,
+			RepairCollectArtifactPairOnce:            true,
+			RepairCollectManifestOnce:                true,
+			RetryInvalidOrMissingArtifactsOnce:       true,
+			RetryZeroOutputPreArtifactStallOnce:      true,
+			ClassifySilentRetryExhaustionUnavailable: true,
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected partial pair repair to recover missing manifest, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected collect_pair_repair exhausted diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest runtime recovery completed", "recovery_mode", "collect_manifest_runtime_recovery") {
+		t.Fatalf("expected runtime manifest recovery diagnostic, got %#v", diagnostics)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read recovered manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), "collect_manifest.runtime_recovery") {
+		t.Fatalf("expected runtime recovery finding in manifest, got %s", raw)
 	}
 }
 
@@ -1381,6 +2444,9 @@ printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot
 	if result.Execution.Status != "succeeded" {
 		t.Fatalf("unexpected execution status: %+v", result.Execution)
 	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json") {
+		t.Fatalf("expected runtime recovery warning, got %#v", result.Execution.Warnings)
+	}
 	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
 	if err != nil {
 		t.Fatalf("read recovered manifest: %v", err)
@@ -1481,7 +2547,7 @@ EOF
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
 				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
-				PostArtifactStallWindow:     20 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
 				TerminateGrace:              10 * time.Millisecond,
@@ -1809,6 +2875,1095 @@ func TestRunHeadlessProviderRepairsAsIsDraftArtifactsWithAllDraftFiles(t *testin
 	}
 }
 
+func TestRunHeadlessProviderEnrichesBootstrapOnlyDraftAfterRepairStall(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-after-stall")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	repairScript := asIsBootstrapDraftScript(task, "sleep 5")
+	enrichmentScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     50 * time.Millisecond,
+			PostArtifactStallWindow:    50 * time.Millisecond,
+			PartialArtifactStallWindow: 50 * time.Millisecond,
+			PollInterval:               10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
+			PostTerminateDrain:         time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected draft enrichment success after scaffold repair stall, got %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-direct")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	enrichmentScript := asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected direct draft enrichment success for bootstrap-only draft, got %v", err)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_repair") {
+		t.Fatalf("bootstrap-only draft validation must skip scaffold draft repair, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentMissingPython(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-python-missing")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	missingPythonScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"printf '%s\\n' 'zsh:1: command not found: python'",
+		"exit 1",
+	}, "\n")+"\n")
+	enrichmentScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{missingPythonScript, enrichmentScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected missing-python draft enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected completed draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read enriched overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftEnrichmentNoopOrScaffoldWithoutRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-no-action")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	noopScript := writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{noopScript},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected noop/scaffold draft enrichment to fail without a second enrichment retry")
+	}
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected exactly one draft enrichment call, got %d", runner.draftCalls)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
+		t.Fatalf("noop/scaffold enrichment must not schedule no-action retry, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected noop/scaffold enrichment failure, got %v", err)
+	}
+}
+
+func TestShouldRetryDraftSilentWriteFirstEnrichmentOnlyForPreArtifactNoFreshMutation(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-silent-write-first")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime draft recovery initialized this artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent pre-artifact noop/scaffold enrichment to allow one write-first retry")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("write-first retry must not retry itself")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("analysis/status stdout must not trigger silent write-first retry")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must not trigger silent write-first retry")
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored as-is draft artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must use cleanup-specific retries or fail, not silent write-first retry")
+	}
+}
+
+func TestShouldRetryDraftCompactStep2EnrichmentOnlyAfterSilentWriteFirstRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-compact-step2")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime draft recovery initialized this artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent no-fresh write-first step2 retry to schedule compact step2 enrichment")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_compact_step2_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must not recursively schedule itself")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must only follow the write-first enrichment retry")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("stdout/status output must not trigger compact step2 retry")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must use cleanup-specific retries or fail")
+	}
+	step4 := newProposalsDraftTask(t, "run-proposals-draft-enrichment-compact-denied")
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", step4, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step2 retry must not apply to non-step2 draft stages")
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored as-is draft artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must not schedule compact step2 retry")
+	}
+}
+
+func TestShouldRetryDraftCompactStep4EnrichmentOnlyAfterSilentWriteFirstRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-enrichment-compact-step4")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for _, name := range []string{"proposal.md", "changelog.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Bootstrap\n\nRuntime proposal surface initialized for this run.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
+
+	if !shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("expected silent no-fresh write-first step4 retry to schedule compact step4 enrichment")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_compact_step4_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must not recursively schedule itself")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must only follow the write-first enrichment retry")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{Stdout: "I have enough evidence"}, preArtifact, noopErr) {
+		t.Fatal("stdout/status output must not trigger compact step4 retry")
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, StallDiagnostic{StallPhase: StallPhasePostArtifact}, noopErr) {
+		t.Fatal("post-artifact scaffold failure must use cleanup-specific retries or fail")
+	}
+	step2 := newAsIsDraftTask(t, "run-asis-draft-enrichment-compact-denied")
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", step2, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("compact step4 retry must not apply to non-step4 draft stages")
+	}
+	for _, name := range []string{"proposal.md", "changelog.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Enriched\n\nProvider authored proposal artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write enriched draft %s: %v", name, err)
+		}
+	}
+	if shouldRetryDraftCompactStep4Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
+		t.Fatal("fresh markdown mutation must not schedule compact step4 retry")
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-printed-command")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	printedCommandScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"printf '%s\\n' \"python3 - <<'PY'\"",
+		"printf '%s\\n' \"from pathlib import Path\"",
+		"printf '%s\\n' \"# command text printed but not executed\"",
+		"printf '%s\\n' \"PY\"",
+		"exit 0",
+	}, "\n")+"\n")
+	enrichmentScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{printedCommandScript, enrichmentScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected printed-command draft enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_no_action_retry") {
+		t.Fatalf("printed-command enrichment must not schedule no-action retry, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_command_text_retry") {
+		t.Fatalf("expected command-text retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful command-text retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read enriched overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentManifestShape(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-manifest-shape")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	invalidManifestScript := writeEngineScript(t, asIsDraftEnrichmentWithInvalidManifestShapeScript(task, "First evidence-backed enrichment before manifest shape retry."))
+	validManifestScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{invalidManifestScript, validManifestScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected manifest-shape draft enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_manifest_shape") {
+		t.Fatalf("expected manifest-shape retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful manifest-shape retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read enriched overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-index-claim")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	badIndexClaimScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Coverage Summary",
+		"",
+		"- A consolidated final-run-index.json with canonical_documents was not observed for the current run.",
+		"- A citation-index.json was not observed for the current run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{badIndexClaimScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected downstream-index claim enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_downstream_index_retry") {
+		t.Fatalf("expected downstream index retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful downstream index retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentShardStatusCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-shard-status")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	genericShardStatusScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"## Operator Decision",
+		"- Review any failed or incomplete shards from the typed summary and re-run collection if needed.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Coverage Summary",
+		"",
+		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
+		"EOF",
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"## Operator Decision",
+		"Shard completeness is complete for the current run: 16 planned, 16 succeeded, 0 failed, and 0 incomplete shard statuses. The operator should inspect architecture evidence density and proposal readiness next.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{genericShardStatusScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected shard-status cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_shard_status_cleanup") {
+		t.Fatalf("expected shard-status cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful shard-status cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestShouldRetryDraftShardStatusCleanupEnrichmentMatchesShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" does not report exact current-run shard completeness from typed shard summary: planned=16 succeeded=16 failed=0 incomplete=0`)
+	if !shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment", err) {
+		t.Fatalf("expected exact shard-completeness error to trigger cleanup retry")
+	}
+	if shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment_shard_status_cleanup", err) {
+		t.Fatalf("cleanup retry must not recursively schedule itself")
+	}
+	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: " + err.Error())
+	if shouldRetryDraftShardStatusCleanupEnrichment("draft_artifact_enrichment", noopErr) {
+		t.Fatalf("noop/scaffold enrichment must use write-first/compact retry before shard-status cleanup")
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentMarkerCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-enrichment-marker-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"- Runtime proposal surface initialized for this analysis run.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"- Runtime proposal surface initialized for this analysis run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	markerContaminatedScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"## Decision / recommended operator action",
+		"Accept the current proposal package as no-actionable-change evidence.",
+		"",
+		"## Evidence used",
+		"- reports/findings/findings.md",
+		"",
+		"## Proposed changes or follow-up plan",
+		"- No actionable proposal evidence was present in the current-run findings; keep the operator decision on reports/findings/findings.md.",
+		"",
+		"## Risks, gaps, and out-of-scope notes",
+		"- No validator/finding summary artifacts with structured findings were observed in the bounded read roots.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"## Updated architecture/proposal surfaces",
+		"- proposals/runtime-recommendations.md was rewritten during bounded read roots cleanup.",
+		"",
+		"## Findings/proposals summary",
+		"No validator/finding summary artifacts with structured findings were observed in the bounded read roots.",
+		"",
+		"## Evidence index or citation references",
+		"- cite.ftgo.accounting.authorize.contract",
+		"",
+		"## Residual coverage gaps",
+		"- Proposal evidence remains absent after bounded read roots cleanup.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, proposalsDraftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"## Decision / recommended operator action",
+		"Accept the current proposal package as no-actionable-change evidence.",
+		"",
+		"## Evidence used",
+		"- reports/findings/findings.md",
+		"",
+		"## Proposed changes or follow-up plan",
+		"- No actionable proposal evidence was present in the current-run findings; keep the operator decision on reports/findings/findings.md.",
+		"",
+		"## Risks, gaps, and out-of-scope notes",
+		"- Proposal evidence remains absent for this current run.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"## Updated architecture/proposal surfaces",
+		"- proposals/runtime-recommendations.md records that no proposal was promoted from the current run.",
+		"",
+		"## Findings/proposals summary",
+		"No structured finding summary was present in current-run proposal evidence.",
+		"",
+		"## Evidence index or citation references",
+		"- cite.ftgo.accounting.authorize.contract",
+		"",
+		"## Residual coverage gaps",
+		"- Proposal evidence remains absent for this current run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{markerContaminatedScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected marker cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_marker_cleanup") {
+		t.Fatalf("expected marker cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful marker cleanup retry must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesStep0DraftEnrichmentMarkerCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-constitution-draft-enrichment-marker-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"Draft surface initialized for the scoped repository analysis.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	downstreamContaminatedScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Operating Principles",
+		"- This constitution does not depend on validator output or pipeline artifacts.",
+		"- The draft manifest retains its existing outputs array.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Repository Evidence",
+		"- README.md describes the target service surface.",
+		"",
+		"## Operator Decision",
+		"Proceed with service-level analysis and record any missing repository evidence as a gap.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{downstreamContaminatedScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected step0 marker cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_marker_cleanup") {
+		t.Fatalf("expected step0 marker cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentWriteSetCleanupForDuplicatedWriteRootDrafts(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-write-set-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	duplicateScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cp \"$draft_root/$name\" \"$write_root/$name\"",
+		"done",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"rm -f \"$write_root/overview.md\" \"$write_root/summary.md\" \"$write_root/architect-summary.md\"",
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{duplicateScript, cleanupScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected write-set cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if _, err := os.Stat(filepath.Join(task.WriteRoot, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s duplicate to be absent from write_root, got err=%v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, name)); err != nil {
+			t.Fatalf("expected %s to remain under draft_final_root: %v", name, err)
+		}
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_write_set_cleanup") {
+		t.Fatalf("expected write-set cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful write-set cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRetriesStep0DraftEnrichmentCanonicalPathCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-constitution-draft-enrichment-canonical-cleanup")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"Draft surface initialized for the scoped repository analysis.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	canonicalDuplicateScript := writeEngineScript(t, draftScript(task, strings.Join([]string{
+		"cat >\"$draft_root/charter-overview.md\" <<'EOF'",
+		"# Constitution",
+		"",
+		"## Repository Evidence",
+		"- README.md identifies the selected repository entrypoint.",
+		"",
+		"## Operator Decision",
+		"Proceed with the architecture pass and inspect missing entrypoint evidence as an explicit gap.",
+		"EOF",
+		"mkdir -p \"$draft_root/skills\"",
+		"cp \"$draft_root/baseline-subagents.yaml\" \"$draft_root/skills/subagents.yaml\"",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"rm -f \"$draft_root/skills/subagents.yaml\"",
+		"rmdir \"$draft_root/skills\" 2>/dev/null || true",
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{canonicalDuplicateScript, cleanupScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected step0 canonical path cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, "baseline-subagents.yaml")); err != nil {
+		t.Fatalf("expected baseline-subagents.yaml to remain under draft_final_root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, "skills", "subagents.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected canonical duplicate to be absent from draft_final_root, got err=%v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_write_set_cleanup") {
+		t.Fatalf("expected write-set cleanup stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful canonical cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderDoesNotRetryDraftEnrichmentWriteSetCleanupWithExtraDraftRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-write-set-cleanup-extra-draft")
+	duplicateAndExtraScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cp \"$draft_root/$name\" \"$write_root/$name\"",
+		"done",
+		"printf '%s\\n' '# Extra' > \"$draft_root/extra.md\"",
+		"exit 0",
+	}, "\n")))
+	cleanupScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"rm -f " + shellQuote(filepath.Join(task.WriteRoot, "overview.md")),
+		"exit 0",
+	}, "\n")+"\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{duplicateAndExtraScript, cleanupScript},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected write-set cleanup to be unavailable when draft_final_root has extra files")
+	}
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected no cleanup retry for mixed write-root/draft-root violation, got %d calls", runner.draftCalls)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftEnrichmentNoopAfterCommandTextRetry(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-no-action-exhausted")
+	printedCommandScript := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"printf '%s\\n' \"python3 - <<'PY'\"",
+		"printf '%s\\n' \"from pathlib import Path\"",
+		"printf '%s\\n' \"# command text printed but not executed\"",
+		"printf '%s\\n' \"PY\"",
+		"exit 0",
+	}, "\n")+"\n")
+	noopScript := writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{printedCommandScript, noopScript},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected noop/scaffold output after command-text retry to fail")
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected exactly two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected noop/scaffold enrichment failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRetriesDraftEnrichmentMalformedMarkdown(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-markdown-syntax")
+	enrichmentScript := asIsMalformedThenValidEnrichmentScript(task)
+	runner := testAdapter{
+		command:                writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected malformed markdown syntax retry to recover draft enrichment, got %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read overview: %v", err)
+	}
+	if !strings.Contains(string(raw), "Valid overview after markdown syntax retry") {
+		t.Fatalf("expected second enrichment content, got:\n%s", string(raw))
+	}
+}
+
+func TestRunHeadlessProviderRejectsBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-invalid")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsBootstrapDraftScript(task, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected bootstrap-only draft enrichment to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected enrichment failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsStalledBootstrapOnlyDraftAfterEnrichment(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-stalled-scaffold")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsBootstrapDraftScript(task, "sleep 5")
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		activity: ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     50 * time.Millisecond,
+			PostArtifactStallWindow:    50 * time.Millisecond,
+			PartialArtifactStallWindow: 50 * time.Millisecond,
+			PollInterval:               10 * time.Millisecond,
+			TerminateGrace:             10 * time.Millisecond,
+			PostTerminateDrain:         time.Millisecond,
+		},
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected stalled bootstrap-only draft enrichment to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft_artifact_enrichment_noop_or_scaffold") {
+		t.Fatalf("expected noop/scaffold enrichment failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftEnrichmentExtraWriteRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-extra-write")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsDraftScript(
+		task,
+		[]string{"overview.md", "summary.md", "architect-summary.md"},
+		"printf '%s\\n' '# Extra' > "+shellQuote(filepath.Join(task.WriteRoot, "extra.md"))+"\n",
+	)
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected draft enrichment write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
+	}
+}
+
+func TestRunHeadlessProviderRejectsDraftEnrichmentUnreferencedDraftRootFiles(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-extra-draft-root")
+	repairScript := asIsBootstrapDraftScript(task, "exit 0")
+	enrichmentScript := asIsDraftScript(
+		task,
+		[]string{"overview.md", "summary.md", "architect-summary.md"},
+		"printf '%s\\n' '# Extra' > "+shellQuote(filepath.Join(task.DraftFinalRoot, "extra.md"))+"\n",
+	)
+	runner := testAdapter{
+		command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+		draftRepairCommand:     writeEngineScript(t, repairScript),
+		draftEnrichmentCommand: writeEngineScript(t, enrichmentScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected draft enrichment write-set contract failure")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "draft enrichment wrote outside the draft artifact write set") {
+		t.Fatalf("expected draft enrichment write-set failure, got %v", err)
+	}
+	if !strings.Contains(runnerErr.Error(), "forbidden draft_final_root files") {
+		t.Fatalf("expected draft_final_root write-set detail, got %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRetriesTransientAPIErrorDraftArtifactRepair(t *testing.T) {
 	task := newAsIsDraftTask(t, "run-asis-draft-repair-api-retry")
 	diagnostics := []acpruntime.DiagnosticEvent{}
@@ -1968,7 +4123,7 @@ func TestRunHeadlessProviderRetriesZeroOutputProposalsStallWhenPolicyAllows(t *t
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
 				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
-				PostArtifactStallWindow:     20 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,
 				PostTerminateDrain:          10 * time.Millisecond,
 				TerminateGrace:              10 * time.Millisecond,
@@ -2253,6 +4408,158 @@ func TestMonitorArtifactStallTripsPreArtifactWindow(t *testing.T) {
 	}
 }
 
+func TestMonitorArtifactStallTripsPreArtifactWallClockDespitePipeActivity(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-pre-wall-clock-active-pipe")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().UTC())
+	keepPipeFresh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepPipeFresh:
+				return
+			case at := <-ticker.C:
+				tracker.Note(at)
+			}
+		}
+	}()
+	defer close(keepPipeFresh)
+
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PreArtifactStallWindow:     time.Hour,
+			PreArtifactWallClockWindow: 20 * time.Millisecond,
+			PostArtifactStallWindow:    time.Hour,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledBeforeArtifacts) {
+			t.Fatalf("expected pre-artifact wall-clock stall, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected pre-artifact wall-clock cap despite fresh pipe activity")
+	}
+}
+
+func TestMonitorArtifactStallIgnoresStaleArtifactsUntilFreshMutation(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-stale-artifacts")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "constitution-draft.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("write stale manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale draft: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().Add(-time.Second))
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			FreshArtifactMutationAfter: time.Now().UTC().Add(time.Second),
+			PreArtifactStallWindow:     20 * time.Millisecond,
+			PostArtifactStallWindow:    20 * time.Millisecond,
+			PartialArtifactStallWindow: 20 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledBeforeArtifacts) {
+			t.Fatalf("expected stale artifacts to use pre-artifact stall, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected monitor to trip pre-artifact window for stale artifacts")
+	}
+}
+
+func TestMonitorArtifactStallTripsInvalidArtifactWindowDespitePipeActivity(t *testing.T) {
+	t.Parallel()
+
+	task := newDraftTask(t, "run-monitor-invalid-active-pipe")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "constitution-draft.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("write invalid manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "charter-overview.md"), []byte("# bootstrap\n"), 0o644); err != nil {
+		t.Fatalf("write invalid draft: %v", err)
+	}
+	old := time.Now().Add(-time.Second)
+	for _, path := range []string{
+		filepath.Join(task.WriteRoot, "constitution-draft.json"),
+		filepath.Join(task.DraftFinalRoot, "charter-overview.md"),
+	} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tracker := newCommandActivityTracker(time.Now().UTC())
+	keepPipeFresh := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepPipeFresh:
+				return
+			case at := <-ticker.C:
+				tracker.Note(at)
+			}
+		}
+	}()
+	defer close(keepPipeFresh)
+
+	done := make(chan StallError, 1)
+	go func() {
+		err, stalled := monitorArtifactStall(ctx, task, tracker, ActivityPolicy{
+			MonitorArtifacts:           true,
+			MonitorPreArtifact:         true,
+			PostArtifactStallWindow:    time.Hour,
+			PartialArtifactStallWindow: 20 * time.Millisecond,
+			PollInterval:               5 * time.Millisecond,
+		})
+		if stalled {
+			done <- err
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStalledAfterArtifacts) {
+			t.Fatalf("expected invalid artifact post-artifact stall, got %v", err)
+		}
+		if got := err.Diagnostic.ArtifactState; got != "invalid" {
+			t.Fatalf("expected invalid artifact state, got %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected invalid artifact stall despite fresh pipe activity")
+	}
+}
+
 func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	t.Parallel()
 
@@ -2282,6 +4589,41 @@ func TestMonitorArtifactStallUsesPartialArtifactWindow(t *testing.T) {
 	cancel()
 }
 
+func TestAllDraftMarkdownOutputsChangedRequiresEveryMarkdownTarget(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-all-draft-markdown-changed")
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "asis-draft-manifest.json"), []byte(steppolicy.RuntimeDraftManifestTaskSkeleton(task)), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# "+name+"\n\nProvider authored as-is draft.\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	before, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot before: %v", err)
+	}
+	if !allDraftMarkdownOutputsChanged(task, writeRootFileSnapshot{}) {
+		t.Fatal("expected initial draft files to count as changed from an empty snapshot")
+	}
+	if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, "summary.md"), []byte("# summary\n\nProvider authored update.\n"), 0o644); err != nil {
+		t.Fatalf("rewrite summary: %v", err)
+	}
+	if allDraftMarkdownOutputsChanged(task, before) {
+		t.Fatal("expected partial markdown rewrite to be rejected")
+	}
+	for _, name := range []string{"overview.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# "+name+"\n\nProvider authored update.\n"), 0o644); err != nil {
+			t.Fatalf("rewrite %s: %v", name, err)
+		}
+	}
+	if !allDraftMarkdownOutputsChanged(task, before) {
+		t.Fatal("expected all markdown rewrites to be accepted")
+	}
+}
+
 func TestCollectArtifactSnapshotIgnoresRuntimeExecutionMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -2305,6 +4647,7 @@ type testAdapter struct {
 	pairRepairCommand      string
 	validatorRepairCommand string
 	draftRepairCommand     string
+	draftEnrichmentCommand string
 	promptBytes            int
 	activity               ActivityPolicy
 	recovery               RecoveryPolicy
@@ -2315,6 +4658,20 @@ type sequenceAdapter struct {
 	commands []string
 	mu       sync.Mutex
 	calls    int
+}
+
+type pairRepairSequenceAdapter struct {
+	testAdapter
+	pairRepairCommands []string
+	mu                 sync.Mutex
+	pairRepairCalls    int
+}
+
+type draftEnrichmentSequenceAdapter struct {
+	testAdapter
+	draftEnrichmentCommands []string
+	mu                      sync.Mutex
+	draftCalls              int
 }
 
 func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
@@ -2329,6 +4686,34 @@ func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	}
 	a.calls++
 	return CommandSpec{Command: a.commands[index], PromptBytes: a.promptBytes}, nil
+}
+
+func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.pairRepairCommands) == 0 {
+		return CommandSpec{}, errors.New("collect pair repair command is unavailable")
+	}
+	index := a.pairRepairCalls
+	if index >= len(a.pairRepairCommands) {
+		index = len(a.pairRepairCommands) - 1
+	}
+	a.pairRepairCalls++
+	return CommandSpec{Command: a.pairRepairCommands[index]}, nil
+}
+
+func (a *draftEnrichmentSequenceAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.draftEnrichmentCommands) == 0 {
+		return CommandSpec{}, errors.New("draft enrichment command is unavailable")
+	}
+	index := a.draftCalls
+	if index >= len(a.draftEnrichmentCommands) {
+		index = len(a.draftEnrichmentCommands) - 1
+	}
+	a.draftCalls++
+	return CommandSpec{Command: a.draftEnrichmentCommands[index]}, nil
 }
 
 func (a testAdapter) Provider() acpruntime.Provider {
@@ -2369,6 +4754,13 @@ func (a testAdapter) DraftArtifactRepairCommandSpec(acpruntime.Task, error) (Com
 		return CommandSpec{}, errors.New("draft repair command is unavailable")
 	}
 	return CommandSpec{Command: a.draftRepairCommand}, nil
+}
+
+func (a testAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	if strings.TrimSpace(a.draftEnrichmentCommand) == "" {
+		return CommandSpec{}, errors.New("draft enrichment command is unavailable")
+	}
+	return CommandSpec{Command: a.draftEnrichmentCommand}, nil
 }
 
 func (a testAdapter) ValidateArtifacts(task acpruntime.Task) error {
@@ -2782,14 +5174,34 @@ EOF
 cat >"$draft_root/proposal.md" <<'EOF'
 # Runtime Recommendations
 
-## Summary
-- Provider authored proposal draft.
+## Decision / recommended operator action
+Accept the provider-authored proposal draft as a no-actionable-change record for this test run.
+
+## Evidence used
+- reports/findings/findings.md
+- cite.ftgo.accounting.authorize.contract
+
+## Proposed changes or follow-up plan
+- No actionable proposal evidence was present in the current-run findings; keep the operator decision anchored to reports/findings/findings.md.
+
+## Risks, gaps, and out-of-scope notes
+- This fixture does not request shard repair.
 EOF
 cat >"$draft_root/changelog.md" <<'EOF'
 # Runtime Proposal Changelog
 
-## Changes
-- Provider authored proposal changelog.
+## Updated architecture/proposal surfaces
+- proposals/runtime-recommendations.md records the provider-authored no-actionable-change decision.
+
+## Findings/proposals summary
+- No actionable proposal evidence was present in the current-run findings.
+
+## Evidence index or citation references
+- reports/findings/findings.md
+- cite.ftgo.accounting.authorize.contract
+
+## Residual coverage gaps
+- Proposal evidence remains absent for this current run.
 EOF
 ` + tail + "\n"
 }
@@ -2816,6 +5228,118 @@ func asIsDraftScript(task acpruntime.Task, files []string, tail string) string {
 	}
 	lines = append(lines, tail)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func asIsBootstrapDraftScript(task acpruntime.Task, tail string) string {
+	lines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		lines = append(lines,
+			"cat >\"$draft_root/"+name+"\" <<'EOF'",
+			"# "+strings.TrimSuffix(name, filepath.Ext(name)),
+			"",
+			"## Scope",
+			"- Run: "+task.RunID,
+			"- Step: "+task.StepID,
+			"",
+			"## Summary",
+			"- Runtime draft recovery initialized this artifact for the scoped analysis step.",
+			"- Use collected shard manifests and validator output as the evidence source before final review.",
+			"EOF",
+		)
+	}
+	lines = append(lines, tail)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func asIsMalformedThenValidEnrichmentScript(task acpruntime.Task) string {
+	return strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"state=" + shellQuote(filepath.Join(task.Workspace, "markdown-syntax-retry-state")),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+		"if [[ ! -f \"$state\" ]]; then",
+		"  printf '%s\\n' first >\"$state\"",
+		"  cat >\"$draft_root/overview.md\" <<'EOF'",
+		"# Overview",
+		"",
+		"Evidence path `reports/taskruns/current/staging/shards/example.md remains half-open.",
+		"EOF",
+		"  cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Summary",
+		"",
+		"Provider authored summary with valid evidence.",
+		"EOF",
+		"  cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"Provider authored architect summary with valid evidence.",
+		"EOF",
+		"  exit 0",
+		"fi",
+		"cat >\"$draft_root/overview.md\" <<'EOF'",
+		"# Overview",
+		"",
+		"Valid overview after markdown syntax retry with reports/taskruns/current/staging/shards/example.md evidence.",
+		"EOF",
+		"cat >\"$draft_root/summary.md\" <<'EOF'",
+		"# Summary",
+		"",
+		"Valid summary after markdown syntax retry with concrete staged evidence.",
+		"EOF",
+		"cat >\"$draft_root/architect-summary.md\" <<'EOF'",
+		"# Architect Summary",
+		"",
+		"Valid architect summary after markdown syntax retry with operator decision evidence.",
+		"EOF",
+	}, "\n") + "\n"
+}
+
+func asIsDraftEnrichmentWithInvalidManifestShapeScript(task acpruntime.Task, marker string) string {
+	return strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		`{`,
+		`  "version": 1,`,
+		`  "run_id": "` + task.RunID + `",`,
+		`  "step_id": "init.step2.asis_docs",`,
+		`  "step_contract": "as_is",`,
+		`  "agent_role": "architect",`,
+		`  "summary": "Provider enriched markdown but drifted manifest shape.",`,
+		`  "status": "enriched",`,
+		`  "outputs": [`,
+		`    {"path":"overview.md","canonical_path":"reports/as-is/overview.md","kind":"report","title":"As-Is Overview","content_digest":"123"},`,
+		`    {"path":"summary.md","canonical_path":"reports/coverage/summary.md","kind":"summary","title":"Coverage Summary"},`,
+		`    {"path":"architect-summary.md","canonical_path":"reports/agent-outputs/architect/summary.md","kind":"summary","title":"Architect Summary"}`,
+		`  ],`,
+		`  "enriched_at": "2026-06-22T17:48:00Z"`,
+		`}`,
+		"EOF",
+		"for name in overview.md summary.md architect-summary.md; do",
+		"  cat >\"$draft_root/$name\" <<'EOF'",
+		"# Evidence-backed draft",
+		"",
+		marker,
+		"EOF",
+		"done",
+	}, "\n") + "\n"
 }
 
 func compactDraftScript(task acpruntime.Task) string {
@@ -2854,6 +5378,15 @@ func hasDiagnosticField(events []acpruntime.DiagnosticEvent, message string, key
 			continue
 		}
 		if got, ok := event.Fields[key].(string); ok && got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRuntimeWarning(warnings []string, needle string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
 			return true
 		}
 	}

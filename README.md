@@ -51,7 +51,10 @@ ACP находится в beta-состоянии и рассчитан на л�
 Go orchestrator пишет generated architecture state в настроенный `arch-workspace`.
 Анализируемые source repositories задуманы как read-only inputs. Но в live headless mode
 ACP запускает внешние provider CLI на той же машине. MVP isolation строится на explicit
-staging directories, managed permission policy и audit warnings, а не на hard sandbox.
+staging directories, managed permission policy, live-harness isolated checkouts for canonical
+`path` inputs и runtime write audit, который завершает otherwise-successful provider step
+как `runtime_contract_failed`, если protected workspace surfaces или analyzed repo working
+tree изменились.
 Default остаётся `trusted_full_access`: ACP передаёт provider CLI текущие full-access flags.
 Opt-in `runtime.profile.permissions.mode: managed` отключает эти flags и auto-approves
 только операции внутри runtime task envelope; неизвестные запросы в non-interactive run

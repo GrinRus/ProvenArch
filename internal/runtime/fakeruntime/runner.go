@@ -187,6 +187,7 @@ func fakeSemanticSnapshot(task acpruntime.Task) contracts.SemanticSnapshot {
 	if primaryRepo == "" {
 		primaryRepo = "stub-repo"
 	}
+	evidencePath := fallbackEvidencePath(task)
 	serviceID := "svc." + slugutil.Slugify(primaryRepo)
 	snapshot := contracts.SemanticSnapshot{
 		Coverage: contracts.Coverage{
@@ -215,7 +216,7 @@ func fakeSemanticSnapshot(task acpruntime.Task) contracts.SemanticSnapshot {
 					Kind:       "observation",
 					Confidence: 0.8,
 					Evidence: []contracts.Evidence{
-						{Repo: primaryRepo, Path: "README.md"},
+						{Repo: primaryRepo, Path: evidencePath},
 					},
 				},
 			},
@@ -233,7 +234,7 @@ func fakeSemanticSnapshot(task acpruntime.Task) contracts.SemanticSnapshot {
 					Kind:       "inference",
 					Confidence: 0.6,
 					Evidence: []contracts.Evidence{
-						{Repo: primaryRepo, Path: "README.md"},
+						{Repo: primaryRepo, Path: evidencePath},
 					},
 				},
 			},

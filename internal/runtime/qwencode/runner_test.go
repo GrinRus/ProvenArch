@@ -328,7 +328,7 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo-a\n    path: "+repoRoot+"\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n\nRuntime entrypoint.\n"), 0o644); err != nil {
 		t.Fatalf("write repo evidence: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Repo A\n"), 0o644); err != nil {
@@ -361,17 +361,20 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	for _, token := range []string{
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
-		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"Do not run a separate read-only preflight",
+		"The first command below is a write-first provider-authored command contract",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action.",
-		"python3 - ",
-		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		"Execute one bounded filesystem command as your next action.",
+		"The command must read authored markdown already in write_root",
+		"write the final shard-pack-manifest.json before it returns",
+		"preflight-only completion is a failed no-op repair",
+		"First command contract:",
+		"write the final provider-authored manifest",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"SKELETON USE:",
 		"Copying this skeleton unchanged is invalid",
-		`"authored_docs":["overview.md"]`,
-		`"evidence_paths":["README.md"]`,
-		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
+		"Authored markdown inputs already present under write_root:",
+		"Bounded repository evidence candidates:",
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
@@ -397,6 +400,10 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		"write it from the heredoc command",
 		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
 		`"<replace with authored doc objects from write_root>"`,
+		"The first command below is a read-only evidence preflight",
+		"After the preflight",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		"writes_manifest",
 	} {
 		if strings.Contains(args, forbidden) {
 			t.Fatalf("qwen repair prompt must not contain scaffold-first wording %q, got %v", forbidden, spec.Args)
@@ -446,10 +453,14 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	for _, token := range []string{
 		"-p",
 		"collect artifact pair focused recovery mode",
-		"Run the exact shell command below as your next command. Do not inspect repository files first.",
-		"COLLECT PAIR WRITE COMMAND:",
-		"<<'ACP_COLLECT_DOC'",
-		"<<'ACP_MANIFEST_JSON'",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
+		"This repair is not a bootstrap/fallback writer",
+		"Do not run a separate read-only preflight",
+		"Your next action must be one bounded filesystem command",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"COLLECT PAIR REPAIR EVIDENCE LIMITS:",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"FINAL SELF-CHECK COMMAND:",
 		"root-overview.md",
 		"shard-pack-manifest.json",
 		`"path": "root-overview.md"`,
@@ -457,6 +468,19 @@ func TestQwenCollectArtifactPairRepairCommandSpecUsesPromptOnly(t *testing.T) {
 	} {
 		if !strings.Contains(args, token) {
 			t.Fatalf("expected qwen collect pair repair prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+	for _, forbidden := range []string{
+		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
+		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
+		"collect_pair_repair_preflight",
+		"COLLECT PAIR WRITE COMMAND:",
+		"<<'ACP_COLLECT_DOC'",
+		"<<'ACP_MANIFEST_JSON'",
+		"The command writes a marker-free seed recovery pair",
+	} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("qwen collect pair repair prompt must not contain seed-first wording %q, got %v", forbidden, spec.Args)
 		}
 	}
 }

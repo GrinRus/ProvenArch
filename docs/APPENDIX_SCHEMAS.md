@@ -117,7 +117,7 @@ Semantic role:
 - несёт semantic snapshot для derived model layer
 - schema-level rejection блокирует known legacy aliases: `covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, `evidence_citation_ids`, top-level `step_contract`/`compatibility`
 - validator-level path hygiene дополнительно reject-ит `documents[].path`, если он указывает на hidden/provider/tool side-effect directory (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`), даже если файл физически существует под shard `write_root`
-- runtime collect repair/recovery policy is behavioral, not a separate schema; current manifest-only command-first repair prompt rules and deterministic `collect_manifest_runtime_recovery` missing-manifest/fallback behavior are specified in `docs/spec/PIPELINE_SPEC.md`.
+- runtime collect repair/recovery policy is behavioral, not a separate schema; current manifest-only read-only preflight repair prompt rules and deterministic `collect_manifest_runtime_recovery` missing-manifest/fallback warning behavior are specified in `docs/spec/PIPELINE_SPEC.md`.
 
 ## 4) Final Run Index Schema
 
@@ -196,6 +196,7 @@ Shared required fields:
 
 Allowed common optional fields:
 - `summary`
+- `updated_at` (string metadata timestamp; ignored by orchestration decisions)
 - `outputs[].kind`
 - `outputs[].title`
 

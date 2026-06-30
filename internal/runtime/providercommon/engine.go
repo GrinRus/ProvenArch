@@ -36,8 +36,11 @@ type CommandSpec struct {
 	Provider acpruntime.Provider
 	Command  string
 	Args     []string
-	Stdin    io.Reader
-	Dir      string
+	// Env contains provider-specific environment overrides. Values are merged
+	// over os.Environ() immediately before process start.
+	Env   map[string]string
+	Stdin io.Reader
+	Dir   string
 	// PromptBytes records the provider prompt payload size without requiring
 	// diagnostics to inspect or consume stdin readers.
 	PromptBytes int
@@ -89,10 +92,19 @@ type DraftArtifactRepairAdapter interface {
 	DraftArtifactRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error)
 }
 
+// DraftArtifactEnrichmentAdapter is implemented by adapters that can run a
+// second-stage draft enrichment prompt after a bootstrap-only draft repair set
+// exists but still fails strict draft validation.
+type DraftArtifactEnrichmentAdapter interface {
+	DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error)
+}
+
 type ActivityPolicy struct {
 	MonitorArtifacts            bool
 	MonitorPreArtifact          bool
+	FreshArtifactMutationAfter  time.Time
 	PreArtifactStallWindow      time.Duration
+	PreArtifactWallClockWindow  time.Duration
 	RetryPreArtifactStallWindow time.Duration
 	PostArtifactStallWindow     time.Duration
 	PartialArtifactStallWindow  time.Duration
@@ -108,6 +120,7 @@ type RecoveryPolicy struct {
 	RepairCollectArtifactPairOnce               bool
 	RepairValidatorVerdictOnce                  bool
 	RepairDraftArtifactsOnce                    bool
+	RepairDraftArtifactEnrichmentOnce           bool
 	RetryInvalidOrMissingArtifactsOnce          bool
 	RetryZeroOutputPreArtifactStallOnce         bool
 	RetryTransientProviderUnavailableRepairOnce bool
@@ -123,6 +136,12 @@ func WithCollectArtifactEnrichmentWindow(task acpruntime.Task, policy ActivityPo
 	}
 	if policy.PartialArtifactStallWindow <= 0 || policy.PartialArtifactStallWindow < defaultCollectEnrichmentWindow {
 		policy.PartialArtifactStallWindow = defaultCollectEnrichmentWindow
+	}
+	if policy.MonitorPreArtifact && policy.PreArtifactWallClockWindow <= 0 {
+		policy.PreArtifactWallClockWindow = policy.PreArtifactStallWindow
+		if policy.PreArtifactWallClockWindow <= 0 {
+			policy.PreArtifactWallClockWindow = defaultPreArtifactStallWindow
+		}
 	}
 	return policy
 }
@@ -242,7 +261,7 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 			if recoveredErr != nil {
 				return acpruntime.Result{}, recoveredErr
 			}
-			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), nil)
+			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), recoveredResult.Execution.Warnings)
 			return recoveredResult, nil
 		}
 		return acpruntime.Result{}, classifyCommandFailure(adapter, task, result, runErr)
@@ -252,7 +271,7 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 			if recoveredErr != nil {
 				return acpruntime.Result{}, recoveredErr
 			}
-			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), nil)
+			recoveredResult.Execution = acpruntime.NewExecution(task, adapter.Provider(), adapter.RuntimeVersion(), "succeeded", time.Now().UTC(), recoveredResult.Execution.Warnings)
 			return recoveredResult, nil
 		}
 		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "contract", "artifact validation failed", err)
@@ -264,6 +283,9 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 	if policy.PreArtifactStallWindow <= 0 {
 		policy.PreArtifactStallWindow = defaultPreArtifactStallWindow
+	}
+	if policy.PreArtifactWallClockWindow < 0 {
+		policy.PreArtifactWallClockWindow = 0
 	}
 	if policy.RetryPreArtifactStallWindow <= 0 {
 		policy.RetryPreArtifactStallWindow = defaultRetryPreArtifactWindow
@@ -290,6 +312,9 @@ func normalizeActivityPolicy(policy ActivityPolicy) ActivityPolicy {
 func applyActivityPolicyEnvOverrides(policy ActivityPolicy) ActivityPolicy {
 	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC"); value > 0 {
 		policy.PreArtifactStallWindow = value
+	}
+	if value := positiveSecondsEnv("ACP_PROVIDER_PRE_ARTIFACT_WALL_CLOCK_SEC"); value > 0 {
+		policy.PreArtifactWallClockWindow = value
 	}
 	if value := positiveSecondsEnv("ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC"); value > 0 {
 		policy.RetryPreArtifactStallWindow = value

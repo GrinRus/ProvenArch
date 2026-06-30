@@ -30,7 +30,7 @@ Codex читает `AGENTS.md` перед началом работы. Держ�
 - Для live matrix harness запускать только `scripts/full-run-batch-matrix.sh` (без wrapper-скрипта)
 - Canonical release sweeps: `baseline` и `parallel-default`
 - Для одного `profile_id` sweep'ы `baseline` и `parallel-default` должны давать одинаковый shard-plan
-- Release verdict брать только из `reports/release_verdict_<matrix-id>.json` (`PASS` -> ready, иначе blocked)
+- Machine execution verdict брать только из `reports/release_verdict_<matrix-id>.json`; release readiness требует `PASS` плюс accepted `reports/swe_ux_assessment_<matrix-id>.md` и accepted `reports/swe_artifact_quality_assessment_<matrix-id>.md`
 - В release gate требовать strict zero-failure и все release providers в PATH: `qwen`, `claude`, `codex`
 - При изменении `schemas/*` или `docs/spec/*` обязательно синхронизировать:
   `docs/APPENDIX_SCHEMAS.md`, `examples/*`, `fixtures/*`, валидаторы/тесты и ADR rationale

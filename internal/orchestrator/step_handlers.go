@@ -454,11 +454,14 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 		return e.assembleStagedDocFlow()
 	}
 	if e.shouldSkipFindingsRuntime() {
-		e.addReportReason("asis_docs_skipped_due_to_unusable_collect")
+		reason := e.collectDownstreamSkipReason("asis_docs")
+		message := e.collectDownstreamSkipMessage()
+		e.addReportReason(reason)
 		e.refreshReportContext()
-		e.addWarning(fmt.Sprintf("%s: as-is doc step skipped because collect evidence is unusable", stepID))
+		e.addWarning(fmt.Sprintf("%s: as-is doc step skipped because %s", stepID, message))
 		e.logWarn(stepID, "", "as-is doc step skipped", map[string]any{
-			"reason":         "collect evidence is unusable",
+			"reason":         message,
+			"skip_reason":    reason,
 			"collect_status": e.renderContext().Collect.Status,
 		})
 		e.asIsDraftManifest = nil
@@ -487,10 +490,13 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 
 func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string) error {
 	if e.shouldSkipFindingsRuntime() {
-		e.markFindingsSkipped("findings_skipped_due_to_unusable_collect")
-		e.addWarning(fmt.Sprintf("%s: validator step skipped because collect evidence is unusable", stepID))
+		reason := e.collectDownstreamSkipReason("findings")
+		message := e.collectDownstreamSkipMessage()
+		e.markFindingsSkipped(reason)
+		e.addWarning(fmt.Sprintf("%s: validator step skipped because %s", stepID, message))
 		e.logWarn(stepID, "", "validator step skipped", map[string]any{
-			"reason":         "collect evidence is unusable",
+			"reason":         message,
+			"skip_reason":    reason,
 			"collect_status": e.renderContext().Collect.Status,
 		})
 		return nil
@@ -512,10 +518,13 @@ func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string)
 
 func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string) error {
 	if e.shouldSkipFindingsRuntime() {
-		e.addReportReason("proposals_skipped_due_to_unusable_collect")
-		e.addWarning(fmt.Sprintf("%s: proposals step skipped because collect evidence is unusable", stepID))
+		reason := e.collectDownstreamSkipReason("proposals")
+		message := e.collectDownstreamSkipMessage()
+		e.addReportReason(reason)
+		e.addWarning(fmt.Sprintf("%s: proposals step skipped because %s", stepID, message))
 		e.logWarn(stepID, "", "proposals step skipped", map[string]any{
-			"reason":         "collect evidence is unusable",
+			"reason":         message,
+			"skip_reason":    reason,
 			"collect_status": e.renderContext().Collect.Status,
 		})
 		e.proposalsDraftManifest = nil

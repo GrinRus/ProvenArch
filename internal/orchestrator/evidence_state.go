@@ -121,7 +121,33 @@ func (e *pipelineExecution) terminalRenderContext(status RunStatus) reports.Repo
 }
 
 func (e *pipelineExecution) shouldSkipFindingsRuntime() bool {
-	return e.renderContext().Collect.Status == reports.EvidenceStatusUnusable
+	return e.renderContext().Collect.Status != reports.EvidenceStatusUsable
+}
+
+func (e *pipelineExecution) collectDownstreamSkipReason(surface string) string {
+	prefix := strings.TrimSpace(surface)
+	if prefix == "" {
+		prefix = "downstream"
+	}
+	switch e.renderContext().Collect.Status {
+	case reports.EvidenceStatusPartial:
+		return prefix + "_skipped_due_to_partial_collect"
+	case reports.EvidenceStatusUnusable:
+		return prefix + "_skipped_due_to_unusable_collect"
+	default:
+		return prefix + "_skipped_due_to_collect_not_usable"
+	}
+}
+
+func (e *pipelineExecution) collectDownstreamSkipMessage() string {
+	switch e.renderContext().Collect.Status {
+	case reports.EvidenceStatusPartial:
+		return "collect evidence is partial"
+	case reports.EvidenceStatusUnusable:
+		return "collect evidence is unusable"
+	default:
+		return "collect evidence is not usable"
+	}
 }
 
 func (e *pipelineExecution) shouldMarkFindingsSkippedAtTerminal(status RunStatus) bool {

@@ -271,7 +271,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
 
-    quality_required = bool(selector.get("quality_required", args.mode in {"regres", "release"}))
     return {
         "selector": {
             "slug": key,
@@ -288,12 +287,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "target_repo_sets": [str(value) for value in selector.get("target_repo_sets", [])],
         "expected_backend_runs": total_expected,
         "expected_backend_pipeline_executions": total_expected * 4,
-        "quality": {
-            "required": quality_required,
-            "run_quality_json": "reports/taskruns/<run_id>-quality.json",
-            "batch_quality_report": "quality_report_<batch-id>.md",
-            "blocking_failure_class": "quality_gates_failed",
-            "artifact_quality_warning_prefix": "artifact_quality:",
+        "execution": {
+            "run_telemetry_json": "reports/taskruns/<run_id>-quality.json",
+            "batch_execution_report": "execution_report_<batch-id>.md",
+            "machine_verdict": "reports/release_verdict_<matrix-id>.json/.md" if release_mode else "reports/matrix_result_<matrix-id>.json/.md",
+        },
+        "manual_assessments": {
+            "required_for_release": release_mode,
+            "ux_report": "reports/swe_ux_assessment_<matrix-id>.md",
+            "artifact_quality_report": "reports/swe_artifact_quality_assessment_<matrix-id>.md",
+            "accepted_decision": "accepted",
         },
         "commands": commands,
     }

@@ -39,6 +39,9 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
 		cmd.Dir = dir
 	}
+	if len(spec.Env) > 0 {
+		cmd.Env = mergedCommandEnv(os.Environ(), spec.Env)
+	}
 	if spec.Stdin != nil {
 		cmd.Stdin = spec.Stdin
 	}
@@ -93,6 +96,10 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 				}
 			}
 		}()
+	}
+	finishCommand := func(reason string, stdoutBytes int, stderrBytes int, err error) {
+		commandDiag.recordProgress(task, activityTracker)
+		commandDiag.finish(reason, stdoutBytes, stderrBytes, err)
 	}
 
 	var streamErr error
@@ -153,7 +160,7 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 		stderrText := stderr.String()
 		stallErr.Diagnostic.StdoutBytes = len([]byte(stdoutText))
 		stallErr.Diagnostic.StderrBytes = len([]byte(stderrText))
-		commandDiag.finish("stall", len([]byte(stdoutText)), len([]byte(stderrText)), stallErr)
+		finishCommand("stall", len([]byte(stdoutText)), len([]byte(stderrText)), stallErr)
 		emitDiagnostic(task, "provider command finished", commandDiag.fields())
 		return acpruntime.Result{
 			Stdout:      stdoutText,
@@ -174,43 +181,49 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 		exitReason = "error"
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			exitReason = "context_canceled"
-			commandDiag.finish(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), ctxErr)
+			finishCommand(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), ctxErr)
 			emitDiagnostic(task, "provider command finished", commandDiag.fields())
 			result.Diagnostics = map[string]any{"provider_lifecycle": commandDiag.fields()}
 			return result, ctxErr
 		}
 		execFailure := runnerdiag.BuildExecFailure(waitErr, result.Stdout, result.Stderr)
-		commandDiag.finish(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), execFailure)
+		finishCommand(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), execFailure)
 		emitDiagnostic(task, "provider command finished", commandDiag.fields())
 		result.Diagnostics = map[string]any{"provider_lifecycle": commandDiag.fields()}
 		return result, execFailure
 	}
-	commandDiag.finish(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), nil)
+	finishCommand(exitReason, len([]byte(result.Stdout)), len([]byte(result.Stderr)), nil)
 	emitDiagnostic(task, "provider command finished", commandDiag.fields())
 	result.Diagnostics = map[string]any{"provider_lifecycle": commandDiag.fields()}
 	return result, nil
 }
 
 type providerCommandDiagnostics struct {
-	Provider       string
-	Command        string
-	CommandPath    string
-	Args           []string
-	Dir            string
-	IncludeDirs    []string
-	PromptBytes    int
-	ActivityPolicy map[string]any
-	Environment    map[string]any
-	TimeoutProfile map[string]any
-	Permissions    map[string]any
-	PID            int
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	DurationMillis int64
-	ExitReason     string
-	Error          string
-	StdoutBytes    int
-	StderrBytes    int
+	Provider                 string
+	Command                  string
+	CommandPath              string
+	Args                     []string
+	Dir                      string
+	IncludeDirs              []string
+	PromptBytes              int
+	ActivityPolicy           map[string]any
+	Environment              map[string]any
+	TimeoutProfile           map[string]any
+	Permissions              map[string]any
+	PID                      int
+	StartedAt                time.Time
+	FinishedAt               time.Time
+	DurationMillis           int64
+	ExitReason               string
+	Error                    string
+	StdoutBytes              int
+	StderrBytes              int
+	LastPipeActivity         time.Time
+	LastArtifactMutation     time.Time
+	ArtifactObserved         bool
+	ArtifactValid            bool
+	ArtifactState            string
+	NoProgressDurationMillis int64
 }
 
 func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, policy ActivityPolicy) *providerCommandDiagnostics {
@@ -230,7 +243,7 @@ func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, polic
 		IncludeDirs:    normalizeDiagnosticPaths(spec.IncludeDirs),
 		PromptBytes:    spec.PromptBytes,
 		ActivityPolicy: activityPolicyDiagnostics(policy),
-		Environment:    allowlistedProviderEnvDiagnostics(),
+		Environment:    allowlistedProviderEnvDiagnostics(spec.Env),
 		TimeoutProfile: cloneDiagnosticMap(task.RuntimeTimeoutProfile),
 		Permissions: map[string]any{
 			"mode":             strings.TrimSpace(task.RuntimePermissions.Mode),
@@ -245,6 +258,38 @@ func (d *providerCommandDiagnostics) markStarted(process *os.Process) {
 		return
 	}
 	d.PID = process.Pid
+}
+
+func (d *providerCommandDiagnostics) recordProgress(task acpruntime.Task, tracker *commandActivityTracker) {
+	if d == nil {
+		return
+	}
+	now := time.Now().UTC()
+	lastProgress := d.StartedAt
+	if tracker != nil {
+		d.LastPipeActivity = tracker.LastRead()
+		if !d.LastPipeActivity.IsZero() && d.LastPipeActivity.After(lastProgress) {
+			lastProgress = d.LastPipeActivity
+		}
+	}
+	if strings.TrimSpace(task.WriteRoot) != "" {
+		snapshot := runtimeArtifactSnapshot(task)
+		d.LastArtifactMutation = snapshot.LastMutation
+		d.ArtifactObserved = snapshot.ArtifactObserved
+		d.ArtifactValid = snapshot.Valid
+		d.ArtifactState = strings.TrimSpace(snapshot.State)
+		if !d.LastArtifactMutation.IsZero() && d.LastArtifactMutation.After(lastProgress) {
+			lastProgress = d.LastArtifactMutation
+		}
+	}
+	if lastProgress.IsZero() {
+		lastProgress = d.StartedAt
+	}
+	noProgress := now.Sub(lastProgress)
+	if noProgress < 0 {
+		noProgress = 0
+	}
+	d.NoProgressDurationMillis = noProgress.Milliseconds()
 }
 
 func (d *providerCommandDiagnostics) finish(reason string, stdoutBytes int, stderrBytes int, err error) {
@@ -266,21 +311,31 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 		return map[string]any{}
 	}
 	fields := map[string]any{
-		"selected_provider": d.Provider,
-		"command":           d.Command,
-		"command_path":      d.CommandPath,
-		"argv":              append([]string(nil), d.Args...),
-		"cwd":               d.Dir,
-		"include_dirs":      append([]string(nil), d.IncludeDirs...),
-		"prompt_bytes":      d.PromptBytes,
-		"activity_policy":   cloneDiagnosticMap(d.ActivityPolicy),
-		"env":               d.Environment,
-		"timeout_profile":   cloneDiagnosticMap(d.TimeoutProfile),
-		"permissions":       cloneDiagnosticMap(d.Permissions),
-		"pid":               d.PID,
-		"started_at":        d.StartedAt.Format(time.RFC3339Nano),
-		"stdout_bytes":      d.StdoutBytes,
-		"stderr_bytes":      d.StderrBytes,
+		"selected_provider":       d.Provider,
+		"command":                 d.Command,
+		"command_path":            d.CommandPath,
+		"argv":                    append([]string(nil), d.Args...),
+		"cwd":                     d.Dir,
+		"include_dirs":            append([]string(nil), d.IncludeDirs...),
+		"prompt_bytes":            d.PromptBytes,
+		"activity_policy":         cloneDiagnosticMap(d.ActivityPolicy),
+		"env":                     d.Environment,
+		"timeout_profile":         cloneDiagnosticMap(d.TimeoutProfile),
+		"permissions":             cloneDiagnosticMap(d.Permissions),
+		"pid":                     d.PID,
+		"started_at":              d.StartedAt.Format(time.RFC3339Nano),
+		"stdout_bytes":            d.StdoutBytes,
+		"stderr_bytes":            d.StderrBytes,
+		"artifact_observed":       d.ArtifactObserved,
+		"artifact_valid":          d.ArtifactValid,
+		"artifact_state":          d.ArtifactState,
+		"no_progress_duration_ms": d.NoProgressDurationMillis,
+	}
+	if !d.LastPipeActivity.IsZero() {
+		fields["last_pipe_activity_at"] = d.LastPipeActivity.UTC().Format(time.RFC3339Nano)
+	}
+	if !d.LastArtifactMutation.IsZero() {
+		fields["last_artifact_mutation_at"] = d.LastArtifactMutation.UTC().Format(time.RFC3339Nano)
 	}
 	if !d.FinishedAt.IsZero() {
 		fields["finished_at"] = d.FinishedAt.Format(time.RFC3339Nano)
@@ -366,10 +421,11 @@ func cloneDiagnosticMap(values map[string]any) map[string]any {
 }
 
 func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
-	return map[string]any{
+	fields := map[string]any{
 		"monitor_artifacts":                  policy.MonitorArtifacts,
 		"monitor_pre_artifact":               policy.MonitorPreArtifact,
 		"pre_artifact_stall_window_ms":       policy.PreArtifactStallWindow.Milliseconds(),
+		"pre_artifact_wall_clock_window_ms":  policy.PreArtifactWallClockWindow.Milliseconds(),
 		"retry_pre_artifact_stall_window_ms": policy.RetryPreArtifactStallWindow.Milliseconds(),
 		"post_artifact_stall_window_ms":      policy.PostArtifactStallWindow.Milliseconds(),
 		"partial_artifact_stall_window_ms":   policy.PartialArtifactStallWindow.Milliseconds(),
@@ -378,14 +434,19 @@ func activityPolicyDiagnostics(policy ActivityPolicy) map[string]any {
 		"terminate_grace_ms":                 policy.TerminateGrace.Milliseconds(),
 		"post_terminate_drain_ms":            policy.PostTerminateDrain.Milliseconds(),
 	}
+	if !policy.FreshArtifactMutationAfter.IsZero() {
+		fields["fresh_artifact_mutation_after_utc"] = policy.FreshArtifactMutationAfter.UTC().Format(time.RFC3339Nano)
+	}
+	return fields
 }
 
-func allowlistedProviderEnvDiagnostics() map[string]any {
+func allowlistedProviderEnvDiagnostics(overrides map[string]string) map[string]any {
 	keys := []string{
 		acpruntime.RuntimeProviderEnv,
 		"ACP_CLAUDE_CMD",
 		"ACP_QWEN_CMD",
 		"ACP_CODEX_CMD",
+		"CODEX_HOME",
 		acpruntime.RuntimeStepTimeoutEnv,
 		acpruntime.RuntimeHeartbeatEnv,
 		acpruntime.PipelineTimeoutEnv,
@@ -395,6 +456,7 @@ func allowlistedProviderEnvDiagnostics() map[string]any {
 		"ACP_HEADLESS_TIMEOUT_SEC",
 		"ACP_HEADLESS_TIMEOUT_PROFILE",
 		"ACP_PROVIDER_PRE_ARTIFACT_STALL_SEC",
+		"ACP_PROVIDER_PRE_ARTIFACT_WALL_CLOCK_SEC",
 		"ACP_PROVIDER_RETRY_PRE_ARTIFACT_STALL_SEC",
 		"ACP_PROVIDER_POST_ARTIFACT_STALL_SEC",
 		"ACP_PROVIDER_PARTIAL_ARTIFACT_STALL_SEC",
@@ -402,7 +464,9 @@ func allowlistedProviderEnvDiagnostics() map[string]any {
 	}
 	out := map[string]any{}
 	for _, key := range keys {
-		if value, ok := os.LookupEnv(key); ok {
+		if value, ok := overrides[key]; ok {
+			out[key] = redactedEnvValue(key, value)
+		} else if value, ok := os.LookupEnv(key); ok {
 			out[key] = redactedEnvValue(key, value)
 		} else {
 			out[key] = map[string]any{"present": false}
@@ -433,6 +497,7 @@ func isRawDiagnosticEnv(key string) bool {
 	case "ACP_CLAUDE_CMD",
 		"ACP_QWEN_CMD",
 		"ACP_CODEX_CMD",
+		"CODEX_HOME",
 		acpruntime.RuntimeProviderEnv,
 		acpruntime.RuntimeStepTimeoutEnv,
 		acpruntime.RuntimeHeartbeatEnv,
@@ -451,6 +516,39 @@ func isRawDiagnosticEnv(key string) bool {
 	default:
 		return false
 	}
+}
+
+func mergedCommandEnv(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return append([]string(nil), base...)
+	}
+	values := make(map[string]string, len(base)+len(overrides))
+	order := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	for key, value := range overrides {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, key+"="+values[key])
+	}
+	return out
 }
 
 func isSecretFlag(arg string) bool {

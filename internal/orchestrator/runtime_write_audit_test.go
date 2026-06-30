@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,14 +27,16 @@ func TestRuntimeWriteAuditIgnoresStagedRootWrites(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(task.WriteRoot, "diagnostic.txt"), []byte("staged only"), 0o644); err != nil {
 		t.Fatalf("write staged file: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err != nil {
+		t.Fatalf("did not expect runtime write audit error for staged write: %v", err)
+	}
 
 	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("did not expect runtime write audit warning for staged write: %#v", execution.warnings)
 	}
 }
 
-func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
+func TestRuntimeWriteAuditFailsOnProtectedWorkspaceMutation(t *testing.T) {
 	t.Parallel()
 
 	ws := writeAuditWorkspace(t)
@@ -44,8 +47,11 @@ func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws.Path, "workspace.yaml"), []byte("version: 1\nrepos: []\n# mutated\n"), 0o644); err != nil {
 		t.Fatalf("mutate workspace manifest: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("expected runtime write audit warning, got %#v", execution.warnings)
 	}
@@ -54,7 +60,7 @@ func TestRuntimeWriteAuditWarnsOnProtectedWorkspaceMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
+func TestRuntimeWriteAuditFailsOnRepoMutation(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
@@ -69,8 +75,11 @@ func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# changed\n"), 0o644); err != nil {
 		t.Fatalf("mutate repo file: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("expected repo mutation warning, got %#v", execution.warnings)
 	}
@@ -79,7 +88,46 @@ func TestRuntimeWriteAuditWarnsOnRepoMutation(t *testing.T) {
 	}
 }
 
-func TestRuntimeWriteAuditReportsUnavailableRepoStatusAsSkipped(t *testing.T) {
+func TestRuntimeWriteAuditAllowsReadOnlyRepoSnapshot(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	ws := writeAuditWorkspace(t)
+	repoRoot := writeAuditGitRepo(t)
+	t.Cleanup(func() {
+		chmodTreeForAudit(t, repoRoot, 0o755, 0o644)
+	})
+	chmodTreeForAudit(t, repoRoot, 0o555, 0o444)
+	task := writeAuditTask(ws, []string{repoRoot})
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	var snapshot []string
+	for _, status := range before.repoStatuses {
+		snapshot = status
+	}
+	if len(snapshot) == 0 {
+		t.Fatal("expected read-only repo snapshot")
+	}
+	if !stringSliceContainsPrefix(snapshot, "readonly:head:") {
+		t.Fatalf("expected read-only snapshot, got %#v", snapshot)
+	}
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
+
+	if err != nil {
+		t.Fatalf("did not expect runtime write audit error for unchanged read-only repo: %v", err)
+	}
+	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) || hasWarningContaining(execution.warnings, runtimeWriteAuditRepoSkipped) {
+		t.Fatalf("did not expect read-only repo audit warnings, got %#v", execution.warnings)
+	}
+	if hasLogWithMessage(logs, runtimeWriteAuditUnexpectedMutation) || hasLogWithMessage(logs, runtimeWriteAuditRepoSkipped) {
+		t.Fatalf("did not expect read-only repo audit logs, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditFailsWhenAuditedRepoStatusBecomesUnavailable(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
@@ -97,8 +145,11 @@ func TestRuntimeWriteAuditReportsUnavailableRepoStatusAsSkipped(t *testing.T) {
 	if err := os.RemoveAll(repoRoot); err != nil {
 		t.Fatalf("remove repo root: %v", err)
 	}
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
 
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
 	if hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("unavailable repo status must not be reported as mutation: %#v", execution.warnings)
 	}
@@ -142,7 +193,9 @@ func TestRuntimeWriteAuditLogsNonGitRepoSkip(t *testing.T) {
 	execution, logs := newWriteAuditExecution(ws)
 
 	before := beginRuntimeWriteAudit(task)
-	execution.completeRuntimeWriteAudit("init.step1.collect", "", task, before)
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err != nil {
+		t.Fatalf("did not expect runtime write audit error for initial non-git skip: %v", err)
+	}
 
 	if !hasWarningContaining(execution.warnings, runtimeWriteAuditRepoSkipped) {
 		t.Fatalf("expected repo skipped warning, got %#v", execution.warnings)
@@ -225,6 +278,22 @@ func runGitForAudit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func chmodTreeForAudit(t *testing.T, root string, dirMode fs.FileMode, fileMode fs.FileMode) {
+	t.Helper()
+
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil {
+			return nil
+		}
+		mode := fileMode
+		if entry.IsDir() {
+			mode = dirMode
+		}
+		_ = os.Chmod(path, mode)
+		return nil
+	})
+}
+
 func hasLogWithMessage(logs *[]RunLogEntry, message string) bool {
 	if logs == nil {
 		return false
@@ -259,4 +328,18 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func stringSliceContainsPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isRuntimeContractError(err error) bool {
+	code, _, ok := acpruntime.ClassifyError(err)
+	return ok && code == string(acpruntime.ErrorCodeRuntimeContract)
 }

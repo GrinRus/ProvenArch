@@ -54,15 +54,22 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 	required := []string{
 		`Write ONLY inside write_root.`,
 		`Suggested collect authored doc path for this shard:`,
-		`Before the first filesystem write inside write_root, perform one bounded evidence pass over the existing repo entrypoint hints and assigned path_scopes`,
-		`Evidence-first pair requirement: after the bounded evidence pass, write the suggested overview doc and shard-pack-manifest.json as one focused marker-free evidence-backed artifact pair`,
+		`The first collect filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write`,
+		`Cap the bounded evidence read/list to at most 8 representative files and at most the first 6000 bytes from each file`,
+		`Do not run analysis-only narration, status/progress text, todo/planning, broad repository sweeps, or any second read-only preflight before the direct literal write command.`,
+		`Evidence-write pair requirement: the first work unit writes the suggested overview doc and shard-pack-manifest.json as one focused marker-free evidence-backed artifact pair`,
 		`Minimal collect target shape: write "payments-overview.md" + "shard-pack-manifest.json" with concrete observed evidence`,
-		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json`,
+		`Do not wait for a complete broad repository sweep before writing shard-pack-manifest.json; the bounded first action is enough`,
+		`Do not rely on focused collect repair as the expected success path; normal collect must attempt to produce the valid pair itself.`,
+		`Before both target files exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings, template programs, or nested quote tricks`,
+		`If the direct write command fails before both targets exist, immediately retry the same direct literal write pattern with simpler content from observed evidence; do not wait for collect_pair_repair.`,
 		`TASK-SPECIFIC COLLECT MANIFEST JSON SKELETON: use the JSON embedded in the collect evidence-first section above as a schema/key/type guide`,
 		`COLLECT MANIFEST CONTRACT CHECKLIST:`,
 		`The task-specific collect manifest JSON skeleton above is normative`,
 		`Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 		`The final collect pair must not be seed-only, scaffold-only, or copied unchanged from the skeleton`,
+		`The final collect markdown must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"`,
+		`The final collect markdown must not mention bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or runtime repair mechanics`,
 		`After writing the evidence-backed pair, avoid broad repository exploration; only minimal manifest/JSON repair needed for the current shard is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,
@@ -141,12 +148,25 @@ func TestCollectFirstActionSectionDefinesEvidenceFirstTargets(t *testing.T) {
 	section := CollectFirstActionSection(task)
 	required := []string{
 		`COLLECT EVIDENCE-FIRST ARTIFACT PAIR:`,
-		`FIRST COLLECT EVIDENCE PASS:`,
+		`FIRST COLLECT BOUNDED WRITE ACTION:`,
 		`COLLECT FINAL WRITE REQUIREMENT:`,
 		`COLLECT MANIFEST TASK SKELETON:`,
 		`SKELETON USE:`,
-		`bounded evidence pass before writing artifacts; do not write a seed-only/bootstrap pair`,
-		`Write the authored document and shard-pack-manifest.json only after they contain evidence-backed content from the bounded evidence pass.`,
+		`start by writing an evidence-backed artifact pair; do not write a seed-only pair`,
+		`next filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write of both exact targets`,
+		`inspect at most 8 representative entrypoint/build/config/source files`,
+		`Read at most the first 6000 bytes from any file.`,
+		`Assigned path_scopes may be directories for discovery, but manifest citations and semantic provenance paths must resolve to concrete existing files, never directories.`,
+		`prove every citation/provenance repo evidence path with file-level checks such as test -f, rg --files, or portable find ... -type f -print`,
+		`If a scoped path is missing or directory-only, record it as coverage.missing or a question instead of using it as citation/provenance evidence.`,
+		`Syntax-only checks such as jq empty or python3 -m json.tool are insufficient`,
+		`Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.`,
+		`Do not emit analysis-only prose, status/progress narration, todo/planning, broad repo sweeps, or any second read-only preflight before writing the artifact pair.`,
+		`Before both targets exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings, template programs, or nested quote tricks`,
+		`Write the authored document and shard-pack-manifest.json with direct shell heredoc/printf/tee literal content from the bounded reads in the first work unit.`,
+		`If a write command fails before both targets exist, immediately retry with a simpler direct literal write; do not wait for collect_pair_repair.`,
+		`Normal collect must not depend on collect_pair_repair as the expected path to success.`,
+		`Final collect markdown must be operator-facing architecture evidence. Do not mention bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or later repair as final content.`,
 		`Copying this skeleton unchanged is invalid and will be rejected as scaffold-only output.`,
 		`Exact authored document target: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md".`,
 		`Exact manifest target: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
@@ -167,51 +187,6 @@ func TestCollectFirstActionSectionDefinesEvidenceFirstTargets(t *testing.T) {
 	} {
 		if strings.Contains(section, forbidden) {
 			t.Fatalf("normal collect first-action must not contain bootstrap marker/wording %q:\n%s", forbidden, section)
-		}
-	}
-}
-
-func TestCollectRecoveryPairWriteCommandWritesValidationReadyFallback(t *testing.T) {
-	t.Parallel()
-
-	task := acpruntime.Task{
-		TaskID:       "task-1",
-		RunID:        "run-1",
-		StepID:       "init.step1.collect",
-		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
-		ArtifactRoot: "reports/taskruns/run-1/staging/shards/payments",
-		RepoScopes:   []string{"payments"},
-		PathScopes:   []string{"payments"},
-		ShardID:      "payments",
-	}
-
-	command := CollectRecoveryPairWriteCommand(task)
-	required := []string{
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'`,
-		`## Recovery Evidence Summary`,
-		`## Evidence Surface`,
-		`## Recovery Notes`,
-		`Remaining Questions`,
-		`cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'`,
-		`collect recovery fallback`,
-		`Collect recovery used minimal scoped evidence`,
-		`"path": "payments-overview.md"`,
-	}
-	for _, needle := range required {
-		if !strings.Contains(command, needle) {
-			t.Fatalf("expected recovery command to contain %q, got:\n%s", needle, command)
-		}
-	}
-	for _, forbidden := range []string{
-		`ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT`,
-		`Recovery Bootstrap`,
-		`Recovery Summary`,
-		`Evidence candidate used for the recovery manifest`,
-		`Collect manifest covers the assigned shard scope`,
-		`Owner mapping evidence not confirmed from the initial scoped evidence path`,
-	} {
-		if strings.Contains(command, forbidden) {
-			t.Fatalf("recovery command must not contain bootstrap scaffold %q:\n%s", forbidden, command)
 		}
 	}
 }
@@ -302,6 +277,12 @@ func TestCollectManifestTaskSkeletonParsesAsShardPackManifest(t *testing.T) {
 	}
 	if got, want := len(manifest.Documents), 2; got != want {
 		t.Fatalf("documents = %d, want %d in skeleton:\n%s", got, want, raw)
+	}
+	if got, want := manifest.Documents[0].CanonicalPath, "reports/as-is/bank-source-docs/docs-overview.md"; got != want {
+		t.Fatalf("documents[0].canonical_path = %q, want %q", got, want)
+	}
+	if got, want := manifest.Documents[1].CanonicalPath, "reports/as-is/bank-source-docs/overview.md"; got != want {
+		t.Fatalf("documents[1].canonical_path = %q, want %q", got, want)
 	}
 	if got, want := manifest.Citations[0].Path, "src/main.go"; got != want {
 		t.Fatalf("citation path = %q, want %q", got, want)
@@ -813,7 +794,7 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 		`The first draft artifact set is bootstrap-only`,
 		`replace placeholder scaffold text with evidence-backed as-is content`,
 		`Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces`,
-		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
+		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
 		`"step_contract": "as_is"`,
 		`"canonical_path": "reports/as-is/overview.md"`,
 	}
@@ -867,7 +848,7 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testin
 		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
 		`The first proposals draft artifact set is bootstrap-only`,
 		`replace placeholder scaffold text with evidence-backed proposal/changelog content`,
-		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 		`"step_contract": "proposals"`,
 		`"canonical_path": "proposals/proposal-baseline/proposal.md"`,
@@ -1024,6 +1005,75 @@ func TestCollectRepoEntrypointHintsIncludesOwnershipFiles(t *testing.T) {
 	for _, needle := range []string{".github/CODEOWNERS", "CODEOWNERS", "OWNERS.md", "MAINTAINERS.yaml"} {
 		if !strings.Contains(joined, needle) {
 			t.Fatalf("expected entrypoint hints to contain %q, got:\n%s", needle, joined)
+		}
+	}
+}
+
+func TestCollectPathScopeFileHintsKeepEachDirectoryScope(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{
+		"cli/README.md",
+		"cli/Cargo.toml",
+		"cli/src/main.rs",
+		"common/README.md",
+		"common/hogql_parser/pyproject.toml",
+		"common/hogvm/README.md",
+	} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	hints := CollectPathScopeFileHints(acpruntime.Task{
+		StepID:           "init.step1.collect",
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"cli", "common"},
+	})
+	joined := strings.Join(hints, "\n")
+	for _, needle := range []string{"cli/README.md", "cli/Cargo.toml", "common/README.md", "common/hogql_parser/pyproject.toml"} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected path-scope hints to contain %q, got:\n%s", needle, joined)
+		}
+	}
+}
+
+func TestCollectFirstActionSectionIncludesPathScopeFileHints(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{"cli/README.md", "common/README.md"} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	section := CollectFirstActionSection(acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		WriteRoot:        "/tmp/workspace/reports/taskruns/run-1/staging/shards/cli-common",
+		ReadContextRoots: []string{repoRoot},
+		ShardID:          "cli-common",
+		DomainID:         "posthog",
+		RepoScopes:       []string{"posthog"},
+		PathScopes:       []string{"cli", "common"},
+	})
+	for _, needle := range []string{
+		"Existing path-scope file candidates for this collect shard:",
+		"cli/README.md",
+		"common/README.md",
+	} {
+		if !strings.Contains(section, needle) {
+			t.Fatalf("expected collect first action section to contain %q, got:\n%s", needle, section)
 		}
 	}
 }

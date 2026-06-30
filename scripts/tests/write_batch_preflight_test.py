@@ -48,6 +48,27 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertNotIn("--approval-mode", args)
         self.assertEqual("", stdin_text)
 
+    def test_codex_headless_probe_uses_runtime_isolation_args(self) -> None:
+        args, stdin_text = self.module.headless_probe_invocation("codex")
+
+        self.assertEqual("exec", args[0])
+        for feature in (
+            "plugins",
+            "remote_plugin",
+            "plugin_sharing",
+            "apps",
+            "enable_mcp_apps",
+            "tool_suggest",
+            "skill_mcp_dependency_install",
+        ):
+            self.assertIn("--disable", args)
+            self.assertIn(feature, args)
+        self.assertIn("--ignore-user-config", args)
+        self.assertIn("--ignore-rules", args)
+        self.assertIn("--ephemeral", args)
+        self.assertEqual("-", args[-1])
+        self.assertIn("ACP_READY", stdin_text)
+
     def test_qwen_artifact_smoke_uses_runtime_write_args(self) -> None:
         sentinel_path = self.root / "write-dir" / "sentinel.txt"
 
@@ -404,6 +425,68 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "codex-cli 0.125.0",
             'model = "gpt-5.5"\n',
         )
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+        self.assertEqual("passed", result["artifact_smoke"])
+
+    def test_probe_provider_readiness_uses_auth_only_codex_home_and_runtime_args(self) -> None:
+        source_home = self.root / "source-codex-home"
+        source_home.mkdir()
+        (source_home / "auth.json").write_text("{\"token\":\"redacted\"}\n", encoding="utf-8")
+        (source_home / "installation_id").write_text("install-123\n", encoding="utf-8")
+        (source_home / "config.toml").write_text("model = \"gpt-5.5\"\n", encoding="utf-8")
+        (source_home / ".tmp").mkdir()
+        (source_home / ".tmp" / "plugins").mkdir()
+
+        command = self._write_script(
+            "codex-isolated-preflight-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'codex-cli 0.140.0'; exit 0; fi\n"
+            "has_plugins_disable=0\n"
+            "has_ignore_config=0\n"
+            "has_ignore_rules=0\n"
+            "prev=''\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$prev\" = \"--disable\" ] && [ \"$arg\" = \"plugins\" ]; then has_plugins_disable=1; fi\n"
+            "  if [ \"$arg\" = \"--ignore-user-config\" ]; then has_ignore_config=1; fi\n"
+            "  if [ \"$arg\" = \"--ignore-rules\" ]; then has_ignore_rules=1; fi\n"
+            "  prev=\"$arg\"\n"
+            "done\n"
+            "if [ \"$has_plugins_disable\" != \"1\" ] || [ \"$has_ignore_config\" != \"1\" ] || [ \"$has_ignore_rules\" != \"1\" ]; then\n"
+            "  printf 'missing codex isolation args: %s\\n' \"$*\" >&2\n"
+            "  exit 2\n"
+            "fi\n"
+            "if [ -z \"${CODEX_HOME:-}\" ] || [ ! -f \"$CODEX_HOME/auth.json\" ] || [ ! -f \"$CODEX_HOME/installation_id\" ]; then\n"
+            "  printf 'missing isolated codex auth home\\n' >&2\n"
+            "  exit 3\n"
+            "fi\n"
+            "if [ -f \"$CODEX_HOME/config.toml\" ] || [ -e \"$CODEX_HOME/.tmp\" ] || [ -e \"$CODEX_HOME/plugins\" ]; then\n"
+            "  printf 'codex preflight copied user config/plugin state\\n' >&2\n"
+            "  exit 4\n"
+            "fi\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
+            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "printf '%s\\n' 'ACP_READY'\n",
+        )
+        old_home = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = str(source_home)
+        try:
+            result = self.module.probe_provider_readiness(
+                "codex",
+                command,
+                str(REPO_ROOT),
+                "codex-cli 0.140.0",
+                'model = "gpt-5.5"\n',
+            )
+        finally:
+            if old_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_home
 
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])

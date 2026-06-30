@@ -36,6 +36,10 @@ func CollectDocumentBootstrapOnly(text string) bool {
 	return collectDocumentBootstrapOnly(text)
 }
 
+func CollectDocumentRuntimeProcessContaminated(text string) bool {
+	return collectDocumentRuntimeProcessContaminated(text)
+}
+
 func collectDocumentBootstrapOnly(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
 	if lower == "" {
@@ -48,6 +52,9 @@ func collectDocumentBootstrapOnly(text string) bool {
 		return true
 	}
 	if collectDocumentRecoveryScaffoldOnly(lower) {
+		return true
+	}
+	if collectDocumentTemporaryRecoveryOnly(lower) {
 		return true
 	}
 	required := []string{
@@ -65,6 +72,84 @@ func collectDocumentBootstrapOnly(text string) bool {
 		}
 	}
 	return true
+}
+
+func collectDocumentRuntimeProcessContaminated(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"bounded read",
+		"bounded evidence read",
+		"bounded collection",
+		"bounded pass",
+		"first bounded evidence",
+		"first bounded read",
+		"initial bounded evidence",
+		"initial bounded read",
+		"not present during bounded",
+		"missing expected evidence",
+		"guessed path",
+		"guessed file",
+		"guessed evidence",
+		"guessed repo",
+		"guessed repository",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	if collectDocumentExpectedMissingConcretePath(lower) {
+		return true
+	}
+	return false
+}
+
+func collectDocumentExpectedMissingConcretePath(lower string) bool {
+	for _, exact := range []string{
+		"expected path was not present",
+		"expected path is not present",
+		"expected file was not present",
+		"expected file is not present",
+		"expected repo was not present",
+		"expected repo is not present",
+		"expected repository was not present",
+		"expected repository is not present",
+	} {
+		if strings.Contains(lower, exact) {
+			return true
+		}
+	}
+	for _, suffix := range []string{
+		" path was not present",
+		" path is not present",
+		" file was not present",
+		" file is not present",
+		" repo was not present",
+		" repo is not present",
+		" repository was not present",
+		" repository is not present",
+	} {
+		start := 0
+		for {
+			idx := strings.Index(lower[start:], suffix)
+			if idx < 0 {
+				break
+			}
+			idx += start
+			prefix := lower[:idx]
+			expected := strings.LastIndex(prefix, "expected ")
+			if expected >= 0 {
+				phrase := strings.TrimSpace(prefix[expected+len("expected "):])
+				if strings.ContainsAny(phrase, `/\.`) || strings.Contains(phrase, "\\") {
+					return true
+				}
+			}
+			start = idx + len(suffix)
+		}
+	}
+	return false
 }
 
 func collectDocumentInitialSeedOnly(lower string) bool {
@@ -85,6 +170,13 @@ func collectDocumentInitialSeedOnly(lower string) bool {
 }
 
 func collectDocumentRecoveryScaffoldOnly(lower string) bool {
+	if strings.Contains(lower, "no repository evidence was emitted") &&
+		(strings.Contains(lower, "bounded collection failure") ||
+			strings.Contains(lower, "current evidence result: no file content observed") ||
+			strings.Contains(lower, "first bounded evidence read") ||
+			strings.Contains(lower, "bounded read failed")) {
+		return true
+	}
 	if strings.Contains(lower, "## recovery bootstrap") &&
 		strings.Contains(lower, "evidence candidate used for the recovery manifest:") &&
 		strings.Contains(lower, "replace this recovery bootstrap with concrete repository evidence") {
@@ -104,6 +196,27 @@ func collectDocumentRecoveryScaffoldOnly(lower string) bool {
 			strings.Contains(lower, "collect recovery fallback")) &&
 		strings.Contains(lower, "## recovery notes") &&
 		strings.Contains(lower, "downstream compilation can preserve traceability instead of accepting an empty or marker-only shard") {
+		return true
+	}
+	return false
+}
+
+func collectDocumentTemporaryRecoveryOnly(lower string) bool {
+	if strings.Contains(lower, "first bounded evidence read was attempted") &&
+		strings.Contains(lower, "initial artifact records only") &&
+		strings.Contains(lower, "will be repaired with concrete") {
+		return true
+	}
+	if strings.Contains(lower, "first bounded read was attempted") &&
+		strings.Contains(lower, "requires concrete evidence repair") {
+		return true
+	}
+	if strings.Contains(lower, "not yet confirmed after interrupted first read") &&
+		strings.Contains(lower, "concrete evidence repair") {
+		return true
+	}
+	if strings.Contains(lower, "shell glob handling interrupted") &&
+		strings.Contains(lower, "will be repaired with concrete file-level evidence") {
 		return true
 	}
 	return false

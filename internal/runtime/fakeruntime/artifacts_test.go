@@ -58,6 +58,56 @@ func TestRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	}
 }
 
+func TestRunnerUsesExistingRepoEvidencePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	repoRoot := filepath.Join(workspace, ".acp", "repos", "ftgo-application-d542d7e34d40")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.adoc"), []byte("= FTGO\n"), 0o644); err != nil {
+		t.Fatalf("write README.adoc: %v", err)
+	}
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "ftgo-root")
+	runner := Runner{}
+
+	_, err := runner.Run(context.Background(), acpruntime.Task{
+		TaskID:           "task-collect",
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		ShardID:          "ftgo-root",
+		DomainID:         "ftgo-root",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/ftgo-root",
+		AgentRole:        "shard-analyst",
+		RepoScopes:       []string{"ftgo-application"},
+		PathScopes:       []string{"."},
+		ReadContextRoots: []string{workspace, repoRoot},
+		StartedAtUTC:     time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("run fake collect: %v", err)
+	}
+
+	manifestRaw, err := os.ReadFile(filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	if err != nil {
+		t.Fatalf("read shard-pack-manifest.json: %v", err)
+	}
+	manifest, err := contracts.ParseShardPackManifest(manifestRaw)
+	if err != nil {
+		t.Fatalf("parse shard-pack-manifest.json: %v", err)
+	}
+	if got, want := manifest.Citations[0].Path, "README.adoc"; got != want {
+		t.Fatalf("expected fake citation to use existing evidence path %q, got %q", want, got)
+	}
+	if got, want := manifest.Semantic.Entities[0].Provenance.Evidence[0].Path, "README.adoc"; got != want {
+		t.Fatalf("expected fake semantic evidence to use existing path %q, got %q", want, got)
+	}
+}
+
 func TestRunnerWritesValidatorVerdictWhenWriteRootProvided(t *testing.T) {
 	t.Parallel()
 

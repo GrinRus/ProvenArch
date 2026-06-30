@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1410,6 +1412,7 @@ func aggregateDocumentInfos(manifests []contracts.ShardPackManifest) map[string]
 	for canonicalPath, info := range aggregatedDocs {
 		info.CanonicalID = preferredCanonicalDocumentID(canonicalPath, setKeysSorted(info.SourceDocumentIDs))
 	}
+	assignUniqueCanonicalDocumentIDs(aggregatedDocs)
 	return aggregatedDocs
 }
 
@@ -1424,6 +1427,77 @@ func preferredCanonicalDocumentID(canonicalPath string, sourceDocumentIDs []stri
 		return "doc.unknown"
 	}
 	return documentID
+}
+
+func assignUniqueCanonicalDocumentIDs(documentInfos map[string]*aggregatedDocumentInfo) {
+	sourceIDPaths := map[string]map[string]struct{}{}
+	canonicalPaths := make([]string, 0, len(documentInfos))
+	for canonicalPath, info := range documentInfos {
+		canonicalPath = strings.TrimSpace(canonicalPath)
+		if canonicalPath == "" || info == nil {
+			continue
+		}
+		canonicalPaths = append(canonicalPaths, canonicalPath)
+		for sourceID := range info.SourceDocumentIDs {
+			sourceID = strings.TrimSpace(sourceID)
+			if sourceID == "" {
+				continue
+			}
+			if _, ok := sourceIDPaths[sourceID]; !ok {
+				sourceIDPaths[sourceID] = map[string]struct{}{}
+			}
+			sourceIDPaths[sourceID][canonicalPath] = struct{}{}
+		}
+	}
+	sort.Strings(canonicalPaths)
+
+	used := map[string]struct{}{}
+	for _, canonicalPath := range canonicalPaths {
+		info := documentInfos[canonicalPath]
+		if info == nil {
+			continue
+		}
+		base := ""
+		for _, sourceID := range setKeysSorted(info.SourceDocumentIDs) {
+			if len(sourceIDPaths[sourceID]) == 1 {
+				base = sourceID
+				break
+			}
+		}
+		if base == "" {
+			base = preferredCanonicalDocumentID(canonicalPath, nil)
+		}
+		info.CanonicalID = uniqueCanonicalDocumentID(base, canonicalPath, used)
+	}
+}
+
+func uniqueCanonicalDocumentID(base string, canonicalPath string, used map[string]struct{}) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = preferredCanonicalDocumentID(canonicalPath, nil)
+	}
+	if _, exists := used[base]; !exists {
+		used[base] = struct{}{}
+		return base
+	}
+	hash := shortDocumentIDHash(canonicalPath)
+	candidate := base + "-" + hash
+	if _, exists := used[candidate]; !exists {
+		used[candidate] = struct{}{}
+		return candidate
+	}
+	for suffix := 2; ; suffix++ {
+		candidate = fmt.Sprintf("%s-%s-%d", base, hash, suffix)
+		if _, exists := used[candidate]; !exists {
+			used[candidate] = struct{}{}
+			return candidate
+		}
+	}
+}
+
+func shortDocumentIDHash(value string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
+	return hex.EncodeToString(sum[:])[:10]
 }
 
 func aggregateCitationIndex(

@@ -124,6 +124,117 @@ func TestValidateCollectManifestRejectsRecoveryEvidenceFallbackDocument(t *testi
 	}
 }
 
+func TestValidateCollectManifestRejectsFailureOnlyCollectDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe first bounded evidence read failed before repository files were inspected. No repository evidence was emitted before the failure.\n\n## Evidence Status\n\n- Current evidence result: no file content observed before the bounded read failed\n- This is a bounded collection failure, not architecture evidence.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected failure-only collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected failure-only document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsInterruptedTemporaryCollectDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Bin Overview\n\nThis shard covers the PostHog repository `bin` path scope. The first bounded evidence read was attempted against the configured PostHog entrypoint hints and `bin` scope, but shell glob handling interrupted the listing before file contents were emitted. This initial artifact records only the assigned scoped surface and will be repaired with concrete file-level evidence after the artifact pair exists.\n\n## Observed Surface\n\n- Repository scope: `posthog`.\n- Assigned path scope: `bin`.\n- Required authored artifact: `bin-overview.md`.\n\n## Evidence Gaps\n\n- Concrete `bin` file roles still require file-level confirmation.\n- Owner mapping and escalation evidence are not confirmed.\n- Operational dependency evidence is not confirmed.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected interrupted temporary collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "bootstrap-only collect document") {
+		t.Fatalf("expected interrupted temporary document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsRuntimeProcessNarrationDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe initial bounded read includes README.md and Makefile, but later files still require collection. This is runtime collection mechanics, not operator-facing architecture evidence.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected runtime process narration collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "process-contaminated collect document") {
+		t.Fatalf("expected process-contaminated document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsGuessedPathNarrationDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nExpected src/test/java/EndToEndTest.java path was not present, so this artifact keeps the guessed path as a follow-up note.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected guessed path collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "process-contaminated collect document") {
+		t.Fatalf("expected process-contaminated document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestAllowsMissingSpecCoverageGap(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe scoped API module depends on shared events and exposes a Restaurant Service surface.\n\n## Gaps And Questions\n\nThe scoped evidence does not include a concrete OpenAPI/Swagger file under `ftgo-restaurant-service-api-spec`, and the expected Swagger resource path was not present in the scoped files.\n")
+
+	if err := ValidateCollectManifestInRoot(writeRoot); err != nil {
+		t.Fatalf("expected missing spec coverage gap to pass validation, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsBootstrapOnlySemanticSkeleton(t *testing.T) {
 	t.Parallel()
 
@@ -486,6 +597,115 @@ func TestValidateCollectManifestRejectsDirectoryDocumentPath(t *testing.T) {
 	}
 }
 
+func TestValidateCollectManifestRejectsMissingCitationRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	payload["citations"].([]any)[0].(map[string]any)["path"] = "pom.xml"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected missing citation repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `citations[0] repo evidence path "pom.xml" is missing`) {
+		t.Fatalf("expected missing citation path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsDirectoryCitationRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `services` contains service code.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+	if err := os.Mkdir(filepath.Join(repoRoot, "services"), 0o755); err != nil {
+		t.Fatalf("mkdir services evidence directory: %v", err)
+	}
+
+	payload := validCollectManifestPayload()
+	payload["citations"].([]any)[0].(map[string]any)["path"] = "services"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected directory citation repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `citations[0] repo evidence path "services" is a directory`) {
+		t.Fatalf("expected directory citation path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsMissingSemanticEvidenceRepoPath(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	entity := semanticSliceItem(payload, "entities", 0)
+	evidence := entity["provenance"].(map[string]any)["evidence"].([]any)
+	evidence[0].(map[string]any)["path"] = "src/missing.go"
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	err = ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot})
+	if err == nil {
+		t.Fatalf("expected missing semantic evidence repo path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `semantic.entities[0].provenance.evidence[0] repo evidence path "src/missing.go" is missing`) {
+		t.Fatalf("expected missing semantic evidence path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestAcceptsGeneratedRepoRootSuffixAlias(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoParent := t.TempDir()
+	repoRoot := filepath.Join(repoParent, "payments-service-d542d7e34d40")
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if err := ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot}); err != nil {
+		t.Fatalf("expected generated repo root suffix alias to validate: %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t *testing.T) {
 	t.Parallel()
 
@@ -701,5 +921,16 @@ func writeDoc(t *testing.T, writeRoot string, rel string, content string) {
 	}
 	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 		t.Fatalf("write doc %q: %v", rel, err)
+	}
+}
+
+func writeRepoFile(t *testing.T, repoRoot string, rel string, content string) {
+	t.Helper()
+	abs := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir for repo file %q: %v", rel, err)
+	}
+	if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+		t.Fatalf("write repo file %q: %v", rel, err)
 	}
 }

@@ -107,7 +107,9 @@ func collectRuntimeRecoveryDocs(writeRoot string) ([]collectManifestRuntimeRecov
 			return err
 		}
 		text := strings.TrimSpace(string(raw))
-		if text == "" || artifactquality.CollectDocumentBootstrapOnly(text) {
+		if text == "" ||
+			artifactquality.CollectDocumentBootstrapOnly(text) ||
+			artifactquality.CollectDocumentRuntimeProcessContaminated(text) {
 			return nil
 		}
 		docs = append(docs, collectManifestRuntimeRecoveryDoc{
@@ -573,7 +575,7 @@ func collectManifestRecoveryEvidencePath(task acpruntime.Task, docs []collectMan
 		}
 	}
 	candidates := preferredRecoveryEvidenceCandidates(pathScopes)
-	for _, value := range []string{"README.md", "README.rst", "package.json", "pyproject.toml", "go.mod", "Makefile", "docker-compose.yml"} {
+	for _, value := range []string{"README.md", "README.adoc", "README.rst", "package.json", "pyproject.toml", "go.mod", "Makefile", "docker-compose.yml"} {
 		candidates = append(candidates, value)
 	}
 	for _, candidate := range candidates {
@@ -659,7 +661,7 @@ func recoveryEvidencePathExists(roots []string, rel string) bool {
 			continue
 		}
 		info, err := os.Stat(filepath.Join(filepath.Clean(root), filepath.FromSlash(rel)))
-		if err == nil && info != nil {
+		if err == nil && info != nil && !info.IsDir() {
 			return true
 		}
 	}

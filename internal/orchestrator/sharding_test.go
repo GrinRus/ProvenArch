@@ -54,12 +54,67 @@ func (customMetadataRunner) RuntimeMeta() contracts.RuntimeMeta {
 	return contracts.RuntimeMeta{Name: "custom-runtime", Version: "v1"}
 }
 
+type recordingShardSummaryStore struct {
+	items []runtimeShardSummaryEntry
+}
+
+func (s *recordingShardSummaryStore) LoadSummary(string, string) ([]runtimeShardSummaryEntry, error) {
+	return append([]runtimeShardSummaryEntry(nil), s.items...), nil
+}
+
+func (s *recordingShardSummaryStore) PersistSummary(_ string, _ string, items []runtimeShardSummaryEntry) error {
+	s.items = append([]runtimeShardSummaryEntry(nil), items...)
+	return nil
+}
+
+func (s *recordingShardSummaryStore) RuntimeExecutionExists(string) bool {
+	return false
+}
+
+func (s *recordingShardSummaryStore) PersistRuntimeExecutionArtifact(string, string, []byte) error {
+	return nil
+}
+
 func TestRuntimeMetaForRunnerUsesMetadataInterface(t *testing.T) {
 	t.Parallel()
 
 	meta := runtimeMetaForRunner(customMetadataRunner{})
 	if meta.Name != "custom-runtime" || meta.Version != "v1" {
 		t.Fatalf("unexpected runtime meta from interface: %+v", meta)
+	}
+}
+
+func TestRuntimeShardSummaryPersistsRunnerErrorCode(t *testing.T) {
+	t.Parallel()
+
+	store := &recordingShardSummaryStore{}
+	state := &runtimeShardSummaryState{
+		store:  store,
+		stepID: "init.step1.collect",
+		entries: []runtimeShardSummaryEntry{
+			{ShardID: "shard-a", Status: "pending"},
+		},
+		index: map[string]int{"shard-a": 0},
+	}
+	err := acpruntime.WrapRunnerError(
+		acpruntime.ProviderClaudeCode,
+		acpruntime.ErrorCodeRunnerUnavailable,
+		"claude-code became unavailable before required artifacts",
+		nil,
+	)
+
+	if markErr := state.markFailedError(runtimeShardPlan{ShardID: "shard-a"}, "task-a", err); markErr != nil {
+		t.Fatalf("mark failed: %v", markErr)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("unexpected persisted item count: %d", len(store.items))
+	}
+	item := store.items[0]
+	if item.ErrorCode != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected shard error_code %q, got %q", acpruntime.ErrorCodeRunnerUnavailable, item.ErrorCode)
+	}
+	if item.Error == "" || item.TaskID != "task-a" || item.Status != "failed" {
+		t.Fatalf("unexpected persisted shard item: %+v", item)
 	}
 }
 
@@ -184,6 +239,72 @@ func TestScheduleRuntimeShardRunsFailFastDoesNotStartNextSequentialShard(t *test
 	}
 	if results[1].Prepared.Task.TaskID != "" || results[1].Err != nil {
 		t.Fatalf("expected second shard to remain undispatched, got prepared=%+v err=%v", results[1].Prepared.Task, results[1].Err)
+	}
+}
+
+func TestScheduleRuntimeShardRunsBestEffortAbortsAfterRepeatedRunnerUnavailable(t *testing.T) {
+	t.Parallel()
+
+	plans := []runtimeShardPlan{
+		{ShardID: "shard-1"},
+		{ShardID: "shard-2"},
+		{ShardID: "shard-3"},
+		{ShardID: "shard-4"},
+		{ShardID: "shard-5"},
+		{ShardID: "shard-6"},
+	}
+	entries := make([]runtimeShardSummaryEntry, 0, len(plans))
+	index := make(map[string]int, len(plans))
+	for idx, plan := range plans {
+		index[plan.ShardID] = idx
+		entries = append(entries, runtimeShardSummaryEntry{
+			ShardID:   plan.ShardID,
+			Status:    "failed",
+			ErrorCode: string(acpruntime.ErrorCodeRunnerUnavailable),
+			Error:     "claude-code became unavailable before required artifacts",
+		})
+	}
+	summaryState := &runtimeShardSummaryState{
+		singleShard: false,
+		entries:     entries,
+		index:       index,
+	}
+	execution := pipelineExecution{}
+
+	results, terminalErr := execution.scheduleRuntimeShardRuns(
+		context.Background(),
+		"refresh.step1.collect",
+		"domain-test",
+		plans,
+		summaryState,
+		runtimeShardExecutionOptions{
+			Strategy:      "sequential",
+			MaxParallel:   1,
+			FailurePolicy: "best_effort",
+			BestEffort:    true,
+		},
+		"domain-test",
+	)
+	if terminalErr == nil {
+		t.Fatalf("expected terminal error after repeated runner_unavailable shards")
+	}
+	if code := shardErrorCode(terminalErr); code != string(acpruntime.ErrorCodeRunnerUnavailable) {
+		t.Fatalf("expected terminal error_code %q, got %q (%v)", acpruntime.ErrorCodeRunnerUnavailable, code, terminalErr)
+	}
+	if len(results) != len(plans) {
+		t.Fatalf("unexpected result count: got=%d want=%d", len(results), len(plans))
+	}
+	for idx := 0; idx < collectBestEffortRunnerUnavailableAbortThreshold; idx++ {
+		if results[idx].Err == nil {
+			t.Fatalf("expected result %d to contain replayed runner_unavailable error", idx)
+		}
+	}
+	if results[collectBestEffortRunnerUnavailableAbortThreshold].Err != nil ||
+		results[collectBestEffortRunnerUnavailableAbortThreshold].Prepared.Task.TaskID != "" {
+		t.Fatalf("expected shard after threshold to remain undispatched, got prepared=%+v err=%v",
+			results[collectBestEffortRunnerUnavailableAbortThreshold].Prepared.Task,
+			results[collectBestEffortRunnerUnavailableAbortThreshold].Err,
+		)
 	}
 }
 

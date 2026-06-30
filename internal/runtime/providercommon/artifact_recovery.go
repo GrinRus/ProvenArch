@@ -3,9 +3,12 @@ package providercommon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -98,6 +101,7 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 	retryPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
 	if stalled.Diagnostic.StallPhase == StallPhasePreArtifact && retryPolicy.RetryPreArtifactStallWindow > 0 {
 		retryPolicy.PreArtifactStallWindow = retryPolicy.RetryPreArtifactStallWindow
+		retryPolicy.PreArtifactWallClockWindow = retryPolicy.RetryPreArtifactStallWindow
 	}
 	emitStallRetryScheduledDiagnostic(task, adapter.Provider(), stalled.Diagnostic)
 	retryResult, retryErr := runProviderCommand(ctx, task, adapter, retryPolicy)
@@ -113,6 +117,9 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 				}
 			}
 			emitRetryExhaustedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic, "fresh_process")
+			if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairAfterSilentRetryExhaustion(ctx, task, adapter, retryResult, retryErr); recovered {
+				return true, recoveredResult, recoveredErr
+			}
 			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "retry", retryResult, "provider unavailable after fresh-process stall retry", retryErr)
 			}
@@ -147,15 +154,43 @@ func recoverFocusedArtifactRepair(ctx context.Context, task acpruntime.Task, ada
 }
 
 func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
+	return recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage, collectArtifactPairRepairOptions{
+		allowManifestFallback: true,
+	})
+}
+
+func recoverCollectArtifactPairRepairAfterSilentRetryExhaustion(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error) (bool, acpruntime.Result, error) {
+	policy := adapter.RecoveryPolicy(task)
+	if !policy.RepairCollectArtifactPairOnce || !acpruntime.IsCollectStep(task.StepID) {
+		return false, acpruntime.Result{}, nil
+	}
+	if !shouldClassifySilentRetryExhaustionUnavailable(policy, task, result) {
+		return false, acpruntime.Result{}, nil
+	}
+	return recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, "retry_silent_exhausted", collectArtifactPairRepairOptions{
+		allowSilentNoArtifact: true,
+		allowManifestFallback: true,
+	})
+}
+
+type collectArtifactPairRepairOptions struct {
+	allowSilentNoArtifact                    bool
+	allowNoProviderDiagnostics               bool
+	allowExistingAuthoredFiles               bool
+	requiredExistingAuthoredDocMutationPaths map[string]struct{}
+	allowManifestFallback                    bool
+}
+
+func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string, options collectArtifactPairRepairOptions) (bool, acpruntime.Result, error) {
 	policy := adapter.RecoveryPolicy(task)
 	if !policy.RepairCollectArtifactPairOnce || !acpruntime.IsCollectStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
 	}
 	snapshot := runtimeArtifactSnapshot(task)
-	if snapshot.AuthoredFiles > 0 {
+	if snapshot.AuthoredFiles > 0 && !options.allowExistingAuthoredFiles {
 		return false, acpruntime.Result{}, nil
 	}
-	if !resultHasProviderDiagnostics(result) {
+	if !options.allowSilentNoArtifact && !options.allowNoProviderDiagnostics && !resultHasProviderDiagnostics(result) {
 		return false, acpruntime.Result{}, nil
 	}
 	repairAdapter, ok := adapter.(CollectArtifactPairRepairAdapter)
@@ -171,7 +206,7 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 	buildRepairSpec := func() (CommandSpec, error) {
 		return repairAdapter.CollectArtifactPairRepairCommandSpec(task, validationErr)
 	}
-	repairResult, repairErr, commandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, result, buildRepairSpec)
+	repairResult, repairErr, commandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, result, buildRepairSpec)
 	if commandErr != nil {
 		return true, acpruntime.Result{}, commandErr
 	}
@@ -183,12 +218,72 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 		if errors.As(repairErr, &repairStalled) {
 			if policy.AcceptValidArtifactsAfterStop {
 				if err := adapter.ValidateArtifacts(task); err == nil {
+					if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+						emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic, outcomeErr)
+						return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+					}
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic.StallPhase)
 					return true, repairResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, err, "collect_pair_repair_post_artifact_invalid", beforeRepairFiles, options); recovered {
+					return true, recoveredResult, recoveredErr
 				}
 			}
+			if shouldRetrySilentNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic) {
+				emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairErr)
+				retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+				if retryCommandErr != nil {
+					return true, acpruntime.Result{}, retryCommandErr
+				}
+				if writeSetErr := validateCollectArtifactPairRepairWriteSet(task, beforeRepairFiles); writeSetErr != nil {
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery wrote outside the collect pair write set", writeSetErr)
+				}
+				if retryErr != nil {
+					var retryStalled StallError
+					if errors.As(retryErr, &retryStalled) {
+						if policy.AcceptValidArtifactsAfterStop {
+							if err := adapter.ValidateArtifacts(task); err == nil {
+								if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+									emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, outcomeErr)
+									return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+								}
+								emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
+								return true, retryResult, nil
+							} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_post_artifact_invalid", beforeRepairFiles, options); recovered {
+								return true, recoveredResult, recoveredErr
+							}
+						}
+						emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
+						if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial", beforeRepairFiles, options); recovered {
+							return true, recoveredResult, recoveredErr
+						}
+						if shouldClassifySilentNoFreshArtifactRepairStall(policy, retryResult, retryStalled.Diagnostic) ||
+							shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
+							return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", retryResult, "provider unavailable during collect pair recovery", retryErr)
+						}
+						return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery stalled before valid artifacts were available", retryErr)
+					}
+					return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, retryResult, retryErr)
+				}
+				if err := adapter.ValidateArtifacts(task); err != nil {
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+					if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid", beforeRepairFiles, options); recovered {
+						return true, recoveredResult, recoveredErr
+					}
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
+				}
+				if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), outcomeErr)
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+				}
+				emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
+				return true, retryResult, nil
+			}
 			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairStalled.Diagnostic, repairErr)
-			if shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
+			if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, repairErr, "collect_pair_repair_partial", beforeRepairFiles, options); recovered {
+				return true, recoveredResult, recoveredErr
+			}
+			if shouldClassifySilentNoFreshArtifactRepairStall(policy, repairResult, repairStalled.Diagnostic) ||
+				shouldClassifySilentRetryExhaustionUnavailable(policy, task, repairResult) {
 				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", repairResult, "provider unavailable during collect pair recovery", repairErr)
 			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery stalled before valid artifacts were available", repairErr)
@@ -198,7 +293,7 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		if shouldRetryTransientProviderUnavailableArtifactRepair(policy, repairResult, err, adapter.UnavailableMarkers()) {
 			emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", err)
-			retryResult, retryErr, retryCommandErr := runFocusedArtifactRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+			retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
 			if retryCommandErr != nil {
 				return true, acpruntime.Result{}, retryCommandErr
 			}
@@ -210,11 +305,20 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 				if errors.As(retryErr, &retryStalled) {
 					if policy.AcceptValidArtifactsAfterStop {
 						if err := adapter.ValidateArtifacts(task); err == nil {
+							if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+								emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, outcomeErr)
+								return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
+							}
 							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic.StallPhase)
 							return true, retryResult, nil
+						} else if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_post_artifact_invalid", beforeRepairFiles, options); recovered {
+							return true, recoveredResult, recoveredErr
 						}
 					}
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", retryStalled.Diagnostic, retryErr)
+					if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, retryErr, "collect_pair_repair_retry_partial", beforeRepairFiles, options); recovered {
+						return true, recoveredResult, recoveredErr
+					}
 					if shouldClassifySilentRetryExhaustionUnavailable(policy, task, retryResult) {
 						return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "collect_pair_repair", retryResult, "provider unavailable during collect pair recovery", retryErr)
 					}
@@ -224,16 +328,114 @@ func recoverCollectArtifactPairRepair(ctx context.Context, task acpruntime.Task,
 			}
 			if err := adapter.ValidateArtifacts(task); err != nil {
 				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+				if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, retryResult, err, "collect_pair_repair_retry_invalid", beforeRepairFiles, options); recovered {
+					return true, recoveredResult, recoveredErr
+				}
 				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
+			}
+			if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), outcomeErr)
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
 			}
 			emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
 			return true, retryResult, nil
 		}
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		if recovered, recoveredResult, recoveredErr := recoverCollectManifestFallbackAfterPairRepair(ctx, task, adapter, repairResult, err, "collect_pair_repair_invalid", beforeRepairFiles, options); recovered {
+			return true, recoveredResult, recoveredErr
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery did not produce valid collect artifacts", err)
+	}
+	if outcomeErr := validateCollectArtifactPairRepairOutcome(task, beforeRepairFiles, options); outcomeErr != nil {
+		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "collect_pair_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), outcomeErr)
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_pair_repair", "collect pair recovery did not repair referenced markdown", outcomeErr)
 	}
 	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "collect_pair_repair", "")
 	return true, repairResult, nil
+}
+
+func recoverCollectManifestFallbackAfterPairRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string, before writeRootFileSnapshot, options collectArtifactPairRepairOptions) (bool, acpruntime.Result, error) {
+	if !shouldRecoverCollectManifestAfterPairRepair(task, before, options, validationErr) {
+		return false, acpruntime.Result{}, nil
+	}
+	return recoverCollectManifestRepair(ctx, task, adapter, result, validationErr, stage)
+}
+
+func shouldRecoverCollectManifestAfterPairRepair(task acpruntime.Task, before writeRootFileSnapshot, options collectArtifactPairRepairOptions, validationErr error) bool {
+	if validationErr == nil {
+		return false
+	}
+	if options.allowManifestFallback {
+		return true
+	}
+	if len(options.requiredExistingAuthoredDocMutationPaths) == 0 {
+		return false
+	}
+	if err := validateCollectArtifactPairRepairOutcome(task, before, options); err != nil {
+		return false
+	}
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
+		return false
+	}
+	if len(collectProcessContaminatedAuthoredDocs(task)) > 0 {
+		return false
+	}
+	if len(collectAuthoredDocsMentioningMissingRepoEvidencePaths(task, validationErr)) > 0 {
+		return false
+	}
+	return true
+}
+
+func validateCollectArtifactPairRepairOutcome(task acpruntime.Task, before writeRootFileSnapshot, options collectArtifactPairRepairOptions) error {
+	if len(options.requiredExistingAuthoredDocMutationPaths) == 0 {
+		return nil
+	}
+	after, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return err
+	}
+	changedRequired := map[string]struct{}{}
+	for path, beforeState := range before {
+		if beforeState.IsDir || path == ShardPackManifestFileName || path == "runtime-execution.json" {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".md" {
+			continue
+		}
+		if _, required := options.requiredExistingAuthoredDocMutationPaths[path]; !required {
+			continue
+		}
+		afterState, exists := after[path]
+		if exists && !afterState.IsDir && beforeState != afterState {
+			changedRequired[path] = struct{}{}
+		}
+	}
+	missing := []string{}
+	for path := range options.requiredExistingAuthoredDocMutationPaths {
+		if _, ok := changedRequired[path]; !ok {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("collect_pair_repair_noop_or_stale_markdown: existing authored markdown was not rewritten: %s", strings.Join(missing, ", "))
+}
+
+func shouldRetrySilentNoFreshCollectPairRepair(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	return policy.RetryInvalidOrMissingArtifactsOnce &&
+		policy.RetryZeroOutputPreArtifactStallOnce &&
+		shouldClassifySilentNoFreshArtifactRepairStall(policy, result, diagnostic)
+}
+
+func shouldClassifySilentNoFreshArtifactRepairStall(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	return policy.ClassifySilentRetryExhaustionUnavailable &&
+		diagnostic.StallPhase == StallPhasePreArtifact &&
+		strings.TrimSpace(result.Stdout) == "" &&
+		strings.TrimSpace(result.Stderr) == "" &&
+		!diagnostic.ArtifactObserved &&
+		diagnostic.AuthoredFileCount == 0
 }
 
 func resultHasProviderDiagnostics(result acpruntime.Result) bool {
@@ -249,14 +451,60 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if snapshot.AuthoredFiles <= 0 {
 		return false, acpruntime.Result{}, nil
 	}
-	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
-		return false, acpruntime.Result{}, nil
-	}
 	beforeRepairFiles, err := snapshotWriteRootFiles(task.WriteRoot)
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_manifest_repair", "manifest-only collect repair write-set precheck failed", err)
 	}
-	if collectManifestFileMissing(task) || isCollectManifestSemanticScaffoldFailure(validationErr) {
+	if processDocs := collectProcessContaminatedAuthoredDocs(task); len(processDocs) > 0 {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_process_contaminated_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics:               true,
+			allowExistingAuthoredFiles:               true,
+			requiredExistingAuthoredDocMutationPaths: stringSliceSet(processDocs),
+			allowManifestFallback:                    false,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for process-contaminated authored markdown", validationErr)
+	}
+	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
+		return false, acpruntime.Result{}, nil
+	}
+	if emptyDocs := collectWhitespaceOnlyAuthoredDocs(task); len(emptyDocs) > 0 {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_empty_authored_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics:               true,
+			allowExistingAuthoredFiles:               true,
+			requiredExistingAuthoredDocMutationPaths: stringSliceSet(emptyDocs),
+			allowManifestFallback:                    false,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for empty authored markdown", validationErr)
+	}
+	if staleDocs := collectAuthoredDocsMentioningMissingRepoEvidencePaths(task, validationErr); len(staleDocs) > 0 {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_repo_evidence_mismatch", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics:               true,
+			allowExistingAuthoredFiles:               true,
+			requiredExistingAuthoredDocMutationPaths: stringSliceSet(staleDocs),
+			allowManifestFallback:                    false,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required for authored markdown that cites missing repo evidence", validationErr)
+	}
+	if !collectWriteRootHasAuthoredMarkdownDoc(task) {
+		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_missing_authored_markdown", collectArtifactPairRepairOptions{
+			allowNoProviderDiagnostics: true,
+			allowExistingAuthoredFiles: true,
+			allowManifestFallback:      true,
+		}); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required when partial collect output contains no authored markdown", validationErr)
+	}
+	if collectManifestFileMissing(task) ||
+		isCollectManifestSemanticScaffoldFailure(validationErr) ||
+		isCollectManifestEmptyPayloadFailure(validationErr) ||
+		isCollectManifestCitationClaimBindingFailure(validationErr) {
 		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, result, beforeRepairFiles, validationErr); recovered {
 			return true, recoveredResult, recoveredErr
 		}
@@ -297,9 +545,6 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 				}
 			}
 			emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), repairStalled.Diagnostic, repairErr)
-			if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, repairErr); recovered {
-				return true, recoveredResult, recoveredErr
-			}
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair stalled before valid artifacts were available", repairErr)
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, repairResult, repairErr)
@@ -309,9 +554,6 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-		if recovered, recoveredResult, recoveredErr := recoverCollectManifestDeterministically(task, adapter, repairResult, beforeRepairFiles, err); recovered {
-			return true, recoveredResult, recoveredErr
-		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
@@ -332,7 +574,39 @@ func recoverCollectManifestDeterministically(task acpruntime.Task, adapter Provi
 		return false, acpruntime.Result{}, nil
 	}
 	emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+	result = markCollectManifestRuntimeRecovered(result, report)
 	return true, result, nil
+}
+
+func markCollectManifestRuntimeRecovered(result acpruntime.Result, report collectManifestRuntimeRecoveryReport) acpruntime.Result {
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics["collect_manifest_runtime_recovery"] = map[string]any{
+		"recovery_mode":       "collect_manifest_runtime_recovery",
+		"source":              "runtime_recovery",
+		"provider_authored":   false,
+		"document_count":      report.DocumentCount,
+		"entity_count":        report.EntityCount,
+		"edge_count":          report.EdgeCount,
+		"evidence_path":       strings.TrimSpace(report.EvidencePath),
+		"manual_quality_gate": "artifact_quality_assessment",
+	}
+	warning := "runtime_recovery: collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json from provider-authored markdown; treat as recovery evidence, not normal provider-authored manifest success"
+	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
+		result.Execution.Warnings = append(result.Execution.Warnings, warning)
+	}
+	return result
+}
+
+func containsRuntimeWarning(values []string, expected string) bool {
+	expected = strings.TrimSpace(expected)
+	for _, value := range values {
+		if strings.TrimSpace(value) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func collectManifestFileMissing(task acpruntime.Task) bool {
@@ -349,6 +623,26 @@ func isCollectManifestSemanticScaffoldFailure(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold")
+}
+
+func isCollectManifestEmptyPayloadFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "shard-pack-manifest.schema.json validation failed: empty payload")
+}
+
+func isCollectManifestCitationClaimBindingFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := err.Error()
+	if strings.Contains(detail, "repo evidence path") ||
+		strings.Contains(detail, "process-contaminated") ||
+		strings.Contains(detail, "process contaminated") {
+		return false
+	}
+	return strings.Contains(detail, ".claim_ids is required")
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
@@ -377,6 +671,195 @@ func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
 		}
 	}
 	return false
+}
+
+func collectWhitespaceOnlyAuthoredDocs(task acpruntime.Task) []string {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return nil
+	}
+	found := []string{}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(name)) != ".md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if strings.TrimSpace(string(raw)) == "" {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(found)
+	return found
+}
+
+func collectWriteRootHasAuthoredMarkdownDoc(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	found := false
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".md", ".markdown":
+			found = true
+			return filepath.SkipAll
+		default:
+			return nil
+		}
+	})
+	return found
+}
+
+func collectProcessContaminatedAuthoredDocs(task acpruntime.Task) []string {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return nil
+	}
+	found := []string{}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(name)) != ".md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if artifactquality.CollectDocumentRuntimeProcessContaminated(string(raw)) {
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(found)
+	return found
+}
+
+func collectAuthoredDocsMentioningMissingRepoEvidencePaths(task acpruntime.Task, err error) []string {
+	missingPaths := missingRepoEvidencePathsFromError(err)
+	if len(missingPaths) == 0 {
+		return nil
+	}
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "" || root == "." {
+		return nil
+	}
+	missing := map[string]struct{}{}
+	for _, path := range missingPaths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			missing[path] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	found := []string{}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil || entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" || name == ShardPackManifestFileName || name == "runtime-execution.json" {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(name)) != ".md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || strings.TrimSpace(rel) == "" || rel == "." {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		text := string(raw)
+		for missingPath := range missing {
+			if strings.Contains(text, missingPath) {
+				found = append(found, filepath.ToSlash(rel))
+				return nil
+			}
+		}
+		return nil
+	})
+	sort.Strings(found)
+	return found
+}
+
+func stringSliceSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	set := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			set[value] = struct{}{}
+		}
+	}
+	return set
+}
+
+func missingRepoEvidencePathsFromError(err error) []string {
+	if err == nil {
+		return nil
+	}
+	const marker = `repo evidence path "`
+	text := err.Error()
+	paths := []string{}
+	seen := map[string]struct{}{}
+	for {
+		idx := strings.Index(text, marker)
+		if idx < 0 {
+			break
+		}
+		text = text[idx+len(marker):]
+		end := strings.Index(text, `"`)
+		if end < 0 {
+			break
+		}
+		path := strings.TrimSpace(text[:end])
+		if path != "" {
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				paths = append(paths, path)
+			}
+		}
+		text = text[end+1:]
+	}
+	return paths
 }
 
 func recoverValidatorVerdictRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
@@ -433,6 +916,9 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	if !policy.RepairDraftArtifactsOnce || !runtimedrafts.IsDraftStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
 	}
+	if isDraftBootstrapOnlyValidationFailure(validationErr) {
+		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, stage+"_bootstrap_only")
+	}
 	repairAdapter, ok := adapter.(DraftArtifactRepairAdapter)
 	if !ok {
 		return false, acpruntime.Result{}, nil
@@ -465,6 +951,10 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic.StallPhase)
 					return true, repairResult, nil
+				} else if isDraftBootstrapOnlyValidationFailure(err) {
+					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic, repairErr)
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, repairResult, err, "draft_artifact_repair_stalled")
 				}
 			}
 			emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -494,6 +984,10 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 							emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic.StallPhase)
 							return true, retryResult, nil
+						} else if isDraftBootstrapOnlyValidationFailure(err) {
+							emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+							emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic, retryErr)
+							return recoverDraftArtifactEnrichment(ctx, task, adapter, retryResult, err, "draft_artifact_repair_retry_stalled")
 						}
 					}
 					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
@@ -508,6 +1002,9 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 			if err := adapter.ValidateArtifacts(task); err != nil {
 				emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+				if isDraftBootstrapOnlyValidationFailure(err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, retryResult, err, "draft_artifact_repair_retry_invalid")
+				}
 				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
 			}
 			emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
@@ -516,6 +1013,9 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 		}
 		emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		if isDraftBootstrapOnlyValidationFailure(err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, repairResult, err, "draft_artifact_repair_invalid")
+		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
 	}
 	emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
@@ -523,14 +1023,679 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	return true, repairResult, nil
 }
 
+func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
+	policy := adapter.RecoveryPolicy(task)
+	if !policy.RepairDraftArtifactEnrichmentOnce || !runtimedrafts.IsDraftStep(task.StepID) {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", validationErr)
+	}
+	enrichmentAdapter, ok := adapter.(DraftArtifactEnrichmentAdapter)
+	if !ok {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", validationErr)
+	}
+	beforeWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_enrichment", "draft enrichment write_root precheck failed", err)
+	}
+	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_enrichment", "draft enrichment draft_final_root precheck failed", err)
+	}
+
+	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", stage, runtimeArtifactSnapshot(task), validationErr)
+	enrichmentResult, enrichmentErr, commandErr := runFocusedArtifactRepairCommandWithPolicy(
+		ctx,
+		task,
+		adapter,
+		result,
+		func() (CommandSpec, error) {
+			return enrichmentAdapter.DraftArtifactEnrichmentCommandSpec(task, validationErr)
+		},
+		func(policy ActivityPolicy) ActivityPolicy {
+			return draftArtifactEnrichmentActivityPolicy(task, policy)
+		},
+	)
+	if commandErr != nil {
+		return true, acpruntime.Result{}, commandErr
+	}
+	if writeSetErr := validateDraftArtifactRepairWriteSetForStage(task, beforeWriteRoot, beforeDraftRoot, stage); writeSetErr != nil {
+		if shouldRetryDraftWriteSetCleanupEnrichment(stage, task, beforeWriteRoot, beforeDraftRoot, writeSetErr) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteSetCleanupRetryError(writeSetErr), "draft_artifact_enrichment_write_set_cleanup")
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", writeSetErr)
+	}
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" {
+		if leftovers := draftWriteRootOutputFiles(task); len(leftovers) > 0 {
+			err := fmt.Errorf("draft artifact enrichment write-set cleanup left misplaced write_root draft files: %s", strings.Join(leftovers, ", "))
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", err)
+		}
+	}
+	if enrichmentErr != nil {
+		var enrichmentStalled StallError
+		if errors.As(enrichmentErr, &enrichmentStalled) {
+			if policy.AcceptValidArtifactsAfterStop {
+				if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err == nil {
+					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
+					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
+					return true, enrichmentResult, nil
+				} else if shouldRetryDraftManifestShapeEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
+				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
+					}
+					if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
+					}
+					if shouldRetryDraftSilentWriteFirstEnrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteFirstRetryError(err), "draft_artifact_enrichment_write_first_retry")
+					}
+					if shouldRetryDraftCompactStep2Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep2RetryError(err), "draft_artifact_enrichment_compact_step2_retry")
+					}
+					if shouldRetryDraftCompactStep4Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep4RetryError(err), "draft_artifact_enrichment_compact_step4_retry")
+					}
+					if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+					}
+					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, err)
+					return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
+				} else if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
+				} else if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+				} else if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+				}
+			}
+			emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
+			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic, enrichmentErr)
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment stalled before valid artifacts were available", enrichmentErr)
+		}
+		if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, enrichmentErr) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, enrichmentErr, "draft_artifact_enrichment_python3_retry")
+		}
+		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, enrichmentResult, enrichmentErr)
+	}
+	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err != nil {
+		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
+		if shouldRetryDraftManifestShapeEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
+		}
+		if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+		}
+		if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+			if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
+			}
+			if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
+			}
+			if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+				return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+			}
+			emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft_artifact_enrichment_noop_or_scaffold", err)
+		}
+		if shouldRetryDraftMalformedMarkdownEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_markdown_syntax")
+		}
+		if shouldRetryDraftDownstreamIndexClaimEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
+		}
+		if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+		}
+		if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
+		}
+		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft artifact enrichment did not produce valid draft artifact contract", err)
+	}
+	emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed", runtimeArtifactSnapshot(task))
+	emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", "")
+	return true, enrichmentResult, nil
+}
+
+const minDraftArtifactEnrichmentPreArtifactWindow = 3 * time.Minute
+
+func draftArtifactEnrichmentActivityPolicy(task acpruntime.Task, policy ActivityPolicy) ActivityPolicy {
+	policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+	if policy.PreArtifactStallWindow < minDraftArtifactEnrichmentPreArtifactWindow {
+		policy.PreArtifactStallWindow = minDraftArtifactEnrichmentPreArtifactWindow
+	}
+	if policy.PreArtifactWallClockWindow < minDraftArtifactEnrichmentPreArtifactWindow {
+		policy.PreArtifactWallClockWindow = minDraftArtifactEnrichmentPreArtifactWindow
+	}
+	return policy
+}
+
+func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, validationErr error, stage string) error {
+	if validationErr != nil {
+		if isDraftBootstrapOnlyValidationFailure(validationErr) {
+			return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: %w", validationErr)
+		}
+		return validationErr
+	}
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" {
+		if draftWriteRootDuplicateCleanupOccurred(task, beforeWriteRoot, beforeDraftRoot) ||
+			draftStep0CanonicalDuplicateCleanupOccurred(task, beforeDraftRoot) {
+			return nil
+		}
+	}
+	if !allDraftMarkdownOutputsChanged(task, beforeDraftRoot) {
+		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed")
+	}
+	return nil
+}
+
+func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" || err == nil {
+		return false
+	}
+	if shouldRetryDraftStep0CanonicalDuplicateCleanup(task, beforeWriteRoot, beforeDraftRoot, err) {
+		return true
+	}
+	if !strings.Contains(err.Error(), "draft repair wrote forbidden write_root files") {
+		return false
+	}
+	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
+	if writeErr != nil {
+		return false
+	}
+	afterDraftRoot, draftErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if draftErr != nil {
+		return false
+	}
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	draftRootChanges := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		return allowedDraftRootChange(change.Path, change.State)
+	})
+	if len(draftRootChanges) > 0 {
+		return false
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	changes := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		return strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile
+	})
+	if len(changes) == 0 {
+		return false
+	}
+	for _, change := range changes {
+		if change.Op != "created" && change.Op != "modified" {
+			return false
+		}
+		if !isAllowedDraftMarkdownOutputPath(task, change.Path) || change.State.IsDir {
+			return false
+		}
+		draftState, ok := afterDraftRoot[change.Path]
+		if !ok || !sameWriteRootFileContent(change.State, draftState) {
+			return false
+		}
+	}
+	return true
+}
+
+func shouldRetryDraftStep0CanonicalDuplicateCleanup(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if err == nil || !strings.Contains(err.Error(), "draft repair wrote forbidden draft_final_root files") {
+		return false
+	}
+	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
+	if writeErr != nil {
+		return false
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	writeRootChanges := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		return strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile
+	})
+	if len(writeRootChanges) > 0 {
+		return false
+	}
+	afterDraftRoot, draftErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if draftErr != nil {
+		return false
+	}
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	draftRootChanges := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		return allowedDraftRootChange(change.Path, change.State)
+	})
+	if len(draftRootChanges) == 0 {
+		return false
+	}
+	hasCanonicalDuplicate := false
+	for _, change := range draftRootChanges {
+		if !isStep0CanonicalDraftDuplicateCreation(task, change) {
+			return false
+		}
+		if filepath.ToSlash(filepath.Clean(change.Path)) == "skills/subagents.yaml" && !change.State.IsDir {
+			hasCanonicalDuplicate = true
+		}
+	}
+	return hasCanonicalDuplicate
+}
+
+func draftWriteRootDuplicateCleanupOccurred(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return false
+	}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		if !writeRootPathWasDraftDuplicate(beforeWriteRoot, beforeDraftRoot, rel) {
+			continue
+		}
+		if _, stillExists := afterWriteRoot[rel]; !stillExists {
+			return true
+		}
+	}
+	return false
+}
+
+func draftStep0CanonicalDuplicateCleanupOccurred(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false
+	}
+	filePath := "skills/subagents.yaml"
+	beforeState, beforeOK := beforeDraftRoot[filePath]
+	if !beforeOK || beforeState.IsDir {
+		return false
+	}
+	_, afterOK := afterDraftRoot[filePath]
+	return !afterOK
+}
+
+func isStep0CanonicalDraftDuplicateCreation(task acpruntime.Task, change repairMutation) bool {
+	return change.Op == "created" && step0CanonicalDraftDuplicatePathMatches(task, change.Path, change.State.IsDir)
+}
+
+func isStep0CanonicalDraftDuplicateCleanupMutation(task acpruntime.Task, change repairMutation) bool {
+	return change.Op == "deleted" && step0CanonicalDraftDuplicatePathMatches(task, change.Path, change.State.IsDir)
+}
+
+func step0CanonicalDraftDuplicatePathMatches(task acpruntime.Task, rawPath string, isDir bool) bool {
+	if strings.TrimSpace(task.StepID) != "init.step0.constitution" {
+		return false
+	}
+	path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(rawPath)))
+	for _, output := range loadAllowedDraftOutputs(task) {
+		outputPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		canonicalPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.CanonicalPath)))
+		if outputPath != "baseline-subagents.yaml" || canonicalPath != "skills/subagents.yaml" {
+			continue
+		}
+		if isDir {
+			return path == "skills"
+		}
+		return path == "skills/subagents.yaml"
+	}
+	return false
+}
+
+func draftWriteRootOutputFiles(task acpruntime.Task) []string {
+	writeRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		if state, ok := writeRoot[rel]; ok && !state.IsDir {
+			out = append(out, rel)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func allDraftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot) bool {
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false
+	}
+	seenMarkdown := false
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		seenMarkdown = true
+		beforeState, beforeExists := beforeDraftRoot[rel]
+		afterState, afterExists := afterDraftRoot[rel]
+		if beforeExists == afterExists && (!afterExists || beforeState == afterState) {
+			return false
+		}
+	}
+	return seenMarkdown
+}
+
+func isDraftEnrichmentNoopOrScaffoldFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_noop_or_scaffold")
+}
+
+func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
+	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
+		err != nil &&
+		strings.Contains(err.Error(), "malformed markdown inline-code")
+}
+
+func shouldRetryDraftManifestShapeEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_manifest_shape" || err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
+		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
+}
+
+func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_downstream_index_retry" || err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
+		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
+}
+
+func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_shard_status_cleanup" || err == nil {
+		return false
+	}
+	if isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
+		strings.Contains(text, "generic conditional shard-gap wording") ||
+		strings.Contains(text, "does not report exact current-run shard status") ||
+		strings.Contains(text, "does not report exact current-run shard completeness")
+}
+
+func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_marker_cleanup" || err == nil {
+		return false
+	}
+	text := err.Error()
+	if !strings.Contains(text, "bootstrap-only placeholder draft content") &&
+		!strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") {
+		return false
+	}
+	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot) && draftMarkdownContainsMarkerCleanupCandidate(task)
+}
+
+func draftMarkdownContainsMarkerCleanupCandidate(task acpruntime.Task) bool {
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) {
+			continue
+		}
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), rel))
+		if err != nil {
+			continue
+		}
+		lower := strings.ToLower(string(raw))
+		if draftMarkdownHasDirectScaffoldMarker(lower) {
+			continue
+		}
+		if draftMarkdownHasProcessMarkerCleanupCandidate(lower) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftMarkdownHasDirectScaffoldMarker(lower string) bool {
+	markers := []string{
+		"provider wrote this draft artifact",
+		"drafted required runtime artifacts",
+		"draft surface initialized",
+		"runtime proposal surface initialized",
+		"runtime draft recovery initialized",
+		"draft recovery initialized",
+		"treat this as diagnostic evidence until",
+		"bootstrap-only placeholder",
+		"placeholder draft content",
+		"placeholder draft text",
+		"placeholder content",
+		"placeholder proposal content",
+		"replace placeholder",
+		"replaced placeholder",
+		"replacing placeholders",
+		"current run evidence should be reviewed before promotion",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftMarkdownHasProcessMarkerCleanupCandidate(lower string) bool {
+	markers := []string{
+		"bounded read root",
+		"bounded read roots",
+		"bounded staged evidence",
+		"bounded evidence read",
+		"bounded read pass",
+		"current draft manifest",
+		"draft manifest",
+		"draft space",
+		"manifest target",
+		"manifest retains",
+		"recovery pass",
+		"recovery action",
+		"enrichment read",
+		"enrichment pass",
+		"validator output",
+		"pipeline artifacts",
+		"later passes",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRetryDraftPrintedCommandEnrichment(stage string, result acpruntime.Result, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_command_text_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{result.Stdout, result.Stderr, errorText(err)}, "\n"))
+	markers := []string{
+		"python3 - <<",
+		"python3 <<",
+		"python3 -c ",
+		"```bash",
+		"```sh",
+		"```python",
+		"here-doc",
+		"heredoc",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRetryDraftSilentWriteFirstEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
+	trimmedStage := strings.TrimSpace(stage)
+	if strings.HasPrefix(trimmedStage, "draft_artifact_enrichment_") || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	if diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
+}
+
+func shouldRetryDraftCompactStep2Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+	default:
+		return false
+	}
+	if diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
+}
+
+func shouldRetryDraftCompactStep4Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+		return false
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step4.proposals", "refresh.step4.proposals":
+	default:
+		return false
+	}
+	if diagnostic.StallPhase != StallPhasePreArtifact {
+		return false
+	}
+	if strings.TrimSpace(result.Stdout) != "" || strings.TrimSpace(result.Stderr) != "" {
+		return false
+	}
+	return !allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
+}
+
+func draftWriteFirstRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_write_first_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_write_first_retry: %w", err)
+}
+
+func draftCompactStep2RetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_compact_step2_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_compact_step2_retry: %w", err)
+}
+
+func draftCompactStep4RetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_compact_step4_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_compact_step4_retry: %w", err)
+}
+
+func draftWriteSetCleanupRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_write_set_cleanup")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_write_set_cleanup: %w", err)
+}
+
+func draftCommandTextRetryError(err error) error {
+	if err == nil {
+		return errors.New("draft_artifact_enrichment_command_text_retry")
+	}
+	return fmt.Errorf("draft_artifact_enrichment_command_text_retry: %w", err)
+}
+
+func shouldRetryDraftMissingPythonEnrichment(stage string, result acpruntime.Result, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_python3_retry" {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{result.Stdout, result.Stderr, errorText(err)}, "\n"))
+	return strings.Contains(text, "command not found: python") ||
+		strings.Contains(text, "python: command not found") ||
+		strings.Contains(text, "python: not found")
+}
+
+func isDraftBootstrapOnlyValidationFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "bootstrap-only placeholder draft content")
+}
+
 func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
+	return runFocusedArtifactRepairCommandWithPolicy(ctx, task, adapter, baseResult, buildSpec, nil)
+}
+
+func runCollectArtifactPairRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {
+	spec, err := buildSpec()
+	if err != nil {
+		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
+	}
+	repairPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
+	repairPolicy.MonitorArtifacts = true
+	repairPolicy.MonitorPreArtifact = true
+	repairPolicy = collectArtifactPairRepairActivityPolicy(repairPolicy)
+	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	return repairResult, repairErr, nil
+}
+
+func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error), configure func(ActivityPolicy) ActivityPolicy) (acpruntime.Result, error, error) {
 	spec, err := buildSpec()
 	if err != nil {
 		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
 	}
 	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
+	if configure != nil {
+		repairPolicy = configure(repairPolicy)
+	}
 	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
 	return repairResult, repairErr, nil
+}
+
+func collectArtifactPairRepairActivityPolicy(policy ActivityPolicy) ActivityPolicy {
+	policy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
+	if policy.PreArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PreArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.PreArtifactWallClockWindow <= 0 {
+		policy.PreArtifactWallClockWindow = defaultCollectRepairWindow
+	}
+	if policy.PostArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PostArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.PartialArtifactStallWindow < defaultCollectRepairWindow {
+		policy.PartialArtifactStallWindow = defaultCollectRepairWindow
+	}
+	if policy.ValidArtifactStopWindow <= 0 {
+		policy.ValidArtifactStopWindow = defaultRepairValidStopWindow
+	}
+	return policy
 }
 
 func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) ActivityPolicy {
@@ -540,6 +1705,7 @@ func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) A
 	if repairPolicy.PreArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PreArtifactStallWindow = defaultFocusedRepairWindow
 	}
+	repairPolicy.PreArtifactWallClockWindow = defaultFocusedRepairWindow
 	if repairPolicy.PostArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PostArtifactStallWindow = defaultFocusedRepairWindow
 	}

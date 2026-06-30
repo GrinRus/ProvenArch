@@ -8,6 +8,7 @@ GO_BIN="${GO:-./scripts/run-go.sh}"
 workspace="$tmpdir/workspace"
 repo="$tmpdir/repos/payments-service"
 mkdir -p "$workspace" "$repo"
+printf '# payments-service\n' >"$repo/README.md"
 
 "$GO_BIN" run ./cmd/acp init-workspace \
   --workspace "$workspace" \

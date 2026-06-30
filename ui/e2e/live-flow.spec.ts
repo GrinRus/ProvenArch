@@ -6,8 +6,12 @@ import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
+const artifactSource = (process.env.UI_E2E_ARTIFACT_SOURCE ?? "live").trim().toLowerCase();
+const snapshotRunID = (process.env.UI_E2E_SNAPSHOT_RUN_ID ?? "").trim();
 const initTimeoutSec = Number.parseInt(process.env.ACP_UI_INIT_POLL_TIMEOUT_SEC ?? "900", 10);
 const initTimeoutMs = Number.isFinite(initTimeoutSec) && initTimeoutSec > 0 ? initTimeoutSec * 1000 : 900_000;
+const qaPollTimeoutSec = Number.parseInt(process.env.ACP_UI_QA_POLL_TIMEOUT_SEC ?? "300", 10);
+const qaPollTimeoutMs = Number.isFinite(qaPollTimeoutSec) && qaPollTimeoutSec > 0 ? qaPollTimeoutSec * 1000 : 300_000;
 
 type RunStatusPollResponse = {
   status?: string;
@@ -20,6 +24,15 @@ type RunArtifactsPollResponse = {
   artifacts?: unknown[];
 };
 
+type RunListPollResponse = {
+  items?: Array<{
+    run_id?: string;
+    status?: string;
+    pipeline?: string;
+    started_at?: string;
+  }>;
+};
+
 type RunObservation = {
   status: string;
   errorCode: string;
@@ -28,12 +41,20 @@ type RunObservation = {
   artifactCount: number;
 };
 
+type QARunPollResponse = {
+  status?: string;
+  error_code?: string | null;
+  current_step?: string;
+  warnings?: string[] | null;
+};
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchRunObservation(api: APIRequestContext, runID: string): Promise<RunObservation> {
   const response = await api.get(`/api/pipeline/runs/${runID}`);
+  expect(response.ok(), `run status API should return ${runID}`).toBe(true);
   const payload = (await response.json()) as RunStatusPollResponse;
   let artifactCount = 0;
   const artifactsResponse = await api.get(`/api/pipeline/runs/${runID}/artifacts`);
@@ -48,6 +69,43 @@ async function fetchRunObservation(api: APIRequestContext, runID: string): Promi
     warningsCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
     artifactCount
   };
+}
+
+async function fetchQARunObservation(api: APIRequestContext, runID: string): Promise<RunObservation> {
+  const response = await api.get(`/api/qa/runs/${runID}`);
+  expect(response.ok(), `qa run status API should return ${runID}`).toBe(true);
+  const payload = (await response.json()) as QARunPollResponse;
+  return {
+    status: (payload.status ?? "").trim(),
+    errorCode: (payload.error_code ?? "").trim(),
+    currentStep: (payload.current_step ?? "").trim(),
+    warningsCount: Array.isArray(payload.warnings) ? payload.warnings.length : 0,
+    artifactCount: 0
+  };
+}
+
+async function resolveSnapshotRunID(api: APIRequestContext): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  let lastPayload: RunListPollResponse | null = null;
+  while (Date.now() < deadline) {
+    const response = await api.get("/api/pipeline/runs?limit=100");
+    expect(response.ok(), "run list API should be available in snapshot mode").toBe(true);
+    const payload = (await response.json()) as RunListPollResponse;
+    lastPayload = payload;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const requested = snapshotRunID
+      ? items.find((item) => item.run_id === snapshotRunID && item.status === "succeeded")
+      : null;
+    const latestSucceeded = items.find((item) => item.status === "succeeded" && item.run_id);
+    const selected = requested ?? latestSucceeded;
+    if (selected?.run_id) {
+      return selected.run_id;
+    }
+    await sleep(250);
+  }
+  throw new Error(
+    `snapshot mode could not find a succeeded run_id=${snapshotRunID || "<latest>"} in /api/pipeline/runs; last_payload=${JSON.stringify(lastPayload)}`
+  );
 }
 
 async function fetchArtifactText(api: APIRequestContext, artifactPath: string): Promise<string> {
@@ -149,6 +207,58 @@ async function waitForInitInspectRun(api: APIRequestContext, page: Page, runID: 
   throw new Error(`run ${runID} did not reach succeeded within ${initTimeoutSec}s`);
 }
 
+async function resolveQARunIDFromStatus(page: Page): Promise<string> {
+  await expect(page.getByTestId("qa-run-status")).toBeVisible({ timeout: 30_000 });
+  let raw = "";
+  await expect
+    .poll(async () => {
+      raw = ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim();
+      return raw;
+    }, {
+      timeout: 30_000,
+      message: "QA run status should include a run id"
+    })
+    .toMatch(/Run\s+run_[A-Za-z0-9_]+\s+status:/);
+  const match = raw.match(/Run\s+(run_[A-Za-z0-9_]+)\s+status:/);
+  expect(match?.[1], "QA run id should be parseable from status text").toBeTruthy();
+  return match?.[1] ?? "";
+}
+
+async function cancelRunBestEffort(api: APIRequestContext, runID: string): Promise<void> {
+  if (!runID) {
+    return;
+  }
+  await api.post(`/api/pipeline/runs/${runID}/cancel`).catch(() => undefined);
+}
+
+async function waitForQARun(api: APIRequestContext, page: Page, runID: string): Promise<void> {
+  const qaDeadline = Date.now() + qaPollTimeoutMs;
+  let lastObservation: RunObservation | null = null;
+  let sawProductiveProgress = false;
+  while (Date.now() < qaDeadline) {
+    const observation = await fetchQARunObservation(api, runID);
+    if (observationShowsProductiveProgress(lastObservation, observation)) {
+      sawProductiveProgress = true;
+    }
+    if (observation.status === "succeeded") {
+      return;
+    }
+    if (observation.status === "failed") {
+      await captureEvidenceScreenshot(page, "frontend-ask-failed-desktop.png").catch(() => undefined);
+      throw new Error(
+        `QA run ${runID} terminated before answer: status=failed error_code=${observation.errorCode || "-"} current_step=${observation.currentStep || "-"}`
+      );
+    }
+    lastObservation = observation;
+    await sleep(500);
+  }
+  await captureEvidenceScreenshot(page, "frontend-ask-timeout-desktop.png").catch(() => undefined);
+  const progressLabel = sawProductiveProgress ? "stayed productive but did not reach succeeded" : "did not produce observable progress";
+  throw new Error(
+    `ACTIVE_RUN_TIMEOUT: qa run ${runID} ${progressLabel} within ${qaPollTimeoutSec}s status=${lastObservation?.status || "-"} current_step=${lastObservation?.currentStep || "-"} warnings=${lastObservation?.warningsCount ?? 0}`
+  );
+}
+
 async function captureEvidenceScreenshot(page: Page, name: string): Promise<string | null> {
   if (screenshotOutputDir === "") {
     return null;
@@ -173,6 +283,21 @@ async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
   await expect(page.getByTestId("evidence-refs-panel")).toBeVisible();
   await expect(page.getByTestId("runtime-safety-panel")).toBeVisible();
   await expect(page.getByTestId("git-publication-panel")).toBeVisible();
+}
+
+async function expectActivityDrawerOpen(page: Page): Promise<void> {
+  const drawer = page.getByTestId("activity-drawer");
+  await expect(drawer).toBeVisible();
+  const isOpen = await drawer.evaluate((element) => element.hasAttribute("open"));
+  if (!isOpen) {
+    await page.getByTestId("activity-drawer-toggle").click({ timeout: 10_000 });
+  }
+  await expect(page.getByTestId("run-logs-mode-select")).toBeVisible({ timeout: 10_000 });
+}
+
+async function selectRunLogsMode(page: Page, mode: "events" | "raw" | "all"): Promise<void> {
+  await expectActivityDrawerOpen(page);
+  await page.getByTestId("run-logs-mode-select").selectOption(mode, { timeout: 10_000 });
 }
 
 async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
@@ -244,16 +369,28 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await page.getByTestId("run-init-btn").click();
-  await expect(page.getByTestId("run-status-panel")).toBeVisible();
-  const runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+  let runID = "";
+  if (artifactSource === "snapshot") {
+    runID = await resolveSnapshotRunID(request);
+    const snapshotRunButton = page.getByRole("button", { name: runID }).first();
+    await expect(snapshotRunButton, `snapshot run ${runID} should be selectable`).toBeVisible({ timeout: 30_000 });
+    await snapshotRunButton.click();
+    const snapshotObservation = await fetchRunObservation(request, runID);
+    expect(snapshotObservation.status, `snapshot run ${runID} should be succeeded`).toBe("succeeded");
+  } else {
+    await page.getByTestId("run-init-btn").click();
+    await expect(page.getByTestId("run-status-panel")).toBeVisible();
+    runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+  }
   expect(runID).not.toBe("");
   console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
   await test.info().attach("run-id", {
     body: runID,
     contentType: "text/plain"
   });
-  await waitForInitInspectRun(request, page, runID);
+  if (artifactSource !== "snapshot") {
+    await waitForInitInspectRun(request, page, runID);
+  }
 
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
@@ -261,13 +398,13 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(selectedRunButton).toBeVisible();
   await selectedRunButton.click();
 
-  await page.getByTestId("run-logs-mode-select").selectOption("events");
+  await selectRunLogsMode(page, "events");
   const logsContent = page.getByTestId("run-logs-content");
   await expect
     .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
     .toContain("[EVENT]");
 
-  await page.getByTestId("run-logs-mode-select").selectOption("raw");
+  await selectRunLogsMode(page, "raw");
   await expect
     .poll(
       async () => {
@@ -280,7 +417,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     )
     .toBe(true);
 
-  await page.getByTestId("run-logs-mode-select").selectOption("all");
+  await selectRunLogsMode(page, "all");
   await expect(page.getByTestId("activity-events-table")).toBeVisible();
   await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
@@ -364,9 +501,15 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("no canonical writes");
     await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
     await page.getByTestId("qa-ask-btn").click();
-
+    const qaRunID = await resolveQARunIDFromStatus(page);
+    try {
+      await waitForQARun(request, page, qaRunID);
+    } catch (error) {
+      await cancelRunBestEffort(request, qaRunID);
+      throw error;
+    }
     await expect
-      .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 120_000 })
+      .poll(async () => ((await page.getByTestId("qa-run-status").textContent()) ?? "").trim(), { timeout: 30_000 })
       .toMatch(/status:\s*succeeded/i);
     await expect(page.getByTestId("qa-answer-panel")).toBeVisible();
     await expect(page.getByTestId("qa-citations-panel")).toBeVisible();

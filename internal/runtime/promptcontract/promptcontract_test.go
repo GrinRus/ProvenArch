@@ -1,8 +1,9 @@
 package promptcontract
 
 import (
+	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,17 +91,19 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
 	expectedTokens := []string{
 		"COLLECT MANIFEST CONTRACT CHECKLIST:",
-		"Evidence-first pair requirement",
+		"Evidence-write pair requirement",
+		"The first collect filesystem work unit may contain only two mechanically simple commands",
 		"Absolute collect targets for the evidence-backed pair",
 		"semantic.coverage MUST use observed/missing/notes",
 		"semantic.questions[*] MUST use id + text",
-		"semantic.findings[*] MUST include id, severity, title, and provenance",
+		"semantic.findings[*] MUST include id, severity, title, description, and provenance",
 		"Do NOT add top-level step_contract, compatibility",
 		"semantic provenance.evidence[*] objects MUST carry repo/path",
 		"The task-specific collect manifest JSON skeleton above is normative",
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
 		`"repo": "payments-service"`,
 		"not be seed-only, scaffold-only, or copied unchanged from the skeleton",
+		`must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"`,
 	}
 	for _, token := range expectedTokens {
 		if !strings.Contains(prompt, token) {
@@ -140,7 +143,7 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	prompt := qwenPrompt
 	for _, token := range []string{
 		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
-		"FIRST COLLECT EVIDENCE PASS:",
+		"FIRST COLLECT BOUNDED WRITE ACTION:",
 		"COLLECT FINAL WRITE REQUIREMENT:",
 		"COLLECT MANIFEST TASK SKELETON:",
 		"SKELETON USE:",
@@ -150,8 +153,14 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 		`"path": "README.md"`,
 		`"questions": [`,
 		`"missing": [`,
-		"bounded evidence pass before writing artifacts",
-		"do not write a seed-only/bootstrap pair",
+		"next filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write of both exact targets",
+		"inspect at most 8 representative entrypoint/build/config/source files",
+		"Read at most the first 6000 bytes from any file.",
+		"Do not emit analysis-only prose",
+		"Before both targets exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings",
+		"direct shell heredoc/printf/tee literal content",
+		"start by writing an evidence-backed artifact pair; do not write a seed-only pair",
+		"Normal collect must not depend on collect_pair_repair as the expected path to success.",
 		"Copying this skeleton unchanged is invalid",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -176,7 +185,7 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	if got := strings.Count(prompt, "COLLECT MANIFEST TASK SKELETON:"); got != 1 {
 		t.Fatalf("expected collect task skeleton section exactly once, got %d:\n%s", got, prompt)
 	}
-	firstActionIndex := strings.Index(prompt, "FIRST COLLECT EVIDENCE PASS:")
+	firstActionIndex := strings.Index(prompt, "FIRST COLLECT BOUNDED WRITE ACTION:")
 	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
 	docFirstIndex := strings.Index(prompt, "DOCS-FIRST FILESYSTEM CONTRACT:")
 	if firstActionIndex < 0 || artifactContractIndex < 0 || docFirstIndex < 0 {
@@ -230,29 +239,48 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"collect manifest repair mode",
 		"COLLECT MANIFEST EVIDENCE-FIRST REPAIR:",
 		"Repair shard-pack-manifest.json from the existing authored documents and bounded repository evidence; do not start with a placeholder scaffold.",
-		"The first command below reads existing authored documents in write_root before writing shard-pack-manifest.json.",
+		"Do not run a separate read-only preflight",
+		"Do not answer with a plan, status note, or analysis-only message before the write.",
+		"Forbidden analysis-only phrases before the write: I have enough evidence",
+		"The first command below is a write-first provider-authored command contract",
+		"No deterministic helper writes the manifest for you",
 		"Read only the listed repository evidence candidates if authored docs need support",
+		"Repository evidence in citations/provenance must be file-level",
+		"directories or missing paths must become coverage gaps/questions, never citation paths",
+		"JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient",
+		"prove every citation/provenance repo path is an existing file",
 		"Write exactly one file:",
 		"Do not rewrite existing authored markdown documents.",
+		"documents[].canonical_path must be a stable promoted workspace path.",
+		"Never use write_root, artifact_root, absolute paths, reports/taskruns, staging",
 		"overwrite it after the evidence pass",
+		"Do not add top-level claims, claim_map, validation, metadata, compatibility, schema",
+		"claim IDs belong only in citations[].claim_ids",
+		"Literal SHARD, <shard>, <claim>, TODO, REPLACE_ME",
 		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
-		"Run this exact command as your next filesystem action.",
-		"Do not manually retype paths, inspect sibling taskruns, read raw logs, or write any other file before this command.",
-		"The command is evidence-derived: it reads authored markdown already in write_root and writes only shard-pack-manifest.json",
-		"python3 - ",
-		"ACP_COLLECT_MANIFEST_REPAIR_PY",
-		`"authored_docs":["docs/deep-dive.md","overview.md"]`,
-		`"evidence_paths":["src/README.md"]`,
+		"Execute one bounded filesystem command as your next action.",
+		"The command must read authored markdown already in write_root",
+		"write the final shard-pack-manifest.json before it returns",
+		"preflight-only completion is a failed no-op repair",
+		"First command contract:",
+		"read bounded authored markdown under write_root",
+		"verify every manifest citation/provenance repo path with file-level checks such as test -f, rg --files, or portable find ... -type f -print",
+		"write the final provider-authored manifest",
+		"file-level evidence path checks after the write",
+		"Exact manifest write target:",
+		"Authored markdown inputs already present under write_root:",
+		"Bounded repository evidence candidates:",
 		"SKELETON USE:",
 		"Use this JSON only as the task-specific schema/key/type guide, not as final content.",
 		"Copying this skeleton unchanged is invalid",
-		`target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')`,
 		"SEMANTIC EXTRACTION REQUIREMENT:",
 		"Evidence-rich authored documents require concrete semantic.entities beyond the repo plus shard wrapper.",
 		"Evidence-rich authored documents require concrete semantic.edges beyond repo/shard contains relationships",
 		"semantic.findings or semantic.questions beyond a generic owner-mapping gap",
 		"A manifest with many citations but only repo/shard entities, only contains edges, and only Owner mapping not confirmed is invalid scaffold-only semantic output.",
 		"Write or replace only write_root/shard-pack-manifest.json.",
+		"not examined in this bounded pass",
+		"not confirmed in scoped repository evidence",
 		"Exact allowed write target:",
 		"Final action must be: write only write_root/shard-pack-manifest.json, then exit successfully.",
 		"Backend validation, not stdout claims, is the success surface.",
@@ -262,6 +290,11 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Existing authored document files in write_root:",
 		"docs/deep-dive.md",
 		"overview.md",
+		"Stable collect canonical_path mapping for existing authored documents:",
+		"docs/deep-dive.md -> reports/as-is/payments/docs-deep-dive.md",
+		"overview.md -> reports/as-is/payments/overview.md",
+		"Stable canonical_path mapping to copy into documents[] exactly:",
+		"Reject any documents[].canonical_path that contains reports/taskruns",
 		"Repository evidence candidates available for bounded repair:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		`"path": "docs/deep-dive.md"`,
@@ -271,12 +304,22 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		`"edges": [`,
 		`"findings": [`,
 		"COLLECT MANIFEST REPAIR INSTRUCTIONS:",
-		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates before writing shard-pack-manifest.json.",
+		"Perform a bounded evidence pass over existing authored documents and listed repository evidence candidates inside the same first command that writes shard-pack-manifest.json.",
 		"Do not read, diff, or patch an existing invalid shard-pack-manifest.json; replace it after the evidence pass.",
+		"Do not stop after status prose such as \"I have enough evidence\"",
+		"Do not cite directory paths in citations/provenance",
+		"Syntax-valid JSON alone is not a valid repair",
 		"Treat the embedded JSON as a schema guide only.",
+		"Do not add top-level claims/claim_map/metadata/validation/compatibility",
+		"do not preserve placeholder tokens such as SHARD, <shard>, <claim>, TODO, or REPLACE_ME",
 		"Do not collapse semantic output to repo/shard wrappers plus owner mapping",
 		"COLLECT MANIFEST REPAIR CHECKLIST:",
 		`artifact_root must remain exactly "reports/taskruns/run-1/staging/shards/payments"`,
+		"CANONICAL SEMANTIC SHAPE:",
+		`coverage.notes shape: "notes": ["observed config/runtime/deploy surface"]; a bare string is invalid.`,
+		`entity forbidden fields: kind, repo, path, evidence at the entity top level`,
+		`edge forbidden fields: relation, source, target`,
+		`provenance object shape is always kind + numeric confidence + evidence[]`,
 		"forbidden legacy aliases:",
 		"copied scaffold semantic is invalid",
 	}
@@ -298,6 +341,13 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Copy the heredoc JSON",
 		"Execute the preferred heredoc write command",
 		"write it from the heredoc command",
+		`target.write_text(`,
+		`"writes_manifest":true`,
+		"read-only evidence preflight",
+		"After the preflight",
+		"writes_manifest",
+		"ACP_COLLECT_MANIFEST_REPAIR_PY",
+		"collect_manifest_repair_preflight",
 		"preserve semantic.entities",
 		"COLLECT MANIFEST REPAIR WRITE SHAPE:",
 		`"<replace with authored doc objects from write_root>"`,
@@ -333,15 +383,12 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	if strings.Count(prompt, "FIRST COLLECT MANIFEST REPAIR COMMAND:") != 1 {
 		t.Fatalf("repair prompt should include exactly one first-command section:\n%s", prompt)
 	}
-	if strings.Count(prompt, "ACP_COLLECT_MANIFEST_REPAIR_PY") != 2 {
-		t.Fatalf("manifest-only repair prompt should include one Python repair heredoc, got:\n%s", prompt)
-	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
 	}
 }
 
-func TestCollectManifestRepairFirstCommandWritesValidationReadyManifest(t *testing.T) {
+func TestCollectManifestRepairGuidanceIsWriteFirst(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -376,27 +423,30 @@ func TestCollectManifestRepairFirstCommandWritesValidationReadyManifest(t *testi
 		PathScopes:   []string{"src"},
 	}
 
-	command := collectManifestRepairFirstCommand(task, []string{"overview.md"}, []string{"src/README.md"})
-	output, err := exec.Command("sh", "-c", command).CombinedOutput()
-	if err != nil {
-		t.Fatalf("repair command failed: %v\n%s\ncommand:\n%s", err, output, command)
-	}
-	if err := artifactquality.ValidateCollectManifestInRoot(writeRoot); err != nil {
-		t.Fatalf("repair command wrote invalid manifest: %v\n%s", err, mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json")))
-	}
-	raw := mustReadFile(t, filepath.Join(writeRoot, "shard-pack-manifest.json"))
+	guidance := collectManifestRepairWriteFirstGuidance(task, []string{"overview.md"}, []string{"src/README.md"})
 	for _, token := range []string{
-		`"name": "Django API"`,
-		`"name": "Postgres"`,
-		`"type": "uses"`,
-		`"title": "Runtime and configuration surface identified from authored collect evidence"`,
+		"First command contract:",
+		"read bounded authored markdown under write_root",
+		"verify every manifest citation/provenance repo path with file-level checks",
+		"write the final provider-authored manifest",
+		"run a local `test -s`/JSON parse check plus file-level evidence path checks after the write",
+		filepath.Join(writeRoot, "shard-pack-manifest.json"),
+		"overview.md",
+		"src/README.md",
 	} {
-		if !strings.Contains(raw, token) {
-			t.Fatalf("expected repaired manifest to contain %q, got:\n%s", token, raw)
+		if !strings.Contains(guidance, token) {
+			t.Fatalf("expected repair guidance to contain %q, got:\n%s", token, guidance)
 		}
 	}
-	if strings.Contains(raw, "contains scoped surface") || strings.Contains(raw, "Owner mapping not confirmed") {
-		t.Fatalf("repair command must not write the old bootstrap-only semantic scaffold:\n%s", raw)
+	for _, forbidden := range []string{
+		"collect_manifest_repair_preflight",
+		"writes_manifest",
+		"read-only",
+		"print(json.dumps",
+	} {
+		if strings.Contains(guidance, forbidden) {
+			t.Fatalf("repair guidance must not preserve old preflight token %q:\n%s", forbidden, guidance)
+		}
 	}
 }
 
@@ -452,41 +502,220 @@ func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.
 	}
 }
 
-func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T) {
+func TestCollectRepairEvidenceCandidatesSkipLargeAndGeneratedFiles(t *testing.T) {
 	t.Parallel()
 
+	repoRoot := t.TempDir()
+	for _, file := range []struct {
+		path string
+		body string
+	}{
+		{path: "README.md", body: "# Runtime\n"},
+		{path: ".test_durations", body: strings.Repeat("slow-test\n", 20000)},
+		{path: "pnpm-lock.yaml", body: "lockfileVersion: '9.0'\n"},
+		{path: "uv.lock", body: strings.Repeat("package = []\n", 20000)},
+		{path: "large-config.json", body: strings.Repeat("{\"entry\":true}\n", 12000)},
+	} {
+		if err := os.WriteFile(filepath.Join(repoRoot, file.path), []byte(file.body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file.path, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"README.md", ".test_durations", "pnpm-lock.yaml", "uv.lock", "large-config.json"},
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	if got := strings.Join(candidates, ","); got != "README.md" {
+		t.Fatalf("expected only useful bounded evidence candidate, got %q", got)
+	}
+}
+
+func TestCollectRepairEvidenceCandidatesAreRankedAndCapped(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	names := []string{
+		".cursorignore",
+		".dockerignore",
+		".editorconfig",
+		".gitignore",
+		".watchmanconfig",
+		"README.md",
+		"AGENTS.md",
+		"CONTRIBUTING.md",
+		"package.json",
+		"pyproject.toml",
+		"docker-compose.base.yml",
+		"docker-compose.dev.yml",
+		"Dockerfile",
+		"Dockerfile.node",
+		".env.example",
+		"posthog.json",
+		"pnpm-workspace.yaml",
+		"tsconfig.json",
+		"pytest.ini",
+		"tach.toml",
+		"turbo.json",
+		"LICENSE",
+		"Makefile",
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       names,
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	if len(candidates) != 18 {
+		t.Fatalf("expected capped candidate set of 18, got %d: %#v", len(candidates), candidates)
+	}
+	wantPrefix := []string{"AGENTS.md", "CONTRIBUTING.md", "README.md", "package.json", "pyproject.toml"}
+	for i, want := range wantPrefix {
+		if candidates[i] != want {
+			t.Fatalf("expected ranked candidate %d to be %q, got %#v", i, want, candidates)
+		}
+	}
+	for _, forbidden := range []string{".cursorignore", ".dockerignore", ".editorconfig", ".gitignore", ".watchmanconfig"} {
+		for _, got := range candidates {
+			if got == forbidden {
+				t.Fatalf("expected dotfile %q to fall outside capped repair evidence, got %#v", forbidden, candidates)
+			}
+		}
+	}
+}
+
+func TestCollectRepairEvidenceCandidatesKeepEachPathScope(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, file := range []string{
+		"cli/README.md",
+		"cli/Cargo.toml",
+		"cli/CHANGELOG.md",
+		"cli/src/api/client.rs",
+		"cli/src/main.rs",
+		"cli/tests/cli.rs",
+		"common/README.md",
+		"common/hogvm/README.md",
+		"common/hogql_parser/pyproject.toml",
+		"common/hogli/README.md",
+	} {
+		path := filepath.Join(repoRoot, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", file, err)
+		}
+		if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+	task := acpruntime.Task{
+		ReadContextRoots: []string{repoRoot},
+		PathScopes:       []string{"cli", "common"},
+	}
+
+	candidates := repairEvidenceCandidates(task)
+	joined := strings.Join(candidates, "\n")
+	for _, want := range []string{"cli/README.md", "cli/Cargo.toml", "common/README.md", "common/hogql_parser/pyproject.toml"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected multi-scope repair candidates to include %q, got:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "cli/package.json") || strings.Contains(joined, "common/hogvm/python/README.md") {
+		t.Fatalf("repair candidates must only list existing files, got:\n%s", joined)
+	}
+}
+
+func TestComposeCollectArtifactPairRepairPromptIsEvidenceFirstNoSeed(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
 	task := acpruntime.Task{
 		RunID:             "run-1",
 		StepID:            "init.step1.collect",
 		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
 		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
 		ShardID:           "payments",
 		DomainID:          "payments",
 		AgentRole:         "shard-analyst",
 		RepoScopes:        []string{"payments-service"},
-		PathScopes:        []string{"."},
+		PathScopes:        []string{"README.md"},
 		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
 	}
 
 	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, task, os.ErrNotExist)
 	expectedTokens := []string{
 		"collect artifact pair focused recovery mode",
-		"Run the exact shell command below as your next command. Do not inspect repository files first.",
-		`Write exactly two files now: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
-		"COLLECT PAIR WRITE COMMAND:",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md' <<'ACP_COLLECT_DOC'",
-		"cat > '/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json' <<'ACP_MANIFEST_JSON'",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
+		"This repair is not a bootstrap/fallback writer",
+		"Do not run a separate read-only preflight",
+		"Do not answer with a plan, status note, or analysis-only message before the writes",
+		"Forbidden analysis-only phrases before the writes: I have enough evidence",
+		"I am now writing",
+		"Your next action must be one bounded filesystem command",
+		"at most 8 files and at most the first 6000 bytes from each file",
+		"The first command must not contain a hard-coded required phrase list",
+		"missing expected evidence",
+		"Before writing, the only allowed evidence prechecks are structural",
+		"at least one allowed evidence file yielded bytes after bounded prefix reads",
+		"truncate to the first 6000 bytes or skip that candidate and continue",
+		"do not abort the repair with errors such as `read file exceeds size limit`",
+		"Do not add any other pre-write `raise SystemExit`/`exit 1` checks",
+		"Keep the first command mechanically simple: no Python f-strings",
+		"build JSON as dictionaries/lists, and write it with `json.dumps`",
+		"If a planned claim is not present in the snippets, omit it or record a coverage gap",
+		"The final markdown must be operator-facing architecture evidence, not a recovery/process log",
+		"Write the markdown document first as concise evidence-backed content, then write the manifest that references it",
+		`Write exactly two files in the first command: "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md" and "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json".`,
+		"Do not delete existing files, run rm -f, use git rev-parse, rely on cwd discovery",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"Execute one filesystem command now",
+		"final provider-authored evidence-backed content",
+		"COLLECT PAIR REPAIR EVIDENCE LIMITS:",
+		"Use only the listed task metadata and bounded repository evidence candidates below",
+		"Do not read lockfiles, generated baselines, test duration indexes",
+		"Do not verify claims with a provider-invented exact phrase checklist",
+		"Use short observed snippets, package names, service names, config keys, and file paths from the bytes actually read",
+		"read a bounded prefix or skip oversized candidates",
+		"Do not abort before writing because your own generated script has no entities/edges/findings",
+		"Every citation/provenance path must be a concrete existing repository file",
+		"directories and missing paths are coverage gaps/questions, not evidence",
+		"documents[].canonical_path must be the stable promoted path from the task-specific skeleton",
+		"Any canonical_path beginning with reports/taskruns/ or containing /staging/ is invalid",
+		"Do not add top-level claims, claim_map, validation, metadata, compatibility, schema",
+		"claim IDs belong only in citations[].claim_ids",
+		"Literal SHARD, <shard>, <claim>, TODO, REPLACE_ME",
+		"JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient",
+		"include file-level citation/provenance checks before a successful exit",
+		"Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"RECOVERY ACCEPTANCE REQUIREMENT:",
-		"The command writes a marker-free seed recovery pair",
-		"if provider execution continues, do one targeted evidence pass",
 		"Recovery Evidence Summary",
-		"collect recovery fallback",
+		"seed-only collect recovery fallback",
+		"Additional provider enrichment should replace",
+		"first bounded evidence read was attempted",
+		"will be repaired with concrete",
+		"Successful recovery output must not mention bounded read, bounded pass, guessed path, guessed file, guessed evidence",
+		"not examined in this bounded pass",
+		"not confirmed in scoped repository evidence",
+		"FINAL SELF-CHECK COMMAND:",
+		"! grep -E",
 		"Successful recovery output must not contain ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
-		"Exiting successfully immediately after the heredoc command is invalid",
-		`"path": "payments-overview.md"`,
+		"A noop, zero-output, unchanged skeleton, or partially-written repair is terminal",
+		`"path": "root-overview.md"`,
 		`"artifact_root": "reports/taskruns/run-1/staging/shards/payments"`,
-		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/payments-overview.md\"",
+		"exact authored document target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/root-overview.md\"",
 		"exact manifest target = \"/tmp/workspace/reports/taskruns/run-1/staging/shards/payments/shard-pack-manifest.json\"",
+		"Bounded repository evidence candidates:",
+		"- README.md",
 		"Do not infer schema from prior reports/taskruns artifacts or raw logs.",
 		"Previous collect artifact validation failure",
 	}
@@ -500,17 +729,181 @@ func TestComposeCollectArtifactPairRepairPromptWritesExactPairFirst(t *testing.T
 		"Existing authored documents in write_root",
 		"Do not rewrite existing authored markdown documents",
 		"read, diff, or patch an existing invalid shard-pack-manifest.json",
+		"FIRST COLLECT PAIR REPAIR PREFLIGHT COMMAND:",
+		"ACP_COLLECT_PAIR_REPAIR_PREFLIGHT_PY",
+		"collect_pair_repair_preflight",
+		"COLLECT PAIR WRITE COMMAND:",
+		"cat > ",
+		"ACP_COLLECT_DOC",
+		"ACP_MANIFEST_JSON",
+		"sed -n",
+		"The command writes a marker-free seed recovery pair",
+		"Exiting successfully immediately after the heredoc command is invalid",
 		"POST-COMMAND ENRICHMENT REQUIREMENT:",
 		"marker-bearing recovery bootstrap pair",
 		"Evidence candidate used for the recovery manifest",
 		"unchanged bootstrap pair is an artifact_quality blocker",
+		"raise SystemExit('read file exceeds size limit')",
+		`raise SystemExit("read file exceeds size limit")`,
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("collect pair repair prompt must not use manifest-only repair wording %q:\n%s", forbidden, prompt)
 		}
 	}
-	if strings.Count(prompt, "ACP_COLLECT_DOC") != 2 || strings.Count(prompt, "ACP_MANIFEST_JSON") != 2 {
-		t.Fatalf("expected one collect doc heredoc and one manifest heredoc:\n%s", prompt)
+}
+
+func TestComposeCollectArtifactPairRepairPromptAddsValidationSpecificFocus(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"src"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(
+		acpruntime.ProviderClaudeCode,
+		task,
+		fmt.Errorf(`shard pack manifest is invalid: citations[0] repo evidence path "src" is a directory, not a file; documents[0].path references process-contaminated collect document file "src-overview.md"; runtime_stalled_before_artifacts`),
+	)
+
+	for _, token := range []string{
+		"VALIDATION-SPECIFIC REPAIR FOCUS:",
+		"replace every directory-only citation/provenance repo path with concrete existing file paths",
+		"cite only files discovered under those directories or listed evidence candidates",
+		"rewrite the existing process-contaminated markdown target",
+		"Do not keep the old markdown and only patch shard-pack-manifest.json",
+		"write the markdown document and shard-pack-manifest.json in the first filesystem command",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected validation-specific collect pair repair prompt token %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"README.md"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderClaudeCode, task, fmt.Errorf("collect pair recovery stalled before valid artifacts were available: runtime_stalled_before_artifacts"))
+	for _, token := range []string{
+		"Compact live recovery path: write first",
+		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
+		"FIRST COLLECT PAIR REPAIR WRITE-FIRST COMMAND:",
+		"COMPACT MANIFEST FIELD CONTRACT:",
+		"documents[0].path must be \"root-overview.md\"",
+		"documents[0].canonical_path must be exactly \"reports/as-is/payments/root-overview.md\"",
+		"documents[].canonical_path must never contain reports/taskruns, /staging/",
+		"Every citations[] item must include a non-empty claim_ids array; empty claim_ids means the manifest is invalid.",
+		"Every citations[] item must include a non-empty document_ids array that references an id from documents[].id.",
+		"CANONICAL SEMANTIC SHAPE:",
+		`coverage.notes shape: "notes": ["observed config/runtime/deploy surface"]; a bare string is invalid.`,
+		`entity object shape: {"id":"svc.example","name":"Example","type":"service","provenance":{"kind":"observation","confidence":0.8,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		"entity forbidden fields: kind, repo, path, evidence at the entity top level",
+		`edge object shape: {"id":"edge.example.depends","type":"depends_on","from":"svc.example","to":"store.example","provenance":{"kind":"observation","confidence":0.7,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		"edge forbidden fields: relation, source, target",
+		`finding object shape: {"id":"finding.example.owner","severity":"medium","title":"Owner not confirmed","description":"Scoped evidence does not identify an owning team.","provenance":{"kind":"observation","confidence":0.6,"evidence":[{"repo":"repo-name","path":"README.md"}]}}.`,
+		"provenance object shape is always kind + numeric confidence + evidence[]",
+		"VALIDATION-SPECIFIC REPAIR FOCUS:",
+		"write the markdown document and shard-pack-manifest.json in the first filesystem command",
+		"Bounded repository evidence candidates:",
+		"- README.md",
+		"Previous collect artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact collect pair repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		`"entities": [`,
+		`"edges": [`,
+		`"findings": [`,
+		"Copying this skeleton unchanged is invalid",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact collect pair repair prompt must not include bulky skeleton token %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeCollectArtifactPairRepairPromptTargetsExistingAuthoredMarkdown(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	writeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(writeRoot, "payments-overview.md"), []byte("# stale\n\n`missing-evidence.md`\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "aaa-general.md"), []byte("# general\n\nREADME.md\n"), 0o644); err != nil {
+		t.Fatalf("write secondary authored doc: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         writeRoot,
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"README.md"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderCodexCode, task, fmt.Errorf("repo evidence path %q is missing under resolved repo root", "missing-evidence.md"))
+	docTarget := filepath.Join(writeRoot, "payments-overview.md")
+	manifestTarget := filepath.Join(writeRoot, "shard-pack-manifest.json")
+	expectedTokens := []string{
+		fmt.Sprintf("Write exactly two files in the first command: %q and %q.", docTarget, manifestTarget),
+		"If the authored document target already exists, rewrite it completely from observed evidence",
+		"do not leave stale missing-path claims in place",
+		fmt.Sprintf("exact authored document target = %q", docTarget),
+		`"path": "payments-overview.md"`,
+	}
+	for _, token := range expectedTokens {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected existing-doc pair repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, `"path": "root-overview.md"`) {
+		t.Fatalf("pair repair prompt should target existing authored markdown, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, `exact authored document target = "`+filepath.Join(writeRoot, "aaa-general.md")+`"`) {
+		t.Fatalf("pair repair prompt should not pick unrelated authored markdown before stale markdown, got:\n%s", prompt)
 	}
 }
 
@@ -668,6 +1061,994 @@ func TestComposeDraftArtifactRepairPromptNamesExactTargets(t *testing.T) {
 	}
 	if strings.Count(prompt, "ACP_DRAFT_FILE") != 6 {
 		t.Fatalf("draft repair prompt must contain exactly three draft file heredocs:\n%s", prompt)
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrNotExist)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"Immediate draft artifact enrichment action:",
+		"Do not run the earlier heredoc/bootstrap draft command again.",
+		"Do not answer with a plan, status note, or analysis-only message",
+		"Your next action must be a filesystem command that rewrites every referenced markdown draft target",
+		"Forbidden analysis-only phrases before the rewrite: I have enough evidence",
+		"First focused work unit: execute one bounded filesystem command that reads the current draft manifest",
+		"If you use Python for this bounded filesystem command, invoke python3 explicitly. Never invoke python",
+		"execute one bounded filesystem command",
+		"rewrites every referenced markdown target in that same command",
+		"bounded staged evidence",
+		"bounded_read_context_roots",
+		"Fresh mutation is required",
+		"rewrite every markdown target",
+		"Prefer not to rewrite the draft manifest during enrichment",
+		"if it is structurally valid, leave it byte-for-byte",
+		"top-level keys version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs",
+		"Do not add top-level status, enriched_at, metadata, validation, confidence, source, content_digest",
+		"The only allowed output object keys are path, canonical_path, kind, and title",
+		"Never add outputs[].status, outputs[].content_digest",
+		"logical_path, target, output_path, publish_path",
+		"Preserve outputs[].path and outputs[].canonical_path exactly",
+		"update only top-level summary or updated_at",
+		"/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final",
+		"overview.md -> reports/as-is/overview.md",
+		"summary.md -> reports/coverage/summary.md",
+		"architect-summary.md -> reports/agent-outputs/architect/summary.md",
+		"STEP2 WRITE-FIRST SEQUENCE",
+		"your next filesystem command must read asis-draft-manifest.json",
+		"all available shard-pack-manifest.json summaries",
+		"final-run-index.json and citation-index.json if present",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md",
+		"overview.md must contain: architecture surface summary",
+		"summary.md must contain: planned/succeeded/failed shard completeness",
+		"architect-summary.md must contain: decision-ready operator summary",
+		"Do not stop after writing only one markdown target",
+		"Do not stop after saying you have enough evidence",
+		"all three step2 markdown targets must be freshly overwritten",
+		"If staged evidence is sparse, write the exact missing staged surface",
+		"Final self-check: overview.md, summary.md, and architect-summary.md were freshly overwritten",
+		"Final markdown must read as an operator-facing architecture/report/proposal artifact",
+		"Final content MUST NOT include these scaffold/recovery markers:",
+		"This draft is grounded in the current step manifest",
+		"bounded staged evidence",
+		"recovery pass",
+		"Drafted required runtime artifacts for this step",
+		"Provider wrote this draft artifact",
+		"placeholder content",
+		"replace placeholder",
+		"Read the current draft manifest only for contract fields and exact outputs",
+		"do not quote or copy its bootstrap summary",
+		"Runtime draft recovery initialized",
+		"later-pipeline evidence placeholder",
+		"Do not perform an unbounded evidence sweep",
+		"compact high-signal evidence reads",
+		"A no-op rewrite is invalid",
+		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
+		"every inline-code/path backtick pair must be balanced",
+		"Do not copy raw authored-shard prose fragments that contain backticks",
+		"Do not append sampled shard first paragraphs after an evidence path.",
+		"Do not end prose sentences with stray backticks",
+		"Do not paste raw JSON, Python dict/list reprs",
+		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs",
+		"decision-ready operator summary",
+		"coverage gaps",
+		"For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible",
+		"Never count the words failed/error/summary lexically inside manifests or markdown",
+		"If planned shard status is not explicitly visible, write planned=unknown",
+		"Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence",
+		"final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2",
+		"If they are absent, omit final-index availability from the as-is markdown",
+		"do not write that current-run final/citation indexes are missing, not observed, not found, or unavailable",
+		"If final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
+		"Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
+		"Do not write broken path bullets such as a lone backtick",
+		"Do not paste sampled authored-shard snippets as semicolon-separated prose",
+		"Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims",
+		"Translate runtime evidence into architecture facts, coverage gaps, and operator decisions",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"Runtime draft recovery initialized this artifact for the scoped analysis step.",
+		`"logical_path"`,
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptForConstitutionRequiresWriteFirstRepoEvidence(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	repoRoot := filepath.Join(t.TempDir(), "posthog")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".github"), 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	for path, body := range map[string]string{
+		"README.md":          "# PostHog\n",
+		"package.json":       `{"name":"posthog"}`,
+		".github/CODEOWNERS": "* @posthog/team\n",
+	} {
+		fullPath := filepath.Join(repoRoot, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", fullPath, err)
+		}
+		if err := os.WriteFile(fullPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", fullPath, err)
+		}
+	}
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step0_constitution"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step0_constitution"),
+		ReadContextRoots:  []string{workspace, repoRoot},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"STEP0 CONSTITUTION WRITE-FIRST SEQUENCE",
+		"only repository entrypoint evidence is valid for this step",
+		"Do not wait for later pipeline evidence.",
+		"Your next filesystem command must read the current constitution-draft.json",
+		"then overwrite charter-overview.md under draft_final_root before any optional extra analysis",
+		filepath.Join(task.DraftFinalRoot, "charter-overview.md"),
+		"charter-overview.md must contain: target identity; repository evidence used with repo/path references",
+		"coverage gaps; and a decision-ready operator summary",
+		"do not keep bootstrap text or mention that later pipeline evidence will arrive",
+		"baseline-subagents.yaml unless it is invalid",
+		"Final self-check: charter-overview.md was freshly overwritten",
+		"STEP0 bounded repository evidence candidates:",
+		filepath.Join(repoRoot, "README.md"),
+		filepath.Join(repoRoot, "package.json"),
+		filepath.Join(repoRoot, ".github", "CODEOWNERS"),
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	if strings.Contains(prompt, filepath.Join(workspace, "README.md")) {
+		t.Fatalf("step0 enrichment prompt should not use workspace root files as repo evidence candidates:\n%s", prompt)
+	}
+	for _, forbidden := range []string{
+		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE",
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"staging/shards",
+		"Use collected shard manifests",
+		"collected shards and validator output",
+		"collected shards/validator output",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 enrichment prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptForStep0CanonicalPathCleanup(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step0_constitution"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step0_constitution"),
+		ReadContextRoots:  []string{workspace},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`draft_artifact_enrichment_write_set_cleanup: draft repair wrote forbidden draft_final_root files: created directory skills; created skills/subagents.yaml`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
+		"created the canonical publish path draft_final_root/skills/subagents.yaml",
+		"allowed draft bundle remains draft_final_root/baseline-subagents.yaml",
+		"delete only draft_final_root/skills/subagents.yaml",
+		"remove draft_final_root/skills only if it is empty",
+		"outputs[].canonical_path is publish metadata, not a draft write path",
+		"draft_final_root/baseline-subagents.yaml exists",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 canonical cleanup prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"misplaced referenced markdown duplicates from write_root",
+		"Do not create overview.md, summary.md, architect-summary.md",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 canonical cleanup prompt must not use generic write_root cleanup wording %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptNamesShardStatusEvidenceAndTargetIdentity(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	planPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-plan-ftgo-application.json")
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-summary-ftgo-application.json")
+	if err := os.WriteFile(planPath, []byte(`{"items":[{"shard_id":"a"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard plan: %v", err)
+	}
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"failed"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		DomainID:          "ftgo-application",
+		RepoScope:         "ftgo-application",
+		RepoScopes:        []string{"ftgo-application"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         filepath.Join(workspace, "reports", "taskruns", "run-1", "runtime", "step2_as_is"),
+		DraftFinalRoot:    filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "drafts", "step2_as_is"),
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT TARGET IDENTITY:",
+		`current_run_id = "run-1"`,
+		`current_step_id = "refresh.step2.asis_docs"`,
+		`current_domain_id = "ftgo-application"`,
+		`current_repo_scope = "ftgo-application"`,
+		"current_repo_scopes = ftgo-application",
+		"Current target identity comes from repo_scope/repo_scopes/domain_id",
+		"not from matrix id, batch id, profile id, workspace path, or run-folder names",
+		"final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact",
+		"Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+		"Final markdown must not cite taskrun identifiers other than current_run_id",
+		"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
+		"Read these exact current-run typed shard-plan/shard-summary files",
+		planPath,
+		summaryPath,
+		"planned = len(items)",
+		"status == \"succeeded\"",
+		"status == \"failed\"",
+		"Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
+		"When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses",
+		"write exact current-run counts and an explicit no-shard-coverage-blocker statement",
+		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
+		`"failed shards require rerun"`,
+		"current-run typed shard-plan/shard-summary files listed above when present",
+		"including shard-summary items[].status",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTargets(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, os.ErrInvalid)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"First focused work unit: execute one bounded filesystem command that reads the current draft manifest",
+		"rewrites every referenced markdown target in that same command",
+		"proposal.md -> proposals/runtime-recommendations.md",
+		"changelog.md -> reports/changelog/runtime-proposals.md",
+		"STEP4 WRITE-FIRST SEQUENCE",
+		"read proposals-draft-manifest.json",
+		"current-run typed shard-plan/shard-summary files listed above when present",
+		"final-run-index.json and citation-index.json if present",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/proposal.md",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final/changelog.md",
+		"proposal.md must contain: Decision / recommended operator action",
+		"Evidence used with repo/path or staged artifact references",
+		"Risks, gaps, and out-of-scope notes",
+		"changelog.md must contain: Updated architecture/proposal surfaces",
+		"Evidence index or citation references",
+		"Residual coverage gaps",
+		"Required proposal/changelog sections must not be empty",
+		"Do not write dangling references such as `prioritize each finding above`",
+		"The proposed changes/follow-up plan must include at least one concrete operator action",
+		"Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md",
+		"Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0",
+		"write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
+		"Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id",
+		"When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array.",
+		"Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
+		"When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
+		"never infer that the current run has 0 observed documents from a missing documents[] field.",
+		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
+		"When final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
+		"If you include final-run-index or citation-index counts, compute them inside the write command",
+		"Approximate, stale, or manually guessed non-zero counts are invalid.",
+		"Do not list JSON metadata-only lines such as `\"version\": 1`",
+		"Do not write stale index availability claims such as `No current-run final-run-index document list was available`",
+		"Do not write stale zero-count claims such as `final-run-index.json contains 0 observed document entries`",
+		"Do not paste raw object payloads, Python-style dict snippets, `{'id': ...}`, or truncated JSON fragments.",
+		"Do not paste sampled shard markdown snippets with inline-code markers into proposal.md or changelog.md",
+		"Do not claim citation detail is limited or unavailable when current-run citation-index.json contains citation entries.",
+		"Do not mention placeholder replacement, placeholder proposal content, replaced placeholder content, or recovery mechanics",
+		"placeholder proposal content",
+		"replaced placeholder content",
+		"If staged evidence is sparse, write the gap explicitly",
+		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
+		"record an explicit no-actionable-proposal gap",
+		"Final self-check: both proposal.md and changelog.md were freshly overwritten",
+		"Final markdown must read as an operator-facing architecture/report/proposal artifact",
+		"Final content MUST NOT include these scaffold/recovery markers:",
+		"current draft manifest",
+		"enrichment read",
+		"Drafted required runtime artifacts for this step",
+		"Runtime proposal surface initialized",
+		"Convert findings into concrete operator decisions",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected proposals draft enrichment prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"Runtime proposal surface initialized for this analysis run.",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("proposals draft enrichment prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "proposal.md" contains malformed markdown inline-code or code-fence syntax`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
+		"The previous enrichment attempt failed because at least one referenced markdown file had malformed inline-code or code-fence syntax.",
+		"Rewrite every referenced markdown file again in one bounded filesystem command.",
+		"Treat this as a cleanup over already written markdown and current-run typed shard evidence",
+		"Prefer plain text service/module names over inline-code when summarizing sampled shard prose.",
+		"Remove sampled shard prose excerpts after evidence paths.",
+		"Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
+		"Do not write stale downstream-index availability claims in step2 markdown.",
+		"Do not write generic shard-gap wording when typed shard-summary shows all shards succeeded",
+		"Final self-check: every markdown line has balanced backticks outside fences",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected markdown syntax retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsManifestShapeRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`parse runtime draft manifest: json: unknown field "status"`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MANIFEST SHAPE RETRY:",
+		"the draft manifest JSON no longer matched the strict runtime draft manifest shape",
+		"restore the manifest to the allowed key set without weakening or bypassing validation",
+		"Leave evidence-backed markdown content in place when it is already valid",
+		"Remove unknown manifest fields such as status, content_digest, enriched_at",
+		"Allowed top-level manifest keys are exactly version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs.",
+		"Allowed output object keys are exactly path, canonical_path, kind, and title.",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected manifest-shape retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" claims current-run final/citation indexes are unavailable instead of omitting downstream index status`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
+		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, not observed, unavailable, not present, not yet present, not yet available, not readable",
+		"For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely",
+		"count only top-level canonical_documents[]",
+		"count only top-level citations[]",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected downstream-index retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsShardStatusCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[2].path "architect-summary.md" uses generic conditional shard-gap wording instead of exact current-run shard status`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+		"generic conditional shard-gap wording instead of exact current-run shard status",
+		"special attention to architect-summary.md",
+		"compute planned, succeeded, failed, and incomplete counts from items[].status",
+		"exact counts and an explicit no-shard-coverage-blocker statement",
+		"Do not use generic conditional phrases such as any failed or incomplete shards",
+		"failed shards require rerun",
+		"what is complete now, what residual artifact-quality risks remain",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected shard-status cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsShardCompletenessCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/as-is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[1].path "summary.md" does not report exact current-run shard completeness from typed shard summary: planned=16 succeeded=16 failed=0 incomplete=0`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+		"does not report exact current-run shard completeness from typed shard summary",
+		"compute planned, succeeded, failed, and incomplete counts from items[].status",
+		"exact counts and an explicit no-shard-coverage-blocker statement",
+		"special attention to summary.md",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected shard-completeness cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsWriteSetCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := fmt.Errorf(`draft_artifact_enrichment_write_set_cleanup: draft repair wrote forbidden write_root files: created architect-summary.md; created overview.md; created summary.md`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT WRITE-SET CLEANUP RETRY:",
+		"misplaced referenced markdown duplicates from write_root",
+		"draft markdown only under draft_final_root",
+		"Keep the step draft manifest in write_root",
+		"Do not delete, rename, or rewrite repository files",
+		"Do not create overview.md, summary.md, architect-summary.md",
+		"If you refresh content, write only referenced markdown targets under draft_final_root",
+		"write_root contains the step draft manifest but no referenced markdown output files",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected write-set cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsMarkerCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_noop_or_scaffold: runtime draft manifest outputs are invalid: outputs[1].path "changelog.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
+		"The previous enrichment changed markdown, but final content still included runtime-process, scaffold, or step0-downstream wording.",
+		"Rewrite every referenced markdown target again in one filesystem command",
+		"bounded read root, bounded read roots, bounded evidence, current draft manifest, draft manifest",
+		"If evidence is sparse, say the concrete architecture evidence was not found in the current run inputs",
+		"For step4, rewrite both proposal.md and changelog.md",
+		"No structured finding summary was present in current-run proposal evidence",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected marker-cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsStep0MarkerCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "charter-overview.md" mentions downstream or runtime-only evidence in step0 constitution content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT MARKER CLEANUP RETRY:",
+		"For step0, do not mention downstream pipeline surfaces",
+		"validation artifacts, proposal/change artifacts, shard/final/citation indexes",
+		"baseline-subagents.yaml, draft files, or future/later pipeline passes.",
+		"Rewrite charter-overview.md as a repository constitution",
+		"Use plain wording such as \"not inspected in this constitution pass\"",
+		"do not write \"later passes\", \"validator output\", or \"pipeline artifacts\"",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 marker-cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsSilentWriteFirstRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_write_first_retry: draft_artifact_enrichment_noop_or_scaffold: runtime draft manifest outputs are invalid: outputs[0].path "overview.md" references bootstrap-only placeholder draft content`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment focused recovery mode",
+		"DRAFT ENRICHMENT SILENT WRITE-FIRST RETRY:",
+		"The previous enrichment was stopped before any fresh markdown mutation and produced no provider stdout/stderr.",
+		"This is one narrow retry for a silent no-write enrichment, not a generic no-action retry.",
+		"Your next response must execute exactly one bounded filesystem command before any prose or extra analysis.",
+		"overwrite every referenced markdown target under draft_final_root before it exits.",
+		"Do not repeat the bootstrap/heredoc draft command",
+		"Success still requires provider-authored fresh marker-free markdown",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected silent write-first retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"DRAFT ENRICHMENT COMMAND-TEXT RETRY:",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"cat >",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("silent write-first retry prompt must avoid command-text/bootstrap token %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-refresh-step1-collect-shard-summary-ftgo-application.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"succeeded"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		DomainID:          "ftgo-application",
+		RepoScope:         "ftgo-application",
+		RepoScopes:        []string{"ftgo-application"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging/shards"},
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_compact_step2_retry: draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"compact step2 draft enrichment retry mode",
+		"DRAFT ENRICHMENT COMPACT STEP2 RETRY:",
+		"silent write-first enrichment made no fresh markdown mutation",
+		"execute exactly one bounded filesystem command before any prose",
+		"overwrite every step2 markdown target under draft_final_root before it exits",
+		"Compact evidence set: current asis-draft-manifest.json, typed shard-plan/shard-summary files listed below, observed staging/shards/*/shard-pack-manifest.json counts, at most 3 authored shard docs or manifests",
+		summaryPath,
+		"compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
+		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
+		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
+		"summary.md must summarize shard completeness",
+		"architect-summary.md must give a decision-ready operator summary",
+		"Evidence bullets must be path plus paraphrased signal only.",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact step2 retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"STEP4 WRITE-FIRST SEQUENCE",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact step2 retry prompt must stay narrow and avoid %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep4RetryMode(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	taskrunsRoot := filepath.Join(workspace, "reports", "taskruns")
+	if err := os.MkdirAll(taskrunsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir taskruns root: %v", err)
+	}
+	summaryPath := filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-posthog.json")
+	if err := os.WriteFile(summaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"succeeded"}]}`), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		DomainID:          "posthog",
+		RepoScope:         "posthog",
+		RepoScopes:        []string{"posthog"},
+		AgentRole:         "architect",
+		Workspace:         workspace,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step4_proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step4_proposals",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns/run-1/staging"},
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_compact_step4_retry: draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"compact step4 draft enrichment retry mode",
+		"DRAFT ENRICHMENT COMPACT STEP4 RETRY:",
+		"silent write-first enrichment made no fresh proposal/changelog markdown mutation",
+		"execute exactly one bounded filesystem command before any prose",
+		"overwrite every step4 markdown target under draft_final_root before it exits",
+		"Compact evidence set: current proposals-draft-manifest.json, typed shard-plan/shard-summary files listed below, current-run validator/finding/proposal/coverage summaries if present",
+		summaryPath,
+		"proposal.md -> proposals/runtime-recommendations.md; exact target",
+		"proposal.md must include Decision / recommended operator action",
+		"changelog.md must include updated architecture/proposal surfaces",
+		"Required proposal/changelog sections must not be empty",
+		"Do not use dangling references like `findings above`",
+		"The proposed changes/follow-up plan must include a concrete evidence-backed operator action",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact step4 retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"FIRST AS-IS DRAFT COMMAND:",
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"at most 6 high-signal shard manifests or authored shard docs",
+		"STEP2 WRITE-FIRST SEQUENCE",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact step4 retry prompt must stay narrow and avoid %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json", "proposal.md", "changelog.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"DRAFT ENRICHMENT COMMAND-TEXT RETRY:",
+		"Your next response must be exactly one filesystem command",
+		"Do not print the command, fenced code, or a Python script as assistant text.",
+		"A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed command-text enrichment.",
+		"The command must use python3",
+		"overwrite every markdown target listed below before it exits",
+		"/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json",
+		"/tmp/workspace/reports/taskruns/run-1/staging/final",
+		"proposal.md -> proposals/runtime-recommendations.md",
+		"changelog.md -> reports/changelog/runtime-proposals.md",
+		"Also read current-run staging/final final-run-index.json and citation-index.json if present.",
+		"For final-run-index.json, count documents from top-level canonical_documents[] only",
+		"For citation-index.json, count citations from top-level citations[] only.",
+		"Any final-run-index/citation-index counts included in markdown must be computed by the command from parsed JSON variables",
+		"Do not list metadata-only JSON keys such as `\"version\": 1`",
+		"Also read validator/finding/coverage/proposal summaries",
+		"Prefer not to rewrite the manifest; if it is structurally valid, leave it byte-for-byte and only rewrite markdown.",
+		"Allowed top-level manifest keys are version, run_id, step_id, step_contract, agent_role, summary, updated_at, and outputs only",
+		"never add status, enriched_at, metadata, validation, confidence, source",
+		"Allowed output object keys are path, canonical_path, kind, and title only.",
+		"Draft surface initialized",
+		"For step4, overwrite proposal.md and changelog.md.",
+		"For step4 command-text retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files",
+		"If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap",
+		"proposal.md must include Decision / recommended operator action",
+		"changelog.md must include updated architecture/proposal surfaces",
+		"None of those required proposal/changelog sections may be empty",
+		"The proposed changes/follow-up plan must contain at least one concrete operator action",
+		"no-shard-coverage-blocker statement",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected command-text retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"ACP_DRAFT_FILE",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"cat >",
+		"FIRST PROPOSALS DRAFT COMMAND:",
+		"STEP4 WRITE-FIRST SEQUENCE",
+		"Runtime proposal surface initialized for this analysis run.",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("command-text retry prompt must stay compact and avoid bootstrap/scaffold %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptStep2CommandTextRetryRequiresTypedShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ReadContextRoots:  []string{"/tmp/workspace/reports/taskruns", "/tmp/workspace/reports/taskruns/run-1/staging/shards"},
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
+		"If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
+		"summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+		"Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
+		"Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step2 command-text retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptStep0CommandTextRetryNamesEvidenceCandidates(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := t.TempDir()
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("PostHog analytics platform\n"), 0o644); err != nil {
+		t.Fatalf("write repo readme: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step0.constitution",
+		StepContract:      "constitution",
+		AgentRole:         "architect",
+		Workspace:         workspaceDir,
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step0_constitution",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution",
+		ReadContextRoots:  []string{workspaceDir, repoDir},
+		ExpectedArtifacts: []string{"constitution-draft.json", "charter-overview.md", "baseline-subagents.yaml"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment command-text retry mode",
+		`Exact required constitution overview overwrite target: "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step0_constitution/charter-overview.md".`,
+		"Read bounded repository entrypoint evidence from the allowed read_context_roots before writing the step0 summary",
+		"STEP0 bounded repository evidence candidates:",
+		filepath.Join(repoDir, "README.md"),
+		"For step0, overwrite charter-overview.md with target identity",
+		"Preserve baseline-subagents.yaml when it is already a valid baseline bundle.",
+		"Allowed output object keys are path, canonical_path, kind, and title only.",
+		"never add status, enriched_at, metadata, validation, confidence, source",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step0 command-text retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"final-run-index.json",
+		"citation-index.json",
+		"validator-verdict.json",
+		"reports/findings/",
+		"reports/coverage/",
+		"staging/shards",
+		"Use collected shard manifests",
+		"collected shard/final/validator",
+		"collected shards and validator output",
+		"Also read validator/finding/coverage/proposal summaries",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("step0 command-text retry prompt must not mention downstream evidence %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsPrintedCommandRetryMode(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/asis",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: draft_artifact_enrichment_noop_or_scaffold: provider printed python3 - <<'PY' as text`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"The previous enrichment printed a shell/Python command as text instead of executing it.",
+		"This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
+		"Do not print the command, fenced code, or a Python script as assistant text.",
+		"For step2, overwrite overview.md, summary.md, and architect-summary.md.",
+		"Previous draft artifact validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected printed-command retry prompt to contain %q, got:\n%s", token, prompt)
+		}
 	}
 }
 
@@ -903,7 +2284,7 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		"The first draft artifact set is bootstrap-only",
 		"replace placeholder scaffold text with evidence-backed as-is content",
 		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
-		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[].`,
+		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
 		`overview.md -> reports/as-is/overview.md`,
 		`"step_contract": "as_is"`,
 		`"canonical_path": "reports/as-is/payments/overview.md"`,
@@ -1030,7 +2411,7 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 		"The first proposals draft artifact set is bootstrap-only",
 		"replace placeholder scaffold text with evidence-backed proposal/changelog content",
 		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
-		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, optional summary, and outputs[].`,
+		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
 		`pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps`,
 		`"step_contract": "proposals"`,

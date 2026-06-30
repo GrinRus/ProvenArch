@@ -147,6 +147,7 @@ func normalizeAndValidateShardSummaryItems(items []runtimeShardSummaryEntry) ([]
 		candidate.ShardID = strings.TrimSpace(candidate.ShardID)
 		candidate.TaskID = strings.TrimSpace(candidate.TaskID)
 		candidate.TaskRun = strings.TrimSpace(candidate.TaskRun)
+		candidate.ErrorCode = strings.TrimSpace(candidate.ErrorCode)
 		candidate.Error = strings.TrimSpace(candidate.Error)
 		candidate.Status = normalizeShardSummaryStatus(candidate.Status)
 		if (candidate.Status == "checkpointed" || candidate.Status == "succeeded") && candidate.TaskRun == "" {

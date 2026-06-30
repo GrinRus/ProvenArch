@@ -208,16 +208,21 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 	}
 	overview := strings.Builder{}
 	overview.WriteString("# As-Is Overview (Runtime Draft)\n\n")
-	overview.WriteString("Prepared by the step-scoped runtime synthesizer.\n\n")
+	overview.WriteString("This deterministic as-is draft summarizes the current workspace evidence for operator review.\n\n")
 	if strings.TrimSpace(summary) != "" {
-		overview.WriteString("- Runtime summary: " + strings.TrimSpace(summary) + "\n")
+		overview.WriteString("- Summary: " + strings.TrimSpace(summary) + "\n")
 	}
 	if len(task.RepoScopes) > 0 {
 		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
 	}
+	overview.WriteString("- Evidence refs: reports/as-is/overview.md, reports/coverage/summary.md, reports/taskruns/" + strings.TrimSpace(task.RunID) + "/staging/final/final-run-index.json\n")
 
 	coverage := strings.Builder{}
 	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")
+	if completeness, ok := runtimeDraftShardCompletenessLine(task); ok {
+		coverage.WriteString("## Shard Completeness\n\n")
+		coverage.WriteString("- " + completeness + "\n\n")
+	}
 	if len(semantic.Coverage.Observed) > 0 {
 		coverage.WriteString("## Observed\n\n")
 		for _, item := range semantic.Coverage.Observed {
@@ -233,15 +238,80 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 		coverage.WriteString("\n")
 	}
 
-	architect := "# Architect Summary\n\n" + strings.TrimSpace(summary) + "\n"
+	architect := strings.Builder{}
+	architect.WriteString("# Architect Summary\n\n")
+	if strings.TrimSpace(summary) != "" {
+		architect.WriteString("## What Is Complete\n\n")
+		architect.WriteString("- " + strings.TrimSpace(summary) + "\n\n")
+	}
+	if completeness, ok := runtimeDraftShardCompletenessLine(task); ok {
+		architect.WriteString("## Coverage Status\n\n")
+		architect.WriteString("- " + completeness + "\n\n")
+	}
+	architect.WriteString("## Operator Decision\n\n")
+	architect.WriteString("- Inspect `reports/as-is/overview.md`, `reports/coverage/summary.md`, and the current final/citation indexes before publishing.\n")
+	architect.WriteString("- Treat missing semantic coverage or sparse citations as residual artifact-quality risk for manual SWE assessment.\n")
 	if err := writeRuntimeDraftFinals(task, map[string]string{
 		"overview.md":          overview.String(),
 		"summary.md":           coverage.String(),
-		"architect-summary.md": architect,
+		"architect-summary.md": architect.String(),
 	}); err != nil {
 		return err
 	}
 	return writeRuntimeDraftManifest(writeRoot, runtimedrafts.AsIsManifestFile, task, summary, outputs)
+}
+
+func runtimeDraftShardCompletenessLine(task acpruntime.Task) (string, bool) {
+	taskrunsRoot := filepath.Clean(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "..", "..", "..", ".."))
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(taskrunsRoot, runID+"-*-step1-collect-shard-summary-*.json"))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	sort.Strings(matches)
+	for _, match := range matches {
+		line, ok := runtimeDraftShardCompletenessLineFromFile(match)
+		if ok {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+func runtimeDraftShardCompletenessLineFromFile(filename string) (string, bool) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return "", false
+	}
+	var summary struct {
+		Items []struct {
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+		return "", false
+	}
+	planned := len(summary.Items)
+	succeeded := 0
+	failed := 0
+	incomplete := 0
+	for _, item := range summary.Items {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "succeeded":
+			succeeded++
+		case "failed":
+			failed++
+		default:
+			incomplete++
+		}
+	}
+	if failed == 0 && incomplete == 0 {
+		return fmt.Sprintf("Shard completeness: %d/%d succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.", succeeded, planned), true
+	}
+	return fmt.Sprintf("Shard completeness: planned=%d succeeded=%d failed=%d incomplete=%d from the current-run typed shard summary.", planned, succeeded, failed, incomplete), true
 }
 
 func writeProposalsDraftManifest(writeRoot string, task acpruntime.Task, summary string) error {
@@ -378,12 +448,230 @@ func fallbackCitation(task acpruntime.Task, claimKey string, documentID string) 
 }
 
 func fallbackEvidencePath(task acpruntime.Task) string {
+	if existing := existingRuntimeEvidencePath(task); existing != "" {
+		return existing
+	}
 	for _, candidate := range task.PathScopes {
-		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
-			return filepath.ToSlash(trimmed)
+		if trimmed := cleanRuntimeEvidenceRel(candidate); trimmed != "" {
+			return trimmed
 		}
 	}
 	return "README.md"
+}
+
+func existingRuntimeEvidencePath(task acpruntime.Task) string {
+	roots := runtimeRepoEvidenceRoots(task)
+	if len(roots) == 0 {
+		return ""
+	}
+	scopes := task.PathScopes
+	if len(scopes) == 0 {
+		scopes = []string{"."}
+	}
+	for _, root := range roots {
+		for _, scope := range scopes {
+			if rel := runtimeEvidenceFileInScope(root, scope); rel != "" {
+				return rel
+			}
+		}
+	}
+	for _, root := range roots {
+		if rel := runtimeEvidenceFileInScope(root, "."); rel != "" {
+			return rel
+		}
+	}
+	return ""
+}
+
+func runtimeRepoEvidenceRoots(task acpruntime.Task) []string {
+	exclude := map[string]struct{}{}
+	for _, value := range []string{task.Workspace, task.WriteRoot, task.DraftFinalRoot} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			exclude[filepath.Clean(trimmed)] = struct{}{}
+		}
+	}
+	roots := []string{}
+	seen := map[string]struct{}{}
+	for _, root := range task.ReadContextRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		clean := filepath.Clean(root)
+		if _, skip := exclude[clean]; skip {
+			continue
+		}
+		if strings.Contains(filepath.ToSlash(clean), "/reports/taskruns/") {
+			continue
+		}
+		info, err := os.Stat(clean)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, exists := seen[clean]; exists {
+			continue
+		}
+		seen[clean] = struct{}{}
+		roots = append(roots, clean)
+	}
+	return roots
+}
+
+func runtimeEvidenceFileInScope(root string, scope string) string {
+	scope = cleanRuntimeEvidenceRel(scope)
+	if scope == "" {
+		scope = "."
+	}
+	target := filepath.Join(filepath.Clean(root), filepath.FromSlash(scope))
+	info, err := os.Stat(target)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		return scope
+	}
+	if rel := firstPreferredRuntimeEvidenceFile(root, target); rel != "" {
+		return rel
+	}
+	return firstRuntimeEvidenceFile(root, target)
+}
+
+func firstPreferredRuntimeEvidenceFile(root string, dir string) string {
+	for _, name := range []string{
+		"README.md",
+		"README.adoc",
+		"README.rst",
+		"README.txt",
+		"AGENTS.md",
+		"CLAUDE.md",
+		"Makefile",
+		"package.json",
+		"pom.xml",
+		"build.gradle",
+		"build.gradle.kts",
+		"settings.gradle",
+		"settings.gradle.kts",
+		"go.mod",
+		"pyproject.toml",
+		"Cargo.toml",
+		"docker-compose.yml",
+		"docker-compose.yaml",
+		"Dockerfile",
+	} {
+		candidate := filepath.Join(dir, filepath.FromSlash(name))
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || !runtimeEvidenceFileAllowed(name, info) {
+			continue
+		}
+		rel, relErr := filepath.Rel(filepath.Clean(root), candidate)
+		if relErr == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return ""
+}
+
+func firstRuntimeEvidenceFile(root string, dir string) string {
+	type candidate struct {
+		rank int
+		rel  string
+	}
+	candidates := []candidate{}
+	_ = filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil {
+			return nil
+		}
+		if len(candidates) >= 64 {
+			return filepath.SkipAll
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".hg", ".svn", "node_modules", ".venv", "__pycache__":
+				return filepath.SkipDir
+			default:
+				return nil
+			}
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil || !runtimeEvidenceFileAllowed(entry.Name(), info) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(filepath.Clean(root), path)
+		if relErr != nil {
+			return nil
+		}
+		candidates = append(candidates, candidate{
+			rank: runtimeEvidenceFileRank(entry.Name()),
+			rel:  filepath.ToSlash(rel),
+		})
+		return nil
+	})
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].rank != candidates[j].rank {
+			return candidates[i].rank < candidates[j].rank
+		}
+		return candidates[i].rel < candidates[j].rel
+	})
+	return candidates[0].rel
+}
+
+func runtimeEvidenceFileAllowed(name string, info os.FileInfo) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	if info.Size() > 128*1024 {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return false
+	}
+	switch lower {
+	case ".test_durations", "pnpm-lock.yaml", "package-lock.json", "yarn.lock", "uv.lock", "go.sum":
+		return false
+	}
+	if strings.HasSuffix(lower, ".lock") || strings.HasSuffix(lower, "-lock.yaml") || strings.HasSuffix(lower, "-lock.json") {
+		return false
+	}
+	if strings.HasPrefix(lower, "coverage.") || strings.HasSuffix(lower, ".snap") || strings.HasSuffix(lower, ".snapshot") {
+		return false
+	}
+	return true
+}
+
+func runtimeEvidenceFileRank(name string) int {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch lower {
+	case "readme.md", "readme.adoc", "readme.rst", "readme.txt", "agents.md", "claude.md":
+		return 0
+	case "package.json", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "go.mod", "pyproject.toml", "cargo.toml", "makefile":
+		return 1
+	case "docker-compose.yml", "docker-compose.yaml", "dockerfile":
+		return 2
+	}
+	if strings.HasPrefix(lower, "dockerfile") || strings.HasPrefix(lower, "docker-compose.") {
+		return 3
+	}
+	if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".adoc") || strings.HasSuffix(lower, ".rst") {
+		return 4
+	}
+	if strings.HasPrefix(lower, ".") {
+		return 9
+	}
+	return 5
+}
+
+func cleanRuntimeEvidenceRel(value string) string {
+	value = filepath.ToSlash(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "./")
+	value = strings.Trim(value, "/")
+	if value == "" || value == "." || strings.HasPrefix(value, "../") || strings.Contains(value, "/../") {
+		return ""
+	}
+	return value
 }
 
 func copyLineRange(input *contracts.LineRange) *contracts.LineRange {

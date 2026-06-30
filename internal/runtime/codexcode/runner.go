@@ -3,8 +3,12 @@ package codexcode
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -70,15 +74,34 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 	} else if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
 		commandArgs = stripCodexDangerFullAccessArgs(commandArgs)
 	}
+	env, err := a.commandEnv(task)
+	if err != nil {
+		return providercommon.CommandSpec{}, err
+	}
 	return providercommon.CommandSpec{
 		Provider:    acpruntime.ProviderCodexCode,
 		Command:     a.runner.commandName(),
 		Args:        commandArgs,
+		Env:         env,
 		Stdin:       strings.NewReader(prompt),
 		Dir:         cwd,
 		PromptBytes: len([]byte(prompt)),
 		IncludeDirs: includeDirs,
 	}, nil
+}
+
+func (a codexAdapter) commandEnv(task acpruntime.Task) (map[string]string, error) {
+	if len(a.runner.Args) > 0 {
+		return nil, nil
+	}
+	codexHome, err := prepareIsolatedCodexHome(task)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(codexHome) == "" {
+		return nil, nil
+	}
+	return map[string]string{"CODEX_HOME": codexHome}, nil
 }
 
 func stripCodexDangerFullAccessArgs(args []string) []string {
@@ -113,25 +136,34 @@ func (a codexAdapter) DraftArtifactRepairCommandSpec(task acpruntime.Task, valid
 	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairDraftArtifacts, validationErr, a.commandSpecWithPrompt)
 }
 
+func (a codexAdapter) DraftArtifactEnrichmentCommandSpec(task acpruntime.Task, validationErr error) (providercommon.CommandSpec, error) {
+	return providercommon.BuildFocusedRepairCommandSpec(task, acpruntime.ProviderCodexCode, providercommon.FocusedRepairDraftEnrichment, validationErr, a.commandSpecWithPrompt)
+}
+
 func (a codexAdapter) ValidateArtifacts(task acpruntime.Task) error {
 	return providercommon.ValidateRuntimeArtifacts(task, acpruntime.ProviderCodexCode)
 }
 
 func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.ActivityPolicy {
 	monitorArtifacts := providercommon.MonitorsRuntimeArtifacts(task)
-	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
+	policy := providercommon.ActivityPolicy{
 		MonitorArtifacts:   monitorArtifacts,
 		MonitorPreArtifact: monitorArtifacts,
-	})
+	}
+	if acpruntime.IsCollectStep(task.StepID) {
+		policy.PreArtifactStallWindow = 3 * time.Minute
+	}
+	return providercommon.WithCollectArtifactEnrichmentWindow(task, policy)
 }
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
-		AcceptValidArtifactsAfterStop: true,
-		RepairCollectManifestOnce:     true,
-		RepairCollectArtifactPairOnce: true,
-		RepairValidatorVerdictOnce:    true,
-		RepairDraftArtifactsOnce:      true,
+		AcceptValidArtifactsAfterStop:     true,
+		RepairCollectManifestOnce:         true,
+		RepairCollectArtifactPairOnce:     true,
+		RepairValidatorVerdictOnce:        true,
+		RepairDraftArtifactsOnce:          true,
+		RepairDraftArtifactEnrichmentOnce: true,
 	}
 }
 
@@ -153,6 +185,15 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 		"exec",
 		"--json",
 		"--color", "never",
+		"--disable", "plugins",
+		"--disable", "remote_plugin",
+		"--disable", "plugin_sharing",
+		"--disable", "apps",
+		"--disable", "enable_mcp_apps",
+		"--disable", "tool_suggest",
+		"--disable", "skill_mcp_dependency_install",
+		"--ignore-user-config",
+		"--ignore-rules",
 		"--skip-git-repo-check",
 	}
 	if strings.TrimSpace(permissions.Mode) == acpruntime.PermissionModeManaged {
@@ -175,4 +216,114 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 
 func buildPrompt(task acpruntime.Task) string {
 	return promptcontract.ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+}
+
+func prepareIsolatedCodexHome(task acpruntime.Task) (string, error) {
+	sourceHome, err := sourceCodexHome()
+	if err != nil {
+		return "", err
+	}
+	base := strings.TrimSpace(os.Getenv("ACP_CODEX_ISOLATED_HOME_BASE"))
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "provenarch-codex-home")
+	}
+	home := filepath.Join(filepath.Clean(base), safeCodexHomePart(task.RunID), safeCodexHomePart(firstNonEmpty(task.TaskID, task.StepID, "task")))
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", fmt.Errorf("create isolated codex home: %w", err)
+	}
+	for _, name := range []string{"auth.json", "installation_id"} {
+		src := filepath.Join(sourceHome, name)
+		if _, err := os.Stat(src); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return "", fmt.Errorf("stat codex home file %s: %w", name, err)
+		}
+		mode := os.FileMode(0o600)
+		if name != "auth.json" {
+			mode = 0o644
+		}
+		if err := copyRegularFile(src, filepath.Join(home, name), mode); err != nil {
+			return "", fmt.Errorf("copy codex home file %s: %w", name, err)
+		}
+	}
+	return home, nil
+}
+
+func sourceCodexHome() (string, error) {
+	if value := strings.TrimSpace(os.Getenv("CODEX_HOME")); value != "" {
+		return filepath.Clean(value), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home for codex auth: %w", err)
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+func copyRegularFile(src string, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if info.IsDir() || !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", src)
+	}
+	tmp := dst + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dst)
+}
+
+func safeCodexHomePart(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-.")
+	if out == "" {
+		return "default"
+	}
+	if len(out) > 120 {
+		return out[:120]
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -1352,6 +1352,7 @@ func writeWorkspace(t *testing.T) string {
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create sample repo path: %v", err)
 	}
+	writeTestRepoReadme(t, repoPath, "# Sample\n")
 	manifestPath := filepath.Join(root, "workspace.yaml")
 	manifest := "version: 1\nrepos:\n  - name: sample\n    path: " + repoPath + "\n"
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
@@ -1368,6 +1369,7 @@ func writeWorkspaceWithExecutionProfile(t *testing.T, strategy string, maxParall
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		t.Fatalf("create sample repo path: %v", err)
 	}
+	writeTestRepoReadme(t, repoPath, "# Sample\n")
 	manifest := strings.Join([]string{
 		"version: 1",
 		"repos:",
@@ -1399,6 +1401,7 @@ for arg in "$@"; do
   LAST_ARG="$arg"
 done
 TASK_PAYLOAD="$TASK_PAYLOAD" TASK_PROMPT="$LAST_ARG" python3 - <<'PY'
+import glob
 import json
 import os
 import re
@@ -1451,6 +1454,21 @@ def first_non_empty_list(mapping, keys):
 def slugify(value):
     return re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-') or "stub"
 
+def infer_repo_scope_from_shard(shard):
+    slug = slugify(shard)
+    for suffix in [
+        "-readme-md",
+        "-makefile",
+        "-dockerfile",
+        "-package-json",
+        "-pom-xml",
+        "-build-gradle",
+        "-settings-gradle",
+    ]:
+        if slug.endswith(suffix) and len(slug) > len(suffix):
+            return slug[:-len(suffix)]
+    return slug
+
 task = {}
 if raw:
     try:
@@ -1473,6 +1491,32 @@ if not repo_scopes:
     if repo_scope:
         repo_scopes = [repo_scope]
 path_scopes = first_non_empty_list(task, ["path_scopes", "PathScopes"])
+if not repo_scopes:
+    inferred_repo_scope = infer_repo_scope_from_shard(shard_id)
+    if inferred_repo_scope:
+        repo_scopes = [inferred_repo_scope]
+
+def shard_completeness_line():
+    if not draft_root or not run_id:
+        return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+    taskruns_root = os.path.abspath(os.path.join(draft_root, "..", "..", "..", ".."))
+    matches = sorted(glob.glob(os.path.join(taskruns_root, f"{run_id}-*-step1-collect-shard-summary-*.json")))
+    for path in matches:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                items = json.load(handle).get("items", [])
+        except Exception:
+            continue
+        if not items:
+            continue
+        planned = len(items)
+        succeeded = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "succeeded")
+        failed = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "failed")
+        incomplete = planned - succeeded - failed
+        if failed == 0 and incomplete == 0:
+            return f"Shard completeness: {succeeded}/{planned} succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary."
+        return f"Shard completeness: planned={planned} succeeded={succeeded} failed={failed} incomplete={incomplete} from the current-run typed shard summary."
+    return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
 
 def write_runtime_draft(manifest_name, outputs, default_step_contract="draft"):
     if not write_root or not draft_root:
@@ -1533,18 +1577,21 @@ elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
                 "canonical_path": "reports/as-is/overview.md",
                 "kind": "report",
                 "title": "Stub As-Is Overview",
+                "content": "# Stub As-Is Overview\n\nEvidence references: reports/as-is/overview.md.\n",
             },
             {
                 "path": "summary.md",
                 "canonical_path": "reports/coverage/summary.md",
                 "kind": "report",
                 "title": "Stub Coverage Summary",
+                "content": "# Stub Coverage Summary\n\n" + shard_completeness_line() + "\n",
             },
             {
                 "path": "architect-summary.md",
                 "canonical_path": "reports/agent-outputs/architect/summary.md",
                 "kind": "agent-output",
                 "title": "Stub Architect Summary",
+                "content": "# Stub Architect Summary\n\nWhat is complete: " + shard_completeness_line() + "\n\nWhat to inspect next: review generated as-is and coverage artifacts.\n",
             },
         ],
         "as_is",
@@ -1646,6 +1693,7 @@ func writeStubCodexRunner(t *testing.T) string {
 set -eu
 TASK_PROMPT="$(cat)"
 TASK_PROMPT="$TASK_PROMPT" python3 - <<'PY'
+import glob
 import json
 import os
 import pathlib
@@ -1688,6 +1736,29 @@ agent_role = policy_value("agent_role") or "architect"
 step_contract = policy_value("step_contract") or "draft"
 current_step = step_id()
 run_id = run_id_from_path(write_root or draft_root or "/tmp/run-1")
+repo_scope = policy_value("repo_scope") or policy_value("RepoScope") or "sample"
+
+def shard_completeness_line():
+    if not draft_root or not run_id:
+        return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
+    taskruns_root = os.path.abspath(os.path.join(draft_root, "..", "..", "..", ".."))
+    matches = sorted(glob.glob(os.path.join(taskruns_root, f"{run_id}-*-step1-collect-shard-summary-*.json")))
+    for path in matches:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                items = json.load(handle).get("items", [])
+        except Exception:
+            continue
+        if not items:
+            continue
+        planned = len(items)
+        succeeded = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "succeeded")
+        failed = sum(1 for item in items if str(item.get("status", "")).strip().lower() == "failed")
+        incomplete = planned - succeeded - failed
+        if failed == 0 and incomplete == 0:
+            return f"Shard completeness: {succeeded}/{planned} succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary."
+        return f"Shard completeness: planned={planned} succeeded={succeeded} failed={failed} incomplete={incomplete} from the current-run typed shard summary."
+    return "Shard completeness: planned=unknown succeeded=unknown failed=unknown incomplete=unknown; typed shard summary was not visible to the stub runner."
 
 if current_step == "init.step0.constitution":
     os.makedirs(write_root, exist_ok=True)
@@ -1724,11 +1795,11 @@ elif current_step in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
     os.makedirs(write_root, exist_ok=True)
     os.makedirs(draft_root, exist_ok=True)
     with open(os.path.join(draft_root, "overview.md"), "w", encoding="utf-8") as handle:
-        handle.write("# Stub As-Is\n")
+        handle.write("# Stub As-Is\n\nEvidence references: reports/as-is/overview.md.\n")
     with open(os.path.join(draft_root, "summary.md"), "w", encoding="utf-8") as handle:
-        handle.write("# Stub Coverage Summary\n")
+        handle.write("# Stub Coverage Summary\n\n" + shard_completeness_line() + "\n")
     with open(os.path.join(draft_root, "architect-summary.md"), "w", encoding="utf-8") as handle:
-        handle.write("# Stub Architect Summary\n")
+        handle.write("# Stub Architect Summary\n\nWhat is complete: " + shard_completeness_line() + "\n\nWhat to inspect next: review generated as-is and coverage artifacts.\n")
     manifest = {
         "version": 1,
         "run_id": run_id,
@@ -1810,7 +1881,7 @@ else:
         "shard_id": shard_id,
         "agent_role": "shard-analyst",
         "artifact_root": artifact_root,
-        "repo_scopes": [],
+        "repo_scopes": [repo_scope] if repo_scope else [],
         "path_scopes": [],
         "summary": "stub codex shard pack",
         "documents": [
@@ -1828,7 +1899,7 @@ else:
         "citations": [
             {
                 "id": "cite." + shard_id,
-                "repo": "stub-repo",
+                "repo": repo_scope or "sample",
                 "path": "README.md",
                 "claim_ids": ["claim.stub"],
                 "document_ids": ["doc." + shard_id]
@@ -1866,6 +1937,16 @@ func outputField(output string, key string) string {
 		}
 	}
 	return ""
+}
+
+func writeTestRepoReadme(t *testing.T, repoPath string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path for README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write repo README: %v", err)
+	}
 }
 
 func hasDoctorCLIResultCheck(checks []struct {

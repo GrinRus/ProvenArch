@@ -203,6 +203,81 @@ func TestRuntimeArtifactSnapshotRejectsBootstrapOnlyCollectDocument(t *testing.T
 	}
 }
 
+func TestValidateCollectArtifactsRejectsMissingRepoEvidencePath(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "workspace")
+	repoRoot := filepath.Join(workspaceRoot, ".acp", "repos", "payments-d542d7e34d40")
+	writeRoot := filepath.Join(workspaceRoot, "reports", "taskruns", "run-collect-1", "staging", "shards", "payments-src")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	writeCollectManifest(t, writeRoot)
+	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment API.\n")
+
+	task := acpruntime.Task{
+		RunID:            "run-collect-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspaceRoot,
+		WriteRoot:        writeRoot,
+		ReadContextRoots: []string{workspaceRoot, repoRoot},
+		RepoScope:        "payments",
+		RepoScopes:       []string{"payments"},
+	}
+	err := ValidateCollectArtifacts(task, acpruntime.ProviderCodexCode)
+	if err == nil {
+		t.Fatalf("expected missing repo evidence path to fail validation")
+	}
+	if !strings.Contains(err.Error(), `repo evidence path "src/payment_handler.go" is missing`) {
+		t.Fatalf("expected missing repo evidence path error, got %v", err)
+	}
+
+	writeTextFile(t, filepath.Join(repoRoot, "src", "payment_handler.go"), "package payments\n")
+	if err := ValidateCollectArtifacts(task, acpruntime.ProviderCodexCode); err != nil {
+		t.Fatalf("expected collect artifacts to validate after repo evidence exists: %v", err)
+	}
+}
+
+func TestRuntimeArtifactSnapshotRejectsDirectoryRepoEvidencePath(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "workspace")
+	repoRoot := filepath.Join(workspaceRoot, ".acp", "repos", "payments-d542d7e34d40")
+	writeRoot := filepath.Join(workspaceRoot, "reports", "taskruns", "run-collect-1", "staging", "shards", "payments-src")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src", "payment_handler.go"), 0o755); err != nil {
+		t.Fatalf("mkdir directory evidence path: %v", err)
+	}
+	writeCollectManifest(t, writeRoot)
+	writeTextFile(t, filepath.Join(writeRoot, "payments-overview.md"), "# Payments Overview\n\n## Observations\n- `src/payment_handler.go` defines the payment API.\n")
+
+	task := acpruntime.Task{
+		RunID:            "run-collect-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspaceRoot,
+		WriteRoot:        writeRoot,
+		ReadContextRoots: []string{workspaceRoot, repoRoot},
+		RepoScope:        "payments",
+		RepoScopes:       []string{"payments"},
+	}
+	snapshot := runtimeArtifactSnapshot(task)
+	if !snapshot.ArtifactObserved || snapshot.Valid || snapshot.State != "invalid" {
+		t.Fatalf("expected directory evidence path to keep collect snapshot invalid, got %+v", snapshot)
+	}
+
+	if err := os.RemoveAll(filepath.Join(repoRoot, "src", "payment_handler.go")); err != nil {
+		t.Fatalf("remove directory evidence path: %v", err)
+	}
+	writeTextFile(t, filepath.Join(repoRoot, "src", "payment_handler.go"), "package payments\n")
+	snapshot = runtimeArtifactSnapshot(task)
+	if !snapshot.ArtifactObserved || !snapshot.Valid || snapshot.State != "valid" {
+		t.Fatalf("expected file evidence path to validate collect snapshot, got %+v", snapshot)
+	}
+}
+
 func writeQAAnswer(t *testing.T, writeRoot string, citations []map[string]string) {
 	t.Helper()
 	writeJSONFile(t, filepath.Join(writeRoot, "qa-answer.json"), map[string]any{

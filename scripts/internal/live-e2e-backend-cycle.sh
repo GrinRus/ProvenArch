@@ -23,7 +23,6 @@ TMP_ROOT="${TMP_ROOT:-}"
 RUN_STATUS_FILE="${RUN_STATUS_FILE:-}"
 KEEP_TMP="${KEEP_TMP:-0}"
 ITERATIONS="${ITERATIONS:-1}"
-RUN_QUALITY_GATES="${RUN_QUALITY_GATES:-1}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
@@ -44,12 +43,15 @@ TERMINATION_SIGNAL=""
 API_SIM_STATUS="not_started"
 API_INIT_RUN_ID=""
 API_INIT_FINAL_STATUS=""
-QUALITY_GATES_STATUS="not_run"
+API_INIT_PROGRESS_GRACE_SEC=""
+API_INIT_LAST_PROGRESS_AT=""
 LAST_SIGNAL=""
 HEADLESS_PROVIDER=""
 HEADLESS_CMD=""
 TARGET_PROFILE="generic"
 RESOLVED_TARGET_REPOS_FILE=""
+ORIGINAL_RESOLVED_TARGET_REPOS_FILE=""
+ISOLATED_TARGET_REPOS_DIR=""
 TARGET_REPOS_META_JSON=""
 EXPECTED_REPO_COUNT_RESOLVED=0
 EXPECTED_RUNS=0
@@ -64,6 +66,16 @@ SUMMARY_RESULT=""
 SUMMARY_WRITTEN="no"
 LAST_PIPELINE_STAGE="not_started"
 LAST_RUNTIME_PROVIDER="unset"
+LAST_PROGRESS_AT_UTC=""
+LAST_PIPELINE_DEADLINE_AT=""
+LAST_PIPELINE_TIMEOUT_ELAPSED_SEC=""
+LAST_PIPELINE_DEADLINE_MISSED_BY_SEC=""
+LAST_PIPELINE_LAST_PROGRESS_AT=""
+LAST_WATCHDOG_TICK_AT=""
+LAST_WATCHDOG_TICK_GAP_SEC=""
+HOST_CLOCK_GAP_DETECTED="no"
+LAST_PIPELINE_TIMED_OUT="no"
+TERMINAL_PROCESS_EXIT_OVERRIDE=""
 TIMEOUTS_API_APPLY_BASELINE_STATUS="not_applied"
 TIMEOUTS_API_APPLY_BASELINE_EFFECTIVE=""
 TIMEOUTS_API_APPLY_BASELINE_SOURCE=""
@@ -79,10 +91,6 @@ if [[ ! "$ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ "$KEEP_TMP" != "0" && "$KEEP_TMP" != "1" ]]; then
   echo "KEEP_TMP must be 0 or 1, got: $KEEP_TMP" >&2
-  exit 1
-fi
-if [[ "$RUN_QUALITY_GATES" != "0" && "$RUN_QUALITY_GATES" != "1" ]]; then
-  echo "RUN_QUALITY_GATES must be 0 or 1, got: $RUN_QUALITY_GATES" >&2
   exit 1
 fi
 if [[ "$APPLY_TIMEOUTS_VIA_API" != "0" && "$APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
@@ -120,7 +128,6 @@ SNAPSHOT_DIR="$TMP_ROOT/snapshots"
 SUMMARY_PATH="$TMP_ROOT/session-summary.md"
 FULL_RUN_LOG="$TMP_ROOT/full-run.log"
 RUN_RESULTS_TSV="$TMP_ROOT/run-results.tsv"
-QUALITY_LOG="$TMP_ROOT/quality-gates.log"
 VALIDATE_JSON="$TMP_ROOT/workspace-validate.json"
 API_INIT_START_JSON="$TMP_ROOT/api-init-start.json"
 API_INIT_STATUS_JSON="$TMP_ROOT/api-init-status.json"
@@ -274,6 +281,41 @@ run_result_row_exists() {
     "$RUN_RESULTS_TSV"
 }
 
+resolve_failed_run_id_from_workspace() {
+  local workspace_path="$1"
+  local pipeline="$2"
+  python3 - "$workspace_path" "$pipeline" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+pipeline = (sys.argv[2] or "").strip()
+taskruns = workspace / "reports" / "taskruns"
+candidates = []
+if taskruns.exists():
+    for path in taskruns.glob("run_*-quality.json"):
+        run_id = path.name[:-len("-quality.json")]
+        candidates.append((path.stat().st_mtime, run_id))
+    raw_root = taskruns / "raw"
+    if raw_root.exists():
+        for path in raw_root.glob("run_*-meta.json"):
+            text = path.name
+            match = re.match(r"(run_[0-9_]+)-", text)
+            if not match:
+                continue
+            if pipeline and f"-{pipeline}." not in text:
+                continue
+            candidates.append((path.stat().st_mtime, match.group(1)))
+
+if not candidates:
+    sys.exit(0)
+candidates.sort()
+print(candidates[-1][1])
+PY
+}
+
 append_run_result_row_once() {
   local iteration="$1"
   local runtime_mode="$2"
@@ -284,6 +326,9 @@ append_run_result_row_once() {
   local workspace_path="$7"
   local output_path="$8"
 
+  if [[ -z "$run_id" ]]; then
+    run_id="$(resolve_failed_run_id_from_workspace "$workspace_path" "$pipeline" || true)"
+  fi
   if [[ -z "$run_id" ]]; then
     return 0
   fi
@@ -329,6 +374,14 @@ append_run_result_row_once() {
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$signal_score" "$semantic_entities" "$semantic_edges" "$findings" "$questions" "$coverage_observed" "$coverage_missing" "$warnings" "$runtime_versions" "$quality_path" "$output_path" >> "$RUN_RESULTS_TSV"
+}
+
+append_api_init_run_result_row() {
+  local status="${1:-failed}"
+  if [[ -z "${API_INIT_RUN_ID:-}" ]]; then
+    return 0
+  fi
+  append_run_result_row_once "1" "fake" "${HEADLESS_PROVIDER:-fake}" "init" "$API_INIT_RUN_ID" "$status" "$WORKSPACE_BASELINE" "$API_INIT_STATUS_JSON"
 }
 
 refresh_runtime_cycle_metrics() {
@@ -438,7 +491,7 @@ prepare_target_repos_file() {
 }
 
 validate_target_repos_file() {
-  TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.json"
+  TARGET_REPOS_META_JSON="${TARGET_REPOS_META_JSON:-$TMP_ROOT/target-repos-meta.json}"
   python3 "$PROVENARCH_ROOT/scripts/resolve-repos-meta.py" \
     --repos-file "$RESOLVED_TARGET_REPOS_FILE" \
     --expected-repo-count "$EXPECTED_REPO_COUNT" \
@@ -464,6 +517,37 @@ read_target_repos_meta() {
   TARGET_PROFILE="${resolved_target_profile:-generic}"
   PROFILE_SOURCE_KIND_EFFECTIVE="${resolved_source_kind:-mixed}"
   EXPECTED_REPO_COUNT_RESOLVED="${resolved_expected_count:-0}"
+}
+
+prepare_isolated_target_repos_file() {
+  case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
+    path|mixed)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  ORIGINAL_RESOLVED_TARGET_REPOS_FILE="$RESOLVED_TARGET_REPOS_FILE"
+  local isolated_repos_file="$TMP_ROOT/target-repos.live-isolated.yaml"
+  local isolated_repos_dir="$TMP_ROOT/source-repos"
+  python3 "$PROVENARCH_ROOT/scripts/prepare-live-repos-file.py" \
+    --repos-file "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" \
+    --work-dir "$isolated_repos_dir" \
+    --out "$isolated_repos_file" \
+    --make-read-only
+  RESOLVED_TARGET_REPOS_FILE="$isolated_repos_file"
+  ISOLATED_TARGET_REPOS_DIR="$isolated_repos_dir"
+  TARGET_REPOS_META_JSON="$TMP_ROOT/target-repos-meta.live-isolated.json"
+  validate_target_repos_file
+  read_target_repos_meta
+  log "target path repos isolated: original=$ORIGINAL_RESOLVED_TARGET_REPOS_FILE active=$RESOLVED_TARGET_REPOS_FILE source_repos=$isolated_repos_dir"
+}
+
+restore_isolated_target_repos_write_bits() {
+  if [[ -n "$ISOLATED_TARGET_REPOS_DIR" && -d "$ISOLATED_TARGET_REPOS_DIR" ]]; then
+    chmod -R u+w "$ISOLATED_TARGET_REPOS_DIR" 2>/dev/null || true
+  fi
 }
 
 resolve_effective_timeouts_from_workspace() {
@@ -912,53 +996,82 @@ run_cli_pipeline() {
     run_cmd+=(--runtime-provider "$runtime_provider")
   fi
 
-  local timeout_flag="$TMP_ROOT/.pipeline-timeout-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.flag"
-  rm -f "$timeout_flag"
-  local run_started_at="$SECONDS"
-  "${run_cmd[@]}" >"$output_path" 2>&1 &
-  local run_pid=$!
-  (
-    sleep "$PIPELINE_TIMEOUT_SEC"
-    if kill -0 "$run_pid" >/dev/null 2>&1; then
-      echo "timeout" >"$timeout_flag"
-      kill -TERM "$run_pid" >/dev/null 2>&1 || true
-      sleep "$PIPELINE_KILL_GRACE_SEC"
-      if kill -0 "$run_pid" >/dev/null 2>&1; then
-        kill -KILL "$run_pid" >/dev/null 2>&1 || true
-      fi
-    fi
-  ) &
-  local watchdog_pid=$!
-  local last_progress_emit=-1
-  while kill -0 "$run_pid" >/dev/null 2>&1; do
-    sleep 1
-    local elapsed_sec=$((SECONDS - run_started_at))
-    if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( elapsed_sec > 0 )) && (( elapsed_sec % RUNTIME_HEARTBEAT_SEC == 0 )) && (( elapsed_sec != last_progress_emit )); then
-      log "pipeline progress: iteration=$iteration runtime=$runtime_label pipeline=$pipeline elapsed_sec=$elapsed_sec timeout_sec=$PIPELINE_TIMEOUT_SEC"
-      write_running_run_status_heartbeat
-      last_progress_emit="$elapsed_sec"
-    fi
-  done
+  local monitor_meta="$TMP_ROOT/.pipeline-monitor-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.json"
+  rm -f "$monitor_meta"
+  LAST_PIPELINE_DEADLINE_AT=""
+  LAST_PIPELINE_TIMEOUT_ELAPSED_SEC=""
+  LAST_PIPELINE_DEADLINE_MISSED_BY_SEC=""
+  LAST_PIPELINE_LAST_PROGRESS_AT=""
+  LAST_WATCHDOG_TICK_AT=""
+  LAST_WATCHDOG_TICK_GAP_SEC=""
+  HOST_CLOCK_GAP_DETECTED="no"
+  LAST_PIPELINE_TIMED_OUT="no"
+  local watchdog_cmd=(
+    python3 "$PROVENARCH_ROOT/scripts/pipeline-watchdog.py"
+    --timeout-sec "$PIPELINE_TIMEOUT_SEC"
+    --grace-sec "$PIPELINE_KILL_GRACE_SEC"
+    --heartbeat-sec "$RUNTIME_HEARTBEAT_SEC"
+    --output "$output_path"
+    --metadata "$monitor_meta"
+    --workspace "$workspace_path"
+  )
+  if [[ -n "${RUN_STATUS_FILE:-}" ]]; then
+    watchdog_cmd+=(--status-file "$RUN_STATUS_FILE")
+  fi
+  watchdog_cmd+=(
+    --last-pipeline-stage "$LAST_PIPELINE_STAGE"
+    --last-runtime-provider "$LAST_RUNTIME_PROVIDER"
+    --progress-label "iteration=$iteration runtime=$runtime_label pipeline=$pipeline"
+    -- "${run_cmd[@]}"
+  )
   local run_exit=0
-  if wait "$run_pid"; then
+  if "${watchdog_cmd[@]}"; then
     run_exit=0
   else
     run_exit=$?
   fi
-  kill "$watchdog_pid" >/dev/null 2>&1 || true
-  wait "$watchdog_pid" >/dev/null 2>&1 || true
 
-  if [[ -f "$timeout_flag" ]]; then
-    rm -f "$timeout_flag"
+  if [[ -f "$monitor_meta" ]]; then
+    local monitor_exports
+    monitor_exports="$(python3 - "$monitor_meta" <<'PY'
+import json
+import shlex
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+fields = {
+    "LAST_PIPELINE_DEADLINE_AT": payload.get("pipeline_deadline_at", ""),
+    "LAST_PIPELINE_TIMEOUT_ELAPSED_SEC": str(payload.get("pipeline_timeout_elapsed_sec", "")),
+    "LAST_PIPELINE_DEADLINE_MISSED_BY_SEC": str(payload.get("deadline_missed_by_sec", "")),
+    "LAST_PIPELINE_LAST_PROGRESS_AT": payload.get("last_progress_at", ""),
+    "LAST_PROGRESS_AT_UTC": payload.get("last_progress_at", ""),
+    "LAST_WATCHDOG_TICK_AT": payload.get("last_watchdog_tick_at", ""),
+    "LAST_WATCHDOG_TICK_GAP_SEC": str(payload.get("max_watchdog_tick_gap_sec", "")),
+    "HOST_CLOCK_GAP_DETECTED": "yes" if payload.get("infra_host_sleep_or_clock_jump_detected") else "no",
+    "LAST_PIPELINE_TIMED_OUT": "yes" if payload.get("timed_out") else "no",
+}
+for key, value in fields.items():
+    print(f"{key}={shlex.quote(str(value))}")
+PY
+)"
+    eval "$monitor_exports"
+  fi
+
+  if [[ "$HOST_CLOCK_GAP_DETECTED" == "yes" ]]; then
+    log "diagnostic infra_host_sleep_or_clock_jump_detected: iteration=$iteration runtime=$runtime_label pipeline=$pipeline max_tick_gap_sec=${LAST_WATCHDOG_TICK_GAP_SEC:-unknown}"
+  fi
+
+  if [[ "$run_exit" -eq 124 && "$LAST_PIPELINE_TIMED_OUT" == "yes" ]]; then
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
     run_id="$(sed -n 's/^run_id: //p' "$output_path" | tail -n1 | tr -d '\r')"
     reconcile_active_runs_in_history "$workspace_path" "runtime_timeout" "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s)"
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "${status:-failed}" "$workspace_path" "$output_path"
     FAILURE_REASON="runtime_timeout"
     TERMINATION_SIGNAL="timeout"
+    TERMINAL_PROCESS_EXIT_OVERRIDE="124"
+    write_terminal_run_status "process_failed" "124" "timeout" "runtime_timeout" "$SUMMARY_WRITTEN"
     die "pipeline timed out after ${PIPELINE_TIMEOUT_SEC}s (grace ${PIPELINE_KILL_GRACE_SEC}s): runtime=$runtime_label pipeline=$pipeline (see $output_path)"
   fi
-  rm -f "$timeout_flag"
 
   if [[ "$run_exit" -ne 0 ]]; then
     status="$(sed -n 's/^status: //p' "$output_path" | tail -n1 | tr -d '\r')"
@@ -982,13 +1095,13 @@ run_cli_pipeline() {
   quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
   if [[ ! -f "$quality_path" ]]; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
-    die "missing quality summary for run $run_id at $quality_path"
+    die "missing run telemetry summary for run $run_id at $quality_path"
   fi
 
   local metrics
   if ! metrics="$(quality_metrics "$quality_path")"; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
-    die "invalid quality summary for run $run_id at $quality_path"
+    die "invalid run telemetry summary for run $run_id at $quality_path"
   fi
 
   local quality_status signal_score semantic_entities semantic_edges findings questions coverage_observed coverage_missing warnings artifact_quality_count
@@ -997,7 +1110,7 @@ run_cli_pipeline() {
 
   if [[ "$quality_status" != "succeeded" ]]; then
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-    die "quality summary status is not succeeded for run $run_id: $quality_status"
+    die "run telemetry summary status is not succeeded for run $run_id: $quality_status"
   fi
 
   if [[ "$runtime_mode" == "headless" ]]; then
@@ -1006,33 +1119,26 @@ run_cli_pipeline() {
       die "headless run $run_id uses mock/fake runtime version ($runtime_versions)"
     fi
     if [[ "$zero_signal" == "1" ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless run $run_id produced zero-signal quality summary"
+      log "headless run $run_id produced zero-signal telemetry; leaving for SWE artifact assessment"
     fi
     if [[ "$artifact_quality_count" != "0" ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      FAILURE_REASON="quality"
-      die "headless run $run_id produced artifact_quality blockers: count=$artifact_quality_count"
+      log "headless run $run_id produced artifact_quality telemetry findings: count=$artifact_quality_count"
     fi
     if [[ "$TARGET_PROFILE" == "ai-advent" && "$domain_collect_steps" -le 0 ]]; then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless run $run_id has no domain collect signal in quality summary"
+      log "headless run $run_id has no domain collect telemetry signal; leaving for SWE artifact assessment"
     fi
   fi
 
   if [[ "$runtime_mode" == "headless" && "$pipeline" == "refresh" ]]; then
     if [[ -n "$previous_signal" ]] && (( signal_score < previous_signal )); then
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "quality regression: last run signal ($signal_score) is lower than previous run signal ($previous_signal) in iteration $iteration"
+      log "headless refresh telemetry signal decreased: previous=$previous_signal current=$signal_score"
     fi
     check_headless_refresh_semantic_quality "$workspace_path" "$run_id" || {
-      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-      die "headless refresh semantic quality checks failed for run $run_id"
+      log "headless refresh semantic telemetry checks found findings for run $run_id"
     }
     if [[ "$TARGET_PROFILE" == "ai-advent" ]]; then
       check_ai_advent_text_signal "$workspace_path" "$run_id" || {
-        append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
-        die "ai-advent textual quality check failed for run $run_id"
+        log "ai-advent textual telemetry check found findings for run $run_id"
       }
     fi
   fi
@@ -1081,6 +1187,9 @@ write_summary() {
     echo "- provenarch_root: $PROVENARCH_ROOT"
     echo "- target_input_mode: repos-file"
     echo "- target_repos_file: ${RESOLVED_TARGET_REPOS_FILE:-unset}"
+    if [[ -n "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" ]]; then
+      echo "- original_target_repos_file: $ORIGINAL_RESOLVED_TARGET_REPOS_FILE"
+    fi
     echo "- profile_id: ${PROFILE_ID:-adhoc}"
     echo "- profile_source_kind: $PROFILE_SOURCE_KIND_EFFECTIVE"
     echo "- expected_repo_count: $EXPECTED_REPO_COUNT_RESOLVED"
@@ -1099,6 +1208,12 @@ write_summary() {
     echo "- pipeline_kill_grace_sec: $PIPELINE_KILL_GRACE_SEC"
     echo "- api_ready_timeout_sec: $API_READY_TIMEOUT_SEC"
     echo "- api_init_timeout_sec: $API_INIT_TIMEOUT_SEC"
+    if [[ -n "$API_INIT_PROGRESS_GRACE_SEC" ]]; then
+      echo "- api_init_progress_grace_sec: $API_INIT_PROGRESS_GRACE_SEC"
+    fi
+    if [[ -n "$API_INIT_LAST_PROGRESS_AT" ]]; then
+      echo "- api_init_last_progress_at: $API_INIT_LAST_PROGRESS_AT"
+    fi
     echo "- ui_init_poll_timeout_sec: $UI_INIT_POLL_TIMEOUT_SEC"
     echo "- ui_cancel_poll_timeout_sec: $UI_CANCEL_POLL_TIMEOUT_SEC"
     echo "- apply_timeouts_via_api: $APPLY_TIMEOUTS_VIA_API"
@@ -1131,6 +1246,25 @@ write_summary() {
     echo "- running_runs_detected: $RUNNING_RUNS_DETECTED"
     echo "- last_pipeline_stage: $LAST_PIPELINE_STAGE"
     echo "- last_runtime_provider: $LAST_RUNTIME_PROVIDER"
+    if [[ -n "$LAST_PIPELINE_DEADLINE_AT" ]]; then
+      echo "- pipeline_deadline_at: $LAST_PIPELINE_DEADLINE_AT"
+    fi
+    if [[ -n "$LAST_PIPELINE_TIMEOUT_ELAPSED_SEC" ]]; then
+      echo "- pipeline_timeout_elapsed_sec: $LAST_PIPELINE_TIMEOUT_ELAPSED_SEC"
+    fi
+    if [[ -n "$LAST_PIPELINE_DEADLINE_MISSED_BY_SEC" ]]; then
+      echo "- deadline_missed_by_sec: $LAST_PIPELINE_DEADLINE_MISSED_BY_SEC"
+    fi
+    if [[ -n "$LAST_PIPELINE_LAST_PROGRESS_AT" ]]; then
+      echo "- last_progress_at: $LAST_PIPELINE_LAST_PROGRESS_AT"
+    fi
+    if [[ -n "$LAST_WATCHDOG_TICK_AT" ]]; then
+      echo "- last_watchdog_tick_at: $LAST_WATCHDOG_TICK_AT"
+    fi
+    if [[ -n "$LAST_WATCHDOG_TICK_GAP_SEC" ]]; then
+      echo "- max_watchdog_tick_gap_sec: $LAST_WATCHDOG_TICK_GAP_SEC"
+    fi
+    echo "- host_clock_gap_detected: $HOST_CLOCK_GAP_DETECTED"
     if [[ -n "$TERMINATION_SIGNAL" ]]; then
       echo "- termination_signal: $TERMINATION_SIGNAL"
     else
@@ -1202,13 +1336,7 @@ PY
     echo "- $WORKSPACE_HEADLESS/reports/taskruns/run-history.json"
     echo "- $WORKSPACE_HEADLESS/reports/taskruns/logs/"
     echo "- $SNAPSHOT_DIR"
-    if [[ "$QUALITY_GATES_STATUS" == "passed" ]]; then
-      echo "- quality_gates: passed ($QUALITY_LOG)"
-    elif [[ "$QUALITY_GATES_STATUS" == "failed" ]]; then
-      echo "- quality_gates: failed ($QUALITY_LOG)"
-    else
-      echo "- quality_gates: skipped"
-    fi
+    echo "- execution_gate: live runtime/frontend evidence only"
     echo
 
     if [[ "$result" == "failed" ]]; then
@@ -1238,7 +1366,11 @@ cleanup() {
   local terminal_state="completed"
   local terminal_signal="none"
   local terminal_exit="$exit_code"
-  if [[ -n "$TERMINATION_SIGNAL" ]]; then
+  if [[ "$TERMINATION_SIGNAL" == "timeout" ]]; then
+    terminal_state="process_failed"
+    terminal_signal="timeout"
+    terminal_exit="${TERMINAL_PROCESS_EXIT_OVERRIDE:-124}"
+  elif [[ -n "$TERMINATION_SIGNAL" ]]; then
     terminal_state="signal_terminated"
     terminal_signal="$(signal_status_token "$TERMINATION_SIGNAL")"
     terminal_exit="$(signal_exit_code "$TERMINATION_SIGNAL")"
@@ -1260,6 +1392,7 @@ cleanup() {
   fi
 
   cat "$SUMMARY_PATH" >&4
+  restore_isolated_target_repos_write_bits
   rm -rf "$TMP_ROOT"
   log "temporary artifacts removed (set KEEP_TMP=1 to keep)"
 }
@@ -1283,6 +1416,7 @@ fi
 prepare_target_repos_file
 validate_target_repos_file
 read_target_repos_meta
+prepare_isolated_target_repos_file
 case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
   path|git_url|mixed)
     ;;
@@ -1290,7 +1424,11 @@ case "$PROFILE_SOURCE_KIND_EFFECTIVE" in
     die "invalid target repos metadata profile_source_kind '$PROFILE_SOURCE_KIND_EFFECTIVE' (expected path|git_url|mixed)"
     ;;
 esac
-log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+if [[ -n "$ORIGINAL_RESOLVED_TARGET_REPOS_FILE" ]]; then
+  log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE original_repos_file=$ORIGINAL_RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+else
+  log "target input resolved: mode=repos-file repos_file=$RESOLVED_TARGET_REPOS_FILE profile=$TARGET_PROFILE"
+fi
 
 HEADLESS_PROVIDER="${ACP_RUNTIME_PROVIDER:-claude-code}"
 case "$HEADLESS_PROVIDER" in
@@ -1406,27 +1544,63 @@ PY
 )"
 
 init_status=""
+init_current_step=""
+init_artifact_count="0"
+init_warning_count="0"
+api_init_started_at=$SECONDS
 api_init_deadline=$((SECONDS + API_INIT_TIMEOUT_SEC))
+API_INIT_PROGRESS_GRACE_SEC=$((RUNTIME_HEARTBEAT_SEC * 2))
+if (( API_INIT_PROGRESS_GRACE_SEC < 60 )); then
+  API_INIT_PROGRESS_GRACE_SEC=60
+fi
+api_init_hard_deadline=$((api_init_deadline + API_INIT_PROGRESS_GRACE_SEC))
 last_api_init_progress=0
-while (( SECONDS < api_init_deadline )); do
+api_init_last_signature=""
+api_init_last_progress_second=$SECONDS
+API_INIT_LAST_PROGRESS_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+while :; do
+  if (( SECONDS >= api_init_deadline )); then
+    api_init_last_progress_age=$((SECONDS - api_init_last_progress_second))
+    if [[ "$init_status" != "running" && "$init_status" != "queued" && -n "$init_status" ]]; then
+      break
+    fi
+    if (( SECONDS >= api_init_hard_deadline || api_init_last_progress_age > API_INIT_PROGRESS_GRACE_SEC )); then
+      break
+    fi
+  fi
   curl -fsS "$API_BASE/api/pipeline/runs/$API_INIT_RUN_ID" > "$API_INIT_STATUS_JSON"
-  init_status="$(python3 - "$API_INIT_STATUS_JSON" <<'PY'
+  init_fields="$(python3 - "$API_INIT_STATUS_JSON" <<'PY'
 import json
 import sys
 payload = json.load(open(sys.argv[1], encoding='utf-8'))
-print(payload.get('status', ''))
+status = str(payload.get('status') or '')
+step = str(payload.get('current_step') or '')
+artifacts = payload.get('artifacts') or []
+warnings = payload.get('warnings') or []
+print("\t".join([status, step, str(len(artifacts)), str(len(warnings))]))
 PY
 )"
+  IFS=$'\t' read -r init_status init_current_step init_artifact_count init_warning_count <<< "$init_fields"
+  init_signature="${init_status}|${init_current_step}|${init_artifact_count}|${init_warning_count}"
+  if [[ -n "$init_signature" && "$init_signature" != "$api_init_last_signature" ]]; then
+    if [[ -n "$api_init_last_signature" ]]; then
+      log "api init observed progress: run_id=$API_INIT_RUN_ID status=$init_status current_step=${init_current_step:-unknown} artifacts=$init_artifact_count warnings=$init_warning_count"
+    fi
+    api_init_last_signature="$init_signature"
+    api_init_last_progress_second=$SECONDS
+    API_INIT_LAST_PROGRESS_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  fi
   if [[ "$init_status" == "succeeded" ]]; then
     break
   fi
   if [[ "$init_status" == "failed" ]]; then
     API_INIT_FINAL_STATUS="$init_status"
+    append_api_init_run_result_row "$init_status"
     die "API init run failed (see $API_INIT_STATUS_JSON and $SERVER_LOG)"
   fi
-  api_init_elapsed=$((API_INIT_TIMEOUT_SEC - (api_init_deadline - SECONDS)))
+  api_init_elapsed=$((SECONDS - api_init_started_at))
   if (( RUNTIME_HEARTBEAT_SEC > 0 )) && (( api_init_elapsed > 0 )) && (( api_init_elapsed % RUNTIME_HEARTBEAT_SEC == 0 )) && (( api_init_elapsed != last_api_init_progress )); then
-    log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC"
+    log "api init progress: run_id=$API_INIT_RUN_ID status=$init_status current_step=${init_current_step:-unknown} elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC progress_grace_sec=$API_INIT_PROGRESS_GRACE_SEC"
     LAST_PIPELINE_STAGE="api.pipeline.init.poll"
     write_running_run_status_heartbeat
     last_api_init_progress="$api_init_elapsed"
@@ -1435,7 +1609,10 @@ PY
 done
 if [[ "$init_status" != "succeeded" ]]; then
   API_INIT_FINAL_STATUS="$init_status"
-  die "API init run did not finish in time (run_id=$API_INIT_RUN_ID)"
+  append_api_init_run_result_row "${init_status:-failed}"
+  api_init_elapsed=$((SECONDS - api_init_started_at))
+  api_init_last_progress_age=$((SECONDS - api_init_last_progress_second))
+  die "API init run did not finish in time (run_id=$API_INIT_RUN_ID elapsed_sec=$api_init_elapsed timeout_sec=$API_INIT_TIMEOUT_SEC progress_grace_sec=$API_INIT_PROGRESS_GRACE_SEC last_progress_age_sec=$api_init_last_progress_age current_step=${init_current_step:-unknown})"
 fi
 API_INIT_FINAL_STATUS="$init_status"
 
@@ -1535,31 +1712,6 @@ if ! validate_runtime_cycle_completion; then
   echo "$local_line"
   echo "$local_line" >&4
   exit 1
-fi
-
-if [[ "$RUN_QUALITY_GATES" == "1" ]]; then
-  log "run quality gates: make contracts test lint build"
-  LAST_PIPELINE_STAGE="quality_gates"
-  write_running_run_status_heartbeat
-  if ! (
-    cd "$PROVENARCH_ROOT"
-    # Run project gates with neutral runtime env so defaults in tests are stable.
-    quality_env_cmd=("env" "-u" "ACP_RUNTIME_PROVIDER" "-u" "ACP_QWEN_CMD" "-u" "ACP_CLAUDE_CMD" "-u" "ACP_CODEX_CMD" "-u" "ACP_APPLY_TIMEOUTS_VIA_API")
-    for key in "${ACP_TIMEOUT_ENV_KEYS[@]}"; do
-      quality_env_cmd+=("-u" "$key")
-    done
-    for key in "${ACP_EXECUTION_ENV_KEYS[@]}"; do
-      quality_env_cmd+=("-u" "$key")
-    done
-    "${quality_env_cmd[@]}" make contracts test lint build >"$QUALITY_LOG" 2>&1
-  ); then
-    QUALITY_GATES_STATUS="failed"
-    FAILURE_REASON="quality"
-    die "quality gates failed (see $QUALITY_LOG)"
-  fi
-  QUALITY_GATES_STATUS="passed"
-else
-  QUALITY_GATES_STATUS="skipped"
 fi
 
 for path in \

@@ -31,7 +31,7 @@ description: Используй для trusted-machine pre-release live E2E gate
 ## Black-box operator protocol
 Live E2E skill теперь работает как step-by-step black-box evaluator, а не как report-first cookbook.
 
-Layering для local `manual-live-e2e workflow`: live-e2e skill -> local trusted-machine operator procedure -> direct public harness commands -> ACP runtime/provider/UI evidence. Scripts produce facts and machine verdicts only; operator/SWE-agent writes the reasoning layer in a separate final assessment. Это operator procedure on trusted host, not GitHub Actions workflow.
+Layering для local `manual-live-e2e workflow`: live-e2e skill -> local trusted-machine operator procedure -> direct public harness commands -> ACP runtime/provider/UI evidence. Scripts produce facts and machine execution verdicts only; запускающий SWE-agent writes separate UX and artifact-quality assessments. Это operator procedure on trusted host, not GitHub Actions workflow.
 
 После каждой фазы фиксируй короткий step report в формате:
 
@@ -40,7 +40,7 @@ goal: <что проверяем>
 action: <какую публичную поверхность вызвали/прочитали>
 observed evidence: <команды, UI/API/log/report/artifact/verifier paths>
 status: passed|failed|skipped|blocked
-primary classification: none|operational_host_preflight_failed|precheck_failed|runtime_timeout|runner_unavailable|runtime_contract_failed|runtime_flow_failed|quality_gates_failed|release_verdict_FAIL|...
+primary classification: none|operational_host_preflight_failed|precheck_failed|runtime_timeout|runner_unavailable|runtime_contract_failed|runtime_flow_failed|frontend_failed|infra_incomplete_cycle|infra_signal_terminated|release_verdict_FAIL|...
 next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 ```
 
@@ -54,12 +54,12 @@ next decision: <continue|stop|rerun diagnostic|verify verdict|final report>
 
 Запрещено чинить прогон изменением canonical matrix files, curated repo files, command shims, compatibility aliases или test-only override env. Host/provider/path blockers надо остановить и классифицировать как operational blocker. Не добавлять GitHub-hosted `manual-live-e2e` workflow для live providers в этом flow.
 
-Harness больше не пишет `blackbox_e2e_steps_*`: эти файлы были machine-authored pseudo-reasoning и не являются evidence. Если нужен durable reasoning report, оператор заполняет `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md` в отдельный `reports/operator_blackbox_assessment_<matrix-id>.md`.
+Harness больше не пишет `blackbox_e2e_steps_*`: эти файлы были machine-authored pseudo-reasoning и не являются evidence. Release readiness требует `reports/swe_ux_assessment_<matrix-id>.md` и `reports/swe_artifact_quality_assessment_<matrix-id>.md` с matching matrix id и `decision: accepted`; optional operator notes можно вести по `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md`.
 
 ## Operational rules
 1) Release gate запускать только на trusted машине, где доступны canonical `path` checkout'ы из curated presets под `/tmp/provenarch-live-e2e/...`.
 2) Перед release run проверить, что локальные `path` checkout'ы существуют и совпадают с pinned SHA из curated/github presets.
-3) Для release verdict использовать только `reports/release_verdict_<matrix-id>.json`.
+3) `reports/release_verdict_<matrix-id>.json` использовать только как machine execution verdict; final release readiness additionally requires accepted SWE UX and artifact-quality reports.
 4) Не использовать diagnostic timeout overrides в official release slices.
 5) Для non-release execution overrides задавать effective execution profile через `ACP_EXECUTION_*`, а не через `BATCH_*`.
 6) Не добавлять wrapper-скрипт поверх `scripts/full-run-batch-matrix.sh`.
@@ -72,9 +72,9 @@ Harness больше не пишет `blackbox_e2e_steps_*`: эти файлы �
 13) Canonical matrix slices уже несут native `timeout_profile`; не задавай `ACP_*TIMEOUT*` вручную для штатного запуска. В non-release manual diagnostic внешние timeout env допустимы, в release-mode они остаются blocked-by-default.
 14) Batch/profile reports нужно читать только в рамках реально выбранной поверхности (`selected_providers`, `selected_run_indexes`); qwen-only `run1` regression run не должен интерпретироваться как synthetic `2x5` matrix.
 15) Для headless providers runtime использует общий artifact-only process engine и тонкие adapters; stdout/stderr являются diagnostics, а success берётся только из валидных artifacts.
-16) Frontend live release check покрывает только real user-facing `init-inspect` artifact/UI/API inspection. Cancellation coverage должна жить в deterministic fake-runtime UI/API tests, не в trusted live provider release gate. Optional `UI_E2E_QA_SMOKE=1` допускается только для non-release/fake-runtime UX evidence и не является release readiness input.
+16) Frontend live release check покрывает только real user-facing `init-inspect` artifact/UI/API inspection. Cancellation coverage должна жить в deterministic fake-runtime UI/API tests, не в trusted live provider release gate. Optional `UI_E2E_QA_SMOKE=1` допускается только для non-release/fake-runtime UX evidence и не является machine execution verdict input; release UX readiness still requires Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`.
 17) Для flexible combinations можно использовать `python3 scripts/live-e2e-plan.py ... --format shell`; этот tool только печатает прямые `full-run-batch-matrix.sh` команды и не заменяет release harness.
-18) Regress/release acceptance всегда включает artifact quality: `reports/taskruns/<run_id>-quality.json`, `quality_report_<batch-id>.md`, `quality_gates_failed=0`, отсутствие `artifact_quality:*`.
+18) `reports/taskruns/<run_id>-quality.json` is telemetry/evidence only; `artifact_quality:*` warnings must not fail batch/matrix/release execution verdicts. Artifact quality is accepted or rejected only by `swe_artifact_quality_assessment_<matrix-id>.md`.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для canonical release slices:
@@ -119,17 +119,17 @@ PY
 1) Host/tree/provider/path preflight: проверить trusted host, clean tree/worktree, provider binaries, writable roots, canonical path checkout'ы и pinned SHA. Зафиксировать step report и остановиться на blockers.
 2) Selector and direct command planning: выбрать catalog slice или сгенерировать direct command через `scripts/live-e2e-plan.py --format shell`; не запускать wrapper и не править canonical matrices. Зафиксировать planned command/evidence.
 3) Matrix execution monitoring: запускать только `scripts/full-run-batch-matrix.sh`, отслеживать matrix/profile status, batch owner heartbeat, driver logs и durable inventories.
-4) Backend artifact and quality inspection: читать `run_matrix_*`, `quality_report_*`, taskrun quality JSON, raw metadata/logs и inventory/status evidence; классифицировать primary failure после каждого профиля.
-5) Frontend UI/API inspection: читать frontend init result JSON/MD reports, Playwright/server logs, screenshot refs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression. Ask UX smoke evidence учитывать только как diagnostic/operator assessment layer, не как release verdict source.
-6) Release verdict verification: readiness брать только из `reports/release_verdict_<matrix-id>.json`; проверить `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`.
-7) Final black-box report: свести по шагам `goal / action / observed evidence / status / primary classification / next decision`; для `release full` все constituent verdict JSON должны иметь `PASS`.
+4) Backend execution evidence inspection: читать `run_matrix_*`, `execution_report_*`, taskrun quality JSON telemetry, raw metadata/logs и inventory/status evidence; классифицировать primary execution failure после каждого профиля.
+5) Frontend UI/API inspection: читать frontend init result JSON/MD reports, Playwright/server logs, screenshot refs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression. Ask UX smoke evidence учитывать как UX assessment evidence, не как machine execution verdict source.
+6) Release execution verdict verification: проверить `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; verifier additionally requires accepted SWE UX and artifact-quality reports next to the verdict JSON.
+7) Final black-box report: свести по шагам `goal / action / observed evidence / status / primary classification / next decision`; для `release full` все constituent verdict JSON должны иметь `PASS` and accepted companion SWE reports.
 
 ## Acceptance focus
 - Во всех release slice verdicts: `strict_status=passed`
 - `artifact_source` только `snapshot`
-- Нет `analysis:evidence-scope`, `analysis:cross-repo-missing`, `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_*`, `summary_missing`, `precheck_failed`
+- Нет `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_*`, `summary_missing`, `precheck_failed`
 - Frontend init-inspect passed для всех трёх release providers (`qwen`, `claude`, `codex`)
-- Нет `artifact_quality:*`; bank-like collapse к одному `cite.runtime-summary` должен либо починиться provider-side repair, либо остаться явным blocker
+- Accepted SWE UX assessment and accepted SWE artifact-quality assessment; bank-like collapse к одному `cite.runtime-summary` is an artifact-quality finding, not a machine execution blocker
 - Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
 - Для `release full` все constituent `release_verdict_<matrix-id>.json` должны иметь `PASS`
 
@@ -149,4 +149,4 @@ PY
 - `operational_host_preflight_failed` с codex model/version текстом
   Это host/provider readiness blocker до deep run. Обновить `codex` или явно задать `ACP_CODEX_CMD_BIN` на совместимый binary; не считать product verdict.
 - `runtime_timeout` на clean canonical slice
-  Причина: либо native time budget оказался недостаточным, либо provider/runtime завис; сначала проверить `timeout_profile` matrix-файла, `full-run.log`, `quality_report_*`, `run_matrix_*`, inventories/status files и taskrun raw logs, затем считать это runtime/provider деградацией.
+  Причина: либо native time budget оказался недостаточным, либо provider/runtime завис; сначала проверить `timeout_profile` matrix-файла, `full-run.log`, `execution_report_*`, `run_matrix_*`, inventories/status files и taskrun raw logs, затем считать это runtime/provider деградацией.

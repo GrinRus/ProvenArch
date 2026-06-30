@@ -14,6 +14,7 @@ const (
 	FocusedRepairCollectArtifactPair FocusedRepairKind = "collect_artifact_pair"
 	FocusedRepairValidatorVerdict    FocusedRepairKind = "validator_verdict"
 	FocusedRepairDraftArtifacts      FocusedRepairKind = "draft_artifacts"
+	FocusedRepairDraftEnrichment     FocusedRepairKind = "draft_artifact_enrichment"
 )
 
 type FocusedRepairCommandBuilder func(task acpruntime.Task, includeDirs []string, prompt string) (CommandSpec, error)
@@ -42,6 +43,8 @@ func focusedRepairIncludeDirectories(task acpruntime.Task, kind FocusedRepairKin
 		return acpruntime.ResolveHeadlessValidatorRepairIncludeDirectories(task)
 	case FocusedRepairDraftArtifacts:
 		return acpruntime.ResolveHeadlessDraftRepairIncludeDirectories(task)
+	case FocusedRepairDraftEnrichment:
+		return acpruntime.ResolveHeadlessDraftEnrichmentIncludeDirectories(task)
 	default:
 		return acpruntime.ResolveHeadlessIncludeDirectories(task)
 	}
@@ -57,6 +60,8 @@ func focusedRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, kin
 		return promptcontract.ComposeValidatorVerdictRepairPrompt(provider, task, validationErr)
 	case FocusedRepairDraftArtifacts:
 		return promptcontract.ComposeDraftArtifactRepairPrompt(provider, task, validationErr)
+	case FocusedRepairDraftEnrichment:
+		return promptcontract.ComposeDraftArtifactEnrichmentPrompt(provider, task, validationErr)
 	default:
 		return promptcontract.ComposeArtifactOnlyPrompt(provider, task)
 	}
