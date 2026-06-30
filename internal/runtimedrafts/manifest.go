@@ -1140,6 +1140,7 @@ func runtimeDraftTextHasShardCompletenessCount(lower string, label string, count
 	quoted := regexp.QuoteMeta(strings.ToLower(strings.TrimSpace(label)))
 	patterns := []string{
 		fmt.Sprintf(`\b%d\s+%s\b`, count, quoted),
+		fmt.Sprintf(`\b%d\s+(?:[a-z][a-z0-9_-]*\s+){1,3}%s\b`, count, quoted),
 		fmt.Sprintf(`\b%s\s*(?:=|:)?\s*%d\b`, quoted, count),
 	}
 	for _, pattern := range patterns {

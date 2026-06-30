@@ -1661,12 +1661,25 @@ func TestRuntimeDraftTextClaimsShardCompletenessAcceptsNaturalCounts(t *testing.
 	t.Parallel()
 
 	counts := runtimeDraftShardCompleteness{planned: 16, succeeded: 16, failed: 0, incomplete: 0}
-	text := "Current-run typed shard summary: 16 planned, 16 succeeded, 0 failed, 0 incomplete."
-	if !runtimeDraftTextClaimsShardCompleteness(text, counts) {
-		t.Fatalf("expected natural planned/succeeded/failed/incomplete counts to validate")
+	for _, text := range []string{
+		"Current-run typed shard summary: 16 planned, 16 succeeded, 0 failed, 0 incomplete.",
+		"Current-run shard summary: 16 shards planned, 16 succeeded, 0 failed, 0 incomplete.",
+	} {
+		if !runtimeDraftTextClaimsShardCompleteness(text, counts) {
+			t.Fatalf("expected natural planned/succeeded/failed/incomplete counts to validate: %q", text)
+		}
 	}
 	if runtimeDraftTextClaimsShardCompleteness("Current-run typed shard summary: 16 planned, 16 succeeded, 0 failed.", counts) {
 		t.Fatalf("expected incomplete/pending count to remain required")
+	}
+}
+
+func TestRuntimeDraftTextClaimsShardCompletenessRejectsWrongNaturalCounts(t *testing.T) {
+	t.Parallel()
+
+	counts := runtimeDraftShardCompleteness{planned: 16, succeeded: 16, failed: 0, incomplete: 0}
+	if runtimeDraftTextClaimsShardCompleteness("Current-run shard summary: 15 shards planned, 16 succeeded, 0 failed, 0 incomplete.", counts) {
+		t.Fatalf("expected mismatched natural planned count to be rejected")
 	}
 }
 
