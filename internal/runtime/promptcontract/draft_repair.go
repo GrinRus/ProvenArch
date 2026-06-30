@@ -353,7 +353,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
 			"- Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence. Current-run markdown may mention only current_run_id taskrun paths.",
-			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not found, or unavailable.",
+			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not observed, not found, or unavailable.",
 			"- When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array. Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
 			"- When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
 			"- If final-run-index.json exists but canonical_documents[] cannot be parsed, write an explicit parse gap or omit the count; never infer that the current run has 0 observed documents from a missing documents[] field.",
@@ -433,7 +433,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			lines = append(lines,
 				"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
 				"- The previous enrichment wrote stale current-run final/citation index availability text.",
-				"- Rewrite every referenced markdown file again and remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not yet present, not yet available, not readable, or has 0 observed documents without a validated zero-document index.",
+				"- Rewrite every referenced markdown file again and remove any sentence that says current-run final-run-index.json or citation-index.json is missing, not observed, unavailable, not present, not yet present, not yet available, not readable, or has 0 observed documents without a validated zero-document index.",
 				"- For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely and focus on shard completeness, evidence density, readable architecture facts, coverage gaps, and operator decisions.",
 				"- If a current-run final-run-index.json is present, count only top-level canonical_documents[]. If citation-index.json is present, count only top-level citations[].",
 			)
@@ -532,7 +532,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		"- Prefer not to rewrite the manifest. If touched, keep only top-level version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs.",
 		"- Preserve each outputs[] path/canonical_path/kind/title exactly; never add status, content_digest, logical_path, target, output_path, publish_path, metadata, validation, confidence, or source fields.",
 		"- Compact evidence set: current asis-draft-manifest.json, typed shard-plan/shard-summary files listed below, observed staging/shards/*/shard-pack-manifest.json counts, at most 3 authored shard docs or manifests, and current-run final-run-index.json/citation-index.json only if present.",
-		"- If final-run-index.json or citation-index.json are absent during step2, omit index availability from markdown. Do not claim those downstream indexes are missing, unavailable, not found, or zero-document.",
+		"- If final-run-index.json or citation-index.json are absent during step2, omit index availability from markdown. Do not claim those downstream indexes are missing, not observed, unavailable, not found, or zero-document.",
 	}
 	if len(statusEvidenceFiles) == 0 {
 		lines = append(lines,

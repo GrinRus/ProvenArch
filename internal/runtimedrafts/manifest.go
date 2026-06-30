@@ -625,6 +625,42 @@ func runtimeDraftTextHasStaleIndexAvailabilityClaim(text string) bool {
 			return true
 		}
 	}
+	for _, line := range strings.Split(lower, "\n") {
+		if !runtimeDraftLineMentionsIndex(line) {
+			continue
+		}
+		if runtimeDraftLineClaimsIndexUnavailable(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftLineMentionsIndex(line string) bool {
+	return strings.Contains(line, "final-run-index") ||
+		strings.Contains(line, "citation-index")
+}
+
+func runtimeDraftLineClaimsIndexUnavailable(line string) bool {
+	for _, marker := range []string{
+		"not observed",
+		"not found",
+		"not available",
+		"not present",
+		"not readable",
+		"not yet observed",
+		"not yet found",
+		"not yet available",
+		"not yet present",
+		"was unavailable",
+		"were unavailable",
+		"is unavailable",
+		"are unavailable",
+	} {
+		if strings.Contains(line, marker) {
+			return true
+		}
+	}
 	return false
 }
 

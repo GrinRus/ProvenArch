@@ -1154,7 +1154,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence",
 		"final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2",
 		"If they are absent, omit final-index availability from the as-is markdown",
-		"do not write that current-run final/citation indexes are missing, not found, or unavailable",
+		"do not write that current-run final/citation indexes are missing, not observed, not found, or unavailable",
 		"If final-run-index.json or citation-index.json are present for current_run_id, summarize counts",
 		"Do not paste raw object payloads, `documents=[{...}]`, `citations=[{...}]`, or Python-style dict snippets.",
 		"Do not write broken path bullets such as a lone backtick",
@@ -1537,7 +1537,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsDownstreamIndexRetryHint(t *tes
 	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
 	for _, token := range []string{
 		"DRAFT ENRICHMENT DOWNSTREAM INDEX CLAIM RETRY:",
-		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, unavailable, not present, not yet present, not yet available, not readable",
+		"remove any sentence that says current-run final-run-index.json or citation-index.json is missing, not observed, unavailable, not present, not yet present, not yet available, not readable",
 		"For step2, final-run-index.json and citation-index.json are downstream artifacts; when absent, omit index availability entirely",
 		"count only top-level canonical_documents[]",
 		"count only top-level citations[]",

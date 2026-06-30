@@ -3287,7 +3287,8 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentDownstreamIndexClaim(t *testin
 		"cat >\"$draft_root/summary.md\" <<'EOF'",
 		"# Coverage Summary",
 		"",
-		"- No current-run final-run-index.json or citation-index.json was present in the allowed current-run locations.",
+		"- A consolidated final-run-index.json with canonical_documents was not observed for the current run.",
+		"- A citation-index.json was not observed for the current run.",
 		"EOF",
 		"exit 0",
 	}, "\n")))

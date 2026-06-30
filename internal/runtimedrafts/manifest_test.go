@@ -1804,6 +1804,71 @@ Current-run index surfaces checked:
 	}
 }
 
+func TestValidateRequiredManifestRejectsLiveObservedStaleIndexAvailabilityClaim(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), []byte(`# FTGO Application - As-Is Architecture Overview
+
+Repository scope: ftgo-application.
+
+Evidence: reports/taskruns/run_20260620_184900_001/staging/shards/ and ftgo-accounting-service/build.gradle.
+`), 0o644); err != nil {
+		t.Fatalf("write overview: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "summary.md"), []byte(`# FTGO Application - Coverage Summary
+
+Evidence: reports/taskruns/run_20260620_184900_001/staging/shards/.
+`), 0o644); err != nil {
+		t.Fatalf("write summary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(draftRoot, "architect-summary.md"), []byte(`# FTGO Application - Architect Summary
+
+## What Is Complete
+- Current-run shards produced service-level authored documents.
+
+## What Is Missing
+- A consolidated final-run-index.json with canonical_documents was not observed for the current run.
+- A citation-index.json was not observed for the current run.
+
+## What the Operator Should Inspect or Decide Next
+1. Inspect staged shard manifests before using this as the canonical as-is baseline.
+`), 0o644); err != nil {
+		t.Fatalf("write architect summary: %v", err)
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260620_184900_001",
+  "step_id": "refresh.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260620_184900_001", "refresh.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected live-observed stale final-index availability claim to be rejected")
+	}
+	if !strings.Contains(err.Error(), "claims current-run final/citation indexes are unavailable") {
+		t.Fatalf("expected stale final-index availability error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsStaleFinalIndexDocumentListClaim(t *testing.T) {
 	t.Parallel()
 
