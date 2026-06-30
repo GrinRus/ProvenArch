@@ -296,6 +296,7 @@ Release workflow hardening:
   - provider-live domain-map execution is not part of release readiness until a separate owner-approved live-gate slice defines stable semantics
 - UI Ask UX smoke:
   - live frontend shell defaults to `UI_E2E_QA_SMOKE=1`; it checks run history, read-only safety, answer panel, citations panel, confidence/unresolved signals and context-pack/runtime-execution links
+  - async Ask polling uses a bounded `ACP_UI_QA_POLL_TIMEOUT_SEC` budget (default 300s); timeout emits `ACTIVE_RUN_TIMEOUT`, is classified as `active_run_timeout`, and the shell best-effort cancels the active QA run before tearing down the server so provider children are not orphaned
   - explicit `UI_E2E_QA_SMOKE=0` is allowed only for diagnostic speed runs and must be recorded as UX residual risk, not accepted Ask evidence
   - screenshot refs are evidence-only and do not influence machine execution verdicts
   - release UX readiness still requires Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`
@@ -363,6 +364,7 @@ Release workflow hardening:
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions
+  - failed Playwright runs with a still-active selected/QA run must request cancel through `/api/pipeline/runs/<run_id>/cancel` before server teardown; remaining cancellation evidence is secondary to the frontend reason
   - init poll budget берётся из effective runtime timeouts and is not raised to `ACP_PIPELINE_TIMEOUT_SEC+30` by default; canonical snapshot mode uses this budget for UI/API/artifact inspection, not a fresh provider-backed init; follow-pipeline mode requires explicit `UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE=1`, and `UI_E2E_INIT_TIMEOUT_CAP_SEC` is an optional diagnostic cap
   - `frontend-e2e-result.json` keeps scenario, reason, run id, last run status/error/current step and diagnostic refs stable; screenshots, traces and videos remain evidence metadata and do not change release verdict semantics
   - live UI smoke раскрывает Activity / Events drawer before interacting with log-mode controls, and Playwright action timeouts are bounded so hidden controls fail as `frontend_failed` instead of consuming the full runtime polling budget

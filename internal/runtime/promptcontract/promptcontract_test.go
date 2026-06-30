@@ -1142,6 +1142,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"Final markdown must summarize structured JSON evidence in readable prose or compact bullets.",
 		"every inline-code/path backtick pair must be balanced",
 		"Do not copy raw authored-shard prose fragments that contain backticks",
+		"Do not append sampled shard first paragraphs after an evidence path.",
 		"Do not end prose sentences with stray backticks",
 		"Do not paste raw JSON, Python dict/list reprs",
 		"Enrich overview.md, summary.md, and architect-summary.md from collected shard manifests, bounded authored shard docs",
@@ -1473,9 +1474,14 @@ func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *test
 	for _, token := range []string{
 		"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
 		"The previous enrichment attempt failed because at least one referenced markdown file had malformed inline-code or code-fence syntax.",
-		"Preserve the evidence-backed meaning, but remove or balance all inline backticks before exit.",
+		"Rewrite every referenced markdown file again in one bounded filesystem command.",
+		"Treat this as a cleanup over already written markdown and current-run typed shard evidence",
 		"Prefer plain text service/module names over inline-code when summarizing sampled shard prose.",
+		"Remove sampled shard prose excerpts after evidence paths.",
 		"Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
+		"Do not write stale downstream-index availability claims in step2 markdown.",
+		"Do not write generic shard-gap wording when typed shard-summary shows all shards succeeded",
+		"Final self-check: every markdown line has balanced backticks outside fences",
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected markdown syntax retry prompt to contain %q, got:\n%s", token, prompt)
@@ -1780,6 +1786,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
 		"summary.md must summarize shard completeness",
 		"architect-summary.md must give a decision-ready operator summary",
+		"Evidence bullets must be path plus paraphrased signal only.",
 		"Previous draft artifact validation failure:",
 	} {
 		if !strings.Contains(prompt, token) {

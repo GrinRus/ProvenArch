@@ -1526,6 +1526,31 @@ Strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260623T082911Z` co
 
 ---
 
+## Live E2E Step2 Enrichment And Ask Smoke Cleanup
+
+### Context
+- 2026-06-30 strict medium `claude-code` rerun `regres-long-posthog-ftgo-20260630T003528Z` preserved the new execution/UX/artifact separation: `matrix_result` used selected provider totals only, `execution_report_<batch-id>.md` was produced, and no legacy mixed `quality_report_*`/`quality_gates_failed` release gate evidence was observed.
+- PostHog backend still failed in `init.step2.asis_docs`: after multiple no-op/scaffold enrichment attempts, compact step2 retry finally fresh-wrote markdown, but copied sampled shard prose with unbalanced inline backticks; the syntax cleanup retry then stalled before valid artifacts and the run correctly ended as `runtime_contract_failed`.
+- FTGO backend passed both init and refresh after focused collect/draft repairs, but frontend failed in default Ask smoke: the async `qa.ask` run remained running after the fixed 120s Playwright poll, was classified as generic `playwright_failed`, and teardown left an orphan `claude` provider process until manually killed.
+
+### Plan
+- [x] Keep `release_verdict_*` execution-only and leave artifact/UX quality as separate SWE report inputs.
+- [x] Add bounded QA smoke polling with `ACP_UI_QA_POLL_TIMEOUT_SEC` and `ACTIVE_RUN_TIMEOUT` marker classification.
+- [x] Best-effort cancel active frontend QA runs after Playwright failure before `acp serve` teardown, preventing orphan provider processes.
+- [x] Tighten step2 markdown syntax retry prompt: rewrite every referenced markdown target in one bounded command, remove sampled shard prose snippets, keep exact typed shard completeness, omit stale downstream-index claims, and avoid generic shard-gap wording.
+- [x] Tighten compact step2 retry prompt so evidence bullets are path plus paraphrased architecture signal only, not copied first paragraphs.
+- [x] Run full DoD.
+- [ ] Commit and rerun strict medium live E2E.
+
+### Acceptance
+- [x] QA smoke timeout is `active_run_timeout`, not generic `playwright_failed`.
+- [x] Failed QA smoke does not leave an unmanaged provider process after harness teardown.
+- [x] Step2 syntax cleanup is provider-authored and does not introduce deterministic ACP-side artifact synthesis.
+- [ ] Latest strict medium `claude-code` rerun no longer fails PostHog step2 on malformed markdown/no-op enrichment.
+- [ ] Latest strict medium frontend Ask smoke either succeeds or fails with bounded `active_run_timeout` plus cancellation evidence.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

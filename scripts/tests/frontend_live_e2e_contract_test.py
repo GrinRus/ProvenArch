@@ -132,6 +132,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         body = self.script_path.read_text(encoding="utf-8")
         self.assertIn('UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"', body)
         self.assertIn('UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE"', body)
+        self.assertIn('UI_E2E_QA_POLL_TIMEOUT_SEC="${ACP_UI_QA_POLL_TIMEOUT_SEC:-300}"', body)
+        self.assertIn('ACP_UI_QA_POLL_TIMEOUT_SEC="$UI_E2E_QA_POLL_TIMEOUT_SEC"', body)
+        self.assertIn("cancel_active_frontend_run", body)
 
     def test_snapshot_artifact_source_is_supported_and_forwarded(self) -> None:
         body = self.script_path.read_text(encoding="utf-8")
@@ -209,6 +212,8 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertEqual("failed", result["status"])
         self.assertEqual("active_run_timeout", result["reason"])
         self.assertEqual("ok", result["health_after_failure"])
+        self.assertEqual("failed", result["last_run_status"])
+        self.assertEqual("run_canceled", result["last_run_error_code"])
 
     def test_runtime_run_failure_is_classified(self) -> None:
         result = self._run_frontend_harness("runtime_failed", acp_mode="run_failed")
@@ -231,6 +236,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             workspace = tmp / "workspace"
             output_dir = tmp / "output"
             marker = tmp / "health-fail.marker"
+            cancel_marker = tmp / "cancel.marker"
             workspace.joinpath("reports", "taskruns").mkdir(parents=True)
             run_status = "failed" if acp_mode == "run_failed" else "running"
             current_step = "init.step2.asis_docs" if acp_mode == "run_failed" else "init.step1.collect"
@@ -270,6 +276,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 "FAKE_ACP_MODE": acp_mode,
                 "FAKE_NPM_MODE": npm_mode,
                 "FAKE_HEALTH_FAIL_MARKER": str(marker),
+                "FAKE_CANCEL_MARKER": str(cancel_marker),
             }
             if extra_env:
                 env.update(extra_env)
@@ -319,8 +326,16 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             listen = args[args.index("--listen") + 1] if "--listen" in args else "127.0.0.1:18080"
             host, port_raw = listen.rsplit(":", 1)
             marker = os.environ.get("FAKE_HEALTH_FAIL_MARKER", "")
+            cancel_marker = os.environ.get("FAKE_CANCEL_MARKER", "")
             mode = os.environ.get("FAKE_ACP_MODE", "healthy")
             stop = False
+
+            def run_payload():
+                if cancel_marker and Path(cancel_marker).exists():
+                    return {"status": "failed", "error_code": "run_canceled", "current_step": "qa.ask", "warnings": []}
+                if mode == "run_failed":
+                    return {"status": "failed", "error_code": "runner_unavailable", "current_step": "init.step2.asis_docs", "warnings": []}
+                return {"status": "running", "current_step": "init.step1.collect", "warnings": []}
 
             class Handler(BaseHTTPRequestHandler):
                 def log_message(self, *_args):
@@ -345,10 +360,15 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                         self._json(200, {"effective": {"ui_init_poll_timeout_sec": 900, "ui_cancel_poll_timeout_sec": 420}})
                         return
                     if self.path.startswith("/api/pipeline/runs/"):
-                        if mode == "run_failed":
-                            self._json(200, {"status": "failed", "error_code": "runner_unavailable", "current_step": "init.step2.asis_docs", "warnings": []})
-                        else:
-                            self._json(200, {"status": "running", "current_step": "init.step1.collect", "warnings": []})
+                        self._json(200, run_payload())
+                        return
+                    self._json(404, {"error": "not found"})
+
+                def do_POST(self):
+                    if self.path.startswith("/api/pipeline/runs/") and self.path.endswith("/cancel"):
+                        if cancel_marker:
+                            Path(cancel_marker).write_text("1", encoding="utf-8")
+                        self._json(202, {"run_id": "run_stub", "status": "cancel_requested"})
                         return
                     self._json(404, {"error": "not found"})
 

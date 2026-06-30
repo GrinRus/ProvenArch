@@ -19,6 +19,7 @@ UI_E2E_SCENARIO="${UI_E2E_SCENARIO:-init-inspect}"
 UI_INIT_POLL_TIMEOUT_SEC="${ACP_UI_INIT_POLL_TIMEOUT_SEC:-}"
 UI_E2E_INIT_TIMEOUT_CAP_SEC="${UI_E2E_INIT_TIMEOUT_CAP_SEC:-0}"
 UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE="${UI_E2E_INIT_TIMEOUT_FOLLOW_PIPELINE:-0}"
+UI_E2E_QA_POLL_TIMEOUT_SEC="${ACP_UI_QA_POLL_TIMEOUT_SEC:-300}"
 UI_E2E_HEADED="${UI_E2E_HEADED:-0}"
 UI_E2E_QA_SMOKE="${UI_E2E_QA_SMOKE:-1}"
 UI_E2E_ARTIFACT_SOURCE="${UI_E2E_ARTIFACT_SOURCE:-live}"
@@ -191,6 +192,57 @@ print(f"last_run_current_step={str(candidate.get('current_step') or '').strip()}
 PY
 }
 
+cancel_active_frontend_run() {
+  local run_id="$1"
+  local health_status="$2"
+  if [[ -z "$run_id" || "$health_status" != "ok" ]]; then
+    return 0
+  fi
+  local payload
+  payload="$(curl -fsS "$BASE_URL/api/pipeline/runs/$run_id" 2>/dev/null || true)"
+  local run_status
+  run_status="$(python3 - "$payload" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1]) if sys.argv[1] else {}
+except Exception:
+    payload = {}
+print(str(payload.get("status") or "").strip())
+PY
+)"
+  case "$run_status" in
+    queued|running)
+      log "canceling active frontend run after Playwright failure: $run_id"
+      curl -fsS -X POST "$BASE_URL/api/pipeline/runs/$run_id/cancel" >/dev/null 2>&1 || true
+      local deadline=$((SECONDS + 15))
+      while (( SECONDS < deadline )); do
+        payload="$(curl -fsS "$BASE_URL/api/pipeline/runs/$run_id" 2>/dev/null || true)"
+        run_status="$(python3 - "$payload" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.loads(sys.argv[1]) if sys.argv[1] else {}
+except Exception:
+    payload = {}
+print(str(payload.get("status") or "").strip())
+PY
+)"
+        case "$run_status" in
+          queued|running)
+            sleep 0.5
+            ;;
+          *)
+            return 0
+            ;;
+        esac
+      done
+      ;;
+  esac
+}
+
 resolve_ui_poll_timeouts() {
   local payload
   payload="$(curl -fsS "$BASE_URL/api/runtime/timeouts" 2>/dev/null || true)"
@@ -278,6 +330,7 @@ case "$UI_E2E_QA_SMOKE" in
     die "UI_E2E_QA_SMOKE must be 0 or 1, got '$UI_E2E_QA_SMOKE'"
     ;;
 esac
+UI_E2E_QA_POLL_TIMEOUT_SEC="$(parse_positive_int_or_die "$UI_E2E_QA_POLL_TIMEOUT_SEC" "ACP_UI_QA_POLL_TIMEOUT_SEC")"
 case "$UI_E2E_ARTIFACT_SOURCE" in
   live|snapshot)
     ;;
@@ -487,7 +540,7 @@ if [[ "$UI_E2E_SCENARIO" == "init-inspect" ]]; then
     fi
   fi
 fi
-log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s"
+log "effective UI polling timeouts: init=${UI_INIT_POLL_TIMEOUT_SEC}s qa=${UI_E2E_QA_POLL_TIMEOUT_SEC}s"
 
 status="passed"
 reason="$ACP_FRONTEND_REASON_OK"
@@ -508,6 +561,7 @@ if ! (
   UI_E2E_RUNTIME_PROVIDER="$RUNTIME_PROVIDER" \
   UI_E2E_SCENARIO="$UI_E2E_SCENARIO" \
   UI_E2E_QA_SMOKE="$UI_E2E_QA_SMOKE" \
+  ACP_UI_QA_POLL_TIMEOUT_SEC="$UI_E2E_QA_POLL_TIMEOUT_SEC" \
   UI_E2E_ARTIFACT_SOURCE="$UI_E2E_ARTIFACT_SOURCE" \
   UI_E2E_SNAPSHOT_RUN_ID="$UI_E2E_SNAPSHOT_RUN_ID" \
   UI_E2E_EXPECTED_REPO_COUNT="$UI_E2E_EXPECTED_REPO_COUNT" \
@@ -532,6 +586,7 @@ if ! (
       reason="$ACP_FRONTEND_REASON_BROWSER_CLOSED"
     fi
   fi
+  cancel_active_frontend_run "$frontend_run_id" "$health_after_failure"
   while IFS='=' read -r key value; do
     case "$key" in
       last_run_status)

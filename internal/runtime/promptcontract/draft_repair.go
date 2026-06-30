@@ -314,6 +314,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Final markdown must summarize structured JSON evidence in readable prose or compact bullets. Do not paste raw JSON, Python dict/list reprs, `documents=[{...}]`, `citations=[{...}]`, `{'id': ...}`, or truncated object fragments.",
 		"- Final markdown must be syntactically readable: every inline-code/path backtick pair must be balanced on the same non-fence line, and code fences must be closed before exit.",
 		"- Do not copy raw authored-shard prose fragments that contain backticks, especially truncated excerpts. Paraphrase signals instead, or write paths without inline-code formatting when truncating or summarizing.",
+		"- Do not append sampled shard first paragraphs after an evidence path. A valid evidence bullet is a path plus a short paraphrased signal; never paste heading/body snippets that may include unbalanced inline-code markers.",
 		"- Do not end prose sentences with stray backticks. If any summary text contains an unmatched backtick, remove the backtick or rewrite the sentence before exit.",
 		"- Do not perform an unbounded evidence sweep. Prefer compact high-signal evidence reads before the first markdown rewrite.",
 		"- A no-op rewrite is invalid: every referenced markdown draft must be freshly rewritten with marker-free evidence-backed content, not merely re-saved unchanged.",
@@ -418,9 +419,14 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			lines = append(lines,
 				"DRAFT ENRICHMENT MARKDOWN SYNTAX RETRY:",
 				"- The previous enrichment attempt failed because at least one referenced markdown file had malformed inline-code or code-fence syntax.",
-				"- Rewrite every referenced markdown file again. Preserve the evidence-backed meaning, but remove or balance all inline backticks before exit.",
+				"- Rewrite every referenced markdown file again in one bounded filesystem command. Preserve the evidence-backed meaning, but remove or balance all inline backticks before exit.",
+				"- Treat this as a cleanup over already written markdown and current-run typed shard evidence; do not perform another broad evidence sweep before rewriting.",
 				"- Prefer plain text service/module names over inline-code when summarizing sampled shard prose. Use inline-code only for short complete paths or identifiers with both opening and closing backticks on the same line.",
+				"- Remove sampled shard prose excerpts after evidence paths. Replace them with short paraphrased architecture signals such as service/API/integration coverage, not raw headings or body snippets.",
 				"- Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
+				"- Do not write stale downstream-index availability claims in step2 markdown. If final-run-index.json or citation-index.json is absent during step2, omit that index status entirely.",
+				"- Do not write generic shard-gap wording when typed shard-summary shows all shards succeeded; keep exact planned/succeeded/failed/incomplete counts and explicit no-shard-coverage-blocker wording.",
+				"- Final self-check: every markdown line has balanced backticks outside fences, no raw sampled snippets remain, no stale downstream-index claim remains, and exact typed shard completeness is still present.",
 			)
 		}
 		if draftEnrichmentValidationMentionsDownstreamIndexClaim(validationErr) {
@@ -566,6 +572,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		"- overview.md must summarize the architecture surface with concrete repo/path or staged artifact references plus explicit coverage gaps.",
 		"- summary.md must summarize shard completeness, evidence density/readability, selected citation or staged artifact refs, and remaining gaps.",
 		"- architect-summary.md must give a decision-ready operator summary: what is complete, what is missing, what to inspect or decide next, and residual risk.",
+		"- Evidence bullets must be path plus paraphrased signal only. Do not paste the first paragraph or heading body from authored shard markdown after the path.",
 		"- Final markdown must be readable operator-facing architecture content, not a runtime process report. Do not paste raw JSON/Python object dumps, documents=[...], citations=[...], or metadata-only keys as evidence.",
 		"- Final markdown must not include scaffold or process markers: Runtime draft recovery initialized; Drafted required runtime artifacts for this step; Treat this as diagnostic evidence until; Use collected shard manifests; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded evidence read; bounded read roots; recovery pass; enrichment read; bootstrap-only placeholder; placeholder draft content; replace placeholder; replacing placeholders.",
 		"- Final self-check inside the command: overview.md, summary.md, and architect-summary.md were freshly overwritten, have balanced backticks/fences, include current-run evidence or explicit gaps, and contain none of the banned markers.",
