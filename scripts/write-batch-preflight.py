@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -222,16 +223,35 @@ def run_probe_command(
     env = os.environ.copy()
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(
-        [command, *args],
+    argv = [command, *args]
+    timeout = timeout_sec if timeout_sec is not None else probe_timeout_sec()
+    process = subprocess.Popen(
+        argv,
         cwd=repo_root or None,
         env=env,
-        input=stdin_text if stdin_text else None,
+        stdin=subprocess.PIPE if stdin_text else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        capture_output=True,
-        timeout=timeout_sec if timeout_sec is not None else probe_timeout_sec(),
-        check=False,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = process.communicate(input=stdin_text if stdin_text else None, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(argv, exc.timeout, output=stdout, stderr=stderr) from None
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[bool, str, str]:
