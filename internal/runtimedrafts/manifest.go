@@ -486,8 +486,10 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 		"placeholder draft text",
 		"placeholder content",
 		"placeholder proposal content",
-		"replace placeholder",
-		"replaced placeholder",
+		"replace placeholder content",
+		"replace placeholder proposal content",
+		"replaced placeholder content",
+		"replaced placeholder proposal content",
 		"replacing placeholders",
 	}
 	for _, marker := range hardMarkers {

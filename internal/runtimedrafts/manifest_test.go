@@ -1020,6 +1020,76 @@ Accept the CODEOWNERS follow-up because ` + "`reports/findings/findings.md`" + `
 	}
 }
 
+func TestValidateRequiredManifestAcceptsProposalPlaceholderCredentialFinding(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Prioritize the security remediation from ` + "`staging/final/reports/findings/findings.md`" + ` before publishing the FTGO runtime baseline.
+
+## Evidence used
+- ` + "`staging/final/final-run-index.json`" + `
+- ` + "`staging/final/citation-index.json`" + `
+- ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + `
+
+## Proposed changes / follow-up plan
+- Replace placeholder ` + "`AWS_ACCESS_KEY_ID`" + `/` + "`AWS_SECRET_ACCESS_KEY`" + ` values in ` + "`ftgo-order-history-service/src/deployment/kubernetes/ftgo-order-history-service.yml`" + ` and rotate any exposed development credentials.
+
+## Risks, gaps, and out-of-scope notes
+- The scoped evidence does not confirm the production secret backend.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` now records the placeholder credential remediation.
+
+## Findings/proposals summary
+- Placeholder AWS credentials from ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + ` are converted into a concrete security follow-up.
+
+## Evidence index or citation references
+- ` + "`staging/final/citation-index.json`" + `
+- ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + `
+
+## Residual coverage gaps
+- Production secret management and credential rotation evidence remains unconfirmed.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Evidence-backed proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err != nil {
+		t.Fatalf("expected placeholder credential finding to validate: %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsProposalsBootstrapDraftContent(t *testing.T) {
 	t.Parallel()
 
