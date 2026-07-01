@@ -356,6 +356,103 @@ Suggested PR slices:
   - README/INSTALL/TROUBLESHOOTING updates distinguishing UI-first setup, direct mode and multi-repo setup
   - no new required provider-live release scenario without owner-approved release-gate decision
 
+## Epic 18 — Live E2E Black-box Artifact Boundary
+
+Context:
+- latest strict medium diagnostics validated the execution/artifact-quality split shape
+  (`execution_report_*`, selected-provider totals, no legacy mixed `quality_report_*` artifacts),
+  but did not fully validate black-box artifact quality;
+- `regres-long-posthog-ftgo-20260630T172821Z` left `ftgo` incomplete because `claude-code`
+  hit provider quota/permission limits during refresh, so artifact and UX decisions stayed
+  inconclusive for that target;
+- promoted operator-facing artifacts from the same evidence showed boundary leaks:
+  `reports/as-is/overview.md` included `run_*` taskrun ids, `reports/taskruns/.../staging/shards`,
+  `runtime-execution.json` snippets and stale final/citation-index availability claims;
+- promoted coverage markdown also included runtime policy wording such as
+  `Downstream quality gates still decide whether recovered artifacts are complete enough for acceptance`;
+- artifact quality assessment must evaluate ProvenArch as a black box: the decision is based on
+  promoted workspace artifacts and UI-visible results, while `reports/taskruns/*-quality.json`,
+  raw logs, runtime metadata and matrix reports are execution telemetry only.
+
+Acceptance:
+- machine execution evidence remains separate from manual quality decisions:
+  `release_verdict_<matrix-id>.json` / `execution_report_<batch-id>.md` decide only execution,
+  while `swe_ux_assessment_<matrix-id>.md` and
+  `swe_artifact_quality_assessment_<matrix-id>.md` decide release UX/artifact acceptance;
+- black-box artifact assessment has an explicit allowed surface:
+  `reports/as-is/**`, `reports/coverage/**`, `reports/findings/**`,
+  `reports/diagrams/**`, `reports/agent-outputs/**`, `proposals/**`, `model/**`,
+  `charter/**` only where promoted as user-facing output, plus UI preview/screenshots;
+- artifact assessment does not use `reports/taskruns/*-quality.json`, raw provider logs,
+  runtime metadata, matrix inventories or execution counters as source-of-truth for artifact
+  acceptance; those files may be cited only in the execution-quality section;
+- promoted operator-facing markdown does not leak live/runtime internals:
+  `reports/taskruns`, `/staging/`, `runtime-execution.json`, raw stdout/stderr/log refs,
+  `task-run_`, foreign/current `run_*` taskrun IDs, `write_root`, `artifact_root`,
+  recovery-process narration, scaffold/bootstrap markers or live-gate policy terms are rejected
+  unless the file is explicitly internal telemetry under `reports/taskruns/**`;
+- provider-authored docs do not publish stale downstream-index claims: `step2.asis_docs`
+  must omit final/citation-index availability if those indexes are not yet in-scope, and
+  `step4.proposals` must summarize current-run `final-run-index.json.canonical_documents[]`
+  and `citation-index.json.citations[]` only when they are actually present and validated;
+- `collect_manifest_runtime_recovery` and fake-runtime generated user-facing artifacts do not
+  inject release/live E2E policy phrases or `reports/taskruns/**` staging paths into promoted
+  reports;
+- runtime/prompt validation treats operator-facing contamination as `runtime_contract_failed`
+  when it is machine-checkable, not as a subjective manual artifact-quality warning;
+- boundary tests cover both directions:
+  live release evidence names stay out of core AOR runtime/orchestrator logic, and promoted
+  artifact fixtures/golden outputs stay free of live/runtime internals;
+- docs/templates make the black-box rule explicit: SWE artifact-quality reports must start from
+  promoted artifacts and UI-visible results, not from telemetry counters;
+- strict medium rerun evidence after implementation includes at least one clean `claude-code`
+  and one clean `codex-code` diagnostic when provider readiness allows; if a provider is blocked
+  by quota/auth/capacity, the report classifies it as an external `runner_unavailable` blocker
+  and does not count it as artifact-quality acceptance;
+- no canonical matrix files, curated repo files, product UI/API behavior or runtime artifact
+  schemas are changed merely to make the live E2E evidence pass.
+
+Suggested PR slices:
+- `18A Black-box artifact assessment contract`
+  - update `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md`
+    and `docs/TESTING_STRATEGY.md` with allowed black-box artifact surfaces
+  - state that `reports/taskruns/*-quality.json` is telemetry-only for artifact decisions
+  - add checklist items for truthfulness, completeness, readability, C4/Mermaid usefulness,
+    citations/indexes, proposals and operator decision readiness
+- `18B Promoted artifact contamination validation`
+  - add shared detector for operator-facing markdown contamination markers
+  - reject `reports/taskruns`, `/staging/`, `runtime-execution.json`, task ids, raw log refs,
+    `write_root`, `artifact_root`, recovery/bootstrap narration and live-gate policy wording
+    outside internal telemetry surfaces
+  - add focused fixtures for PostHog/FTGO-style stale overview and coverage-summary leaks
+- `18C Runtime recovery wording cleanup`
+  - remove `Downstream quality gates...` and similar policy text from runtime-recovered
+    provider-authored/promoted content
+  - keep recovery diagnostics in telemetry/logs instead of user-facing architecture reports
+  - ensure fake runtime user-facing reports reference promoted paths, not
+    `reports/taskruns/<run_id>/staging/final/...`
+- `18D Downstream index truthfulness hardening`
+  - keep `step2.asis_docs` from claiming final/citation indexes are missing before downstream
+    indexes exist
+  - verify `step4.proposals` counts documents/citations only from current-run top-level
+    `canonical_documents[]` and `citations[]`
+  - retain provider-authored retry paths without adding deterministic hidden synthesis
+- `18E Boundary regression tests`
+  - extend `scripts/tests/aor_live_boundary_test.py` or add a companion test for promoted
+    artifact contamination markers
+  - add Go/runtime tests for rejected contaminated markdown and accepted clean operator-facing
+    markdown with concrete repo/path evidence
+  - add script/report tests proving artifact telemetry remains non-blocking for machine
+    execution verdicts
+- `18F Trusted medium rerun and black-box report`
+  - rerun `regres long` from a clean worktree with direct `scripts/full-run-batch-matrix.sh`
+  - run `claude-code` and `codex-code` selected-provider diagnostics when host/provider
+    readiness permits
+  - produce a chat/report summary split into execution quality, black-box artifact quality and
+    UX quality, with leakage scan results over promoted artifacts
+  - do not commit generated live E2E evidence unless it is converted into an intentional
+    fixture/golden file
+
 ## Cleanup follow-up (post-beta, owner confirmation required)
 
 Открытые пункты после cleanup slice:
