@@ -1070,7 +1070,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "init",
                             "init-run",
                             "succeeded",
-                            "10",
+                            "8",
                             "1",
                             "0",
                             "1",
@@ -1091,7 +1091,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                             "refresh",
                             "refresh-run",
                             "succeeded",
-                            "11",
+                            "9",
                             "1",
                             "1",
                             "1",
@@ -2324,7 +2324,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertNotIn("runtime:execution-semantics", issues)
 
-    def test_python_report_records_artifact_quality_warning_without_execution_failure(self) -> None:
+    def test_python_report_escalates_artifact_quality_warning_to_quality_gate_failure(self) -> None:
         run_dir = self.root / "run-artifact-quality"
         self._create_artifact_quality_fixture_run_dir(run_dir)
 
@@ -2341,10 +2341,104 @@ class BatchFailureClassificationTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual("none", result.failure_class)
+        self.assertEqual("quality_gates_failed", result.failure_class)
         self.assertEqual(1, result.artifact_quality_findings)
+        self.assertTrue(result.quality_gates_failed)
+        self.assertFalse(result.hard_pass)
+        self.assertEqual("passed", result.runtime_contract_status)
+        self.assertEqual("failed", result.artifact_quality_status)
+        self.assertTrue(result.artifact_quality_failed)
+        self.assertEqual("Blocked", result.verdict)
+        self.assertIn("quality:artifact-quality", result.issues)
+        self.assertTrue(
+            any("runtime passed, artifact quality failed" in detail for detail in result.issue_details),
+            result.issue_details,
+        )
+
+    def test_python_report_escalates_artifact_quality_signal_code_to_quality_gate_failure(self) -> None:
+        run_dir = self.root / "run-artifact-quality-signal"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality["quality_signals"] = [
+            {
+                "code": "artifact_quality.low_semantic_density",
+                "severity": "warning",
+                "message": "artifact_quality: fixture semantic density is too low",
+            }
+        ]
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertEqual("quality_gates_failed", result.failure_class)
+        self.assertFalse(result.hard_pass)
+        self.assertTrue(result.artifact_quality_failed)
+        self.assertEqual("failed", result.artifact_quality_status)
+        self.assertIn("quality:artifact-quality", result.issues)
+
+    def test_python_report_keeps_stall_pressure_non_blocking_but_caps_verdict_label(self) -> None:
+        run_dir = self.root / "run-stall-pressure-label"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality["quality_signals"] = [
+            {
+                "code": "runtime_quality.stall_pressure",
+                "severity": "warning",
+                "message": "runtime_quality: provider stall pressure was observed",
+            }
+        ]
+        refresh_quality.setdefault("totals", {})["stall_count"] = 1
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
         self.assertTrue(result.hard_pass)
-        self.assertIn("artifact:quality-warning", result.issues)
+        self.assertFalse(result.quality_gates_failed)
+        self.assertEqual("passed", result.artifact_quality_status)
+        self.assertIn("execution:stall-pressure", result.issues)
+        self.assertEqual("Needs review", result.verdict)
+
+    def test_python_report_useful_run_remains_strict_pass(self) -> None:
+        run_dir = self.root / "run-useful-pass"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.pop("quality_signals", None)
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertTrue(result.hard_pass)
+        self.assertEqual("passed", result.runtime_contract_status)
+        self.assertEqual("passed", result.artifact_quality_status)
+        self.assertFalse(result.artifact_quality_failed)
+        self.assertEqual("Excellent", result.verdict)
+
+    def test_python_report_verdict_label_caps_analysis_and_stall_issues(self) -> None:
+        self.assertEqual("Needs review", self.module.verdict(100, ["analysis:overview"], True))
+        self.assertEqual("Needs review", self.module.verdict(100, ["analysis:findings"], True))
+        self.assertEqual("Needs review", self.module.verdict(100, ["execution:stall-pressure"], True))
+        self.assertEqual("Blocked", self.module.verdict(100, ["quality:artifact-quality"], False))
 
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
@@ -4134,7 +4228,10 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("`1/1` backend full-runs", report)
         self.assertIn("выбранных провайдеров (`1/1`)", report)
         self.assertIn("## Backend Execution Verdict", report)
-        self.assertIn("Machine execution verdict is based on runtime/preflight/frontend execution evidence only.", report)
+        self.assertIn(
+            "Runtime contract status is reported separately from artifact quality status.",
+            report,
+        )
         self.assertIn("## Runtime Recovery And Artifact Telemetry", report)
         self.assertIn("- artifact_quality_findings: 0", report)
         self.assertNotIn("10/10", report)

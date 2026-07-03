@@ -170,14 +170,29 @@ def parse_int(value: str, default: int = 0) -> int:
 
 
 def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
+    extracted: list[str] = []
+    seen: set[str] = set()
+    signals = quality_payload.get("quality_signals") or []
+    if isinstance(signals, list):
+        for signal in signals:
+            if not isinstance(signal, dict):
+                continue
+            code = str(signal.get("code", "")).strip()
+            if not code.startswith("artifact_quality."):
+                continue
+            message = str(signal.get("message", "")).strip()
+            text = f"{code}: {message}" if message else code
+            if text and text not in seen:
+                extracted.append(text)
+                seen.add(text)
     warnings = quality_payload.get("run_warnings") or []
     if not isinstance(warnings, list):
-        return []
-    extracted: list[str] = []
+        return extracted
     for warning in warnings:
         text = str(warning).strip()
-        if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX):
+        if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX) and text not in seen:
             extracted.append(text)
+            seen.add(text)
     return extracted
 
 
@@ -1155,7 +1170,12 @@ def bool_score(value: bool, weight: int) -> int:
     return weight if value else 0
 
 
-def verdict(total: int) -> str:
+def verdict(total: int, issues: list[str] | None = None, hard_pass: bool = True) -> str:
+    issue_set = set(issues or [])
+    if not hard_pass or "quality:artifact-quality" in issue_set:
+        return "Blocked"
+    if "execution:stall-pressure" in issue_set or any(issue.startswith("analysis:") for issue in issue_set):
+        return "Needs review"
     if total >= 85:
         return "Excellent"
     if total >= 70:
@@ -1176,6 +1196,9 @@ class RunEvaluation:
     analysis: int
     total: int
     verdict: str
+    runtime_contract_status: str = "failed"
+    artifact_quality_status: str = "passed"
+    artifact_quality_failed: bool = False
     init_signal: int = 0
     refresh_signal: int = 0
     refresh_findings: int = 0
@@ -1200,6 +1223,7 @@ class RunEvaluation:
     runtime_timeout: bool = False
     infra_signal_terminated: bool = False
     infra_incomplete_cycle: bool = False
+    quality_gates_failed: bool = False
     summary_missing: bool = False
     precheck_failed: bool = False
     runtime_flow_failed: bool = False
@@ -1332,6 +1356,7 @@ def evaluate_run(
     running_runs_detected = parse_int(parse_markdown_scalar(summary_text, "running_runs_detected"), 0) if summary_text else 0
     run_history_running = int(run_history_counts.get("running", 0))
     api_status = parse_api_status(summary_text)
+    quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
     terminal_process_failure = terminal_process_failed_summary(
         summary_path.exists(),
         run_status.get("state", ""),
@@ -1580,6 +1605,9 @@ def evaluate_run(
     )
     infra_incomplete_cycle = failure_reason == "infra_incomplete_cycle"
     partial_failures_hit = partial_failure_count > 0
+    quality_gates_failed = failure_reason == "quality" or quality_gates_value == "failed"
+    if partial_failures_hit:
+        quality_gates_failed = True
     if not terminal_process_failure:
         if expected_runs > 0 and completed_runs != expected_runs:
             infra_incomplete_cycle = True
@@ -1623,6 +1651,11 @@ def evaluate_run(
         issues.append("reliability:partial-failures")
         details.append(
             f"reliability/partial-failures -> partial_failure_count={partial_failure_count}"
+        )
+    if quality_gates_failed:
+        issues.append("reliability:quality-gates-failed")
+        details.append(
+            f"reliability/quality-gates-failed -> {summary_path}: quality_gates={quality_gates_value or '-'} failure_reason={failure_reason or '-'}"
         )
     if cancellation_like:
         issues.append("reliability:cancellation-like")
@@ -1774,7 +1807,7 @@ def evaluate_run(
                         str(reason).strip() for reason in evidence_reasons if str(reason).strip()
                     )
             if artifact_quality_warnings:
-                issues.append("artifact:quality-warning")
+                issues.append("quality:artifact-quality")
                 for warning in artifact_quality_warnings:
                     details.append(f"artifact/quality-warning -> {analysis_quality_path}: {warning}")
             if analysis_evidence_reasons:
@@ -2036,6 +2069,9 @@ def evaluate_run(
 
     analysis = bool_score(overview_ok, 10) + bool_score(findings_ok, 10) + bool_score(coverage_ok, 10) + bool_score(questions_ok, 10)
 
+    artifact_quality_failed = "quality:artifact-quality" in issues
+    quality_gates_failed = quality_gates_failed or artifact_quality_failed
+
     failure_class = "none"
     if summary_missing:
         failure_class = "summary_missing"
@@ -2051,6 +2087,8 @@ def evaluate_run(
         failure_class = "runner_unavailable"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
+    elif quality_gates_failed:
+        failure_class = "quality_gates_failed"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
     elif validator_verdict_failed_hit or runtime_flow_failed:
@@ -2083,6 +2121,7 @@ def evaluate_run(
             "runner_unavailable",
             "runtime_contract_failed",
             "infra_signal_terminated",
+            "quality_gates_failed",
             "infra_incomplete_cycle",
             "runtime_flow_failed",
         }:
@@ -2094,21 +2133,49 @@ def evaluate_run(
             runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
+        quality_gates_failed = quality_gates_failed or classified_failure == "quality_gates_failed"
         if not ignore_classified_incomplete:
             infra_incomplete_cycle = infra_incomplete_cycle or classified_failure == "infra_incomplete_cycle"
         summary_missing = summary_missing or classified_failure == "summary_missing"
 
+    analysis_issue = any(issue.startswith("analysis:") for issue in issues)
+    artifact_quality_status = "failed" if artifact_quality_failed else ("needs_review" if analysis_issue else "passed")
     hard_pass = (
         h1
         and h2
         and h3
+        and h4
         and snapshot_ok
+        and not quality_gates_failed
+        and not artifact_quality_failed
+        and not semantic_hard_fail
         and not runtime_flow_failed
         and not summary_missing
         and not runtime_timeout
         and not infra_signal_terminated
         and not infra_incomplete_cycle
     )
+
+    non_artifact_quality_gate_failed = quality_gates_failed and not artifact_quality_failed
+    runtime_contract_passed = (
+        api_status == "succeeded"
+        and h2
+        and h3
+        and h4
+        and snapshot_ok
+        and contract == 20
+        and not non_artifact_quality_gate_failed
+        and not summary_missing
+        and not runtime_timeout
+        and not runner_unavailable_hit
+        and not runtime_contract_failed_hit
+        and not infra_signal_terminated
+        and not infra_incomplete_cycle
+        and not runtime_flow_failed
+    )
+    runtime_contract_status = "passed" if runtime_contract_passed else "failed"
+    if runtime_contract_status == "passed" and artifact_quality_status == "failed":
+        details.append("quality/artifact-quality-status -> runtime passed, artifact quality failed")
 
     total = reliability + contract + analysis
     return RunEvaluation(
@@ -2120,7 +2187,10 @@ def evaluate_run(
         contract=contract,
         analysis=analysis,
         total=total,
-        verdict=verdict(total),
+        verdict=verdict(total, issues, hard_pass),
+        runtime_contract_status=runtime_contract_status,
+        artifact_quality_status=artifact_quality_status,
+        artifact_quality_failed=artifact_quality_failed,
         init_signal=init_signal,
         refresh_signal=refresh_signal,
         refresh_findings=int(refresh_row["findings"]) if refresh_row else 0,
@@ -2145,6 +2215,7 @@ def evaluate_run(
         runtime_timeout=runtime_timeout,
         infra_signal_terminated=infra_signal_terminated,
         infra_incomplete_cycle=infra_incomplete_cycle,
+        quality_gates_failed=quality_gates_failed,
         summary_missing=summary_missing,
         precheck_failed=False,
         runtime_flow_failed=runtime_flow_failed,
@@ -2262,16 +2333,33 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
+    split_status_runs = [
+        f"{item.provider} run{item.run_index}"
+        for item in runs
+        if item.runtime_contract_status == "passed" and item.artifact_quality_status == "failed"
+    ]
+    if split_status_runs:
+        lines.extend(
+            [
+                f"- runtime passed, artifact quality failed: {', '.join(split_status_runs)}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "| provider | run | hard_pass | runtime_contract_status | artifact_quality_status | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | artifact_quality_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | issues |",
+            "|---|---:|---:|---|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
     for item in runs:
         lines.append(
             "| "
-            f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
+            f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.runtime_contract_status} | "
+            f"{item.artifact_quality_status} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
             f"{int(item.runtime_contract_failed)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
-            f"{int(item.infra_incomplete_cycle)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
+            f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.artifact_quality_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{item.repair_attempts} | {item.repair_exhausted} | {item.fresh_retries} | {item.focused_repairs} | "
@@ -2429,6 +2517,8 @@ def provider_matrix_rows(
                 "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
                 "infra_incomplete_cycle_failures": sum(1 for item in items if item.infra_incomplete_cycle),
                 "artifact_quality_findings": sum(item.artifact_quality_findings for item in items),
+                "quality_gates_failed_failures": sum(1 for item in items if item.quality_gates_failed),
+                "artifact_quality_failed_failures": sum(1 for item in items if item.artifact_quality_failed),
                 "summary_missing_failures": sum(1 for item in items if item.summary_missing),
                 "precheck_failed_failures": sum(1 for item in items if item.precheck_failed),
                 "runtime_flow_failed_failures": sum(1 for item in items if item.runtime_flow_failed),
@@ -2457,6 +2547,7 @@ def write_execution_report(
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
     runtime_flow_failed_runs = sum(1 for run in runs if run.runtime_flow_failed)
+    artifact_quality_failed_runs = sum(1 for run in runs if run.artifact_quality_failed)
     repair_attempts_total = sum(run.repair_attempts for run in runs)
     repair_exhausted_total = sum(run.repair_exhausted for run in runs)
     fresh_retries_total = sum(run.fresh_retries for run in runs)
@@ -2467,6 +2558,11 @@ def write_execution_report(
     zero_output_pre_artifact_stalls_total = sum(run.zero_output_pre_artifact_stalls for run in runs)
     partial_failure_count_total = sum(run.partial_failure_count for run in runs)
     quality_alerts_total = sum(run.quality_alerts for run in runs)
+    split_status_runs = [
+        f"{run.provider} run{run.run_index}"
+        for run in runs
+        if run.runtime_contract_status == "passed" and run.artifact_quality_status == "failed"
+    ]
     declared_meta = normalize_declared_repos_meta(preflight)
     declared_repos = declared_meta.get("declared_repos") or []
     issue_counter = Counter()
@@ -2491,10 +2587,12 @@ def write_execution_report(
         "",
         "## Backend Execution Verdict",
         f"- hard_pass_runs: {hard_pass_all}/{len(runs)}",
+        f"- artifact_quality_failed_runs: {artifact_quality_failed_runs}/{len(runs)}",
+        f"- runtime passed, artifact quality failed: {', '.join(split_status_runs) if split_status_runs else '-'}",
         f"- runtime_flow_failed_runs: {runtime_flow_failed_runs}/{len(runs)}",
         f"- primary_failure_classes: {', '.join(sorted({run.failure_class for run in runs if run.failure_class and run.failure_class != '-'})) or 'none'}",
         "",
-        "Machine execution verdict is based on runtime/preflight/frontend execution evidence only. Artifact quality signals below are telemetry for SWE assessment and do not flip the machine execution verdict.",
+        "Runtime contract status is reported separately from artifact quality status. Strict hard-pass requires both runtime execution and artifact quality to pass.",
         "",
         "## Runtime Recovery And Artifact Telemetry",
         f"- semantic_hard_fail_runs: {semantic_hard_fail_runs}/{len(runs)}",
@@ -2516,8 +2614,8 @@ def write_execution_report(
         "",
         "## Provider Matrix",
         "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
+        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | artifact_quality_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
     ]
     for row in provider_rows:
         lines.append(
@@ -2530,7 +2628,7 @@ def write_execution_report(
             f"{row['zero_output_pre_artifact_stalls']} | "
             f"{row['partial_failure_count']} | {row['quality_alerts']} | {row['artifact_quality_findings']} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
             f"{row['runtime_contract_failed_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
-            f"{row['infra_incomplete_cycle_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
+            f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['artifact_quality_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
         )
 
@@ -2607,6 +2705,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "provider",
         "run",
         "hard_pass",
+        "runtime_contract_status",
+        "artifact_quality_status",
+        "artifact_quality_failed",
         "reliability",
         "contract",
         "analysis",
@@ -2635,6 +2736,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "runtime_timeout",
         "infra_signal_terminated",
         "infra_incomplete_cycle",
+        "quality_gates_failed",
         "summary_missing",
         "precheck_failed",
         "runtime_flow_failed",
@@ -2651,6 +2753,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     run.provider,
                     str(run.run_index),
                     str(int(run.hard_pass)),
+                    run.runtime_contract_status,
+                    run.artifact_quality_status,
+                    str(int(run.artifact_quality_failed)),
                     str(run.reliability),
                     str(run.contract),
                     str(run.analysis),
@@ -2679,6 +2784,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(int(run.runtime_timeout)),
                     str(int(run.infra_signal_terminated)),
                     str(int(run.infra_incomplete_cycle)),
+                    str(int(run.quality_gates_failed)),
                     str(int(run.summary_missing)),
                     str(int(run.precheck_failed)),
                     str(int(run.runtime_flow_failed)),

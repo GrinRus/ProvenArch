@@ -561,7 +561,7 @@ Medium live E2E validation now uses the canonical non-release `regres long` matr
 
 ### Goals (must have)
 - [x] Keep product UI/API behavior, canonical matrix files, and curated repo files unchanged
-- [x] Preserve execution/UX/artifact quality separation; `artifact_quality:*` remains telemetry/evidence only
+- [x] Preserve execution/UX/artifact quality separation; `artifact_quality.*` is a public black-box artifact gate, separate from runtime contract status
 - [x] Fix live-observed draft enrichment no-op/scaffold failure without ACP-side deterministic product synthesis
 - [x] Fix frontend snapshot eligibility so failed headless refresh rows cannot start heavy UI smoke as if they were valid snapshots
 - [x] Fix live-observed collect pair repair preflight-only/status-only no-op so post-preflight provider output must mutate markdown + manifest before prose

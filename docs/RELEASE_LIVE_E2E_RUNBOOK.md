@@ -100,9 +100,9 @@ Flexible selectors:
 | `release fast|long|full` | release | canonical release slices | all three providers only | `baseline + parallel-default` | unchanged |
 
 Execution/reporting policy для generated regress/release команд:
-- каждый backend run may emit `reports/taskruns/<run_id>-quality.json`, but that file is telemetry/evidence only;
+- каждый backend run may emit `reports/taskruns/<run_id>-quality.json`; live E2E treats it as public black-box evidence and never imports product internals;
 - `execution_report_<batch-id>.md` агрегирует только реально выбранные providers/run indexes;
-- `artifact_quality:*` warnings are preserved as artifact-quality evidence and never convert batch/matrix/release execution verdict into `FAIL`;
+- `quality_signals[].code` with prefix `artifact_quality.` and legacy `run_warnings` with prefix `artifact_quality:` fail artifact-quality status and strict batch/matrix/release verdicts while preserving separate `runtime_contract_status`;
 - `totals.repair_attempts`, `fresh_retries`, `focused_repairs`, `repair_exhausted`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts` являются visible execution telemetry в execution/matrix reports;
 - malformed provider-authored semantic artifacts, including markdown accidentally written to `shard-pack-manifest.json`, must be emitted as `analysis:malformed-semantic-json` evidence in `execution_report_*` instead of crashing report generation;
 - non-exhausted repair/stall pressure не превращает successful backend run в failure само по себе, но `partial_failure_count > 0` остаётся execution/runtime-flow blocker.
@@ -771,8 +771,10 @@ Zero tolerance:
 - staged `citation-index.json` и `final-run-index.json` должны использовать один deterministic `document_id` namespace. Unique `manifest.Documents[*].id` values are preserved, but repeated provider-authored ids across distinct `canonical_path` values are remapped to stable canonical-path-derived ids before final index validation and citation remap; duplicate source ids must not fail the whole docflow when canonical paths are distinct. Semantic assembly перед validator обязана нормализовать `evidence.repo` к логическому repo scope и дедуплицировать alias entities/related refs.
 - если collect evidence = `unusable`, `init|refresh.step2.asis_docs`, `init|refresh.step3.findings` и `init|refresh.step4.proposals` не должны запускать live provider: staged final set собирается только из persisted collect artifacts и дальше остаётся triage-only incomplete surface.
 - owner-gap остаётся visible signal в `coverage/findings/questions`, но owner-only residual без технических validator issues не должен сам по себе блокировать verdict; такой кейс допустимо увидеть как `validator-verdict = PASS` с сохранёнными findings/questions.
-- `reports/taskruns/<run_id>-quality.json` обязан содержать fresh `artifact_inventory` для текущего run: promoted workspace surfaces, taskrun/staging surfaces и semantic counts из текущего `final-run-index.json`. `run_warnings` с префиксом `artifact_quality:` сохраняются как telemetry/evidence for SWE artifact-quality report и не являются machine execution blockers. Типовые artifact findings — refresh final set с несколькими canonical docs и единственным generic `cite.runtime-summary`, placeholder top-level reports/proposals, empty semantic model, semantic model that is non-empty but scaffold-only (`contains`-only repo/shard entities + generic owner-gap findings), missing `model/entities`, gap-only/scaffold-only C4, empty findings при owner/operational/dependency coverage gaps и shard manifests, которые ссылаются на provider/tool side-effect paths.
-- acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а являются artifact-quality finding for manual assessment.
+- `reports/taskruns/<run_id>-quality.json` обязан содержать fresh `artifact_inventory` для текущего run: promoted workspace surfaces, taskrun/staging surfaces и semantic counts из текущего `final-run-index.json`. `quality_signals[]` с кодом `artifact_quality.*` и legacy `run_warnings` с префиксом `artifact_quality:` считаются canonical live gate blockers даже при schema-valid `validator-verdict.json = PASS`; типовые product-level blockers: placeholder overview, empty findings with critical coverage gaps, zero semantic entities/edges/findings despite observed coverage, and gap-only context/container diagrams.
+- batch reports distinguish `runtime_contract_status` from `artifact_quality_status`; the expected diagnostic wording for split failures is `runtime passed, artifact quality failed`. Such a run is strict-failed even when process/provider/snapshot/schema checks passed.
+- `runtime_quality.stall_pressure` remains non-blocking by itself, but it caps verdict labeling at review-needed; `analysis:*` issues also prevent `Excellent`, and `analysis:overview` / `analysis:findings` cap the label at review-needed.
+- acceptable reuse-pattern допускается только если frozen refresh artifacts сохраняют хотя бы один rich collect shard с repo-specific citations; reuse-only manifests без такого shard'а считаются low-signal collapse.
 - `profile_matrix_<matrix-id>` и `execution_report_<batch-id>` агрегируют только реально выбранные `selected_providers` и `selected_run_indexes`; qwen-only `run1` regression run не должен материализовать synthetic `2x5` deficits.
 - `frontend_e2e_matrix_<batch-id>.md` должен сохранять runtime failure context для UI-triggered runs: `run_id`, `last_run_status`, `error_code`, `current_step`, screenshot count и Playwright result directory. Summary status/reasons остаются execution taxonomy (`runtime_run_failed`, `playwright_failed`, etc.); эти details нужны для triage и SWE UX/artifact assessment.
 - internal shard-plan/shard-summary JSON обязаны содержать non-empty `meta.runtime.name` / `meta.runtime.version`; пустой runtime meta считается contract drift, а не допустимым partial state.
@@ -899,10 +901,13 @@ ACP_APPLY_TIMEOUTS_VIA_API=1 \
 Machine execution `PASS` требует:
 1. Во всех `profile+sweep` строках `strict_status=passed`.
 2. Для каждого `profile+sweep`: `backend_total_runs=3`, `backend_hard_pass=3`.
-3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/summary_missing/precheck_failed = 0`.
-4. `artifact_source` только `snapshot` (без `workspace-fallback`).
-5. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
-6. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
+3. `runtime_contract_failed/runner_unavailable/runtime_timeout/infra_signal_terminated/infra_incomplete_cycle/quality_gates_failed/artifact_quality_failed/summary_missing/precheck_failed = 0`.
+4. `semantic_hard_fail=0`, `off_topic_hits=0`.
+5. `artifact_source` только `snapshot` (без `workspace-fallback`).
+6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
+7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
+8. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
+9. Нет artifact-quality blockers (`artifact_quality.*` in `quality_signals[]`, `artifact_quality:` in run warnings, or `artifact_quality_failed_failures > 0` in matrix results).
 
 Final release readiness требует все три accepted evidence signals:
 1. `release_verdict_<matrix-id>.json = PASS`.

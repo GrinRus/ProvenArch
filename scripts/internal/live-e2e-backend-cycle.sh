@@ -902,6 +902,22 @@ def normalize(value: str) -> str:
     value = " ".join(value.split())
     return value
 
+def canonical_gap_category(value: str) -> str:
+    text = normalize(value)
+    if "owner team id" in text or ("owner" in text and any(token in text for token in ("mapping", "team", "ownership"))):
+        return "owner_mapping"
+    if "runbook" in text or ("operational" in text and any(token in text for token in ("handoff", "procedure", "playbook"))):
+        return "operational_runbook"
+    if "third party" in text or ("external" in text and any(token in text for token in ("dependency", "system", "integration"))):
+        return "external_dependency"
+    if any(token in text for token in ("datastore", "database", "storage", "persistence")):
+        return "datastore_storage"
+    if any(token in text for token in ("ci cd", "cicd", "continuous integration", "workflow", "pipeline")):
+        return "cicd"
+    if any(token in text for token in ("api", "interface", "endpoint")):
+        return "api_interface"
+    return ""
+
 missing_values = []
 in_missing = False
 for line in coverage_lines:
@@ -916,8 +932,14 @@ if len(missing_values) != len(set(missing_values)):
     sys.exit(3)
 
 owner_gap = any(item in {"owner mappings", "owner mapping", "owner team mappings", "owner team mapping"} for item in missing_values)
-if owner_gap and re.search(r"no findings reported\.", findings_text, flags=re.IGNORECASE):
-    print(f"semantic quality failed for run {run_id}: owner-related gap exists but findings report is empty")
+gap_categories = sorted({category for item in missing_values if (category := canonical_gap_category(item))})
+critical_gap = bool(gap_categories)
+owner_gap = owner_gap or "owner_mapping" in gap_categories
+if critical_gap and re.search(r"no findings reported\.", findings_text, flags=re.IGNORECASE):
+    print(
+        f"semantic quality failed for run {run_id}: critical coverage gaps exist but findings report is empty "
+        f"(categories={','.join(gap_categories)})"
+    )
     sys.exit(4)
 
 question_texts = []
@@ -951,6 +973,7 @@ for taskrun_path in sorted(glob.glob(taskrun_glob, recursive=True)):
 print(
     "semantic_quality_ok "
     f"owner_gap={int(owner_gap)} "
+    f"critical_gap_categories={','.join(gap_categories) if gap_categories else '-'} "
     f"coverage_missing={len(missing_values)} "
     f"open_questions={len(question_texts)}"
 )

@@ -238,6 +238,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- When writing shard-pack-manifest.json, adapt the task-specific JSON skeleton embedded in the collect evidence-first section; keep exact metadata keys and replace skeleton evidence/content values with facts you actually observed.`,
 			`- Do not exit after writing markdown only; every collect shard must finish with a valid shard-pack-manifest.json.`,
 			`- The final collect pair must not be seed-only, scaffold-only, or copied unchanged from the skeleton; use evidence-backed content where repository files support it.`,
+			`- After the first artifact pair exists, perform a bounded enrichment pass over the assigned repo/path scope; final semantic arrays must contain repo-specific entities/edges/findings/questions or an explicit evidence-backed insufficient-evidence finding/question.`,
 			`- The final collect markdown must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"; if concrete file evidence is unavailable, record a gap without claiming the artifact is pending later replacement.`,
 			`- The final collect markdown must not mention bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or runtime repair mechanics; unsupported expected files belong only in coverage gaps/questions without citations.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
@@ -294,7 +295,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
 			`- Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set; do not wait for broad analysis before creating the required files.`,
-			`- The first draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed as-is content from staged final artifacts.`,
+			`- The first draft artifact set is bootstrap-only; after it exists, enrich overview.md, summary.md, and architect-summary.md from staged final evidence.`,
+			`- Before successful exit, replace placeholder scaffold text with evidence-backed as-is content or state evidence-backed insufficiency tied to coverage/questions.`,
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
 			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
@@ -310,7 +312,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write proposals-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
-			`- The first proposals draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text with evidence-backed proposal/changelog content from validated staged artifacts.`,
+			`- The first proposals draft artifact set is bootstrap-only; after it exists, enrich proposal/changelog drafts from validated staged evidence.`,
+			`- Before successful exit, replace placeholder scaffold text with evidence-backed proposal/changelog content or state evidence-backed insufficiency tied to validator findings/coverage.`,
 			`- If proposals-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
 		)
@@ -422,6 +425,7 @@ func ValidatorFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact validator verdict target: %q.`, target),
 		"FIRST VALIDATOR VERDICT COMMAND:",
 		"Run this exact command as the next filesystem action after checking whether the target file already exists; do not inspect repository files, sibling taskruns, or raw logs before this command:",
+		"After the skeleton exists, inspect staged final artifacts and replace skeleton findings/questions with evidence-backed validator findings/questions for remaining critical gaps or explicit no-issue rationale before exiting.",
 		ValidatorVerdictWriteCommand(task),
 	}, "\n")
 }
@@ -453,10 +457,12 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 	return strings.Join([]string{
 		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
 		"- This as-is step must start by writing asis-draft-manifest.json and its referenced draft files before broad as-is assembly.",
+		"- The first draft artifact set is bootstrap-only; replace placeholder scaffold text with evidence-backed as-is content before successful exit.",
 		fmt.Sprintf(`- Exact as-is draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST AS-IS DRAFT COMMAND:",
 		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect sibling taskruns, prior reports, or raw logs before this command:",
+		"After the first draft set exists, enrich the draft files from staged final evidence or explicitly state evidence-backed insufficiency; do not leave generic draft placeholder text as final content.",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }
@@ -513,10 +519,12 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 	return strings.Join([]string{
 		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
 		"- This proposals step must start by writing proposals-draft-manifest.json and its referenced draft files before broad proposal analysis.",
+		"- The first proposals draft artifact set is bootstrap-only; replace placeholder scaffold text with evidence-backed proposal/changelog content before successful exit.",
 		fmt.Sprintf(`- Exact proposals draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST PROPOSALS DRAFT COMMAND:",
 		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect repository files, inspect sibling taskruns, or inspect raw logs before this command:",
+		"After the first proposal draft set exists, enrich it from validated staged evidence or explicitly state evidence-backed insufficiency; do not leave generic draft placeholder text as final content.",
 		RuntimeDraftFirstActionWriteCommand(task),
 	}, "\n")
 }
@@ -1067,7 +1075,7 @@ func CollectArtifactRepairHints(initialProblem string) []string {
 		`- Rebuild shard-pack-manifest.json to the canonical ACP schema before exiting successfully.`,
 		`- In shard-pack-manifest.json, semantic.coverage/questions/entities/edges/findings are all required; questions/entities/edges/findings must be arrays even when empty.`,
 		`- semantic.questions[*] must include id and text; do not emit question-only aliases.`,
-		`- documents[].path MUST stay relative to artifact_root only; valid example: "iac-overview.md". Invalid examples: "reports/taskruns/run-1/staging/shards/bank-of-anthos-iac/iac-overview.md", "charter/overview.md".`,
+		`- documents[].path MUST stay relative to artifact_root only; valid example: "component-overview.md". Invalid examples: "reports/taskruns/run-1/staging/shards/example-component/component-overview.md", "charter/overview.md".`,
 		`- Do NOT emit top-level semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 		`- semantic.entities[*] MUST remain full entity objects with provenance included; do not drop entities[*].provenance during repair.`,
 		`- semantic.edges[*] MUST remain objects with canonical keys type/from/to; do not use kind/source/target aliases.`,

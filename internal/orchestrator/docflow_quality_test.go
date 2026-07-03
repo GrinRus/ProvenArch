@@ -266,7 +266,7 @@ func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
 		"artifact_quality.empty_semantic_model",
 		"artifact_quality.model_entities_missing",
 		"artifact_quality.placeholder_artifact",
-		"artifact_quality.findings_empty_with_coverage_gap",
+		"artifact_quality.empty_findings_with_gaps",
 		"artifact_quality.c4_gap_only",
 		"artifact_quality.hidden_provider_document",
 	} {

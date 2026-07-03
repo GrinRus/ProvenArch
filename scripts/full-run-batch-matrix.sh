@@ -1669,6 +1669,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "runtime_timeout": 0,
         "infra_signal_terminated": 0,
         "infra_incomplete_cycle": 0,
+        "quality_gates_failed": 0,
+        "artifact_quality_failed": 0,
         "summary_missing": 0,
         "precheck_failed": 0,
         "cancellation_like": 0,
@@ -1724,6 +1726,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         stats["total"] = int(stats["total"]) + 1
         provider = field(parts, "provider", "")
         hard_pass = field_bool(parts, "hard_pass")
+        artifact_quality_failed_field = field_bool(parts, "artifact_quality_failed")
+        quality_gates_failed_field = field_bool(parts, "quality_gates_failed")
         if provider:
             provider_total: Counter = stats["provider_total"]  # type: ignore[assignment]
             provider_total.update([provider])
@@ -1739,6 +1743,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             "runtime_timeout",
             "infra_signal_terminated",
             "infra_incomplete_cycle",
+            "quality_gates_failed",
+            "artifact_quality_failed",
             "summary_missing",
             "precheck_failed",
             "cancellation_like",
@@ -1777,6 +1783,10 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
                 stats["evidence_scope_hits"] = int(stats["evidence_scope_hits"]) + 1
             if tag == "analysis:cross-repo-missing":
                 stats["cross_repo_missing_hits"] = int(stats["cross_repo_missing_hits"]) + 1
+            if tag == "quality:artifact-quality" and not artifact_quality_failed_field:
+                stats["artifact_quality_failed"] = int(stats["artifact_quality_failed"]) + 1
+                if not quality_gates_failed_field:
+                    stats["quality_gates_failed"] = int(stats["quality_gates_failed"]) + 1
             if tag.startswith("runtime:"):
                 runtime_flow_hit = True
         if runtime_flow_hit:
@@ -1877,6 +1887,8 @@ def strict_blockers(
         "runtime_timeout",
         "infra_signal_terminated",
         "infra_incomplete_cycle",
+        "quality_gates_failed",
+        "artifact_quality_failed",
         "summary_missing",
         "precheck_failed",
     ):
@@ -2022,6 +2034,8 @@ header = [
     "runtime_timeout_failures",
     "infra_signal_terminated_failures",
     "infra_incomplete_cycle_failures",
+    "quality_gates_failed_failures",
+    "artifact_quality_failed_failures",
     "summary_missing_failures",
     "precheck_failed_failures",
     "runtime_flow_failed_runs",
@@ -2052,8 +2066,8 @@ tsv_lines = ["\t".join(header)]
 md_lines = [
     "# Profile Matrix",
     "",
-    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | evidence_scope | cross_repo_missing | runtime_flow | repair/stall/partial | frontend init (qwen/claude/codex) | blockers | run_matrix | execution_report |",
-    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+    "| profile_id | sweep_id | batch_id | status | strict | shard_plan_invariant | backend_hard/total | semantic_hard_fail | off_topic_hits | artifact_non_snapshot | artifact_quality | evidence_scope | cross_repo_missing | runtime_flow | repair/stall/partial | frontend init (qwen/claude/codex) | blockers | run_matrix | execution_report |",
+    "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
 ]
 
 invariant_status_by_batch, invariant_blockers_by_batch = shard_plan_invariant_status(records)
@@ -2183,6 +2197,8 @@ for rec in records:
                 str(stats["runtime_timeout"]),
                 str(stats["infra_signal_terminated"]),
                 str(stats["infra_incomplete_cycle"]),
+                str(stats["quality_gates_failed"]),
+                str(stats["artifact_quality_failed"]),
                 str(stats["summary_missing"]),
                 str(stats["precheck_failed"]),
                 str(stats["runtime_flow_failed"]),
@@ -2216,6 +2232,7 @@ for rec in records:
         f"{rec['profile_id']} | {rec.get('sweep_id', 'baseline')} | {rec['batch_id']} | {rec['status']} | {strict_status} | "
         f"{shard_plan_invariant} | "
         f"{stats['hard']}/{stats['total']} | {stats['semantic_hard_fail']} | {stats['off_topic_hits']} | {stats['artifact_non_snapshot']} | "
+        f"{stats['artifact_quality_failed']} | "
         f"{stats['evidence_scope_hits']} | {stats['cross_repo_missing_hits']} | "
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
         f"repair={stats['repair_attempts']}; exhausted={stats['repair_exhausted']}; focused={stats['focused_repairs']}; "
@@ -2249,6 +2266,8 @@ for rec in records:
                 "runtime_timeout_failures": int(stats["runtime_timeout"]),
                 "infra_signal_terminated_failures": int(stats["infra_signal_terminated"]),
                 "infra_incomplete_cycle_failures": int(stats["infra_incomplete_cycle"]),
+                "quality_gates_failed_failures": int(stats["quality_gates_failed"]),
+                "artifact_quality_failed_failures": int(stats["artifact_quality_failed"]),
                 "summary_missing_failures": int(stats["summary_missing"]),
                 "precheck_failed_failures": int(stats["precheck_failed"]),
                 "runtime_flow_failed_runs": int(stats["runtime_flow_failed"]),
