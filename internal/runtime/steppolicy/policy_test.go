@@ -595,6 +595,18 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`Run one filesystem command as the next action`,
 		`perform only a bounded current-run evidence read/list`,
 		`write all three markdown targets first, then write the manifest last before returning`,
+		`AS-IS FIRST-PASS WRITE SEQUENCE:`,
+		`write_root='/tmp/workspace/reports/taskruns/run-1/asis'`,
+		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
+		`mkdir -p "$write_root" "$draft_root"`,
+		`bounded evidence reads/lists from the current-run staged evidence index below`,
+		`write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md"`,
+		`write "$write_root/asis-draft-manifest.json" last`,
+		`test -s "$draft_root/overview.md"`,
+		`test -s "$draft_root/summary.md"`,
+		`test -s "$draft_root/architect-summary.md"`,
+		`test -s "$write_root/asis-draft-manifest.json"`,
+		`do not rely on focused repair to create it later`,
 		`AS-IS DRAFT MANIFEST SHAPE GUIDE:`,
 		`"run_id": "run-1"`,
 		`"step_id": "init.step2.asis_docs"`,
@@ -606,6 +618,9 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`Current-run staged evidence index`,
 		`AS-IS FIRST-PASS SELF-CHECK:`,
 		`The first write set was not manifest-only`,
+		`summary.md and architect-summary.md contain the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal`,
+		`explicit no-shard-coverage-blocker statement that current-run shard coverage is not a blocker`,
+		`architect-summary.md says what is complete, what is missing, what the operator should inspect or decide next, and residual risk`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(section, needle) {
@@ -686,6 +701,8 @@ func TestDocFirstFilesystemPolicyIncludesCurrentRunEvidenceIndex(t *testing.T) {
 		filepath.ToSlash(filepath.Join(workspace, "reports", "taskruns", runID+"-init-step1-collect-shard-summary-bank.json")),
 		"planned=<n> succeeded=<n> failed=<n> incomplete=<n>",
 		"planned=4 succeeded=2 failed=1 incomplete=1",
+		"summary.md and architect-summary.md must state exact shard completeness counts",
+		"explicit no-shard-coverage-blocker statement",
 	} {
 		if !strings.Contains(policy, needle) {
 			t.Fatalf("expected as-is policy to contain %q, got:\n%s", needle, policy)

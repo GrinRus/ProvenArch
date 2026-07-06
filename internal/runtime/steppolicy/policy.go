@@ -100,10 +100,11 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT delegate to agent/subagent helpers.`,
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use staged final evidence from read_context_roots; do not treat sibling baseline workspaces, prior draft manifests, or prior reports as template sources.`,
-			`- Evidence-first draft requirement: the first filesystem work unit must read bounded current-run staged evidence and then write asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md before any final answer, status note, or optional extra analysis.`,
+			`- Evidence-first draft requirement: the first filesystem work unit must read bounded current-run staged evidence, write overview.md, summary.md, and architect-summary.md, then write asis-draft-manifest.json last before any final answer, status note, or optional extra analysis.`,
 			`- Do not write bootstrap-only as-is markdown as the normal happy path; first-pass drafts must already be evidence-backed or must state explicit evidence-backed insufficiency tied to current-run coverage/questions.`,
 			`- Do not answer with "I will read", "I will rewrite", "I have enough evidence", "ready for repair", or similar analysis-only text before the evidence-backed as-is draft write.`,
-			`- When current-run typed shard-plan/shard-summary evidence is visible, summary.md must include exact planned/succeeded/failed/incomplete counts before successful exit.`,
+			`- When current-run typed shard-plan/shard-summary evidence is visible, summary.md and architect-summary.md must include exact planned/succeeded/failed/incomplete counts before successful exit.`,
+			`- When typed shard status shows failed=0 and incomplete=0, summary.md and architect-summary.md must include an explicit no-shard-coverage-blocker statement that says current-run shard coverage is not a blocker; do not write generic failed/incomplete caveats.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for asis-draft-manifest.json.`,
 			`- Keep step_contract exactly "as_is"; null, empty, or alternate values are invalid.`,
 			`- The first authored draft set must include asis-draft-manifest.json plus validation-ready overview.md, summary.md, and architect-summary.md under draft_final_root.`,
@@ -503,6 +504,8 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"FIRST AS-IS DRAFT COMMAND:",
 		"Run one filesystem command as the next action. In that command, perform only a bounded current-run evidence read/list, write all three markdown targets first, then write the manifest last before returning.",
 		"Do not run a separate read-only preflight, broad repo sweep, sibling taskrun inspection, prior-report templating, or analysis-only response before the writes.",
+		"AS-IS FIRST-PASS WRITE SEQUENCE:",
+		asIsFirstPassWriteSequence(task),
 		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing markdown from observed evidence instead of copying scaffold prose.",
 		"AS-IS DRAFT MANIFEST SHAPE GUIDE:",
 		strings.TrimSpace(RuntimeDraftManifestShapeGuide(task)),
@@ -513,9 +516,32 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"- asis-draft-manifest.json exists under write_root and uses step_contract=\"as_is\".",
 		"- overview.md, summary.md, and architect-summary.md exist under draft_final_root.",
 		"- The first write set was not manifest-only: all three markdown targets were created before or in the same command as the final manifest write.",
+		"- summary.md and architect-summary.md contain the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal when typed shard status is visible.",
+		"- If typed shard status has failed=0 and incomplete=0, summary.md and architect-summary.md include an explicit no-shard-coverage-blocker statement that current-run shard coverage is not a blocker.",
+		"- architect-summary.md says what is complete, what is missing, what the operator should inspect or decide next, and residual risk.",
 		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",
 	)
 	return strings.Join(lines, "\n")
+}
+
+func asIsFirstPassWriteSequence(task acpruntime.Task) string {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	return strings.Join([]string{
+		"- Use this exact target setup at the top of that one command:",
+		"  write_root=" + shellSingleQuote(writeRoot),
+		"  draft_root=" + shellSingleQuote(draftRoot),
+		`  mkdir -p "$write_root" "$draft_root"`,
+		"- In the same shell process, first perform bounded evidence reads/lists from the current-run staged evidence index below; do not stop after this read phase.",
+		`- Then write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md".`,
+		`- Then write "$write_root/asis-draft-manifest.json" last using the manifest shape guide below and outputs for exactly those three markdown files.`,
+		"- End the same command with these existence checks before exit:",
+		`  test -s "$draft_root/overview.md"`,
+		`  test -s "$draft_root/summary.md"`,
+		`  test -s "$draft_root/architect-summary.md"`,
+		`  test -s "$write_root/asis-draft-manifest.json"`,
+		"- If any check would fail, fix the missing target in that same command before returning; do not rely on focused repair to create it later.",
+	}, "\n")
 }
 
 func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
@@ -636,7 +662,8 @@ func currentRunEvidenceIndexLines(task acpruntime.Task, kind currentRunEvidenceK
 	if kind == currentRunEvidenceAsIs {
 		lines = append(lines,
 			`- As-is enrichment must use the typed shard plan/summary, shard-pack-manifest summaries, final-run-index.json, and citation-index.json when visible.`,
-			`- summary.md must state exact shard completeness counts in this literal shape when evidence is visible: planned=<n> succeeded=<n> failed=<n> incomplete=<n>.`,
+			`- summary.md and architect-summary.md must state exact shard completeness counts in this literal shape when evidence is visible: planned=<n> succeeded=<n> failed=<n> incomplete=<n>.`,
+			`- If typed shard completeness shows failed=0 and incomplete=0, summary.md and architect-summary.md must include an explicit no-shard-coverage-blocker statement that says current-run shard coverage is not a blocker and must not include generic failed/incomplete caveats.`,
 			`- overview.md and architect-summary.md must cite concrete repo/path or staged citation/index references from the current run, not generic scaffold language.`,
 		)
 	} else {

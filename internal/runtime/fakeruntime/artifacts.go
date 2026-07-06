@@ -309,7 +309,7 @@ func runtimeDraftShardCompletenessLineFromFile(filename string) (string, bool) {
 		}
 	}
 	if failed == 0 && incomplete == 0 {
-		return fmt.Sprintf("Shard completeness: %d/%d succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.", succeeded, planned), true
+		return fmt.Sprintf("Shard completeness: planned=%d succeeded=%d failed=%d incomplete=%d from the current-run typed shard summary; no-shard-coverage-blocker because current-run shard coverage is not a blocker.", planned, succeeded, failed, incomplete), true
 	}
 	return fmt.Sprintf("Shard completeness: planned=%d succeeded=%d failed=%d incomplete=%d from the current-run typed shard summary.", planned, succeeded, failed, incomplete), true
 }

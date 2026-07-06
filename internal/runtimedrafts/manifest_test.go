@@ -560,8 +560,8 @@ func TestValidateRequiredManifestAcceptsAsIsDraftShardCompletenessFromTypedSumma
 	}
 	files := map[string]string{
 		"overview.md":          "# As-Is Architecture Overview\n\nEvidence references: reports/as-is/posthog-root/root-overview.md and reports/as-is/posthog-services/services-overview.md.\n",
-		"summary.md":           "# Coverage Summary\n\nShard completeness: 2/2 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\n\nEvidence density is sufficient for the scoped PostHog shards, with remaining gaps called out per shard.\n",
-		"architect-summary.md": "# Architect Summary\n\nWhat is complete: 2/2 succeeded collect shards are available for review.\n\nWhat to inspect next: compare services and root-surface evidence before publishing.\n",
+		"summary.md":           "# Coverage Summary\n\nShard completeness: planned=2 succeeded=2 failed=0 incomplete=0 from the current-run typed shard summary; no-shard-coverage-blocker because current-run shard coverage is not a blocker.\n\nEvidence density is sufficient for the scoped PostHog shards, with remaining gaps called out per shard.\n",
+		"architect-summary.md": "# Architect Summary\n\nWhat is complete: planned=2 succeeded=2 failed=0 incomplete=0 from the current-run typed shard summary; no-shard-coverage-blocker because current-run shard coverage is not a blocker.\n\nWhat to inspect next: compare services and root-surface evidence before publishing.\n",
 	}
 	for relPath, content := range files {
 		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
