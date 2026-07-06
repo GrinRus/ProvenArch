@@ -2383,6 +2383,8 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 		"one bounded evidence-read/write filesystem work unit",
 		"read current-run staged evidence first",
 		"Run one filesystem command as the next action",
+		"Your first response item for this step must be the filesystem command itself",
+		"the first provider item must be command_execution",
 		"AS-IS FIRST-PASS WRITE SEQUENCE:",
 		"write_root='/tmp/write-root'",
 		"draft_root='/tmp/draft-root'",

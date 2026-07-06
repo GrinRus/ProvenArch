@@ -523,7 +523,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
                 "ACP_NODE_TOOL_CANDIDATES_ONLY": "1",
                 "ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC": "5",
                 "ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC": "5",
-                "ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC": "1",
+                "ACP_LIVE_PRECHECK_DOD_TIMEOUT_SEC": "2",
                 "BATCH_OWNER_HEARTBEAT_SEC": "1",
             }
         )
@@ -541,7 +541,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
 
         self.assertNotEqual(0, completed.returncode, msg=completed.stdout + completed.stderr)
         combined_output = completed.stderr + completed.stdout
-        self.assertIn("make contracts test lint build timed out after 1s", combined_output)
+        self.assertIn("make contracts test lint build timed out after 2s", combined_output)
         self.assertIn("precheck_failed", combined_output)
         make_log = e2e_root / "runs" / batch_id / "precheck-make.log"
         self.assertTrue(make_log.exists())

@@ -14,6 +14,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 	"github.com/GrinRus/ProvenArch/internal/runtime/providercommon"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
 var ErrRunnerUnavailable = errors.New("codex-code runner is unavailable")
@@ -153,6 +154,8 @@ func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activi
 	if acpruntime.IsCollectStep(task.StepID) {
 		policy.PreArtifactStallWindow = 5 * time.Minute
 		policy.RetryPreArtifactStallWindow = 5 * time.Minute
+	} else if runtimedrafts.IsDraftStep(task.StepID) {
+		policy.PreArtifactStallWindow = 180 * time.Second
 	}
 	return providercommon.WithCollectArtifactEnrichmentWindow(task, policy)
 }
