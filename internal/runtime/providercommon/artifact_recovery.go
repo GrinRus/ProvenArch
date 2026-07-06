@@ -553,11 +553,84 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair wrote outside shard-pack-manifest.json", err)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		if shouldRetryCollectManifestShapeCleanup(err) {
+			if cleanupResult, cleanupErr, handled := runCollectManifestShapeCleanup(ctx, task, adapter, repairAdapter, repairResult, beforeRepairFiles, err, repairPolicy, policy); handled {
+				return true, cleanupResult, cleanupErr
+			}
+		}
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
 	return true, repairResult, nil
+}
+
+func runCollectManifestShapeCleanup(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, repairAdapter CollectManifestRepairAdapter, baseResult acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, validationErr error, repairPolicy ActivityPolicy, policy RecoveryPolicy) (acpruntime.Result, error, bool) {
+	emitCollectManifestShapeCleanupScheduledDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task), validationErr)
+	spec, err := repairAdapter.CollectManifestRepairCommandSpec(task, validationErr)
+	if err != nil {
+		return acpruntime.Result{}, classifyCommandFailure(adapter, task, baseResult, err), true
+	}
+	cleanupResult, cleanupRunErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	if cleanupRunErr != nil {
+		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+			return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup wrote outside shard-pack-manifest.json", err), true
+		}
+		var cleanupStalled StallError
+		if errors.As(cleanupRunErr, &cleanupStalled) {
+			if policy.AcceptValidArtifactsAfterStop {
+				if err := adapter.ValidateArtifacts(task); err == nil {
+					emitCollectManifestShapeCleanupCompletedDiagnostic(task, adapter.Provider(), cleanupStalled.Diagnostic.StallPhase)
+					return cleanupResult, nil, true
+				}
+			}
+			emitCollectManifestShapeCleanupExhaustedDiagnostic(task, adapter.Provider(), cleanupStalled.Diagnostic, cleanupRunErr)
+			return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup stalled before valid artifacts were available", cleanupRunErr), true
+		}
+		return acpruntime.Result{}, classifyCommandFailure(adapter, task, cleanupResult, cleanupRunErr), true
+	}
+	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup wrote outside shard-pack-manifest.json", err), true
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitCollectManifestShapeCleanupExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup did not produce valid collect artifacts", err), true
+	}
+	emitCollectManifestShapeCleanupCompletedDiagnostic(task, adapter.Provider(), "")
+	return cleanupResult, nil, true
+}
+
+func shouldRetryCollectManifestShapeCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := strings.ToLower(strings.TrimSpace(err.Error()))
+	if detail == "" {
+		return false
+	}
+	if strings.Contains(detail, "repo evidence path") ||
+		strings.Contains(detail, "process-contaminated") ||
+		strings.Contains(detail, "process contaminated") ||
+		strings.Contains(detail, "outside shard-pack-manifest.json") ||
+		strings.Contains(detail, "wrote forbidden files") ||
+		strings.Contains(detail, "authored markdown") ||
+		strings.Contains(detail, "empty authored markdown") ||
+		strings.Contains(detail, "bootstrap-only") {
+		return false
+	}
+	if strings.Contains(detail, "citations") && strings.Contains(detail, ".id must be unique") {
+		return true
+	}
+	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
+		return true
+	}
+	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") {
+		return true
+	}
+	if strings.Contains(detail, "documents") && strings.Contains(detail, "citation_ids") && strings.Contains(detail, "references") {
+		return true
+	}
+	return false
 }
 
 func recoverCollectManifestDeterministically(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {

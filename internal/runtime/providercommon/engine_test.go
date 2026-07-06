@@ -1132,6 +1132,160 @@ exit 0
 	}
 }
 
+func TestRunHeadlessProviderRunsCollectManifestShapeCleanupAfterDuplicateCitationRepair(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-manifest-shape-cleanup")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	for _, name := range []string{"README.md", "pom.xml"} {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badQuestionManifest := strings.Replace(
+		collectManifestJSON(task),
+		`"text": "Who owns bank-of-anthos?"`,
+		`"question": "Who owns bank-of-anthos?"`,
+		1,
+	)
+	duplicateCitationManifest := collectManifestWithTwoCitationsJSON(task, "cite.bank.root.overview", "cite.bank.root.overview")
+	cleanupManifest := collectManifestWithTwoCitationsJSON(task, "cite.bank.root.readme", "cite.bank.root.pom")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badQuestionManifest + `
+EOF
+`
+	firstRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + duplicateCitationManifest + `
+EOF
+`
+	cleanupScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + cleanupManifest + `
+EOF
+`
+	runner := &manifestRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, initialScript),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop: true,
+				RepairCollectManifestOnce:     true,
+			},
+		},
+		manifestRepairCommands: []string{
+			writeEngineScript(t, firstRepairScript),
+			writeEngineScript(t, cleanupScript),
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected collect manifest shape cleanup success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest shape cleanup scheduled", "recovery_mode", "collect_manifest_shape_cleanup") {
+		t.Fatalf("expected collect_manifest_shape_cleanup scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest shape cleanup completed", "recovery_mode", "collect_manifest_shape_cleanup") {
+		t.Fatalf("expected collect_manifest_shape_cleanup completed diagnostic, got %#v", diagnostics)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read cleanup manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"id": "cite.bank.root.readme"`) || !strings.Contains(string(raw), `"id": "cite.bank.root.pom"`) {
+		t.Fatalf("expected cleanup manifest to include unique path-derived citation IDs, got %s", raw)
+	}
+}
+
+func TestRunHeadlessProviderFailsWhenCollectManifestShapeCleanupRemainsInvalid(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-manifest-shape-cleanup-invalid")
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	for _, name := range []string{"README.md", "pom.xml"} {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	badQuestionManifest := strings.Replace(
+		collectManifestJSON(task),
+		`"text": "Who owns bank-of-anthos?"`,
+		`"question": "Who owns bank-of-anthos?"`,
+		1,
+	)
+	duplicateCitationManifest := collectManifestWithTwoCitationsJSON(task, "cite.bank.root.overview", "cite.bank.root.overview")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Collect Overview' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badQuestionManifest + `
+EOF
+`
+	duplicateRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + duplicateCitationManifest + `
+EOF
+`
+	runner := &manifestRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, initialScript),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop: true,
+				RepairCollectManifestOnce:     true,
+			},
+		},
+		manifestRepairCommands: []string{
+			writeEngineScript(t, duplicateRepairScript),
+			writeEngineScript(t, duplicateRepairScript),
+		},
+	}
+
+	_, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err == nil {
+		t.Fatal("expected duplicate citation shape cleanup exhaustion to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if !strings.Contains(runnerErr.Error(), "collect manifest shape cleanup did not produce valid collect artifacts") {
+		t.Fatalf("expected shape cleanup exhaustion to remain terminal, got %v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest shape cleanup exhausted", "recovery_mode", "collect_manifest_shape_cleanup") {
+		t.Fatalf("expected collect_manifest_shape_cleanup exhausted diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderEscalatesMissingRepoEvidenceInMarkdownToPairRepair(t *testing.T) {
 	t.Parallel()
 
@@ -4727,6 +4881,13 @@ type pairRepairSequenceAdapter struct {
 	pairRepairCalls    int
 }
 
+type manifestRepairSequenceAdapter struct {
+	testAdapter
+	manifestRepairCommands []string
+	mu                     sync.Mutex
+	manifestRepairCalls    int
+}
+
 type draftEnrichmentSequenceAdapter struct {
 	testAdapter
 	draftEnrichmentCommands []string
@@ -4760,6 +4921,20 @@ func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(acprunt
 	}
 	a.pairRepairCalls++
 	return CommandSpec{Command: a.pairRepairCommands[index]}, nil
+}
+
+func (a *manifestRepairSequenceAdapter) CollectManifestRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.manifestRepairCommands) == 0 {
+		return CommandSpec{}, errors.New("collect manifest repair command is unavailable")
+	}
+	index := a.manifestRepairCalls
+	if index >= len(a.manifestRepairCommands) {
+		index = len(a.manifestRepairCommands) - 1
+	}
+	a.manifestRepairCalls++
+	return CommandSpec{Command: a.manifestRepairCommands[index]}, nil
 }
 
 func (a *draftEnrichmentSequenceAdapter) DraftArtifactEnrichmentCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
@@ -5055,6 +5230,111 @@ func collectManifestJSON(task acpruntime.Task) string {
       }
     ],
     "edges": [],
+    "findings": []
+  }
+}`
+}
+
+func collectManifestWithTwoCitationsJSON(task acpruntime.Task, firstCitationID string, secondCitationID string) string {
+	return `{
+  "version": 1,
+  "run_id": "` + task.RunID + `",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank",
+  "domain_id": "bank",
+  "agent_role": "shard-analyst",
+  "artifact_root": "` + task.ArtifactRoot + `",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["."],
+  "documents": [
+    {
+      "id": "doc.bank.overview",
+      "kind": "report",
+      "title": "Bank Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/bank/overview.md",
+      "topics": ["bank"],
+      "citation_ids": ["` + firstCitationID + `", "` + secondCitationID + `"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "` + firstCitationID + `",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.bank.readme"],
+      "document_ids": ["doc.bank.overview"]
+    },
+    {
+      "id": "` + secondCitationID + `",
+      "repo": "bank-of-anthos",
+      "path": "pom.xml",
+      "claim_ids": ["claim.bank.pom"],
+      "document_ids": ["doc.bank.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["repository entrypoints", "build metadata"],
+      "missing": ["owner mapping"],
+      "notes": ["repair test fixture"]
+    },
+    "questions": [
+      {
+        "id": "q.bank.owner",
+        "text": "Who owns bank-of-anthos?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.bank",
+        "name": "bank",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "bank-of-anthos",
+              "path": "README.md"
+            }
+          ]
+        }
+      },
+      {
+        "id": "build.bank.maven",
+        "name": "bank maven build",
+        "type": "build",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "bank-of-anthos",
+              "path": "pom.xml"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge.bank.uses-maven",
+        "type": "builds",
+        "from": "build.bank.maven",
+        "to": "svc.bank",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "repo": "bank-of-anthos",
+              "path": "pom.xml"
+            }
+          ]
+        }
+      }
+    ],
     "findings": []
   }
 }`

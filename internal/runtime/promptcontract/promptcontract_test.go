@@ -247,8 +247,13 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"Read only the listed repository evidence candidates if authored docs need support",
 		"Repository evidence in citations/provenance must be file-level",
 		"directories or missing paths must become coverage gaps/questions, never citation paths",
+		"Every citations[].id must be unique",
+		"derive each citation id from the shard/document stem plus the repo path slug",
 		"JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient",
-		"prove every citation/provenance repo path is an existing file",
+		"parse JSON and verify semantic.questions[] all have id and text",
+		"citations[].id has no duplicates",
+		"every citation has non-empty claim_ids and document_ids",
+		"every citation/provenance repo path is an existing file",
 		"Write exactly one file:",
 		"Do not rewrite existing authored markdown documents.",
 		"documents[].canonical_path must be a stable promoted workspace path.",
@@ -265,8 +270,9 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"First command contract:",
 		"read bounded authored markdown under write_root",
 		"verify every manifest citation/provenance repo path with file-level checks such as test -f, rg --files, or portable find ... -type f -print",
+		"verify semantic.questions[] all have id and text, citations[].id has no duplicates",
 		"write the final provider-authored manifest",
-		"file-level evidence path checks after the write",
+		"structural and file-level evidence path checks after the write",
 		"Exact manifest write target:",
 		"Authored markdown inputs already present under write_root:",
 		"Bounded repository evidence candidates:",
@@ -295,6 +301,8 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 		"overview.md -> reports/as-is/payments/overview.md",
 		"Stable canonical_path mapping to copy into documents[] exactly:",
 		"Reject any documents[].canonical_path that contains reports/taskruns",
+		"Every citations[].id must be unique; when citing multiple repository files, include a path slug in each id",
+		"update documents[].citation_ids to the exact generated IDs",
 		"Repository evidence candidates available for bounded repair:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		`"path": "docs/deep-dive.md"`,
@@ -428,8 +436,9 @@ func TestCollectManifestRepairGuidanceIsWriteFirst(t *testing.T) {
 		"First command contract:",
 		"read bounded authored markdown under write_root",
 		"verify every manifest citation/provenance repo path with file-level checks",
+		"verify semantic.questions[] all have id and text, citations[].id has no duplicates",
 		"write the final provider-authored manifest",
-		"run a local `test -s`/JSON parse check plus file-level evidence path checks after the write",
+		"run a local `test -s`/JSON parse check plus structural and file-level evidence path checks after the write",
 		filepath.Join(writeRoot, "shard-pack-manifest.json"),
 		"overview.md",
 		"src/README.md",
@@ -499,6 +508,48 @@ func TestComposeCollectManifestRepairPromptPrefersUsefulRootEvidence(t *testing.
 	}
 	if strings.Contains(prompt, `"path": ".gitignore"`) {
 		t.Fatalf("repair prompt skeleton must not choose .gitignore as primary root evidence, got:\n%s", prompt)
+	}
+}
+
+func TestComposeCollectManifestRepairPromptUsesValidationSpecificShapeFocus(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "write-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, "overview.md"), []byte("# Root Overview\n"), 0o644); err != nil {
+		t.Fatalf("write authored doc: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root",
+		WriteRoot:    writeRoot,
+		ShardID:      "root",
+		DomainID:     "root",
+		AgentRole:    "shard-analyst",
+		RepoScopes:   []string{"repo"},
+		PathScopes:   []string{"README.md", "pom.xml"},
+	}
+
+	prompt := ComposeCollectManifestRepairPrompt(
+		acpruntime.ProviderQwenCode,
+		task,
+		errors.New(`semantic/questions/2: missing properties: "text"; citations[1].id must be unique; citations[2].id must be unique`),
+	)
+	for _, token := range []string{
+		"VALIDATION-SPECIFIC MANIFEST REPAIR FOCUS:",
+		"rewrite every semantic.questions[] item as an object with both id and text",
+		"regenerate citations[].id values so every citation id is unique",
+		"derive IDs from shard/document stem plus repo path slug",
+		"Update every documents[].citation_ids array to reference the exact regenerated citation IDs",
+		"Previous collect manifest validation failure:",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected repair prompt to contain validation focus %q, got:\n%s", token, prompt)
+		}
 	}
 }
 

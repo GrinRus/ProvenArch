@@ -385,7 +385,13 @@ def classify_step_validation_text(text: str) -> str:
         return "markdown_syntax"
     if "bootstrap" in lower or "scaffold" in lower or "placeholder" in lower:
         return "placeholder_or_scaffold"
-    if "manifest" in lower or "unknown field" in lower or "outputs[]" in lower:
+    if (
+        "manifest" in lower
+        or "unknown field" in lower
+        or "outputs[]" in lower
+        or "citations[" in lower
+        or "semantic/questions" in lower
+    ):
         return "manifest_shape"
     if "shard completeness" in lower or "typed shard" in lower:
         return "shard_completeness"
@@ -416,6 +422,7 @@ def collect_runtime_step_pressure(workspace_roots: list[Path], run_ids: set[str]
                 "valid_artifact_controlled_stops": 0,
                 "final_validation_class": "unknown",
                 "first_validation_error_excerpt": "",
+                "terminal_validation_error_excerpt": "",
                 "stop_kind": "",
                 "initial_artifact_state": "",
             },
@@ -428,9 +435,15 @@ def collect_runtime_step_pressure(workspace_roots: list[Path], run_ids: set[str]
         existing = str(step_stats.get("first_validation_error_excerpt") or "")
         if existing and is_generic_runtime_excerpt(existing) and not is_generic_runtime_excerpt(excerpt):
             step_stats["first_validation_error_excerpt"] = excerpt
-            return
-        if not existing and not is_generic_runtime_excerpt(excerpt):
+        elif not existing and not is_generic_runtime_excerpt(excerpt):
             step_stats["first_validation_error_excerpt"] = excerpt
+        terminal_existing = str(step_stats.get("terminal_validation_error_excerpt") or "")
+        if (
+            not terminal_existing
+            or not is_generic_runtime_excerpt(excerpt)
+            or is_generic_runtime_excerpt(terminal_existing)
+        ):
+            step_stats["terminal_validation_error_excerpt"] = excerpt
 
     def remember_state(step_stats: dict[str, Any], state: str) -> None:
         state = str(state or "").strip().lower()
@@ -488,16 +501,25 @@ def collect_runtime_step_pressure(workspace_roots: list[Path], run_ids: set[str]
                         or runtime_log_string(payload, "action") == "fresh_process_after_invalid_artifacts"
                     )
                 )
-                if "focused artifact repair scheduled" in combined or retry_is_actual_repair:
+                collect_manifest_repair_scheduled = (
+                    "collect manifest repair scheduled" in combined
+                    or "collect manifest shape cleanup scheduled" in combined
+                )
+                if "focused artifact repair scheduled" in combined or collect_manifest_repair_scheduled or retry_is_actual_repair:
                     step_stats = stats_for(step_id)
                     step_stats["repair_attempts"] += 1
                     remember_stop_kind(step_stats, "repair_retry")
                     remember_state(step_stats, artifact_state_from_payload(payload))
                     remember_validation(step_stats, validation_text)
-                if "focused artifact repair exhausted" in combined or "repair exhausted" in combined:
+                collect_manifest_repair_exhausted = (
+                    "collect manifest repair exhausted" in combined
+                    or "collect manifest shape cleanup exhausted" in combined
+                )
+                if "focused artifact repair exhausted" in combined or "repair exhausted" in combined or collect_manifest_repair_exhausted:
                     step_stats = stats_for(step_id)
                     step_stats["repair_exhausted"] += 1
-                    step_stats["repair_attempts"] += 1
+                    if not collect_manifest_repair_scheduled:
+                        step_stats["repair_attempts"] += 1
                     remember_stop_kind(step_stats, "repair_exhausted")
                     remember_state(step_stats, artifact_state_from_payload(payload))
                     remember_validation(step_stats, validation_text)
@@ -593,6 +615,7 @@ def excellent_blockers_by_step_from_pressure(
                 "valid_artifact_controlled_stops": int(step_stats.get("valid_artifact_controlled_stops", 0) or 0),
                 "final_validation_class": str(step_stats.get("final_validation_class") or "unknown"),
                 "first_validation_error_excerpt": str(step_stats.get("first_validation_error_excerpt") or ""),
+                "terminal_validation_error_excerpt": str(step_stats.get("terminal_validation_error_excerpt") or ""),
                 "stop_kind": str(step_stats.get("stop_kind") or ""),
                 "initial_artifact_state": str(step_stats.get("initial_artifact_state") or ""),
             }
@@ -2794,8 +2817,8 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     else:
         lines.extend(
             [
-                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt |",
-                "|---|---:|---|---|---:|---:|---:|---|---|---|---|",
+                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt | terminal_validation_error_excerpt |",
+                "|---|---:|---|---|---:|---:|---:|---|---|---|---|---|",
             ]
         )
         for entry in step_entries:
@@ -2806,7 +2829,8 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
                 f"{md_cell(entry.get('repair_attempts', 0))} | {md_cell(entry.get('stall_count', 0))} | "
                 f"{md_cell(entry.get('valid_artifact_controlled_stops', 0))} | "
                 f"{md_cell(entry.get('final_validation_class', 'unknown'))} | {md_cell(entry.get('stop_kind', '-'))} | "
-                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} |"
+                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} | "
+                f"{md_cell(entry.get('terminal_validation_error_excerpt', '-'))} |"
             )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -3073,8 +3097,8 @@ def write_execution_report(
     else:
         lines.extend(
             [
-                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt |",
-                "|---|---:|---|---|---:|---:|---:|---|---|---|---|",
+                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt | terminal_validation_error_excerpt |",
+                "|---|---:|---|---|---:|---:|---:|---|---|---|---|---|",
             ]
         )
         for entry in step_entries:
@@ -3085,7 +3109,8 @@ def write_execution_report(
                 f"{md_cell(entry.get('repair_attempts', 0))} | {md_cell(entry.get('stall_count', 0))} | "
                 f"{md_cell(entry.get('valid_artifact_controlled_stops', 0))} | "
                 f"{md_cell(entry.get('final_validation_class', 'unknown'))} | {md_cell(entry.get('stop_kind', '-'))} | "
-                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} |"
+                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} | "
+                f"{md_cell(entry.get('terminal_validation_error_excerpt', '-'))} |"
             )
     lines.extend(
         [

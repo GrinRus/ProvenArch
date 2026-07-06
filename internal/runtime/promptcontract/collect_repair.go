@@ -13,7 +13,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 )
 
-func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, _ error) string {
+func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	authoredDocs := authoredRepairDocuments(task.WriteRoot)
 	evidencePaths := repairEvidenceCandidates(task)
@@ -30,7 +30,8 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		"- No deterministic helper writes the manifest for you; you must author shard-pack-manifest.json from the observed markdown and allowed repository evidence.",
 		"- Read only the listed repository evidence candidates if authored docs need support; do not start an open-ended repository sweep.",
 		"- Repository evidence in citations/provenance must be file-level: path_scopes may guide discovery, but directories or missing paths must become coverage gaps/questions, never citation paths.",
-		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; the first command must also prove every citation/provenance repo path is an existing file.",
+		"- Every citations[].id must be unique; when citing multiple repo files from one authored document, derive each citation id from the shard/document stem plus the repo path slug, not from the authored markdown document id alone.",
+		"- JSON syntax-only checks such as jq empty or python3 -m json.tool are insufficient; the first command must parse JSON and verify semantic.questions[] all have id and text, citations[].id has no duplicates, every citation has non-empty claim_ids and document_ids, every documents[].citation_ids value exists, and every citation/provenance repo path is an existing file.",
 		fmt.Sprintf("- Write exactly one file: %q.", manifestTarget),
 		"- Do not rewrite existing authored markdown documents.",
 		"- documents[].canonical_path must be a stable promoted workspace path. Never use write_root, artifact_root, absolute paths, reports/taskruns, staging, raw logs, or runtime metadata paths as canonical_path.",
@@ -94,6 +95,10 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		}
 	}
 	repairLines = append(repairLines, overwriteCollectManifestRepairInstructions()...)
+	if focus := collectManifestRepairValidationFocus(validationErr); len(focus) > 0 {
+		repairLines = append(repairLines, "VALIDATION-SPECIFIC MANIFEST REPAIR FOCUS:")
+		repairLines = append(repairLines, focus...)
+	}
 	repairLines = append(repairLines,
 		"CANONICAL SEMANTIC SHAPE:",
 	)
@@ -106,6 +111,9 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 		`- Repair-mode note: if schemas/* or docs/spec/* are absent from the runtime workspace, do not look for them; use this embedded checklist.`,
 		`- The task-specific JSON skeleton above is a schema guide only; copied scaffold semantic is invalid even when the JSON schema passes.`,
 	)
+	if detail := errorText(validationErr); detail != "" {
+		repairLines = append(repairLines, fmt.Sprintf("- Previous collect manifest validation failure: %s", detail))
+	}
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
 }
@@ -121,8 +129,9 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 		"  - read bounded authored markdown under write_root;",
 		"  - read only listed repository evidence candidates if needed;",
 		"  - verify every manifest citation/provenance repo path with file-level checks such as test -f, rg --files, or portable find ... -type f -print;",
+		"  - verify semantic.questions[] all have id and text, citations[].id has no duplicates, every citation has non-empty claim_ids and document_ids, and every documents[].citation_ids value references an existing citation;",
 		"  - write the final provider-authored manifest to " + shellSingleQuote(manifestTarget) + " before returning;",
-		"  - run a local `test -s`/JSON parse check plus file-level evidence path checks after the write.",
+		"  - run a local `test -s`/JSON parse check plus structural and file-level evidence path checks after the write.",
 		"- Exact manifest write target: " + shellSingleQuote(manifestTarget),
 		"- Authored markdown inputs already present under write_root:",
 	}
@@ -151,10 +160,42 @@ func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs 
 		"- Do not emit only this evidence list. The same first command must write shard-pack-manifest.json.",
 		"- Reject any documents[].canonical_path that contains reports/taskruns, /staging/, raw runtime paths, write_root, artifact_root, or an absolute filesystem prefix.",
 		"- Do not cite repository directories. If a candidate is directory-only or missing, record it in coverage.missing/questions instead of citations/provenance.",
+		"- Every citations[].id must be unique; when citing multiple repository files, include a path slug in each id and update documents[].citation_ids to the exact generated IDs.",
 		"- Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.",
 		"- Do not use a copied skeleton or generic repo/shard wrapper semantic as the final manifest.",
 	)
 	return strings.Join(lines, "\n")
+}
+
+func collectManifestRepairValidationFocus(validationErr error) []string {
+	detail := strings.ToLower(errorText(validationErr))
+	if strings.TrimSpace(detail) == "" {
+		return nil
+	}
+	lines := []string{}
+	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
+		lines = append(lines,
+			"- Terminal shape focus: rewrite every semantic.questions[] item as an object with both id and text; do not use question, title-only, or id-only question objects.",
+			"- Run a local JSON check that fails when any semantic.questions[] item lacks id or text before exiting 0.",
+		)
+	}
+	if strings.Contains(detail, "citations") && strings.Contains(detail, ".id must be unique") {
+		lines = append(lines,
+			"- Terminal shape focus: regenerate citations[].id values so every citation id is unique.",
+			"- If several citations point to different repo files for one authored markdown document, derive IDs from shard/document stem plus repo path slug, for example cite.<shard>.<doc>.<path-slug>.",
+			"- Update every documents[].citation_ids array to reference the exact regenerated citation IDs; do not leave stale duplicate IDs behind.",
+			"- Run a local duplicate check on citations[].id before exiting 0.",
+		)
+	}
+	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") ||
+		(strings.Contains(detail, "citation_ids") && strings.Contains(detail, "reference")) {
+		lines = append(lines,
+			"- Terminal binding focus: every citations[] item needs non-empty claim_ids and document_ids arrays.",
+			"- Every citation document_ids entry must point to an existing documents[].id, and every documents[].citation_ids entry must point to an existing citations[].id.",
+			"- Rewrite citation/document bindings together; do not patch only one side of the relationship.",
+		)
+	}
+	return lines
 }
 
 func collectCanonicalPathMappingLines(task acpruntime.Task, docPaths []string) []string {

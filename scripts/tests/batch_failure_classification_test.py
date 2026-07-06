@@ -2501,6 +2501,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("markdown_syntax", blocker["final_validation_class"])
         self.assertEqual("repair_retry", blocker["stop_kind"])
         self.assertIn("does not link medium/high", blocker["first_validation_error_excerpt"])
+        self.assertIn("malformed markdown inline-code", blocker["terminal_validation_error_excerpt"])
 
         report_path = self.root / "reports-step-blockers" / "execution.md"
         self.module.write_execution_report(report_path, "batch-step-blockers", [result], [], {}, ["qwen-code"])
@@ -2509,6 +2510,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn("refresh.step4.proposals", report)
         self.assertIn("runtime_quality.repair_heavy", report)
         self.assertIn("first_validation_error_excerpt", report)
+        self.assertIn("terminal_validation_error_excerpt", report)
+        self.assertIn("malformed markdown inline-code", report)
 
     def test_python_report_does_not_attribute_controlled_stop_to_repair_heavy_step(self) -> None:
         run_dir = self.root / "run-repair-heavy-with-controlled-stop"
@@ -2600,6 +2603,53 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(1, len(exhausted))
         self.assertEqual("refresh.step4.proposals", exhausted[0]["step_id"])
         self.assertEqual("finding_linkage", exhausted[0]["final_validation_class"])
+        self.assertIn("no-current-run-finding-id", exhausted[0]["terminal_validation_error_excerpt"])
+
+    def test_python_report_surfaces_terminal_collect_manifest_validation_excerpt(self) -> None:
+        run_dir = self.root / "run-collect-manifest-terminal-excerpt"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.setdefault("totals", {})["repair_attempts"] = 1
+        refresh_quality.setdefault("totals", {})["repair_exhausted"] = 1
+        write_json(refresh_quality_path, refresh_quality)
+        write_text(
+            run_dir / "headless/arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"warning","run_id":"refresh-run","step_id":"init.step1.collect",'
+                '"message":"collect manifest repair scheduled","recovery_mode":"collect_manifest_repair",'
+                '"validation_error":"semantic/questions/2: missing properties: text"}\n'
+                '{"level":"error","run_id":"refresh-run","step_id":"init.step1.collect",'
+                '"message":"collect manifest repair exhausted","recovery_mode":"collect_manifest_repair",'
+                '"validation_error":"citations[1].id must be unique; citations[2].id must be unique"}\n'
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        exhausted = [
+            blocker
+            for blocker in result.excellent_blockers_by_step
+            if blocker["blocker_code"] == "runtime_quality.repair_exhausted"
+        ]
+        self.assertEqual(1, len(exhausted))
+        blocker = exhausted[0]
+        self.assertEqual("init.step1.collect", blocker["step_id"])
+        self.assertEqual("manifest_shape", blocker["final_validation_class"])
+        self.assertIn("semantic/questions/2", blocker["first_validation_error_excerpt"])
+        self.assertIn("citations[1].id must be unique", blocker["terminal_validation_error_excerpt"])
+
+        report_path = self.root / "reports-terminal-excerpt" / "execution.md"
+        self.module.write_execution_report(report_path, "batch-terminal-excerpt", [result], [], {}, ["qwen-code"])
+        report = report_path.read_text(encoding="utf-8")
+        self.assertIn("terminal_validation_error_excerpt", report)
+        self.assertIn("citations[1].id must be unique", report)
 
     def test_python_report_useful_run_remains_strict_pass(self) -> None:
         run_dir = self.root / "run-useful-pass"

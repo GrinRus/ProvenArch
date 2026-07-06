@@ -46,3 +46,18 @@ func TestProposalsDraftManifestCanonicalExampleUsesStrictContract(t *testing.T) 
 		}
 	}
 }
+
+func TestCompactCollectManifestValidationChecklistIncludesCitationIDUniqueness(t *testing.T) {
+	t.Parallel()
+
+	joined := strings.Join(CompactCollectManifestValidationChecklist("reports/taskruns/run-1/staging/shards/root"), "\n")
+	for _, needle := range []string{
+		"citations[].id values must be unique",
+		"derive each citations[].id from the shard/document stem plus the repo path slug",
+		"every documents[].citation_ids value references a citations[].id",
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected compact collect checklist to contain %q, got:\n%s", needle, joined)
+		}
+	}
+}
