@@ -82,9 +82,92 @@ func TestAssessLiveReportSurfaceSignalsDiagramPlaceholderOnly(t *testing.T) {
 	assertQualitySignal(t, signals, "artifact_quality.diagram_placeholder_only")
 }
 
+func TestAssessLiveReportSurfaceSignalsProposalsFindingsDisconnected(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"proposals/runtime-recommendations.md": strings.Join([]string{
+			"# Runtime Recommendations",
+			"",
+			"## Decision / recommended operator action",
+			"- No structured finding summary was present, so no source-level architecture change is approved.",
+			"",
+			"## Evidence used",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Proposed changes or follow-up plan",
+			"- Keep the proposal queue unchanged.",
+			"",
+			"## Risks, gaps, and out-of-scope notes",
+			"- Owner mapping remains unresolved.",
+			"",
+		}, "\n"),
+		"reports/changelog/runtime-proposals.md": strings.Join([]string{
+			"# Runtime Proposal Changelog",
+			"",
+			"## Updated architecture/proposal surfaces",
+			"- Proposal surface was refreshed.",
+			"",
+			"## Findings/proposals summary",
+			"- No structured finding summary was present.",
+			"",
+			"## Evidence index or citation references",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Residual coverage gaps",
+			"- Owner mapping remains unresolved.",
+			"",
+		}, "\n"),
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+
+	assertQualitySignal(t, signals, "artifact_quality.proposals_findings_disconnected")
+}
+
+func TestAssessLiveReportSurfaceSignalsProposalsLowActionability(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"proposals/runtime-recommendations.md": strings.Join([]string{
+			"# Runtime Recommendations",
+			"",
+			"## Decision / recommended operator action",
+			"- Review `finding.owner.missing` during the next architecture review.",
+			"",
+			"## Evidence used",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Proposed changes or follow-up plan",
+			"- Review current-run evidence.",
+			"",
+			"## Risks, gaps, and out-of-scope notes",
+			"- Ownership remains unresolved.",
+			"",
+		}, "\n"),
+		"reports/changelog/runtime-proposals.md": strings.Join([]string{
+			"# Runtime Proposal Changelog",
+			"",
+			"## Updated architecture/proposal surfaces",
+			"- Proposal surface was refreshed.",
+			"",
+			"## Findings/proposals summary",
+			"- `finding.owner.missing` remains visible.",
+			"",
+			"## Evidence index or citation references",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Residual coverage gaps",
+			"- Ownership remains unresolved.",
+			"",
+		}, "\n"),
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+
+	assertQualitySignal(t, signals, "artifact_quality.proposals_low_actionability")
+}
+
 func TestAssessLiveReportSurfaceSignalsSkipsIncompleteReportMode(t *testing.T) {
 	ws := qualitySignalWorkspace(t, map[string]string{
-		"reports/as-is/overview.md": "# As-Is Overview\n\nProvider wrote this draft artifact under the required draft_final_root.\n",
+		"reports/as-is/overview.md":            "# As-Is Overview\n\nProvider wrote this draft artifact under the required draft_final_root.\n",
+		"proposals/runtime-recommendations.md": "# Runtime Recommendations\n\nNo structured finding summary was present.\n",
 	})
 	ctx := reports.ReportRenderContext{ReportMode: reports.ReportModeIncomplete}
 	steps := []runtimeStepQuality{{StepID: "refresh.step1.collect", CoverageObserved: 2}}
@@ -137,6 +220,38 @@ func qualitySignalWorkspace(t *testing.T, overrides map[string]string) workspace
 			"",
 		}, "\n"),
 		"reports/coverage/open-questions.md": "# Open Questions\n\n- `q.owner.payment-api` Who owns payment-api?\n",
+		"proposals/runtime-recommendations.md": strings.Join([]string{
+			"# Runtime Recommendations",
+			"",
+			"## Decision / recommended operator action",
+			"- Add an owner mapping for `finding.owner.missing` on the payment-api service.",
+			"",
+			"## Evidence used",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Proposed changes or follow-up plan",
+			"- Update services/payment/CODEOWNERS with the owning team for the affected service path.",
+			"",
+			"## Risks, gaps, and out-of-scope notes",
+			"- Runtime SLO ownership remains out of scope.",
+			"",
+		}, "\n"),
+		"reports/changelog/runtime-proposals.md": strings.Join([]string{
+			"# Runtime Proposal Changelog",
+			"",
+			"## Updated architecture/proposal surfaces",
+			"- `proposals/runtime-recommendations.md` records the owner mapping action for `finding.owner.missing`.",
+			"",
+			"## Findings/proposals summary",
+			"- `finding.owner.missing` is mapped to a CODEOWNERS follow-up.",
+			"",
+			"## Evidence index or citation references",
+			"- `reports/findings/findings.md`",
+			"",
+			"## Residual coverage gaps",
+			"- Runtime SLO ownership remains out of scope.",
+			"",
+		}, "\n"),
 	}
 	for rel, content := range overrides {
 		files[rel] = content

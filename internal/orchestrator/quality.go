@@ -39,35 +39,37 @@ type runtimeStepQuality struct {
 }
 
 type runQualityTotals struct {
-	Steps                       int `json:"steps"`
-	SemanticEntities            int `json:"semantic_entities"`
-	SemanticEdges               int `json:"semantic_edges"`
-	FindingsCount               int `json:"findings_count"`
-	QuestionsCount              int `json:"questions_count"`
-	CoverageObserved            int `json:"coverage_observed"`
-	CoverageMissing             int `json:"coverage_missing"`
-	WarningsCount               int `json:"warnings_count"`
-	SignalScore                 int `json:"signal_score"`
-	RepairAttempts              int `json:"repair_attempts"`
-	RepairExhausted             int `json:"repair_exhausted"`
-	FreshRetries                int `json:"fresh_retries"`
-	FocusedRepairs              int `json:"focused_repairs"`
-	StallCount                  int `json:"stall_count"`
-	PreArtifactStalls           int `json:"pre_artifact_stalls"`
-	PostArtifactStalls          int `json:"post_artifact_stalls"`
-	ZeroOutputPreArtifactStalls int `json:"zero_output_pre_artifact_stalls"`
-	PartialFailureCount         int `json:"partial_failure_count"`
+	Steps                        int `json:"steps"`
+	SemanticEntities             int `json:"semantic_entities"`
+	SemanticEdges                int `json:"semantic_edges"`
+	FindingsCount                int `json:"findings_count"`
+	QuestionsCount               int `json:"questions_count"`
+	CoverageObserved             int `json:"coverage_observed"`
+	CoverageMissing              int `json:"coverage_missing"`
+	WarningsCount                int `json:"warnings_count"`
+	SignalScore                  int `json:"signal_score"`
+	RepairAttempts               int `json:"repair_attempts"`
+	RepairExhausted              int `json:"repair_exhausted"`
+	FreshRetries                 int `json:"fresh_retries"`
+	FocusedRepairs               int `json:"focused_repairs"`
+	StallCount                   int `json:"stall_count"`
+	PreArtifactStalls            int `json:"pre_artifact_stalls"`
+	PostArtifactStalls           int `json:"post_artifact_stalls"`
+	ValidArtifactControlledStops int `json:"valid_artifact_controlled_stops"`
+	ZeroOutputPreArtifactStalls  int `json:"zero_output_pre_artifact_stalls"`
+	PartialFailureCount          int `json:"partial_failure_count"`
 }
 
 type runtimeRecoveryCounters struct {
-	RepairAttempts              int
-	RepairExhausted             int
-	FreshRetries                int
-	FocusedRepairs              int
-	StallCount                  int
-	PreArtifactStalls           int
-	PostArtifactStalls          int
-	ZeroOutputPreArtifactStalls int
+	RepairAttempts               int
+	RepairExhausted              int
+	FreshRetries                 int
+	FocusedRepairs               int
+	StallCount                   int
+	PreArtifactStalls            int
+	PostArtifactStalls           int
+	ValidArtifactControlledStops int
+	ZeroOutputPreArtifactStalls  int
 }
 
 type runFailureClassification struct {
@@ -176,6 +178,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	totals.StallCount = e.runtimeRecoveryCounters.StallCount
 	totals.PreArtifactStalls = e.runtimeRecoveryCounters.PreArtifactStalls
 	totals.PostArtifactStalls = e.runtimeRecoveryCounters.PostArtifactStalls
+	totals.ValidArtifactControlledStops = e.runtimeRecoveryCounters.ValidArtifactControlledStops
 	totals.ZeroOutputPreArtifactStalls = e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls
 	totals.PartialFailureCount = len(e.partialFailures)
 
@@ -228,6 +231,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		"stall_count":                     totals.StallCount,
 		"pre_artifact_stalls":             totals.PreArtifactStalls,
 		"post_artifact_stalls":            totals.PostArtifactStalls,
+		"valid_artifact_controlled_stops": totals.ValidArtifactControlledStops,
 		"zero_output_pre_artifact_stalls": totals.ZeroOutputPreArtifactStalls,
 		"partial_failure_count":           totals.PartialFailureCount,
 	})
@@ -307,6 +311,10 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 	if diagnosticFieldBool(fields, "zero_output_pre_artifact_stall") {
 		e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls++
 	}
+	if isValidArtifactControlledStopDiagnostic(message, fields) {
+		e.runtimeRecoveryCounters.ValidArtifactControlledStops++
+		return
+	}
 
 	phase := diagnosticFieldString(fields, "stall_phase")
 	if phase == "" || !isActualRuntimeStallDiagnostic(message, fields) {
@@ -323,6 +331,9 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 }
 
 func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool {
+	if isValidArtifactControlledStopDiagnostic(message, fields) {
+		return false
+	}
 	action := diagnosticFieldString(fields, "action")
 	recoveryMode := diagnosticFieldString(fields, "recovery_mode")
 	validationError := diagnosticFieldString(fields, "validation_error")
@@ -332,11 +343,34 @@ func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool 
 	case "retry exhausted":
 		return true
 	case "retry completed":
-		return recoveryMode == "fresh_process_artifact_only"
-	case "focused artifact repair completed", "collect manifest repair completed":
-		return true
+		return recoveryMode == "fresh_process_artifact_only" && !diagnosticArtifactValid(fields)
 	case "focused artifact repair exhausted", "collect manifest repair exhausted":
 		return strings.Contains(validationError, "runtime_stalled")
+	default:
+		return false
+	}
+}
+
+func isValidArtifactControlledStopDiagnostic(message string, fields map[string]any) bool {
+	if message != "provider command finished" {
+		return false
+	}
+	if diagnosticFieldString(fields, "exit_reason") != "stall" {
+		return false
+	}
+	if diagnosticFieldString(fields, "validation_error") != "" {
+		return false
+	}
+	return diagnosticArtifactValid(fields)
+}
+
+func diagnosticArtifactValid(fields map[string]any) bool {
+	if diagnosticFieldBool(fields, "artifact_valid") {
+		return true
+	}
+	switch diagnosticFieldString(fields, "artifact_state") {
+	case "valid", "succeeded", "success":
+		return true
 	default:
 		return false
 	}
@@ -475,6 +509,7 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 				Path:     "reports/findings/findings.md",
 			})
 		}
+		signals = append(signals, proposalsFindingsAlignmentSignals(readRel, findingsText)...)
 	}
 
 	if questionsText, ok := readRel("reports/coverage/open-questions.md"); ok {
@@ -629,6 +664,154 @@ func normalizeCoverageGapText(value string) string {
 
 func findingsReportsNoFindings(text string) bool {
 	return strings.Contains(strings.ToLower(text), "no findings reported.")
+}
+
+type markdownFindingsSummary struct {
+	IDs            []string
+	HighOrMediumID bool
+}
+
+func proposalsFindingsAlignmentSignals(readRel func(string) (string, bool), findingsText string) []runQualitySignal {
+	findings := summarizeMarkdownFindings(findingsText)
+	if len(findings.IDs) == 0 || findingsReportsNoFindings(findingsText) {
+		return nil
+	}
+	proposalText, proposalOK := readRel("proposals/runtime-recommendations.md")
+	changelogText, changelogOK := readRel("reports/changelog/runtime-proposals.md")
+	if !proposalOK && !changelogOK {
+		return nil
+	}
+	combined := strings.Join([]string{proposalText, changelogText}, "\n")
+	signals := []runQualitySignal{}
+	if proposalTextDeniesStructuredFindings(combined) || !artifactTextReferencesAnyFindingID(combined, findings.IDs) {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.proposals_findings_disconnected",
+			Severity: "warning",
+			Message:  "artifact_quality: proposals/changelog are disconnected from non-empty findings",
+			Path:     "proposals/runtime-recommendations.md",
+		})
+	}
+	if findings.HighOrMediumID && !proposalTextHasFindingActionability(combined, findings.IDs) {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.proposals_low_actionability",
+			Severity: "warning",
+			Message:  "artifact_quality: medium/high findings exist but proposals lack finding-linked operator action and affected surface",
+			Path:     "proposals/runtime-recommendations.md",
+		})
+	}
+	return signals
+}
+
+func summarizeMarkdownFindings(text string) markdownFindingsSummary {
+	summary := markdownFindingsSummary{}
+	currentID := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "- id:"):
+			currentID = firstMarkdownFieldValue(trimmed[len("- id:"):])
+			if currentID != "" {
+				summary.IDs = append(summary.IDs, currentID)
+			}
+		case strings.HasPrefix(lower, "- severity:"):
+			severity := strings.ToLower(firstMarkdownFieldValue(trimmed[len("- severity:"):]))
+			if currentID != "" && (severity == "high" || severity == "medium") {
+				summary.HighOrMediumID = true
+			}
+		}
+	}
+	summary.IDs = normalizeOrderedUniqueStrings(summary.IDs)
+	return summary
+}
+
+func firstMarkdownFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	value = strings.Trim(value, "` \t:;,")
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "` \t:;,.")
+}
+
+func proposalTextDeniesStructuredFindings(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no structured finding summary was present",
+		"no structured findings were present",
+		"no structured finding summary",
+		"no source-level architecture change is approved",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactTextReferencesAnyFindingID(text string, findingIDs []string) bool {
+	lower := strings.ToLower(text)
+	for _, id := range findingIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" && strings.Contains(lower, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func proposalTextHasFindingActionability(text string, findingIDs []string) bool {
+	lower := strings.ToLower(text)
+	if !artifactTextReferencesAnyFindingID(text, findingIDs) {
+		return false
+	}
+	actionMarkers := []string{
+		"recommended operator action",
+		"recommended action",
+		"operator action",
+		"follow-up",
+		"follow up",
+		"remediate",
+		"replace",
+		"add ",
+		"update ",
+		"document ",
+		"assign ",
+	}
+	surfaceMarkers := []string{
+		"affected surface",
+		"affected path",
+		"service",
+		"component",
+		"datastore",
+		"runbook",
+		"src/",
+		"services/",
+		"internal/",
+		"cmd/",
+		".go",
+		".yaml",
+		".yml",
+		".ts",
+		".tsx",
+	}
+	return textContainsAny(lower, actionMarkers) && textContainsAny(lower, surfaceMarkers)
+}
+
+func textContainsAny(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func collectStepsObserved(steps []runtimeStepQuality) bool {

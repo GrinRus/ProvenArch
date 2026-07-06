@@ -1688,10 +1688,13 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "stall_count": 0,
         "pre_artifact_stalls": 0,
         "post_artifact_stalls": 0,
+        "valid_artifact_controlled_stops": 0,
         "zero_output_pre_artifact_stalls": 0,
         "partial_failure_count": 0,
         "quality_alerts": 0,
         "issues_counter": Counter(),
+        "excellent_blockers_counter": Counter(),
+        "excellent_blockers_by_step": [],
         "provider_total": Counter(),
         "provider_hard": Counter(),
     }
@@ -1763,6 +1766,7 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             "stall_count",
             "pre_artifact_stalls",
             "post_artifact_stalls",
+            "valid_artifact_controlled_stops",
             "zero_output_pre_artifact_stalls",
             "partial_failure_count",
             "quality_alerts",
@@ -1775,6 +1779,22 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
 
         issues_raw = field(parts, "issues", "")
         issue_tags = [tag.strip() for tag in issues_raw.split(",") if tag.strip() and tag.strip() != "-"]
+        excellent_raw = field(parts, "excellent_blockers", "")
+        excellent_tags = [tag.strip() for tag in excellent_raw.split(",") if tag.strip() and tag.strip() != "-"]
+        if excellent_tags:
+            excellent_counter: Counter = stats["excellent_blockers_counter"]  # type: ignore[assignment]
+            excellent_counter.update(excellent_tags)
+        excellent_steps_raw = field(parts, "excellent_blockers_by_step", "")
+        if excellent_steps_raw:
+            try:
+                decoded_steps = json.loads(excellent_steps_raw)
+            except Exception:
+                decoded_steps = []
+            if isinstance(decoded_steps, list):
+                step_items: list = stats["excellent_blockers_by_step"]  # type: ignore[assignment]
+                for step_item in decoded_steps:
+                    if isinstance(step_item, dict):
+                        step_items.append(step_item)
         runtime_flow_hit = False
         for tag in issue_tags:
             counter: Counter = stats["issues_counter"]  # type: ignore[assignment]
@@ -1793,6 +1813,30 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
             stats["runtime_flow_issue_hits"] = int(stats["runtime_flow_issue_hits"]) + 1
 
     return stats
+
+
+def excellent_blockers_from_stats(stats: dict[str, object]) -> list[str]:
+    counter = Counter()
+    explicit = stats.get("excellent_blockers_counter")
+    if isinstance(explicit, Counter):
+        counter.update(explicit)
+    issues = stats.get("issues_counter")
+    if isinstance(issues, Counter):
+        if int(stats.get("artifact_quality_failed", 0)) > 0 and not counter.get("artifact-quality blockers"):
+            counter["artifact-quality blockers"] = int(stats.get("artifact_quality_failed", 0))
+        issue_map = {
+            "execution:repair-heavy": "runtime_quality.repair_heavy",
+            "execution:repair-exhausted": "runtime_quality.repair_exhausted",
+            "execution:stall-pressure": "runtime_quality.stall_pressure",
+            "execution:partial-failures": "runtime_quality.partial_failures",
+        }
+        for issue, label in issue_map.items():
+            if issues.get(issue, 0) and not counter.get(label):
+                counter[label] = int(issues.get(issue, 0))
+        for issue, count in issues.items():
+            if str(issue).startswith("analysis:") and not counter.get(str(issue)):
+                counter[str(issue)] = int(count)
+    return [f"{name}={count}" for name, count in sorted(counter.items())]
 
 
 def normalize_scope_list(values: object) -> list[str]:
@@ -2049,6 +2093,7 @@ header = [
     "stall_count",
     "pre_artifact_stalls",
     "post_artifact_stalls",
+    "valid_artifact_controlled_stops",
     "zero_output_pre_artifact_stalls",
     "partial_failure_count",
     "quality_alerts",
@@ -2146,6 +2191,8 @@ for rec in records:
         key: row["reasons"]
         for key, row in frontend_rows.items()
     }
+    excellent_blockers = excellent_blockers_from_stats(stats)
+    excellent_blockers_by_step = list(stats.get("excellent_blockers_by_step", []))
 
     shard_plan_invariant = invariant_status_by_batch.get(str(rec["batch_id"]), "not_compared")
     blockers = strict_blockers(
@@ -2212,6 +2259,7 @@ for rec in records:
                 str(stats["stall_count"]),
                 str(stats["pre_artifact_stalls"]),
                 str(stats["post_artifact_stalls"]),
+                str(stats["valid_artifact_controlled_stops"]),
                 str(stats["zero_output_pre_artifact_stalls"]),
                 str(stats["partial_failure_count"]),
                 str(stats["quality_alerts"]),
@@ -2237,7 +2285,7 @@ for rec in records:
         f"{int(stats['runtime_flow_failed']) + int(stats['runtime_flow_issue_hits'])} | "
         f"repair={stats['repair_attempts']}; exhausted={stats['repair_exhausted']}; focused={stats['focused_repairs']}; "
         f"stalls={stats['stall_count']} (pre={stats['pre_artifact_stalls']}; post={stats['post_artifact_stalls']}); "
-        f"zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
+        f"valid_controlled={stats['valid_artifact_controlled_stops']}; zero_pre={stats['zero_output_pre_artifact_stalls']}; partial={stats['partial_failure_count']}; alerts={stats['quality_alerts']} | "
         f"{frontend_statuses['frontend_qwen_status']}/{frontend_statuses['frontend_claude_status']}/{frontend_statuses['frontend_codex_status']} | "
         f"{'; '.join(blockers) if blockers else '-'} | {rec['run_matrix_md']} | {rec['execution_report_md']} |"
     )
@@ -2250,6 +2298,8 @@ for rec in records:
             "status": rec["status"],
             "strict_status": strict_status,
             "blocking_reasons": blockers,
+            "excellent_blockers": excellent_blockers,
+            "excellent_blockers_by_step": excellent_blockers_by_step,
             "shard_plan_invariant": shard_plan_invariant,
             "execution": {
                 "strategy": execution_strategy,
@@ -2279,6 +2329,7 @@ for rec in records:
                 "stall_count": int(stats["stall_count"]),
                 "pre_artifact_stalls": int(stats["pre_artifact_stalls"]),
                 "post_artifact_stalls": int(stats["post_artifact_stalls"]),
+                "valid_artifact_controlled_stops": int(stats["valid_artifact_controlled_stops"]),
                 "zero_output_pre_artifact_stalls": int(stats["zero_output_pre_artifact_stalls"]),
                 "partial_failure_count": int(stats["partial_failure_count"]),
             },
@@ -2309,6 +2360,22 @@ for rec in verdict_records:
             backend_aggregate[key] = backend_aggregate.get(key, 0) + int(value)
         except Exception:
             continue
+matrix_excellent_blockers = [
+    f"{item['profile_id']}/{item['sweep_id']}:{blocker}"
+    for item in verdict_records
+    for blocker in item.get("excellent_blockers", [])
+]
+matrix_excellent_blockers_by_step = [
+    {
+        **step_entry,
+        "profile_id": item["profile_id"],
+        "sweep_id": item["sweep_id"],
+        "batch_id": item["batch_id"],
+    }
+    for item in verdict_records
+    for step_entry in item.get("excellent_blockers_by_step", [])
+    if isinstance(step_entry, dict)
+]
 
 out_md.parent.mkdir(parents=True, exist_ok=True)
 out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
@@ -2365,6 +2432,34 @@ else:
         for blocker in release_contract_blockers:
             verdict_lines.append(f"  - {blocker}")
 
+verdict_lines.extend(["", "## Excellent Blockers"])
+excellent_records = [item for item in verdict_records if item.get("excellent_blockers")]
+if not excellent_records:
+    verdict_lines.append("- none")
+else:
+    for item in excellent_records:
+        verdict_lines.append(
+            f"- {item['profile_id']} / {item['sweep_id']} ({item['batch_id']}): "
+            f"{'; '.join(str(blocker) for blocker in item.get('excellent_blockers', []))}"
+        )
+verdict_lines.extend(["", "## Excellent Blockers By Step"])
+if not matrix_excellent_blockers_by_step:
+    verdict_lines.append("- none")
+else:
+    for step_entry in matrix_excellent_blockers_by_step:
+        verdict_lines.append(
+            "- "
+            f"{step_entry.get('profile_id', '-')}/{step_entry.get('sweep_id', '-')} "
+            f"({step_entry.get('batch_id', '-')}): "
+            f"step={step_entry.get('step_id', '-')}; blocker={step_entry.get('blocker_code', '-')}; "
+            f"repair_attempts={step_entry.get('repair_attempts', 0)}; "
+            f"stall_count={step_entry.get('stall_count', 0)}; "
+            f"valid_artifact_controlled_stops={step_entry.get('valid_artifact_controlled_stops', 0)}; "
+            f"stop_kind={step_entry.get('stop_kind', '-')}; "
+            f"initial_artifact_state={step_entry.get('initial_artifact_state', '-')}; "
+            f"final_validation_class={step_entry.get('final_validation_class', 'unknown')}"
+        )
+
 if release_mode:
     verdict_lines.extend(
         [
@@ -2387,6 +2482,8 @@ if release_mode:
         "strict_pass_runs": len(verdict_records) - strict_fail_count,
         "strict_fail_runs": strict_fail_count,
         "backend": backend_aggregate,
+        "excellent_blockers": matrix_excellent_blockers,
+        "excellent_blockers_by_step": matrix_excellent_blockers_by_step,
         "release_contract": {
             "mode": "release",
             "required_sweeps": required_sweeps,
@@ -2422,6 +2519,8 @@ else:
         "strict_pass_runs": len(verdict_records) - strict_fail_count,
         "strict_fail_runs": strict_fail_count,
         "backend": backend_aggregate,
+        "excellent_blockers": matrix_excellent_blockers,
+        "excellent_blockers_by_step": matrix_excellent_blockers_by_step,
         "selected_providers": selected_providers,
         "selected_run_indexes": selected_run_indexes,
         "blocking_reasons": matrix_blockers,

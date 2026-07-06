@@ -2383,6 +2383,34 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("failed", result.artifact_quality_status)
         self.assertIn("quality:artifact-quality", result.issues)
 
+    def test_python_report_escalates_proposals_findings_disconnect_signal(self) -> None:
+        run_dir = self.root / "run-proposals-findings-disconnect"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality["quality_signals"] = [
+            {
+                "code": "artifact_quality.proposals_findings_disconnected",
+                "severity": "warning",
+                "message": "artifact_quality: proposals ignore non-empty findings",
+            }
+        ]
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertFalse(result.hard_pass)
+        self.assertTrue(result.artifact_quality_failed)
+        self.assertEqual("failed", result.artifact_quality_status)
+        self.assertIn("artifact-quality blockers", result.excellent_blockers)
+        self.assertEqual("Blocked", result.verdict)
+
     def test_python_report_keeps_stall_pressure_non_blocking_but_caps_verdict_label(self) -> None:
         run_dir = self.root / "run-stall-pressure-label"
         self._create_artifact_quality_fixture_run_dir(run_dir)
@@ -2410,7 +2438,168 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.quality_gates_failed)
         self.assertEqual("passed", result.artifact_quality_status)
         self.assertIn("execution:stall-pressure", result.issues)
+        self.assertIn("runtime_quality.stall_pressure", result.excellent_blockers)
         self.assertEqual("Needs review", result.verdict)
+
+    def test_python_report_keeps_repair_heavy_non_blocking_but_caps_verdict_label(self) -> None:
+        run_dir = self.root / "run-repair-heavy-label"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.setdefault("totals", {})["repair_attempts"] = 2
+        write_json(refresh_quality_path, refresh_quality)
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertTrue(result.hard_pass)
+        self.assertIn("execution:repair-heavy", result.issues)
+        self.assertIn("runtime_quality.repair_heavy", result.excellent_blockers)
+        self.assertEqual("Needs review", result.verdict)
+
+    def test_python_report_includes_excellent_blockers_by_step(self) -> None:
+        run_dir = self.root / "run-repair-heavy-step-label"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.setdefault("totals", {})["repair_attempts"] = 2
+        write_json(refresh_quality_path, refresh_quality)
+        write_text(
+            run_dir / "headless/arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"info","kind":"runtime_output","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"provider stdout mentioned unbalanced inline backtick while showing a command"}\n'
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"focused artifact repair scheduled","recovery_stage":"draft_artifact_enrichment",'
+                '"validation_error":"does not link medium/high current-run findings to recommended operator action"}\n'
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"focused artifact repair scheduled","recovery_stage":"draft_artifact_enrichment_markdown_syntax",'
+                '"validation_error":"malformed markdown inline-code"}\n'
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertTrue(result.hard_pass)
+        self.assertEqual("Needs review", result.verdict)
+        self.assertEqual(1, len(result.excellent_blockers_by_step))
+        blocker = result.excellent_blockers_by_step[0]
+        self.assertEqual("refresh.step4.proposals", blocker["step_id"])
+        self.assertEqual("runtime_quality.repair_heavy", blocker["blocker_code"])
+        self.assertEqual(2, blocker["repair_attempts"])
+        self.assertEqual("markdown_syntax", blocker["final_validation_class"])
+        self.assertEqual("repair_retry", blocker["stop_kind"])
+        self.assertIn("does not link medium/high", blocker["first_validation_error_excerpt"])
+
+        report_path = self.root / "reports-step-blockers" / "execution.md"
+        self.module.write_execution_report(report_path, "batch-step-blockers", [result], [], {}, ["qwen-code"])
+        report = report_path.read_text(encoding="utf-8")
+        self.assertIn("## Excellent Blockers By Step", report)
+        self.assertIn("refresh.step4.proposals", report)
+        self.assertIn("runtime_quality.repair_heavy", report)
+        self.assertIn("first_validation_error_excerpt", report)
+
+    def test_python_report_does_not_attribute_controlled_stop_to_repair_heavy_step(self) -> None:
+        run_dir = self.root / "run-repair-heavy-with-controlled-stop"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.setdefault("totals", {})["repair_attempts"] = 2
+        write_json(refresh_quality_path, refresh_quality)
+        write_text(
+            run_dir / "headless/arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step2.asis_docs",'
+                '"message":"retry scheduled","action":"terminate_and_validate",'
+                '"exit_reason":"stall","artifact_valid":true,"artifact_state":"valid","stall_phase":"post_artifact"}\n'
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"focused artifact repair scheduled","recovery_stage":"draft_artifact_enrichment",'
+                '"validation_error":"does not link medium/high current-run findings to recommended operator action"}\n'
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"focused artifact repair scheduled","recovery_stage":"draft_artifact_enrichment_markdown_syntax",'
+                '"validation_error":"malformed markdown inline-code"}\n'
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertIn("runtime_quality.repair_heavy", result.excellent_blockers)
+        blocker_step_ids = {
+            blocker["step_id"]
+            for blocker in result.excellent_blockers_by_step
+            if blocker["blocker_code"] == "runtime_quality.repair_heavy"
+        }
+        self.assertEqual({"refresh.step4.proposals"}, blocker_step_ids)
+
+    def test_python_report_classifies_backticked_id_guidance_as_low_actionability(self) -> None:
+        text = (
+            "does not link medium/high current-run findings to recommended operator action; "
+            "copy IDs from backticked '- ID: `...`' lines in staging/final/reports/findings/findings.md"
+        )
+
+        self.assertEqual("low_actionability", self.module.classify_step_validation_text(text))
+
+    def test_python_report_keeps_placeholder_hint_as_low_actionability(self) -> None:
+        text = (
+            "does not link medium/high current-run findings to recommended operator action; "
+            "do not write synthetic placeholders such as no-current-run-finding-id"
+        )
+
+        self.assertEqual("low_actionability", self.module.classify_step_validation_text(text))
+
+    def test_python_report_attributes_repair_exhausted_to_exact_step(self) -> None:
+        run_dir = self.root / "run-repair-exhausted-step-label"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.setdefault("totals", {})["repair_attempts"] = 1
+        refresh_quality.setdefault("totals", {})["repair_exhausted"] = 1
+        write_json(refresh_quality_path, refresh_quality)
+        write_text(
+            run_dir / "headless/arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            (
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step2.asis_docs",'
+                '"message":"focused artifact repair scheduled","recovery_stage":"draft_artifact_enrichment",'
+                '"validation_error":"manifest shape drift"}\n'
+                '{"level":"warning","run_id":"refresh-run","step_id":"refresh.step4.proposals",'
+                '"message":"focused artifact repair exhausted","recovery_stage":"draft_artifact_enrichment",'
+                '"validation_error":"uses synthetic current-run finding placeholder \\"no-current-run-finding-id\\" despite non-empty current-run findings"}\n'
+            ),
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        exhausted = [
+            blocker
+            for blocker in result.excellent_blockers_by_step
+            if blocker["blocker_code"] == "runtime_quality.repair_exhausted"
+        ]
+        self.assertEqual(1, len(exhausted))
+        self.assertEqual("refresh.step4.proposals", exhausted[0]["step_id"])
+        self.assertEqual("finding_linkage", exhausted[0]["final_validation_class"])
 
     def test_python_report_useful_run_remains_strict_pass(self) -> None:
         run_dir = self.root / "run-useful-pass"
@@ -2434,10 +2623,48 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertFalse(result.artifact_quality_failed)
         self.assertEqual("Excellent", result.verdict)
 
+    def test_python_report_valid_artifact_controlled_stop_can_remain_excellent(self) -> None:
+        run_dir = self.root / "run-valid-controlled-stop"
+        self._create_artifact_quality_fixture_run_dir(run_dir)
+        refresh_quality_path = run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"
+        refresh_quality = json.loads(refresh_quality_path.read_text(encoding="utf-8"))
+        refresh_quality.pop("run_warnings", None)
+        refresh_quality.pop("quality_signals", None)
+        write_json(refresh_quality_path, refresh_quality)
+        write_json(
+            run_dir / "headless/arch-workspace/reports/taskruns/raw/refresh-step2-meta.json",
+            {
+                "task": {"run_id": "refresh-run", "step_id": "refresh.step2.asis_docs"},
+                "diagnostics": {
+                    "provider_lifecycle": {
+                        "exit_reason": "stall",
+                        "artifact_valid": True,
+                        "artifact_state": "valid",
+                        "error": "runtime_stalled_after_artifacts",
+                    }
+                },
+            },
+        )
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+        )
+
+        self.assertTrue(result.hard_pass)
+        self.assertEqual(1, result.valid_artifact_controlled_stops)
+        self.assertNotIn("execution:stall-pressure", result.issues)
+        self.assertNotIn("runtime_quality.stall_pressure", result.excellent_blockers)
+        self.assertEqual([], result.excellent_blockers_by_step)
+        self.assertEqual("Excellent", result.verdict)
+
     def test_python_report_verdict_label_caps_analysis_and_stall_issues(self) -> None:
         self.assertEqual("Needs review", self.module.verdict(100, ["analysis:overview"], True))
         self.assertEqual("Needs review", self.module.verdict(100, ["analysis:findings"], True))
         self.assertEqual("Needs review", self.module.verdict(100, ["execution:stall-pressure"], True))
+        self.assertEqual("Needs review", self.module.verdict(100, ["execution:repair-heavy"], True))
         self.assertEqual("Blocked", self.module.verdict(100, ["quality:artifact-quality"], False))
 
     def test_shell_classifier_reads_taskrun_logs_and_returns_runtime_contract_failed(self) -> None:
@@ -4234,6 +4461,7 @@ class BatchFailureClassificationTest(unittest.TestCase):
         )
         self.assertIn("## Runtime Recovery And Artifact Telemetry", report)
         self.assertIn("- artifact_quality_findings: 0", report)
+        self.assertIn("## Excellent Blockers", report)
         self.assertNotIn("10/10", report)
         self.assertNotIn("2/2", report)
         self.assertNotIn("| claude-code |", report)

@@ -151,7 +151,8 @@ func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activi
 		MonitorPreArtifact: monitorArtifacts,
 	}
 	if acpruntime.IsCollectStep(task.StepID) {
-		policy.PreArtifactStallWindow = 3 * time.Minute
+		policy.PreArtifactStallWindow = 5 * time.Minute
+		policy.RetryPreArtifactStallWindow = 5 * time.Minute
 	}
 	return providercommon.WithCollectArtifactEnrichmentWindow(task, policy)
 }

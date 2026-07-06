@@ -801,6 +801,10 @@ func runtimeDraftTextProposalCompletenessMismatch(text string, draftRoot string,
 		return ""
 	}
 
+	if mismatch := runtimeDraftTextFindingsProposalDisconnect(text, draftRoot, runID, isPrimaryProposal); mismatch != "" {
+		return mismatch
+	}
+
 	counts, ok := readRuntimeDraftShardCompleteness(draftRoot, runID)
 	if ok && counts.planned > 0 && !runtimeDraftTextClaimsShardCompleteness(text, counts) {
 		return fmt.Sprintf("does not report exact current-run proposal shard completeness from typed shard summary: planned=%d succeeded=%d failed=%d incomplete=%d", counts.planned, counts.succeeded, counts.failed, counts.incomplete)
@@ -819,6 +823,304 @@ func runtimeDraftTextProposalCompletenessMismatch(text string, draftRoot string,
 		return runtimeDraftTextProposalChangelogMismatch(text)
 	}
 	return ""
+}
+
+type runtimeDraftFindingSummary struct {
+	ids            []string
+	highOrMediumID bool
+	highMediumIDs  []string
+	severityByID   map[string]string
+}
+
+func runtimeDraftTextFindingsProposalDisconnect(text string, draftRoot string, runID string, requireActionability bool) string {
+	findingsText, ok := readRuntimeDraftCurrentRunFindings(draftRoot, runID)
+	if !ok {
+		return ""
+	}
+	findings := runtimeDraftSummarizeMarkdownFindings(findingsText)
+	if len(findings.ids) == 0 || strings.Contains(strings.ToLower(findingsText), "no findings reported.") {
+		return ""
+	}
+	findingsHint := runtimeDraftFindingIDsHint(findings.ids)
+	highMediumHint := runtimeDraftHighMediumFindingHint(findings)
+	if runtimeDraftTextDeniesStructuredFindings(text) {
+		return "claims no structured finding summary despite non-empty current-run findings" + findingsHint
+	}
+	if placeholder := runtimeDraftTextSyntheticFindingPlaceholder(text); placeholder != "" {
+		return fmt.Sprintf("uses synthetic current-run finding placeholder %q despite non-empty current-run findings", placeholder) + findingsHint
+	}
+	if !runtimeDraftTextReferencesAnyFindingID(text, findings.ids) {
+		return "does not reference any current-run finding ID despite non-empty current-run findings" + findingsHint
+	}
+	if requireActionability && findings.highOrMediumID {
+		if runtimeDraftProposalTextHasActionabilityTable(text, findings.highMediumIDs) {
+			return "uses markdown table for medium/high actionable findings; expected a bullet-only Top Actionable Findings section with one bullet per finding and exact Finding ID, copied Severity value, Affected surface/path, Recommended operator action, and Residual gap all on the same bullet line" + highMediumHint
+		}
+		if !runtimeDraftProposalTextHasFindingActionability(text, findings.highMediumIDs) {
+			return "does not link medium/high current-run findings to recommended operator action and affected surface/path; expected a bullet-only Top Actionable Findings section with one bullet per finding and exact Finding ID, copied Severity value from findings.md, Affected surface/path from Related IDs/Evidence, Recommended operator action, and Residual gap all on the same bullet line" + highMediumHint
+		}
+	}
+	return ""
+}
+
+func runtimeDraftFindingIDsHint(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	limit := len(ids)
+	if limit > 3 {
+		limit = 3
+	}
+	return fmt.Sprintf("; current-run finding IDs include %s; copy IDs from backticked '- ID: `...`' lines in staging/final/reports/findings/findings.md, never from staging/final/reports/findings.md, and do not write synthetic placeholders such as no-current-run-finding-id", strings.Join(ids[:limit], ", "))
+}
+
+func runtimeDraftHighMediumFindingHint(findings runtimeDraftFindingSummary) string {
+	if len(findings.highMediumIDs) == 0 {
+		return runtimeDraftFindingIDsHint(findings.ids)
+	}
+	limit := len(findings.highMediumIDs)
+	if limit > 3 {
+		limit = 3
+	}
+	parts := make([]string, 0, limit)
+	for _, id := range findings.highMediumIDs[:limit] {
+		severity := strings.TrimSpace(findings.severityByID[id])
+		if severity == "" {
+			parts = append(parts, id)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s severity=%s", id, severity))
+	}
+	return fmt.Sprintf("; current-run high/medium findings include %s; copy IDs from backticked '- ID: `...`' lines in staging/final/reports/findings/findings.md, never from staging/final/reports/findings.md, and do not write synthetic placeholders such as no-current-run-finding-id", strings.Join(parts, ", "))
+}
+
+func readRuntimeDraftCurrentRunFindings(draftRoot string, runID string) (string, bool) {
+	cleanDraftRoot := filepath.Clean(strings.TrimSpace(draftRoot))
+	if cleanDraftRoot == "" || cleanDraftRoot == "." || strings.TrimSpace(runID) == "" {
+		return "", false
+	}
+	candidates := []string{
+		filepath.Join(cleanDraftRoot, "reports", "findings", "findings.md"),
+		filepath.Join(cleanDraftRoot, "staging", "final", "reports", "findings", "findings.md"),
+		filepath.Join(cleanDraftRoot, "..", "final", "reports", "findings", "findings.md"),
+		filepath.Join(cleanDraftRoot, "..", "..", "final", "reports", "findings", "findings.md"),
+		filepath.Join(cleanDraftRoot, "..", "..", "..", "staging", "final", "reports", "findings", "findings.md"),
+	}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		raw, err := os.ReadFile(candidate)
+		if err == nil {
+			return string(raw), true
+		}
+	}
+	return "", false
+}
+
+func runtimeDraftSummarizeMarkdownFindings(text string) runtimeDraftFindingSummary {
+	summary := runtimeDraftFindingSummary{
+		severityByID: map[string]string{},
+	}
+	currentID := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "- id:"):
+			currentID = runtimeDraftFirstMarkdownFieldValue(trimmed[len("- id:"):])
+			if currentID != "" {
+				summary.ids = append(summary.ids, currentID)
+			}
+		case strings.HasPrefix(lower, "- severity:"):
+			severity := strings.ToLower(runtimeDraftFirstMarkdownFieldValue(trimmed[len("- severity:"):]))
+			if currentID != "" && severity != "" {
+				summary.severityByID[currentID] = severity
+			}
+			if currentID != "" && (severity == "high" || severity == "medium") {
+				summary.highOrMediumID = true
+				summary.highMediumIDs = append(summary.highMediumIDs, currentID)
+			}
+		}
+	}
+	summary.ids = runtimeDraftUniqueSortedStrings(summary.ids)
+	summary.highMediumIDs = runtimeDraftUniqueSortedStrings(summary.highMediumIDs)
+	return summary
+}
+
+func runtimeDraftFirstMarkdownFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	value = strings.Trim(value, "` \t:;,")
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "` \t:;,.")
+}
+
+func runtimeDraftUniqueSortedStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func runtimeDraftTextDeniesStructuredFindings(text string) bool {
+	lower := strings.ToLower(text)
+	for _, marker := range []string{
+		"no structured finding summary was present",
+		"no structured findings were present",
+		"no structured finding summary",
+		"no source-level architecture change is approved",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftTextSyntheticFindingPlaceholder(text string) string {
+	lower := strings.ToLower(text)
+	for _, marker := range []string{
+		"no-current-run-finding-id",
+		"no structured current-run finding id",
+		"no current-run finding id was available",
+		"no current-run finding id",
+		"finding unavailable",
+	} {
+		if strings.Contains(lower, marker) {
+			return marker
+		}
+	}
+	return ""
+}
+
+func runtimeDraftTextReferencesAnyFindingID(text string, findingIDs []string) bool {
+	lower := strings.ToLower(text)
+	for _, id := range findingIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" && strings.Contains(lower, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftProposalTextHasFindingActionability(text string, findingIDs []string) bool {
+	body, ok := runtimeDraftMarkdownSectionBody(text, runtimeDraftMarkdownSectionSpec{
+		name:         "Top Actionable Findings",
+		alternatives: [][]string{{"top", "actionable", "finding"}},
+	})
+	if !ok {
+		return false
+	}
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !runtimeDraftProposalLineIsBullet(trimmed) {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if !runtimeDraftTextReferencesAnyFindingID(lower, findingIDs) {
+			continue
+		}
+		if !strings.Contains(lower, "finding id") {
+			continue
+		}
+		if !strings.Contains(lower, "severity") || !(strings.Contains(lower, "high") || strings.Contains(lower, "medium")) {
+			continue
+		}
+		if !runtimeDraftTextContainsAny(lower, []string{"affected surface", "affected path", "related ids", "evidence"}) {
+			continue
+		}
+		if !runtimeDraftTextContainsAny(lower, []string{"recommended operator action", "recommended action", "operator action"}) {
+			continue
+		}
+		if !runtimeDraftTextContainsAny(lower, []string{"update ", "add ", "document ", "assign ", "remediate", "replace"}) {
+			continue
+		}
+		if !strings.Contains(lower, "residual gap") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func runtimeDraftProposalLineIsBullet(line string) bool {
+	return strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ")
+}
+
+func runtimeDraftProposalTextHasActionabilityTable(text string, findingIDs []string) bool {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if !strings.Contains(lower, "|") {
+			continue
+		}
+		if !(strings.Contains(lower, "finding id") ||
+			strings.Contains(lower, "recommended operator action") ||
+			strings.Contains(lower, "affected surface") ||
+			strings.Contains(lower, "affected path") ||
+			runtimeDraftTextReferencesAnyFindingID(lower, findingIDs)) {
+			continue
+		}
+		for _, neighborIndex := range []int{i - 1, i + 1} {
+			if neighborIndex < 0 || neighborIndex >= len(lines) {
+				continue
+			}
+			if runtimeDraftLineIsMarkdownTableSeparator(lines[neighborIndex]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func runtimeDraftLineIsMarkdownTableSeparator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.Contains(trimmed, "|") || !strings.Contains(trimmed, "---") {
+		return false
+	}
+	trimmed = strings.Trim(trimmed, "| ")
+	for _, cell := range strings.Split(trimmed, "|") {
+		cell = strings.TrimSpace(cell)
+		if cell == "" {
+			continue
+		}
+		if !regexp.MustCompile(`^:?-{3,}:?$`).MatchString(cell) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeDraftTextContainsAny(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeDraftTextProposalBodyMismatch(text string) string {
@@ -933,6 +1235,9 @@ func runtimeDraftMarkdownBodyHasSubstantiveContent(body string) bool {
 
 func runtimeDraftTextHasDanglingProposalReference(text string) bool {
 	lower := strings.ToLower(text)
+	if runtimeDraftTextHasSubstantiveLinkedProposalContent(lower) {
+		return false
+	}
 	markers := []string{
 		"finding above",
 		"findings above",
@@ -949,6 +1254,32 @@ func runtimeDraftTextHasDanglingProposalReference(text string) bool {
 		}
 	}
 	return false
+}
+
+func runtimeDraftTextHasSubstantiveLinkedProposalContent(lower string) bool {
+	if !strings.Contains(lower, "finding id:") {
+		return false
+	}
+	if !runtimeDraftTextContainsAny(lower, []string{
+		"recommended operator action",
+		"recommended action",
+		"operator action",
+		"proposed changes",
+		"follow-up plan",
+	}) {
+		return false
+	}
+	if !runtimeDraftTextContainsAny(lower, []string{
+		"affected surface",
+		"affected path",
+		"related ids",
+		"evidence",
+	}) {
+		return false
+	}
+	return strings.Contains(lower, "residual gap") ||
+		strings.Contains(lower, "residual coverage gap") ||
+		strings.Contains(lower, "proposal implementation remains unverified")
 }
 
 func runtimeDraftTextHasExplicitNoActionableProposalGap(text string) bool {

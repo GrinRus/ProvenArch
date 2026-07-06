@@ -1407,7 +1407,7 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"The proposed changes/follow-up plan must include at least one concrete operator action",
 		"Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md",
 		"Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0",
-		"write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
+		"write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>` plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 		"Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id",
 		"When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array.",
 		"Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
@@ -1428,7 +1428,14 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"replaced placeholder content",
 		"If staged evidence is sparse, write the gap explicitly",
 		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
+		"staging/final/reports/",
+		"Do not read reports/taskruns/<run_id>/reports/findings/findings.md as the current-run source",
 		"record an explicit no-actionable-proposal gap",
+		"bullet-only Top Actionable Findings section",
+		"Each actionable finding bullet must keep all required fields on the same bullet line",
+		"Do not split one finding across multiple bullets",
+		"Do not use markdown tables for actionable findings",
+		"Do not satisfy high/medium findings with generic inspect/review/decide text only",
 		"Final self-check: both proposal.md and changelog.md were freshly overwritten",
 		"Final markdown must read as an operator-facing architecture/report/proposal artifact",
 		"Final content MUST NOT include these scaffold/recovery markers:",
@@ -1481,6 +1488,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsMarkdownSyntaxRetryHint(t *test
 		"Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
 		"Do not write stale downstream-index availability claims in step2 markdown.",
 		"Do not write generic shard-gap wording when typed shard-summary shows all shards succeeded",
+		"preserve bullet-only Top Actionable Findings format and do not introduce markdown tables",
 		"Final self-check: every markdown line has balanced backticks outside fences",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1604,6 +1612,37 @@ func TestComposeDraftArtifactEnrichmentPromptAddsShardCompletenessCleanupRetryHi
 	} {
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected shard-completeness cleanup retry prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptAddsProposalShardCompletenessCleanupRetryHint(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step4.proposals",
+		StepContract:      "proposals",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/proposals",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/final",
+		ExpectedArtifacts: []string{"proposals-draft-manifest.json"},
+	}
+	err := fmt.Errorf(`runtime draft manifest outputs are invalid: outputs[0].path "proposal.md" does not report exact current-run proposal shard completeness from typed shard summary: planned=10 succeeded=10 failed=0 incomplete=0`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderClaudeCode, task, err)
+	for _, token := range []string{
+		"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+		"does not report exact current-run proposal shard completeness from typed shard summary",
+		"step4 proposal target still omitted exact current-run proposal shard completeness",
+		"special attention to proposal.md",
+		"both proposal.md and changelog.md must contain the exact literal shape planned=<n> succeeded=<n> failed=<n> incomplete=<n>",
+		"explicit no-shard-coverage-blocker statement",
+		"Preserve exact current-run finding IDs",
+		"bullet-only Top Actionable Findings format",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected proposal shard-completeness cleanup retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }
@@ -1844,13 +1883,22 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep4RetryMode(t *testin
 		"execute exactly one bounded filesystem command before any prose",
 		"overwrite every step4 markdown target under draft_final_root before it exits",
 		"Compact evidence set: current proposals-draft-manifest.json, typed shard-plan/shard-summary files listed below, current-run validator/finding/proposal/coverage summaries if present",
+		"reports/taskruns/<run_id>/staging/final/reports/",
+		"do not treat reports/taskruns/<run_id>/reports/* as current-run evidence",
 		summaryPath,
 		"proposal.md -> proposals/runtime-recommendations.md; exact target",
 		"proposal.md must include Decision / recommended operator action",
+		"bullet-only Top Actionable Findings section",
+		"exact Finding ID, copied Severity value from that finding block",
+		"Do not split one finding across multiple bullets",
+		"Do not use markdown tables for actionable findings.",
+		"Generic inspect/review/decide wording is not enough",
 		"changelog.md must include updated architecture/proposal surfaces",
 		"Required proposal/changelog sections must not be empty",
 		"Do not use dangling references like `findings above`",
 		"The proposed changes/follow-up plan must include a concrete evidence-backed operator action",
+		"write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>`",
+		"in both proposal.md and changelog.md",
 		"Previous draft artifact validation failure:",
 	} {
 		if !strings.Contains(prompt, token) {
@@ -1912,11 +1960,17 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCommandTextRetryMode(t *testing
 		"Draft surface initialized",
 		"For step4, overwrite proposal.md and changelog.md.",
 		"For step4 command-text retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files",
+		"reports/taskruns/<run_id>/staging/final/reports/",
+		"do not read reports/taskruns/<run_id>/reports/* as current-run evidence",
 		"If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap",
+		"bullet-only Top Actionable Findings section",
+		"Do not use markdown tables for actionable findings.",
+		"Do not satisfy high/medium findings with generic inspect/review/decide text only",
 		"proposal.md must include Decision / recommended operator action",
 		"changelog.md must include updated architecture/proposal surfaces",
 		"None of those required proposal/changelog sections may be empty",
 		"The proposed changes/follow-up plan must contain at least one concrete operator action",
+		"write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>`",
 		"no-shard-coverage-blocker statement",
 		"Previous draft artifact validation failure:",
 	} {
@@ -2275,14 +2329,17 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 	expectedTokens := []string{
 		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
 		"FIRST AS-IS DRAFT COMMAND:",
-		"write_root='/tmp/write-root'",
-		"draft_root='/tmp/draft-root'",
-		"cat > \"$write_root/asis-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > \"$draft_root/overview.md\" <<'ACP_DRAFT_FILE'",
-		"cat > \"$draft_root/summary.md\" <<'ACP_DRAFT_FILE'",
-		"cat > \"$draft_root/architect-summary.md\" <<'ACP_DRAFT_FILE'",
-		"The first draft artifact set is bootstrap-only",
-		"replace placeholder scaffold text with evidence-backed as-is content",
+		"one bounded evidence-read/write filesystem work unit",
+		"read current-run staged evidence first",
+		"Run one filesystem command as the next action",
+		"AS-IS DRAFT MANIFEST SHAPE GUIDE:",
+		"Exact as-is draft manifest target: \"/tmp/write-root/asis-draft-manifest.json\"",
+		"Exact overview target: \"/tmp/draft-root/overview.md\"",
+		"Exact coverage summary target: \"/tmp/draft-root/summary.md\"",
+		"Exact architect summary target: \"/tmp/draft-root/architect-summary.md\"",
+		`"summary": "Evidence-backed manifest for provider-authored runtime artifacts."`,
+		"Use the FIRST AS-IS DRAFT COMMAND above as an evidence-first write contract",
+		"The first draft artifact set must already be validation-ready",
 		"AS-IS DRAFT MANIFEST CANONICAL SHAPE:",
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
 		`overview.md -> reports/as-is/overview.md`,
@@ -2305,11 +2362,16 @@ func TestComposeArtifactOnlyPromptAddsAsIsDraftCanonicalSection(t *testing.T) {
 	if got := strings.Count(claudePrompt, "FIRST AS-IS DRAFT COMMAND:"); got != 1 {
 		t.Fatalf("expected one as-is first-action command heading, got %d:\n%s", got, claudePrompt)
 	}
-	if got := strings.Count(claudePrompt, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
-		t.Fatalf("expected one as-is manifest heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
-	}
-	if got := strings.Count(claudePrompt, "ACP_DRAFT_FILE"); got != 6 {
-		t.Fatalf("expected three as-is draft file heredocs in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	for _, forbidden := range []string{
+		"ACP_DRAFT_MANIFEST_JSON",
+		"ACP_DRAFT_FILE",
+		"cat >",
+		"The first draft artifact set is bootstrap-only",
+		"Drafted required runtime artifacts for this step",
+	} {
+		if strings.Contains(claudePrompt, forbidden) {
+			t.Fatalf("normal as-is prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, claudePrompt)
+		}
 	}
 }
 
@@ -2403,13 +2465,16 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 	expectedTokens := []string{
 		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
 		"FIRST PROPOSALS DRAFT COMMAND:",
-		"write_root='/tmp/write-root'",
-		"draft_root='/tmp/draft-root'",
-		"cat > \"$write_root/proposals-draft-manifest.json\" <<'ACP_DRAFT_MANIFEST_JSON'",
-		"cat > \"$draft_root/proposal.md\" <<'ACP_DRAFT_FILE'",
-		"cat > \"$draft_root/changelog.md\" <<'ACP_DRAFT_FILE'",
-		"The first proposals draft artifact set is bootstrap-only",
-		"replace placeholder scaffold text with evidence-backed proposal/changelog content",
+		"one bounded evidence-read/write filesystem work unit",
+		"read current-run staged findings/coverage/index evidence first",
+		"Run one filesystem command as the next action",
+		"PROPOSALS DRAFT MANIFEST SHAPE GUIDE:",
+		"Exact proposals draft manifest target: \"/tmp/write-root/proposals-draft-manifest.json\"",
+		"Exact proposal target: \"/tmp/draft-root/proposal.md\"",
+		"Exact changelog target: \"/tmp/draft-root/changelog.md\"",
+		`"summary": "Evidence-backed manifest for provider-authored runtime artifacts."`,
+		"Use the FIRST PROPOSALS DRAFT COMMAND above as an evidence-first write contract",
+		"The first proposals draft artifact set must already be validation-ready",
 		"PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:",
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
@@ -2431,10 +2496,15 @@ func TestComposeArtifactOnlyPromptAddsProposalsDraftCanonicalSection(t *testing.
 	if got := strings.Count(claudePrompt, "FIRST PROPOSALS DRAFT COMMAND:"); got != 1 {
 		t.Fatalf("expected one proposals first-action command heading, got %d:\n%s", got, claudePrompt)
 	}
-	if got := strings.Count(claudePrompt, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
-		t.Fatalf("expected one proposals manifest heredoc in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
-	}
-	if got := strings.Count(claudePrompt, "ACP_DRAFT_FILE"); got != 4 {
-		t.Fatalf("expected two proposals draft file heredocs in normal prompt, got delimiter count %d:\n%s", got, claudePrompt)
+	for _, forbidden := range []string{
+		"ACP_DRAFT_MANIFEST_JSON",
+		"ACP_DRAFT_FILE",
+		"cat >",
+		"The first proposals draft artifact set is bootstrap-only",
+		"Drafted required runtime artifacts for this step",
+	} {
+		if strings.Contains(claudePrompt, forbidden) {
+			t.Fatalf("normal proposals prompt must not contain bootstrap heredoc/scaffold %q:\n%s", forbidden, claudePrompt)
+		}
 	}
 }

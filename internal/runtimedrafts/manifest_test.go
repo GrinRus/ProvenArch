@@ -1090,6 +1090,287 @@ Prioritize the security remediation from ` + "`staging/final/reports/findings/fi
 	}
 }
 
+func TestValidateRequiredManifestRejectsProposalsStructuredFindingDenialWhenFindingsExist(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(draftRoot, "reports", "findings"), 0o755); err != nil {
+		t.Fatalf("mkdir findings root: %v", err)
+	}
+	findings := `# Findings
+
+## Missing owner mapping
+
+- ID: ` + "`finding.owner.missing`" + `
+- Severity: ` + "`medium`" + `
+- Description: payment-api owner mapping is unresolved in repository evidence.
+`
+	if err := os.WriteFile(filepath.Join(draftRoot, "reports", "findings", "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+No structured finding summary was present, so no source-level architecture change is approved.
+
+## Evidence used
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`final-run-index.json`" + `
+
+## Proposed changes or follow-up plan
+- No actionable proposal evidence was present in the current-run findings; keep the proposal queue unchanged.
+
+## Risks, gaps, and out-of-scope notes
+- Ownership evidence remains a residual gap.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` records that no proposal was promoted.
+
+## Findings/proposals summary
+- No structured finding summary was present.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`citation-index.json`" + `
+
+## Residual coverage gaps
+- Ownership evidence remains a residual gap.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Evidence-backed proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected proposals/finding disconnect to be rejected")
+	}
+	if !strings.Contains(err.Error(), "claims no structured finding summary despite non-empty current-run findings") {
+		t.Fatalf("expected structured finding denial error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsSyntheticFindingPlaceholderWhenFindingsExist(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Escalation path is not documented
+
+- ID: ` + "`finding.bank.of.anthos.docs.escalation.path.gap`" + `
+- Severity: ` + "`medium`" + `
+- Related IDs: ` + "`service.bank.ledgerwriter`" + `
+- Description: Operator escalation ownership is not documented in repository evidence.
+- Evidence: ` + "`bank:src/ledgerwriter/README.md`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Document the missing escalation path before promotion.
+
+## Evidence used
+- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`final-run-index.json`" + `
+
+## Top Actionable Findings
+- Finding ID: ` + "`no-current-run-finding-id`" + `; Severity: ` + "`medium`" + `; Affected surface/path: ` + "`bank:src/ledgerwriter/README.md`" + `; Recommended operator action: document the operator escalation path; Residual gap: current-run finding linkage is unavailable.
+
+## Proposed changes or follow-up plan
+- Add escalation-path ownership documentation for the unavailable current-run finding.
+
+## Risks, gaps, and out-of-scope notes
+- Referenced finding: ` + "`no-current-run-finding-id`" + `.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` records follow-up for ` + "`no-current-run-finding-id`" + `.
+
+## Findings/proposals summary
+- The current proposal uses synthetic finding no-current-run-finding-id instead of an exact current-run finding ID.
+
+## Evidence index or citation references
+- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+
+## Residual coverage gaps
+- Finding linkage remains unresolved.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Evidence-backed proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected synthetic current-run finding placeholder to be rejected")
+	}
+	for _, want := range []string{
+		`uses synthetic current-run finding placeholder "no-current-run-finding-id" despite non-empty current-run findings`,
+		"current-run finding IDs include finding.bank.of.anthos.docs.escalation.path.gap",
+		"copy IDs from backticked '- ID: `...`' lines in staging/final/reports/findings/findings.md",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateRequiredManifestPrioritizesProposalFindingLinkageOverShardCompleteness(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	shardSummary := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "domain_id": "bank",
+  "items": [
+    {"shard_id": "bank-root", "status": "succeeded"},
+    {"shard_id": "bank-services", "status": "succeeded"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-bank.json"), []byte(shardSummary), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	findings := `# Findings
+
+## Missing owner mapping
+
+- ID: ` + "`finding.owner.missing`" + `
+- Severity: ` + "`medium`" + `
+- Description: payment-api owner mapping is unresolved in repository evidence.
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Review current findings before source changes.
+
+## Evidence used
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`final-run-index.json`" + `
+
+## Proposed changes or follow-up plan
+- Assign the ownership gap to an operator, then review affected service paths.
+
+## Risks, gaps, and out-of-scope notes
+- Ownership evidence remains a residual gap.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` was updated.
+
+## Findings/proposals summary
+- Current findings require operator review.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`citation-index.json`" + `
+
+## Residual coverage gaps
+- Ownership evidence remains a residual gap.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Evidence-backed proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected proposals/finding disconnect to be rejected")
+	}
+	if strings.Contains(err.Error(), "does not report exact current-run proposal shard completeness") {
+		t.Fatalf("expected finding linkage to be prioritized over shard completeness, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not reference any current-run finding ID") ||
+		!strings.Contains(err.Error(), "current-run finding IDs include finding.owner.missing") {
+		t.Fatalf("expected current-run finding ID hint, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsProposalsBootstrapDraftContent(t *testing.T) {
 	t.Parallel()
 
@@ -1223,6 +1504,367 @@ Proceed with the architecture proposals captured in the current-run shard analys
 		!strings.Contains(err.Error(), "actionable proposal") &&
 		!strings.Contains(err.Error(), "proposal changelog section") {
 		t.Fatalf("expected non-actionable proposal/changelog error, got %v", err)
+	}
+}
+
+func TestValidateRequiredManifestAcceptsMarkdownSafeActionableFindingBullet(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Database recovery procedures are not confirmed
+
+- ID: ` + "`finding.bank.data.recovery.gap`" + `
+- Severity: ` + "`high`" + `
+- Related IDs: ` + "`datastore.bank.accounts.db`" + `, ` + "`datastore.bank.ledger.db`" + `
+- Description: Backup, restore, retention, or recovery procedures are not confirmed.
+- Evidence: ` + "`bank:src/accounts/userservice/README.md`" + `, ` + "`bank:src/ledger/ledger-db/README.md`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Document recovery ownership before publishing the datastore architecture baseline for ` + "`finding.bank.data.recovery.gap`" + `.
+
+## Evidence used
+- Current-run findings: ` + "`reports/findings/findings.md`" + `.
+- Indexed evidence: ` + "`final-run-index.json`" + ` and ` + "`cite.bank.ledger.db.readme`" + `.
+
+## Top Actionable Findings
+- Finding ID: ` + "`finding.bank.data.recovery.gap`" + `; Severity: ` + "`high`" + `; Affected surface/path: ` + "`bank:src/ledger/ledger-db/README.md`" + `; Recommended operator action: document backup, restore, and retention runbook ownership for the ledger datastore; Residual gap: production restore evidence remains unconfirmed.
+
+## Proposed changes or follow-up plan
+- Document the datastore recovery runbook and assign an accountable owner for the ledger/accounts backup and restore procedures cited by ` + "`finding.bank.data.recovery.gap`" + `.
+- Update the runtime proposal backlog for each high or medium current-run finding above until the owner and acceptance evidence are recorded.
+
+## Risks, gaps, and out-of-scope notes
+- Residual gap: production restore test evidence still needs owner confirmation.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` now links ` + "`finding.bank.data.recovery.gap`" + ` to a datastore recovery documentation action.
+
+## Findings/proposals summary
+- ` + "`finding.bank.data.recovery.gap`" + ` is retained as the top high-severity proposal driver.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`cite.bank.ledger.db.readme`" + `
+
+## Residual coverage gaps
+- Restore execution evidence remains a residual coverage gap.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err != nil {
+		t.Fatalf("expected markdown-safe actionable finding bullet to validate: %v", err)
+	}
+}
+
+func TestValidateRequiredManifestRejectsFindingsLinkedButGenericProposal(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Database recovery procedures are not confirmed
+
+- ID: ` + "`finding.bank.data.recovery.gap`" + `
+- Severity: ` + "`high`" + `
+- Related IDs: ` + "`datastore.bank.accounts.db`" + `, ` + "`datastore.bank.ledger.db`" + `
+- Description: Backup, restore, retention, or recovery procedures are not confirmed.
+- Evidence: ` + "`bank:src/accounts/userservice/README.md`" + `, ` + "`bank:src/ledger/ledger-db/README.md`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Proceed with a targeted operator review for ` + "`finding.bank.data.recovery.gap`" + ` before promotion.
+
+## Evidence used
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`final-run-index.json`" + `
+
+## Proposed changes or follow-up plan
+- Inspect ` + "`finding.bank.data.recovery.gap`" + ` and decide whether remediation is needed.
+
+## Risks, gaps, and out-of-scope notes
+- Residual risk remains until the operator makes a disposition.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` was refreshed.
+
+## Findings/proposals summary
+- ` + "`finding.bank.data.recovery.gap`" + ` requires operator disposition.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+
+## Residual coverage gaps
+- Recovery evidence remains unresolved.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected findings-linked but generic proposal to be rejected")
+	}
+	for _, want := range []string{
+		"does not link medium/high current-run findings to recommended operator action and affected surface/path",
+		"bullet-only Top Actionable Findings section",
+		"current-run high/medium findings include finding.bank.data.recovery.gap severity=high",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateRequiredManifestRejectsSplitActionableFindingBullets(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Runtime escalation path is not documented
+
+- ID: ` + "`finding.bank.runtime.escalation.gap`" + `
+- Severity: ` + "`medium`" + `
+- Related IDs: ` + "`svc.bank.ledgerwriter`" + `
+- Description: Runtime escalation ownership is not documented in repository evidence.
+- Evidence: ` + "`bank:src/ledgerwriter/README.md`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Document escalation ownership before publishing ` + "`finding.bank.runtime.escalation.gap`" + `.
+
+## Evidence used
+- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+
+## Top Actionable Findings
+- Finding ID: ` + "`finding.bank.runtime.escalation.gap`" + `; Severity: ` + "`medium`" + `; Affected surface/path: ` + "`svc.bank.ledgerwriter`" + `
+- Description: Runtime escalation ownership is missing; Recommended operator action: document the service owner and escalation path; Residual gap: production incident ownership remains unconfirmed.
+
+## Proposed changes or follow-up plan
+- Document the service owner and escalation path for ` + "`finding.bank.runtime.escalation.gap`" + `.
+
+## Risks, gaps, and out-of-scope notes
+- Residual gap: production evidence remains unconfirmed.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` now references ` + "`finding.bank.runtime.escalation.gap`" + `.
+
+## Findings/proposals summary
+- ` + "`finding.bank.runtime.escalation.gap`" + ` requires an owner/escalation proposal update.
+
+## Evidence index or citation references
+- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+
+## Residual coverage gaps
+- Production escalation evidence remains unconfirmed.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected split actionable finding bullets to be rejected")
+	}
+	for _, want := range []string{
+		"does not link medium/high current-run findings to recommended operator action and affected surface/path",
+		"all on the same bullet line",
+		"current-run high/medium findings include finding.bank.runtime.escalation.gap severity=medium",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateRequiredManifestRejectsActionableFindingMarkdownTable(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Database recovery procedures are not confirmed
+
+- ID: ` + "`finding.bank.data.recovery.gap`" + `
+- Severity: ` + "`high`" + `
+- Related IDs: ` + "`datastore.bank.ledger.db`" + `
+- Description: Backup, restore, retention, or recovery procedures are not confirmed.
+- Evidence: ` + "`bank:src/ledger/ledger-db/README.md`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Document recovery ownership before publishing ` + "`finding.bank.data.recovery.gap`" + `.
+
+## Evidence used
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`final-run-index.json`" + `
+
+## Top Actionable Findings
+| Finding ID | Severity | Affected surface/path | Recommended operator action | Residual gap |
+|---|---|---|---|---|
+| ` + "`finding.bank.data.recovery.gap`" + ` | high | ` + "`bank:src/ledger/ledger-db/README.md`" + ` | document backup and restore runbook ownership | restore evidence unconfirmed |
+
+## Proposed changes or follow-up plan
+- Document the recovery runbook for ` + "`finding.bank.data.recovery.gap`" + `.
+
+## Risks, gaps, and out-of-scope notes
+- Restore execution evidence remains a residual gap.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` links ` + "`finding.bank.data.recovery.gap`" + `.
+
+## Findings/proposals summary
+- ` + "`finding.bank.data.recovery.gap`" + ` remains the proposal driver.
+
+## Evidence index or citation references
+- ` + "`reports/findings/findings.md`" + `
+
+## Residual coverage gaps
+- Restore execution evidence remains a residual gap.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected actionable markdown table to be rejected")
+	}
+	if !strings.Contains(err.Error(), "uses markdown table for medium/high actionable findings") {
+		t.Fatalf("expected markdown table rejection, got %v", err)
 	}
 }
 

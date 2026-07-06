@@ -3,6 +3,7 @@ package steppolicy
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -46,6 +47,10 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use only existing repo entrypoint hints; do not assume README.md exists when it is not present.`,
 			`- After the first useful evidence pass, converge to constitution drafts instead of continuing a broad repo sweep.`,
+			`- Same provider turn requirement: after the first constitution draft skeleton exists, the very next filesystem action must do a bounded repository-entrypoint evidence read and fresh-overwrite charter-overview.md before any final answer, status note, or optional extra analysis.`,
+			`- Do not answer with "I will read", "I will rewrite", "ready for repair", or similar analysis-only text between the skeleton write and the enriched charter-overview.md overwrite.`,
+			`- charter-overview.md must only use workspace/charter/repository-entrypoint evidence. Do not mention later collection steps, later analysis, future pipeline passes, downstream checks, collected shards, validator output, final indexes, citations, proposal artifacts, runtime repair, providers, or taskrun mechanics.`,
+			`- Express unknowns as "not confirmed in the current constitution evidence" instead of pointing to later/downstream pipeline stages.`,
 			`- constitution-draft.json must use the runtime draft manifest contract exactly; legacy constitution schemas are forbidden.`,
 			`- This is a draft-only step; do not invent semantic entities, edges, findings, or questions on stdout.`,
 		}, "\n")
@@ -95,9 +100,13 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT delegate to agent/subagent helpers.`,
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use staged final evidence from read_context_roots; do not treat sibling baseline workspaces, prior draft manifests, or prior reports as template sources.`,
+			`- Evidence-first draft requirement: the first filesystem work unit must read bounded current-run staged evidence and then write asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md before any final answer, status note, or optional extra analysis.`,
+			`- Do not write bootstrap-only as-is markdown as the normal happy path; first-pass drafts must already be evidence-backed or must state explicit evidence-backed insufficiency tied to current-run coverage/questions.`,
+			`- Do not answer with "I will read", "I will rewrite", "I have enough evidence", "ready for repair", or similar analysis-only text before the evidence-backed as-is draft write.`,
+			`- When current-run typed shard-plan/shard-summary evidence is visible, summary.md must include exact planned/succeeded/failed/incomplete counts before successful exit.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for asis-draft-manifest.json.`,
 			`- Keep step_contract exactly "as_is"; null, empty, or alternate values are invalid.`,
-			`- The first authored draft set must include asis-draft-manifest.json plus overview.md, summary.md, and architect-summary.md under draft_final_root.`,
+			`- The first authored draft set must include asis-draft-manifest.json plus validation-ready overview.md, summary.md, and architect-summary.md under draft_final_root.`,
 			`- Do NOT register legacy metadata envelopes or repo_scopes/path_scopes fields in asis-draft-manifest.json.`,
 		}, "\n")
 	case "init.step3.findings", "refresh.step3.findings":
@@ -120,6 +129,10 @@ func StepSpecificPolicy(stepID string) string {
 			`- Do NOT delegate to agent/subagent helpers.`,
 			`- Do NOT use todo_write-style planning or long plan narration.`,
 			`- Use validated staged final evidence from read_context_roots; do not treat prior proposal reports or final indexes as manifest templates.`,
+			`- Evidence-first draft requirement: the first filesystem work unit must read bounded current-run findings/coverage/index evidence and then write proposals-draft-manifest.json plus proposal.md and changelog.md before any final answer, status note, or optional extra analysis.`,
+			`- Do not write bootstrap-only proposal/changelog markdown as the normal happy path; first-pass drafts must already be evidence-backed or must state explicit evidence-backed insufficiency tied to validator findings/coverage.`,
+			`- Do not answer with "I will read", "I will rewrite", "I have enough evidence", "ready for repair", or similar analysis-only text before the evidence-backed proposal/changelog draft write.`,
+			`- If current-run staged final reports/findings/findings.md contains finding IDs, proposal.md and changelog.md must cite at least one exact current-run finding ID before successful exit.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for proposals-draft-manifest.json.`,
 			`- Keep step_contract exactly "proposals"; null, empty, or alternate values are invalid.`,
 			`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/*.`,
@@ -213,6 +226,9 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write the referenced draft files exactly at draft_final_root/charter-overview.md and draft_final_root/baseline-subagents.yaml.`,
 			`- Do NOT place the draft files under draft_final_root/charter/ or draft_final_root/skills/; those are canonical publish paths, not draft file locations.`,
 			`- The first constitution draft artifact set is bootstrap-only; before final exit, replace placeholder scaffold text in charter-overview.md with evidence-backed charter content from the configured repository scope and charter wizard contract when available.`,
+			`- Same provider turn requirement: do not wait for focused repair; run a bounded repository-entrypoint enrichment rewrite of charter-overview.md in this normal turn before successful exit.`,
+			`- Final charter-overview.md must not mention later collection steps, later analysis, future pipeline passes, downstream checks, collected shards, validator output, final indexes, citations, proposal artifacts, runtime repair, providers, or taskrun mechanics.`,
+			`- Express unknowns as current constitution evidence gaps, not as work delegated to later/downstream steps.`,
 			`- If constitution-draft.json already describes the publish surface, stop only after confirming charter-overview.md is not an unchanged bootstrap placeholder; baseline-subagents.yaml may remain the baseline bundle.`,
 			`- constitution-draft.json must use the exact runtime draft manifest shape shown below; do not emit legacy constitution schemas.`,
 			`- outputs[] must map charter-overview.md -> charter/overview.md and baseline-subagents.yaml -> skills/subagents.yaml exactly.`,
@@ -294,13 +310,15 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 		lines = append(lines,
 			`- Write asis-draft-manifest.json in write_root.`,
 			`- Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
-			`- Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set; do not wait for broad analysis before creating the required files.`,
-			`- The first draft artifact set is bootstrap-only; after it exists, enrich overview.md, summary.md, and architect-summary.md from staged final evidence.`,
-			`- Before successful exit, replace placeholder scaffold text with evidence-backed as-is content or state evidence-backed insufficiency tied to coverage/questions.`,
+			`- Use the FIRST AS-IS DRAFT COMMAND above as an evidence-first write contract, not as a bootstrap placeholder command.`,
+			`- The first draft artifact set must already be validation-ready: read bounded staged evidence first, then write the manifest and all three markdown targets in the same filesystem work unit.`,
+			`- Same provider turn requirement: the normal turn must write all three markdown targets with bounded evidence-backed content before successful exit.`,
+			`- Before successful exit, ensure the first-pass content is evidence-backed as-is content or explicit evidence-backed insufficiency tied to coverage/questions.`,
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
-			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are validation-ready and not bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
 		)
+		lines = append(lines, currentRunEvidenceIndexLines(task, currentRunEvidenceAsIs)...)
 		lines = append(lines, artifactquality.AsIsDraftManifestContractLines()...)
 		lines = append(lines,
 			`- Canonical as-is draft fragment below is normative for field names, step_contract, and required outputs; copy keys/types exactly and only change IDs/content.`,
@@ -312,11 +330,23 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Write proposals-draft-manifest.json in write_root.`,
 			`- Draft final docs only under draft_final_root.`,
 			`- Allowed canonical targets are proposals/* and reports/changelog/*.`,
-			`- The first proposals draft artifact set is bootstrap-only; after it exists, enrich proposal/changelog drafts from validated staged evidence.`,
-			`- Before successful exit, replace placeholder scaffold text with evidence-backed proposal/changelog content or state evidence-backed insufficiency tied to validator findings/coverage.`,
-			`- If proposals-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are not unchanged bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
+			`- Use the FIRST PROPOSALS DRAFT COMMAND above as an evidence-first write contract, not as a bootstrap placeholder command.`,
+			`- The first proposals draft artifact set must already be validation-ready: read current-run findings/coverage/index evidence first, then write the manifest, proposal.md, and changelog.md in the same filesystem work unit.`,
+			`- Same provider turn requirement: the normal turn must write proposal.md and changelog.md with bounded evidence-backed content before successful exit.`,
+			`- Enrichment must read current-run staged final surfaces when visible: reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, reports/taskruns/<run_id>/staging/final/reports/coverage/summary.md, final-run-index.json, citation-index.json, and typed shard summary.`,
+			`- Do NOT look for current-run findings at reports/taskruns/<run_id>/reports/findings/findings.md; the current-run promoted proposal evidence lives under staging/final before publish.`,
+			"- Do NOT shorten the findings path to staging/final/reports/findings.md; the file is nested at staging/final/reports/findings/findings.md. IDs are usually backticked in lines like - ID: `finding.example`; strip the backticks and copy the exact ID. Never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			`- If current-run findings are non-empty, proposal/changelog drafts must cite current-run finding IDs and include severity summary, top actionable findings, affected surfaces/paths, recommended operator action, and residual gaps.`,
+			`- If current-run findings include high or medium severity, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding. Each bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from the finding block, Affected surface/path from Related IDs/Evidence, Recommended operator action using a concrete operator verb, and Residual gap.`,
+			"- Do NOT split one finding across multiple bullets; a separate Description bullet after a Finding ID bullet does not satisfy actionability. Do NOT write Severity: unspecified for any finding that has a - Severity: field; copy high/medium/low exactly from findings.md. Example bullet: - Finding ID: `finding.example`; Severity: `medium`; Affected surface/path: `svc.example` / `repo:path`; Recommended operator action: document the owner and escalation path; Residual gap: production evidence remains unconfirmed.",
+			`- Do not use markdown tables for actionable findings; tables are rejected because they have repeatedly produced malformed live markdown.`,
+			`- Do NOT satisfy high/medium findings with generic inspect/review/decide wording only, and do NOT cite only low-severity findings when high/medium findings are present.`,
+			`- Do NOT claim structured findings are absent when current-run findings.md contains finding IDs.`,
+			`- Before successful exit, ensure the first-pass content is evidence-backed proposal/changelog content or explicit evidence-backed insufficiency tied to validator findings/coverage.`,
+			`- If proposals-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are validation-ready and not bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Promotion remains deterministic; your drafts become publish candidates only after compile/publish gates.`,
 		)
+		lines = append(lines, currentRunEvidenceIndexLines(task, currentRunEvidenceProposals)...)
 		lines = append(lines, artifactquality.ProposalsDraftManifestContractLines()...)
 		lines = append(lines,
 			`- Canonical proposals draft fragment below is normative for field names, step_contract, and allowed publish surface; copy keys/types exactly and only change IDs/content.`,
@@ -439,6 +469,8 @@ func ConstitutionFirstActionSection(task acpruntime.Task) string {
 		"CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:",
 		"- This constitution step must start by writing constitution-draft.json and its referenced draft files before broad workspace analysis.",
 		"- The heredoc charter overview is bootstrap-only; replace it with evidence-backed charter content before successful exit.",
+		"- Same provider turn requirement: after this skeleton command succeeds, immediately run bounded repo-entrypoint enrichment and fresh-overwrite charter-overview.md before final success.",
+		"- Final charter-overview.md must express unknowns as current constitution evidence gaps; do not write later collection steps, later analysis, future pipeline passes, downstream checks, collected shards, validator output, final indexes, citations, proposal artifacts, runtime repair, providers, or taskrun mechanics.",
 		fmt.Sprintf(`- Exact constitution draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
 		"FIRST CONSTITUTION DRAFT COMMAND:",
@@ -454,17 +486,35 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		return ""
 	}
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), runtimedrafts.AsIsManifestFile)
-	return strings.Join([]string{
+	lines := []string{
 		"AS-IS FIRST-ACTION DRAFT ARTIFACTS:",
-		"- This as-is step must start by writing asis-draft-manifest.json and its referenced draft files before broad as-is assembly.",
-		"- The first draft artifact set is bootstrap-only; replace placeholder scaffold text with evidence-backed as-is content before successful exit.",
+		"- This as-is step must start with one bounded evidence-read/write filesystem work unit, not with a bootstrap-only draft.",
+		"- The first filesystem work unit must read current-run staged evidence first, write overview.md, summary.md, and architect-summary.md under draft_final_root, then write asis-draft-manifest.json last before returning.",
+		"- Do not create, write, touch, or leave asis-draft-manifest.json as a standalone first artifact; a manifest-only first write before markdown is invalid and may be classified as pre-artifact stall.",
+		"- Same provider turn requirement: do not send any final answer, status note, or analysis-only prose before those validation-ready markdown files exist.",
+		"- overview.md must contain concrete repo/path, citation, or staged artifact refs when evidence exists; summary.md must include exact shard counts when typed shard status is visible; architect-summary.md must include decision-ready operator cues.",
+		"- If evidence is sparse, write explicit evidence-backed insufficiency tied to current-run coverage/questions instead of generic placeholder text.",
 		fmt.Sprintf(`- Exact as-is draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- Exact overview target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "overview.md")),
+		fmt.Sprintf(`- Exact coverage summary target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "summary.md")),
+		fmt.Sprintf(`- Exact architect summary target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "architect-summary.md")),
 		"FIRST AS-IS DRAFT COMMAND:",
-		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect sibling taskruns, prior reports, or raw logs before this command:",
-		"After the first draft set exists, enrich the draft files from staged final evidence or explicitly state evidence-backed insufficiency; do not leave generic draft placeholder text as final content.",
-		RuntimeDraftFirstActionWriteCommand(task),
-	}, "\n")
+		"Run one filesystem command as the next action. In that command, perform only a bounded current-run evidence read/list, write all three markdown targets first, then write the manifest last before returning.",
+		"Do not run a separate read-only preflight, broad repo sweep, sibling taskrun inspection, prior-report templating, or analysis-only response before the writes.",
+		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing markdown from observed evidence instead of copying scaffold prose.",
+		"AS-IS DRAFT MANIFEST SHAPE GUIDE:",
+		strings.TrimSpace(RuntimeDraftManifestShapeGuide(task)),
+	}
+	lines = append(lines, currentRunEvidenceIndexLines(task, currentRunEvidenceAsIs)...)
+	lines = append(lines,
+		"AS-IS FIRST-PASS SELF-CHECK:",
+		"- asis-draft-manifest.json exists under write_root and uses step_contract=\"as_is\".",
+		"- overview.md, summary.md, and architect-summary.md exist under draft_final_root.",
+		"- The first write set was not manifest-only: all three markdown targets were created before or in the same command as the final manifest write.",
+		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func RuntimeDraftFirstActionWriteCommand(task acpruntime.Task) string {
@@ -516,17 +566,502 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		return ""
 	}
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), runtimedrafts.ProposalsManifestFile)
-	return strings.Join([]string{
+	lines := []string{
 		"PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:",
-		"- This proposals step must start by writing proposals-draft-manifest.json and its referenced draft files before broad proposal analysis.",
-		"- The first proposals draft artifact set is bootstrap-only; replace placeholder scaffold text with evidence-backed proposal/changelog content before successful exit.",
+		"- This proposals step must start with one bounded evidence-read/write filesystem work unit, not with a bootstrap-only draft.",
+		"- The first filesystem work unit must read current-run staged findings/coverage/index evidence first, write proposal.md and changelog.md under draft_final_root, then write proposals-draft-manifest.json last before returning.",
+		"- Do not create, write, touch, or leave proposals-draft-manifest.json as a standalone first artifact; a manifest-only first write before proposal/changelog markdown is invalid and may be classified as pre-artifact stall.",
+		"- Same provider turn requirement: do not send any final answer, status note, or analysis-only prose before those validation-ready markdown files exist.",
+		"- In that first work unit, read current-run staged final findings and coverage under reports/taskruns/<run_id>/staging/final/reports/*, plus final-run-index.json, citation-index.json, and typed shard summary if visible; link non-empty findings to proposal/changelog content by finding ID.",
+		"- When typed shard-summary items[] is visible, proposal.md and changelog.md must both contain the exact literal shard completeness shape planned=<n> succeeded=<n> failed=<n> incomplete=<n>; if failed=0 and incomplete=0, both files must also state an explicit no-shard-coverage-blocker.",
+		"- The exact findings file is reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, not reports/taskruns/<run_id>/staging/final/reports/findings.md. Copy IDs from backticked - ID: lines and never emit no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+		"- proposal.md must contain non-empty sections named Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes.",
+		"- changelog.md must contain non-empty sections named Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps.",
+		"- For high/medium findings, include a bullet-only Top Actionable Findings section with one bullet per finding and all required fields on that same bullet line: exact Finding ID, copied Severity value from the finding block, Affected surface/path from Related IDs/Evidence, Recommended operator action, and Residual gap.",
+		"- Do not split one finding across multiple bullets; do not write Severity: unspecified when findings.md has a - Severity: field; copy the exact high/medium/low value from that finding.",
+		"- Do not use markdown tables for actionable findings.",
 		fmt.Sprintf(`- Exact proposals draft manifest target: %q.`, manifestTarget),
 		fmt.Sprintf(`- Draft files must be written only under draft_final_root: %q.`, strings.TrimSpace(task.DraftFinalRoot)),
+		fmt.Sprintf(`- Exact proposal target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "proposal.md")),
+		fmt.Sprintf(`- Exact changelog target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
 		"FIRST PROPOSALS DRAFT COMMAND:",
-		"Run this exact shell command as the next filesystem action; do not manually retype paths, rewrite slash-separated path components, inspect repository files, inspect sibling taskruns, or inspect raw logs before this command:",
-		"After the first proposal draft set exists, enrich it from validated staged evidence or explicitly state evidence-backed insufficiency; do not leave generic draft placeholder text as final content.",
-		RuntimeDraftFirstActionWriteCommand(task),
-	}, "\n")
+		"Run one filesystem command as the next action. In that command, perform only a bounded current-run evidence read/list, write proposal.md and changelog.md first with all required sections, then write the manifest last before returning.",
+		"Do not run a separate read-only preflight, broad repo sweep, sibling taskrun inspection, prior-proposal templating, or analysis-only response before the writes.",
+		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing proposal/changelog markdown from observed evidence instead of copying scaffold prose.",
+		"PROPOSALS DRAFT MANIFEST SHAPE GUIDE:",
+		strings.TrimSpace(RuntimeDraftManifestShapeGuide(task)),
+	}
+	lines = append(lines, currentRunEvidenceIndexLines(task, currentRunEvidenceProposals)...)
+	lines = append(lines,
+		"PROPOSALS FIRST-PASS SELF-CHECK:",
+		"- proposals-draft-manifest.json exists under write_root and uses step_contract=\"proposals\".",
+		"- proposal.md and changelog.md exist under draft_final_root.",
+		"- The first write set was not manifest-only: proposal.md and changelog.md were created before or in the same command as the final manifest write.",
+		"- proposal.md contains Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes.",
+		"- changelog.md contains Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps.",
+		"- If typed shard completeness is visible, proposal.md and changelog.md both include the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal and no-shard-coverage-blocker statement when there are no failed or incomplete shards.",
+		"- If findings.md has any - ID: lines, both markdown targets cite at least one exact current-run finding ID.",
+		"- No markdown target says structured findings are absent when findings.md is non-empty, and no target uses synthetic finding placeholders.",
+		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",
+	)
+	return strings.Join(lines, "\n")
+}
+
+type currentRunEvidenceKind string
+
+const (
+	currentRunEvidenceAsIs      currentRunEvidenceKind = "as_is"
+	currentRunEvidenceProposals currentRunEvidenceKind = "proposals"
+)
+
+func currentRunEvidenceIndexLines(task acpruntime.Task, kind currentRunEvidenceKind) []string {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	evidence := currentRunEvidenceIndex(task, kind)
+	lines := []string{
+		"- Current-run staged evidence index: read these exact public artifact files when present inside the first evidence-first write command before writing final markdown.",
+	}
+	for _, item := range evidence {
+		if item.Path == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf(`  - %s: %q`, item.Label, item.Path))
+	}
+	if completenessLine := currentRunShardCompletenessPromptLine(task); completenessLine != "" {
+		lines = append(lines, completenessLine)
+	}
+	if kind == currentRunEvidenceAsIs {
+		lines = append(lines,
+			`- As-is enrichment must use the typed shard plan/summary, shard-pack-manifest summaries, final-run-index.json, and citation-index.json when visible.`,
+			`- summary.md must state exact shard completeness counts in this literal shape when evidence is visible: planned=<n> succeeded=<n> failed=<n> incomplete=<n>.`,
+			`- overview.md and architect-summary.md must cite concrete repo/path or staged citation/index references from the current run, not generic scaffold language.`,
+		)
+	} else {
+		lines = append(lines,
+			fmt.Sprintf(`- Exact current-run findings source: reports/taskruns/%s/staging/final/reports/findings/findings.md. Read that file when present and copy at least one exact finding ID into proposal.md and changelog.md when findings are non-empty.`, runID),
+			`- proposal.md and changelog.md must both state exact shard completeness in this literal shape when typed shard evidence is visible: planned=<n> succeeded=<n> failed=<n> incomplete=<n>. If failed=0 and incomplete=0, both files must state an explicit no-shard-coverage-blocker.`,
+			`- Do not use synthetic finding placeholders; if findings.md has - ID: lines, proposal/changelog linkage must use one of those exact IDs.`,
+			`- High/medium findings require one bullet per finding, with Finding ID, Severity, Affected surface/path, Recommended operator action, and Residual gap all on the same bullet line.`,
+		)
+		if findingPreviewLine := currentRunFindingsPreviewPromptLine(task); findingPreviewLine != "" {
+			lines = append(lines, findingPreviewLine)
+		}
+	}
+	return lines
+}
+
+type currentRunEvidenceItem struct {
+	Label string
+	Path  string
+}
+
+func currentRunEvidenceIndex(task acpruntime.Task, kind currentRunEvidenceKind) []currentRunEvidenceItem {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	items := []currentRunEvidenceItem{}
+	add := func(label, path string) {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" {
+			return
+		}
+		for _, existing := range items {
+			if existing.Label == label && existing.Path == path {
+				return
+			}
+		}
+		items = append(items, currentRunEvidenceItem{Label: label, Path: path})
+	}
+	for _, rel := range []struct {
+		label string
+		path  string
+	}{
+		{"final-run-index", "final-run-index.json"},
+		{"citation-index", "citation-index.json"},
+		{"coverage-summary", "reports/coverage/summary.md"},
+	} {
+		if path := firstExistingStagedFinalPath(task, rel.path); path != "" {
+			add(rel.label, path)
+		}
+	}
+	if kind == currentRunEvidenceProposals {
+		if path := firstExistingStagedFinalPath(task, "reports/findings/findings.md"); path != "" {
+			add("findings", path)
+		}
+	} else {
+		if path := firstExistingStagedFinalPath(task, "reports/findings/findings.md"); path != "" {
+			add("findings", path)
+		}
+	}
+	for _, path := range existingTaskrunGlob(task, []string{
+		runID + "*shard-summary*.json",
+		runID + "*shard-plan*.json",
+		runID + "*typed*summary*.json",
+		runID + "*typed*plan*.json",
+	}) {
+		add("typed-shard-evidence", path)
+	}
+	for _, path := range existingShardManifestPaths(task, 6) {
+		add("shard-pack-manifest", path)
+	}
+	if len(items) == 0 {
+		add("expected-staged-final-root", fmt.Sprintf("reports/taskruns/%s/staging/final", runID))
+		add("expected-typed-shard-summary", fmt.Sprintf("reports/taskruns/%s-*-shard-summary-*.json", runID))
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Label == items[j].Label {
+			return items[i].Path < items[j].Path
+		}
+		return items[i].Label < items[j].Label
+	})
+	return items
+}
+
+func currentRunShardCompletenessPromptLine(task acpruntime.Task) string {
+	path, counts, ok := currentRunShardCompleteness(task)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(
+		`- Current-run typed shard completeness observed from %q: planned=%d succeeded=%d failed=%d incomplete=%d. Copy this exact literal into summary/proposal text when shard status is mentioned.`,
+		filepath.ToSlash(path),
+		counts.Planned,
+		counts.Succeeded,
+		counts.Failed,
+		counts.Incomplete,
+	)
+}
+
+type currentRunShardCompletenessCounts struct {
+	Planned    int
+	Succeeded  int
+	Failed     int
+	Incomplete int
+}
+
+func currentRunShardCompleteness(task acpruntime.Task) (string, currentRunShardCompletenessCounts, bool) {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	for _, candidate := range existingTaskrunGlob(task, []string{
+		runID + "*shard-summary*.json",
+		runID + "*typed*summary*.json",
+	}) {
+		raw, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		var summary struct {
+			Items []struct {
+				Status string `json:"status"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(raw, &summary); err != nil || len(summary.Items) == 0 {
+			continue
+		}
+		counts := currentRunShardCompletenessCounts{Planned: len(summary.Items)}
+		for _, item := range summary.Items {
+			switch strings.ToLower(strings.TrimSpace(item.Status)) {
+			case "succeeded", "success", "passed":
+				counts.Succeeded++
+			case "failed", "error":
+				counts.Failed++
+			default:
+				counts.Incomplete++
+			}
+		}
+		return candidate, counts, true
+	}
+	return "", currentRunShardCompletenessCounts{}, false
+}
+
+func currentRunFindingsPreviewPromptLine(task acpruntime.Task) string {
+	path := firstExistingStagedFinalPath(task, "reports/findings/findings.md")
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	findings := summarizePromptMarkdownFindings(string(raw), 5)
+	if len(findings) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		`- Visible current-run finding IDs from %q include %s. Proposal/changelog drafts must copy exact IDs; high/medium IDs require Top Actionable Findings bullets.`,
+		filepath.ToSlash(path),
+		strings.Join(findings, ", "),
+	)
+}
+
+func summarizePromptMarkdownFindings(text string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	type finding struct {
+		id       string
+		severity string
+	}
+	findings := []finding{}
+	currentID := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "- id:"):
+			currentID = promptMarkdownFieldValue(trimmed[len("- id:"):])
+			if currentID != "" {
+				findings = append(findings, finding{id: currentID})
+			}
+		case strings.HasPrefix(lower, "- severity:") && currentID != "":
+			severity := strings.ToLower(promptMarkdownFieldValue(trimmed[len("- severity:"):]))
+			for idx := range findings {
+				if findings[idx].id == currentID {
+					findings[idx].severity = severity
+					break
+				}
+			}
+		}
+	}
+	preferred := make([]finding, 0, len(findings))
+	fallback := make([]finding, 0, len(findings))
+	seen := map[string]struct{}{}
+	for _, finding := range findings {
+		if finding.id == "" {
+			continue
+		}
+		if _, ok := seen[finding.id]; ok {
+			continue
+		}
+		seen[finding.id] = struct{}{}
+		if finding.severity == "high" || finding.severity == "medium" {
+			preferred = append(preferred, finding)
+		} else {
+			fallback = append(fallback, finding)
+		}
+	}
+	if len(preferred) == 0 {
+		preferred = fallback
+	}
+	out := []string{}
+	for _, finding := range preferred {
+		value := finding.id
+		if finding.severity != "" {
+			value += " severity=" + finding.severity
+		}
+		out = append(out, value)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func promptMarkdownFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	value = strings.Trim(value, "` \t:;,")
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "` \t:;,.")
+}
+
+func firstExistingStagedFinalPath(task acpruntime.Task, rel string) string {
+	for _, candidate := range stagedFinalPathCandidates(task, rel) {
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func stagedFinalPathCandidates(task acpruntime.Task, rel string) []string {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	rel = filepath.FromSlash(strings.Trim(strings.TrimSpace(rel), "/"))
+	candidates := []string{}
+	add := func(path string) {
+		path = filepath.Clean(strings.TrimSpace(path))
+		if path == "" || path == "." {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == path {
+				return
+			}
+		}
+		candidates = append(candidates, path)
+	}
+	for _, root := range task.ReadContextRoots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." {
+			continue
+		}
+		slash := filepath.ToSlash(root)
+		if strings.HasSuffix(slash, "/staging/final") {
+			add(filepath.Join(root, rel))
+		}
+		add(filepath.Join(root, "reports", "taskruns", runID, "staging", "final", rel))
+		add(filepath.Join(root, "staging", "final", rel))
+		add(filepath.Join(root, rel))
+	}
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+		add(filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final", rel))
+	}
+	return candidates
+}
+
+func existingTaskrunGlob(task acpruntime.Task, patterns []string) []string {
+	roots := taskrunRoots(task)
+	matches := []string{}
+	seen := map[string]struct{}{}
+	for _, root := range roots {
+		for _, pattern := range patterns {
+			for _, path := range globExisting(filepath.Join(root, pattern)) {
+				if _, ok := seen[path]; ok {
+					continue
+				}
+				seen[path] = struct{}{}
+				matches = append(matches, path)
+			}
+		}
+	}
+	sort.Strings(matches)
+	if len(matches) > 8 {
+		return matches[:8]
+	}
+	return matches
+}
+
+func existingShardManifestPaths(task acpruntime.Task, limit int) []string {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	roots := []string{}
+	for _, root := range task.ReadContextRoots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." {
+			continue
+		}
+		slash := filepath.ToSlash(root)
+		if strings.HasSuffix(slash, "/staging/final") {
+			roots = append(roots, filepath.Join(filepath.Dir(root), "shards"))
+		}
+		roots = append(roots,
+			filepath.Join(root, "reports", "taskruns", runID, "staging", "shards"),
+			filepath.Join(root, "staging", "shards"),
+		)
+	}
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+		roots = append(roots, filepath.Join(workspace, "reports", "taskruns", runID, "staging", "shards"))
+	}
+	seen := map[string]struct{}{}
+	paths := []string{}
+	for _, root := range roots {
+		if !dirExists(root) {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d == nil || d.IsDir() || d.Name() != "shard-pack-manifest.json" {
+				return nil
+			}
+			path = filepath.ToSlash(path)
+			if _, ok := seen[path]; ok {
+				return nil
+			}
+			seen[path] = struct{}{}
+			paths = append(paths, path)
+			if limit > 0 && len(paths) >= limit {
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if limit > 0 && len(paths) >= limit {
+			break
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func taskrunRoots(task acpruntime.Task) []string {
+	runID := strings.TrimSpace(task.RunID)
+	if runID == "" {
+		runID = "run-1"
+	}
+	roots := []string{}
+	add := func(path string) {
+		path = filepath.Clean(strings.TrimSpace(path))
+		if path == "" || path == "." {
+			return
+		}
+		for _, existing := range roots {
+			if existing == path {
+				return
+			}
+		}
+		roots = append(roots, path)
+	}
+	for _, root := range task.ReadContextRoots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." {
+			continue
+		}
+		slash := filepath.ToSlash(root)
+		marker := "/reports/taskruns/" + runID + "/"
+		if idx := strings.Index(slash, marker); idx >= 0 {
+			add(root[:idx+len("/reports/taskruns")])
+		}
+		if strings.HasSuffix(slash, "/reports/taskruns") {
+			add(root)
+		}
+		add(filepath.Join(root, "reports", "taskruns"))
+	}
+	if workspace := strings.TrimSpace(task.Workspace); workspace != "" {
+		add(filepath.Join(workspace, "reports", "taskruns"))
+	}
+	return roots
+}
+
+func globExisting(pattern string) []string {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	for _, path := range matches {
+		if fileExists(path) {
+			out = append(out, filepath.ToSlash(path))
+		}
+	}
+	return out
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func safeDraftOutputPath(raw string) (string, bool) {
@@ -552,6 +1087,18 @@ func runtimeDraftFirstActionFileTemplate(task acpruntime.Task, output runtimedra
 	switch canonicalPath {
 	case "skills/subagents.yaml":
 		return strings.TrimSpace(string(workspace.BaselineSubagentsContent()))
+	case "charter/overview.md":
+		scopeLines := runtimeDraftScopeLines(task)
+		return strings.Join([]string{
+			"# Constitution",
+			"",
+			"## Scope",
+			strings.Join(scopeLines, "\n"),
+			"",
+			"## Charter Draft",
+			"- Draft constitution surface initialized for the configured repository scope.",
+			"- Replace this bootstrap with target identity, repo/path evidence, decision boundaries, and local-first operating rules before successful exit.",
+		}, "\n")
 	case "proposals/runtime-recommendations.md":
 		return strings.Join([]string{
 			"# Runtime Recommendations",
@@ -932,6 +1479,20 @@ func RuntimeDraftManifestTaskSkeleton(task acpruntime.Task) string {
 	return string(raw)
 }
 
+func RuntimeDraftManifestShapeGuide(task acpruntime.Task) string {
+	raw := RuntimeDraftManifestTaskSkeleton(task)
+	var manifest runtimedrafts.Manifest
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		return raw
+	}
+	manifest.Summary = "Evidence-backed manifest for provider-authored runtime artifacts."
+	out, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return raw
+	}
+	return string(out)
+}
+
 func runtimeDraftOutputSkeleton(task acpruntime.Task) []runtimedrafts.Output {
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
@@ -1197,6 +1758,9 @@ func DraftArtifactRepairHints(task acpruntime.Task, validationErr error) []strin
 			`- proposals-draft-manifest.json is the only publish-surface manifest for proposals/* and reports/changelog/* drafts.`,
 			`- step_contract MUST be exactly "proposals"; version MUST be integer 1.`,
 			`- outputs[].canonical_path values are allowed only under proposals/* or reports/changelog/* and MUST be unique.`,
+			`- If current-run staged final reports/findings/findings.md contains finding IDs, repaired proposal/changelog markdown MUST cite current-run finding IDs and MUST NOT claim structured findings are absent.`,
+			`- Current-run findings/coverage evidence is staged at reports/taskruns/<run_id>/staging/final/reports/* before publish; do NOT treat reports/taskruns/<run_id>/reports/* as the current-run source.`,
+			`- If findings include high/medium severity, repaired proposal.md MUST link at least one high/medium finding to affected surface/path and recommended operator action; generic review-only text is insufficient.`,
 			`- Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 			`- After draft artifact repair, stop after artifacts validate; do not emit any legacy metadata registration surface.`,
 		)

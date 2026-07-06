@@ -1582,8 +1582,6 @@ exit 7
 }
 
 func TestRunHeadlessProviderRetriesSilentNoFreshCollectPairRepair(t *testing.T) {
-	t.Parallel()
-
 	task := newCollectTask(t, "run-collect-pair-repair-silent-no-fresh-retry")
 	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte(`# Collect Overview
 
@@ -1628,7 +1626,7 @@ EOF
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          false,
 				PreArtifactStallWindow:      500 * time.Millisecond,
-				RetryPreArtifactStallWindow: 250 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
 				PreArtifactWallClockWindow:  5 * time.Second,
 				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
@@ -2944,6 +2942,68 @@ func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) 
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
 		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderEnrichesProposalsDraftAfterSemanticRepairFailure(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-repair-semantic-enrichment")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	semanticScaffoldRepair := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/proposals-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"## Scope",
+		"- Current run has proposal material pending evidence-backed recommendations.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"## Notes",
+		"- Current run has proposal changelog material pending evidence-backed recommendations.",
+		"EOF",
+	}, "\n")+"\n")
+	validEnrichment := writeEngineScript(t, proposalsDraftScript(task, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command:                writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nexit 0\n"),
+			draftRepairCommand:     semanticScaffoldRepair,
+			draftEnrichmentCommand: validEnrichment,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{validEnrichment},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected proposal draft enrichment after semantic repair failure, got %v", err)
+	}
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected one draft enrichment call, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_repair") {
+		t.Fatalf("expected draft_artifact_repair scheduled diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_repair_invalid") {
+		t.Fatalf("expected draft_artifact_repair_invalid enrichment stage diagnostic, got %#v", diagnostics)
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
 		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)

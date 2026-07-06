@@ -16,7 +16,7 @@ const (
 )
 
 func (c Compiler) CompileC4Diagrams(entities []contracts.Entity, edges []contracts.Edge) ([]Artifact, error) {
-	entities = uniqueEntitiesByID(entities)
+	entities, edges = normalizeDiagramInputs(entities, edges)
 	entityByID := make(map[string]contracts.Entity, len(entities))
 	for _, entity := range entities {
 		entityByID[entity.ID] = entity
@@ -247,6 +247,64 @@ func uniqueEntitiesByID(entities []contracts.Entity) []contracts.Entity {
 	out := make([]contracts.Entity, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, byID[id])
+	}
+	return out
+}
+
+func normalizeDiagramInputs(entities []contracts.Entity, edges []contracts.Edge) ([]contracts.Entity, []contracts.Edge) {
+	entities = uniqueEntitiesByID(entities)
+	aliasByID := map[string]string{}
+	canonicalBySignature := map[string]string{}
+	out := make([]contracts.Entity, 0, len(entities))
+	for _, entity := range entities {
+		id := strings.TrimSpace(entity.ID)
+		if id == "" {
+			continue
+		}
+		entity.ID = id
+		aliasByID[id] = id
+		signature := diagramEntitySignature(entity)
+		if signature != "" {
+			if canonicalID, ok := canonicalBySignature[signature]; ok {
+				aliasByID[id] = canonicalID
+				continue
+			}
+			canonicalBySignature[signature] = id
+		}
+		out = append(out, entity)
+	}
+	return out, normalizeDiagramEdges(edges, aliasByID)
+}
+
+func diagramEntitySignature(entity contracts.Entity) string {
+	entityType := strings.ToLower(strings.TrimSpace(entity.Type))
+	entityName := strings.ToLower(strings.Join(strings.Fields(entity.Name), " "))
+	if entityType == "" || entityName == "" {
+		return ""
+	}
+	return entityType + "|" + entityName
+}
+
+func normalizeDiagramEdges(edges []contracts.Edge, aliasByID map[string]string) []contracts.Edge {
+	out := make([]contracts.Edge, 0, len(edges))
+	seen := map[string]struct{}{}
+	for _, edge := range edges {
+		from := strings.TrimSpace(edge.From)
+		to := strings.TrimSpace(edge.To)
+		if canonicalID, ok := aliasByID[from]; ok {
+			from = canonicalID
+		}
+		if canonicalID, ok := aliasByID[to]; ok {
+			to = canonicalID
+		}
+		edge.From = from
+		edge.To = to
+		key := from + "\x00" + to + "\x00" + strings.TrimSpace(edge.Type)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, edge)
 	}
 	return out
 }

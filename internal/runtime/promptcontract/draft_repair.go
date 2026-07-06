@@ -193,6 +193,15 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		lines = append(lines,
 			"- The heredoc proposal/changelog files are bootstrap-only repair targets, not valid final content.",
 			"- Before final exit, replace recovery scaffold text with evidence-backed proposal/changelog content from validated staged artifacts.",
+			"- Read the current-run staged final findings markdown before writing final proposal text: reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, or the absolute staging/final findings path listed in read_context_roots. Finding IDs are markdown fields like '- ID: `finding.example`'; copy exact current-run IDs into proposal and changelog when any such line exists.",
+			"- Do not look for current-run findings under reports/taskruns/<run_id>/reports/findings/findings.md; before publish, current-run findings and coverage are staged under reports/taskruns/<run_id>/staging/final/reports/.",
+			"- Do not shorten the staged findings file to staging/final/reports/findings.md. The exact file is staging/final/reports/findings/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			"- If findings include Severity: `high` or Severity: `medium`, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding.",
+			"- Each actionable finding bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path copied from Related IDs/Evidence, Recommended operator action with a concrete verb such as update, add, document, assign, or remediate, and Residual gap.",
+			"- Do not split one finding across multiple bullets; a separate Description bullet after a Finding ID bullet does not satisfy actionability. Do not write Severity: unspecified when findings.md has a - Severity: field; copy high/medium/low exactly from the referenced finding. Example: - Finding ID: `finding.example`; Severity: `medium`; Affected surface/path: `svc.example` / `repo:path`; Recommended operator action: document the owner and escalation path; Residual gap: production evidence remains unconfirmed.",
+			"- Do not use markdown tables for actionable findings; write compact bullets instead.",
+			"- Do not satisfy high/medium findings with generic inspect/review/decide text only, and do not cite only low-severity findings when high/medium findings are present.",
+			"- Never write `No structured finding summary was present` or `No source-level architecture change is approved` when current-run findings.md contains any `- ID:` line.",
 			"- Final action must be: ensure proposals-draft-manifest.json and every referenced draft file exist and no referenced draft file contains unchanged bootstrap/recovery scaffold.",
 		)
 		lines = append(lines, "PROPOSALS DRAFT MANIFEST CANONICAL SHAPE:")
@@ -376,6 +385,15 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Enrich proposal and changelog drafts from validated staged findings, coverage gaps, questions, citations, and proposal candidates.",
 			"- Proposals must be actionable and traceable to staged evidence; do not leave generic validation notes as the only content.",
 			"- STEP4 WRITE-FIRST SEQUENCE: read proposals-draft-manifest.json, current-run typed shard-plan/shard-summary files listed above when present, final-run-index.json and citation-index.json if present, validator/finding summaries and at most 6 high-signal shard manifests or authored shard docs, then overwrite proposal.md and changelog.md under draft_final_root before any optional extra analysis.",
+			"- Also read current-run staged final reports/findings/findings.md and reports/coverage/summary.md when present, under reports/taskruns/<run_id>/staging/final/reports/. If findings.md contains one or more `- ID: finding...` entries, proposal.md and changelog.md must reference at least one current-run finding ID.",
+			"- Do not read reports/taskruns/<run_id>/reports/findings/findings.md as the current-run source; that path is not the staged final evidence surface used before publish.",
+			"- Do not shorten the staged findings file to staging/final/reports/findings.md. The exact file is staging/final/reports/findings/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			"- For non-empty current-run findings, proposal.md must include severity summary, top actionable findings, affected surfaces/paths, recommended operator action, and residual gaps; do not write that no structured finding summary was present.",
+			"- If findings.md contains any Severity: `high` or Severity: `medium` item, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding.",
+			"- Each actionable finding bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path copied from Related IDs/Evidence, Recommended operator action with a concrete verb such as update, add, document, assign, or remediate, and Residual gap.",
+			"- Do not split one finding across multiple bullets; a separate Description bullet after a Finding ID bullet does not satisfy actionability. Do not write Severity: unspecified when findings.md has a - Severity: field; copy high/medium/low exactly from the referenced finding. Example: - Finding ID: `finding.example`; Severity: `medium`; Affected surface/path: `svc.example` / `repo:path`; Recommended operator action: document the owner and escalation path; Residual gap: production evidence remains unconfirmed.",
+			"- Do not use markdown tables for actionable findings; write one compact bullet per high/medium finding instead.",
+			"- Do not satisfy high/medium findings with generic inspect/review/decide text only, and do not cite only low-severity findings when high/medium findings are present.",
 			"- Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals. Use validator/finding/coverage/proposal evidence; if none is visible, record an explicit no-actionable-proposal gap.",
 			fmt.Sprintf("- Exact required proposal draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "proposal.md")),
 			fmt.Sprintf("- Exact required changelog draft overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
@@ -385,7 +403,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Do not write dangling references such as `prioritize each finding above` or `findings listed above` unless the same proposal/changelog contains substantive findings/proposals above that sentence.",
 			"- The proposed changes/follow-up plan must include at least one concrete operator action tied to current-run evidence, or an explicit no-actionable-proposal gap tied to the observed evidence set.",
 			"- Do not report 0 authored markdown shard documents unless you actually globbed staging/shards/**/*.md in the allowed roots and found none; otherwise give the observed count or omit the count.",
-			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write exact planned/succeeded/failed/incomplete counts plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
+			"- Do not ask the operator to re-run or repair non-succeeded shards when the current-run typed shard-summary shows failed=0 and no incomplete statuses; write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>` plus an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md instead.",
 			"- Do not list final-run-index.json, citation-index.json, validator verdicts, or shard summaries from a different run_id as current-run proposal evidence.",
 			"- When reading current-run staging/final/final-run-index.json, count indexed documents from the top-level canonical_documents[] array. Do not use nonexistent documents[] fields, checked_paths[], or validation checked_paths as the document count.",
 			"- When reading current-run staging/final/citation-index.json, count citations from the top-level citations[] array.",
@@ -426,7 +444,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 				"- Do not copy truncated shard excerpts, raw snippets, or semicolon lists that may carry half-open backticks.",
 				"- Do not write stale downstream-index availability claims in step2 markdown. If final-run-index.json or citation-index.json is absent during step2, omit that index status entirely.",
 				"- Do not write generic shard-gap wording when typed shard-summary shows all shards succeeded; keep exact planned/succeeded/failed/incomplete counts and explicit no-shard-coverage-blocker wording.",
-				"- Final self-check: every markdown line has balanced backticks outside fences, no raw sampled snippets remain, no stale downstream-index claim remains, and exact typed shard completeness is still present.",
+				"- For step4 actionable findings, preserve bullet-only Top Actionable Findings format and do not introduce markdown tables.",
+				"- Final self-check: every markdown line has balanced backticks outside fences, no raw sampled snippets remain, no stale downstream-index claim remains, bullet-only actionable findings remain table-free, and exact typed shard completeness is still present.",
 			)
 		}
 		if draftEnrichmentValidationMentionsDownstreamIndexClaim(validationErr) {
@@ -440,15 +459,27 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		}
 		if draftEnrichmentValidationMentionsShardStatusCleanup(validationErr) {
 			focusTarget := draftEnrichmentShardStatusCleanupFocusTarget(validationErr)
-			lines = append(lines,
-				"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
-				"- The previous enrichment freshly rewrote markdown, but at least one step2 target still used generic conditional shard-gap wording instead of exact current-run shard status.",
-				fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
-				"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
-				"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
-				"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
-				"- The operator decision summary must say what is complete now, what residual artifact-quality risks remain, and what the operator should inspect next without suggesting nonexistent shard failures.",
-			)
+			if isProposalsDraftStep(task.StepID) {
+				lines = append(lines,
+					"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+					"- The previous enrichment freshly rewrote markdown, but at least one step4 proposal target still omitted exact current-run proposal shard completeness.",
+					fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
+					"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
+					"- If the typed shard-summary shows all shards succeeded, both proposal.md and changelog.md must contain the exact literal shape planned=<n> succeeded=<n> failed=<n> incomplete=<n> and an explicit no-shard-coverage-blocker statement.",
+					"- Preserve exact current-run finding IDs, copied severities, affected surface/path, recommended operator action, residual gap, and bullet-only Top Actionable Findings format.",
+					"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
+				)
+			} else {
+				lines = append(lines,
+					"DRAFT ENRICHMENT SHARD STATUS CLEANUP RETRY:",
+					"- The previous enrichment freshly rewrote markdown, but at least one step2 target still used generic conditional shard-gap wording instead of exact current-run shard status.",
+					fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
+					"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
+					"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
+					"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
+					"- The operator decision summary must say what is complete now, what residual artifact-quality risks remain, and what the operator should inspect next without suggesting nonexistent shard failures.",
+				)
+			}
 		}
 		if draftEnrichmentValidationMentionsMarkerCleanup(validationErr) {
 			lines = append(lines,
@@ -604,6 +635,14 @@ func composeDraftArtifactEnrichmentCompactStep4RetryPrompt(provider acpruntime.P
 		"- Prefer not to rewrite the manifest. If touched, keep only top-level version, run_id, step_id, step_contract, agent_role, summary, updated_at, outputs.",
 		"- Preserve each outputs[] path/canonical_path/kind/title exactly; never add status, content_digest, logical_path, target, output_path, publish_path, metadata, validation, confidence, or source fields.",
 		"- Compact evidence set: current proposals-draft-manifest.json, typed shard-plan/shard-summary files listed below, current-run validator/finding/proposal/coverage summaries if present, current-run final-run-index.json/citation-index.json if present, and at most 3 staged shard docs or manifests.",
+		"- If current-run staged final reports/findings/findings.md is visible and contains finding IDs, proposal.md and changelog.md must cite at least one current-run finding ID; proposal.md must include severity summary, affected surfaces/paths, recommended operator action, and residual gaps.",
+		"- Current-run findings and coverage are under reports/taskruns/<run_id>/staging/final/reports/ before publish; do not treat reports/taskruns/<run_id>/reports/* as current-run evidence.",
+		"- Do not shorten the staged findings file to staging/final/reports/findings.md. The exact file is staging/final/reports/findings/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+		"- If findings.md contains Severity: `high` or Severity: `medium`, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding and all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path, Recommended operator action, and Residual gap.",
+		"- Do not split one finding across multiple bullets; do not write Severity: unspecified when findings.md has a - Severity: field; copy high/medium/low exactly from the referenced finding.",
+		"- Do not use markdown tables for actionable findings.",
+		"- Generic inspect/review/decide wording is not enough for high/medium findings; use a concrete operator verb such as update, add, document, assign, or remediate and cite the affected Related IDs/Evidence path.",
+		"- Never claim structured findings are absent when current-run findings.md contains finding IDs.",
 		"- If proposal/finding evidence is sparse, still overwrite both files with an explicit no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
 	}
 	if len(statusEvidenceFiles) == 0 {
@@ -618,7 +657,7 @@ func composeDraftArtifactEnrichmentCompactStep4RetryPrompt(provider acpruntime.P
 	}
 	lines = append(lines,
 		"- If typed shard-summary items[] is readable, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
-		"- When typed shard-summary shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md.",
+		"- When typed shard-summary shows all shards succeeded, write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>` and an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md.",
 		"- Do not infer shard counts from lexical occurrences of failed/error in markdown or manifests.",
 		"- Required markdown overwrite targets:",
 	)
@@ -763,12 +802,20 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 		lines = append(lines,
 			"- For step4, overwrite proposal.md and changelog.md.",
 			"- For step4 command-text retry, the command must perform at most one bounded evidence listing/read pass before writing both markdown files; do not run an open-ended repo or staged-artifact sweep before the first mutation.",
+			"- Read current-run staged final findings.md, coverage summary, final-run-index.json, citation-index.json, and typed shard status when visible before writing proposal/changelog markdown.",
+			"- Current-run findings and coverage are under reports/taskruns/<run_id>/staging/final/reports/ before publish; do not read reports/taskruns/<run_id>/reports/* as current-run evidence.",
+			"- The exact findings file is reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, not reports/taskruns/<run_id>/staging/final/reports/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			"- If current-run findings.md contains finding IDs, proposal.md and changelog.md must cite at least one current-run finding ID and must not claim structured findings are absent.",
+			"- If current-run findings.md contains Severity: `high` or Severity: `medium`, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding and all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path, Recommended operator action, and Residual gap.",
+			"- Do not split one finding across multiple bullets; do not write Severity: unspecified when findings.md has a - Severity: field; copy high/medium/low exactly from the referenced finding.",
+			"- Do not use markdown tables for actionable findings.",
+			"- Do not satisfy high/medium findings with generic inspect/review/decide text only; cite Related IDs/Evidence as affected surface/path and use a concrete operator verb such as update, add, document, assign, or remediate.",
 			"- If proposal evidence is sparse, still overwrite both files with a decision-ready no-actionable-proposal gap tied to observed current-run evidence instead of waiting for more evidence.",
 			"- proposal.md must include Decision / recommended operator action, evidence used, proposed changes or follow-up plan, risks/gaps/out-of-scope.",
 			"- changelog.md must include updated architecture/proposal surfaces, findings/proposals summary, evidence index/citation refs, and residual coverage gaps.",
 			"- None of those required proposal/changelog sections may be empty; avoid dangling references to findings above unless the same file includes those findings.",
 			"- The proposed changes/follow-up plan must contain at least one concrete operator action tied to current-run evidence, or an explicit no-actionable-proposal gap.",
-			"- If typed shard status shows all shards succeeded, write exact planned/succeeded/failed/incomplete counts and an explicit no-shard-coverage-blocker statement.",
+			"- If typed shard status shows all shards succeeded, write the exact literal shard completeness string `planned=<n> succeeded=<n> failed=<n> incomplete=<n>` and an explicit no-shard-coverage-blocker statement in both proposal.md and changelog.md.",
 		)
 	}
 	if validationErr != nil {
@@ -841,6 +888,15 @@ func draftEnrichmentValidationMentionsStep0CanonicalPathCleanup(err error) bool 
 		strings.Contains(text, "skills/subagents.yaml")
 }
 
+func isProposalsDraftStep(stepID string) bool {
+	switch strings.TrimSpace(stepID) {
+	case "init.step4.proposals", "refresh.step4.proposals":
+		return true
+	default:
+		return false
+	}
+}
+
 func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
 	if err == nil {
 		return false
@@ -849,6 +905,7 @@ func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
 	return strings.Contains(text, "draft_artifact_enrichment_shard_status_cleanup") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
 		strings.Contains(text, "uses generic conditional shard-gap wording") ||
+		strings.Contains(text, "does not report exact current-run proposal shard completeness") ||
 		strings.Contains(text, "does not report exact current-run shard completeness") ||
 		strings.Contains(text, "claims staging shard evidence is empty") ||
 		strings.Contains(text, "does not include concrete repo/path, citation, or staged artifact evidence references") ||
@@ -860,7 +917,7 @@ func draftEnrichmentShardStatusCleanupFocusTarget(err error) string {
 		return "architect-summary.md"
 	}
 	text := err.Error()
-	for _, target := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+	for _, target := range []string{"proposal.md", "changelog.md", "overview.md", "summary.md", "architect-summary.md"} {
 		if strings.Contains(text, `path "`+target+`"`) {
 			return target
 		}
