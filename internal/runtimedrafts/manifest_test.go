@@ -589,6 +589,67 @@ func TestValidateRequiredManifestAcceptsAsIsDraftShardCompletenessFromTypedSumma
 	}
 }
 
+func TestValidateRequiredManifestRejectsAsIsDraftEmptyEvidenceSlots(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step2_as_is")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step2_as_is")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	shardSummary := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "domain_id": "bank",
+  "items": [
+    {"shard_id": "bank-root", "status": "succeeded"},
+    {"shard_id": "bank-services", "status": "succeeded"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(taskrunsRoot, "run-1-init-step1-collect-shard-summary-bank.json"), []byte(shardSummary), 0o644); err != nil {
+		t.Fatalf("write shard summary: %v", err)
+	}
+	files := map[string]string{
+		"overview.md":          "# As-Is Architecture Overview\n\nEvidence references: reports/as-is/bank-root/root-overview.md and shard-pack-manifest.json.\n",
+		"summary.md":           "# Coverage Summary\n\nTyped shard completeness for the current run is: planned=2 succeeded=2 failed=0 incomplete=0.\n\nCurrent-run shard coverage is not a blocker: no-shard-coverage-blocker.\n\n## Coverage Observed\n- Typed shard evidence checked:  and .\n- Enrichment indexes checked when present:  and  under .\n",
+		"architect-summary.md": "# Architect Summary\n\nTyped shard completeness for the current run is: planned=2 succeeded=2 failed=0 incomplete=0.\n\nCurrent-run shard coverage is not a blocker: no-shard-coverage-blocker.\n\n## Complete\n- Current-run staged evidence was read from  and typed shard files for .\n\n## Operator Cues\n- Use  and  to trace any claim that needs file-level proof.\n\n## Residual Risk\n- Inspect shard manifests under  to confirm domain coverage.\n",
+	}
+	for relPath, content := range files {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected empty evidence slots to be rejected")
+	}
+	if !strings.Contains(err.Error(), "contains empty evidence reference slots") {
+		t.Fatalf("expected empty evidence slot error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsAsIsDraftMisleadingShardCompleteness(t *testing.T) {
 	t.Parallel()
 
@@ -1262,6 +1323,103 @@ Document the missing escalation path before promotion.
 		`uses synthetic current-run finding placeholder "no-current-run-finding-id" despite non-empty current-run findings`,
 		"current-run finding IDs include finding.bank.of.anthos.docs.escalation.path.gap",
 		"copy IDs from backticked '- ID: `...`' lines in staging/final/reports/findings/findings.md",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateRequiredManifestRejectsPlaceholderFindingIDNoneInActionableSection(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	taskrunsRoot := filepath.Join(tempDir, "reports", "taskruns")
+	writeRoot := filepath.Join(taskrunsRoot, "run-1", "runtime", "step4_proposals")
+	draftRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "drafts", "step4_proposals")
+	findingsRoot := filepath.Join(taskrunsRoot, "run-1", "staging", "final", "reports", "findings")
+	for _, dir := range []string{writeRoot, draftRoot, findingsRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	findings := `# Findings
+
+## Central frontend dependency is visible
+
+- ID: ` + "`finding.bank.frontend.central.dependency`" + `
+- Severity: ` + "`low`" + `
+- Related IDs: ` + "`svc.bank.frontend`" + `
+- Description: Frontend central dependency should remain visible in proposal evidence.
+- Evidence: ` + "`bank:src/frontend/app.py`" + `
+`
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	for relPath, content := range map[string]string{
+		"proposal.md": `# Runtime Recommendations
+
+## Decision / recommended operator action
+Proceed with a proposal that tracks ` + "`finding.bank.frontend.central.dependency`" + `.
+
+## Evidence used
+- Current-run findings source: ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `.
+- Proposal linkage includes current-run finding ID ` + "`finding.bank.frontend.central.dependency`" + `.
+
+## Top Actionable Findings
+- Finding ID: ` + "`none`" + `; Severity: ` + "`low`" + `; Affected surface/path: ` + "`reports/findings/findings.md`" + `; Recommended operator action: monitor coverage only; Residual gap: no high or medium current-run findings were present.
+
+## Proposed changes or follow-up plan
+- Document the frontend dependency disposition for ` + "`finding.bank.frontend.central.dependency`" + ` before publish.
+
+## Risks, gaps, and out-of-scope notes
+- Proposal linkage must stay tied to exact current-run finding IDs.
+`,
+		"changelog.md": `# Runtime Proposal Changelog
+
+## Updated architecture/proposal surfaces
+- ` + "`proposals/runtime-recommendations.md`" + ` links proposal evidence to ` + "`finding.bank.frontend.central.dependency`" + `.
+
+## Findings/proposals summary
+- ` + "`finding.bank.frontend.central.dependency`" + ` severity=` + "`low`" + ` affects ` + "`svc.bank.frontend`" + `.
+
+## Top Actionable Findings
+- Finding ID: ` + "`none`" + `; Severity: ` + "`low`" + `; Affected surface/path: ` + "`reports/findings/findings.md`" + `; Recommended operator action: monitor coverage only; Residual gap: no high or medium current-run findings were present.
+
+## Evidence index or citation references
+- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+
+## Residual coverage gaps
+- Low-severity proposal evidence remains visible.
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "refresh.step4.proposals",
+  "step_contract": "proposals",
+  "agent_role": "architect",
+  "summary": "Evidence-backed proposals.",
+  "outputs": [
+    {"path": "proposal.md", "canonical_path": "proposals/runtime-recommendations.md", "kind": "proposal", "title": "Runtime Recommendations"},
+    {"path": "changelog.md", "canonical_path": "reports/changelog/runtime-proposals.md", "kind": "changelog", "title": "Runtime Proposal Changelog"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, ProposalsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile})
+	if err == nil {
+		t.Fatalf("expected placeholder Finding ID none to be rejected")
+	}
+	for _, want := range []string{
+		`uses placeholder Finding ID "none" in actionable findings despite non-empty current-run findings`,
+		"current-run finding IDs include finding.bank.frontend.central.dependency",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to contain %q, got %v", want, err)

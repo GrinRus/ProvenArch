@@ -600,6 +600,9 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
 		`mkdir -p "$write_root" "$draft_root"`,
 		`bounded evidence reads/lists from the current-run staged evidence index below`,
+		`Markdown writes must preserve literal backticks and paths`,
+		`single-quoted heredocs such as <<'EOF' or a python3 - <<'PY' program`,
+		`Do not put markdown content that contains backticks inside double-quoted shell strings or unquoted heredocs`,
 		`write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md"`,
 		`write "$write_root/asis-draft-manifest.json" last`,
 		`test -s "$draft_root/overview.md"`,
@@ -607,6 +610,7 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`test -s "$draft_root/architect-summary.md"`,
 		`test -s "$write_root/asis-draft-manifest.json"`,
 		`do not rely on focused repair to create it later`,
+		`no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and"`,
 		`AS-IS DRAFT MANIFEST SHAPE GUIDE:`,
 		`"run_id": "run-1"`,
 		`"step_id": "init.step2.asis_docs"`,
@@ -754,6 +758,7 @@ func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing
 		`both files must also state an explicit no-shard-coverage-blocker`,
 		`staging/final/reports/*`,
 		`bullet-only Top Actionable Findings section`,
+		`do not write Finding ID: none, Finding ID: n/a, Finding ID: unavailable`,
 		`proposal.md must contain non-empty sections named Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes`,
 		`changelog.md must contain non-empty sections named Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps`,
 		`Do not use markdown tables for actionable findings`,
@@ -779,6 +784,7 @@ func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing
 		`proposal.md contains Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes`,
 		`changelog.md contains Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps`,
 		`proposal.md and changelog.md both include the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal`,
+		`every Finding ID field uses an exact current-run finding ID, never none/n/a/unavailable`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(section, needle) {

@@ -103,6 +103,7 @@ func StepSpecificPolicy(stepID string) string {
 			`- Evidence-first draft requirement: the first filesystem work unit must read bounded current-run staged evidence, write overview.md, summary.md, and architect-summary.md, then write asis-draft-manifest.json last before any final answer, status note, or optional extra analysis.`,
 			`- Do not write bootstrap-only as-is markdown as the normal happy path; first-pass drafts must already be evidence-backed or must state explicit evidence-backed insufficiency tied to current-run coverage/questions.`,
 			`- Do not answer with "I will read", "I will rewrite", "I have enough evidence", "ready for repair", or similar analysis-only text before the evidence-backed as-is draft write.`,
+			`- Markdown writes must be shell-safe: use single-quoted heredocs (<<'EOF') or python3 Path.write_text with literal strings; never place markdown containing backticks inside double-quoted shell strings or unquoted heredocs because shell command substitution can erase path/citation refs.`,
 			`- When current-run typed shard-plan/shard-summary evidence is visible, summary.md and architect-summary.md must include exact planned/succeeded/failed/incomplete counts before successful exit.`,
 			`- When typed shard status shows failed=0 and incomplete=0, summary.md and architect-summary.md must include an explicit no-shard-coverage-blocker statement that says current-run shard coverage is not a blocker; do not write generic failed/incomplete caveats.`,
 			`- Treat schemas/*, docs/spec/*, and the enforced prompt contract as the only manifest source of truth for asis-draft-manifest.json.`,
@@ -338,6 +339,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Do NOT look for current-run findings at reports/taskruns/<run_id>/reports/findings/findings.md; the current-run promoted proposal evidence lives under staging/final before publish.`,
 			"- Do NOT shorten the findings path to staging/final/reports/findings.md; the file is nested at staging/final/reports/findings/findings.md. IDs are usually backticked in lines like - ID: `finding.example`; strip the backticks and copy the exact ID. Never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
 			`- If current-run findings are non-empty, proposal/changelog drafts must cite current-run finding IDs and include severity summary, top actionable findings, affected surfaces/paths, recommended operator action, and residual gaps.`,
+			`- If current-run findings are non-empty, never write "Finding ID: none", "Finding ID: n/a", or "Finding ID: unavailable" in any actionable finding bullet; use an exact current-run finding ID or omit the actionable bullet when no actionable finding exists.`,
 			`- If current-run findings include high or medium severity, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding. Each bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from the finding block, Affected surface/path from Related IDs/Evidence, Recommended operator action using a concrete operator verb, and Residual gap.`,
 			"- Do NOT split one finding across multiple bullets; a separate Description bullet after a Finding ID bullet does not satisfy actionability. Do NOT write Severity: unspecified for any finding that has a - Severity: field; copy high/medium/low exactly from findings.md. Example bullet: - Finding ID: `finding.example`; Severity: `medium`; Affected surface/path: `svc.example` / `repo:path`; Recommended operator action: document the owner and escalation path; Residual gap: production evidence remains unconfirmed.",
 			`- Do not use markdown tables for actionable findings; tables are rejected because they have repeatedly produced malformed live markdown.`,
@@ -533,6 +535,8 @@ func asIsFirstPassWriteSequence(task acpruntime.Task) string {
 		"  draft_root=" + shellSingleQuote(draftRoot),
 		`  mkdir -p "$write_root" "$draft_root"`,
 		"- In the same shell process, first perform bounded evidence reads/lists from the current-run staged evidence index below; do not stop after this read phase.",
+		"- Markdown writes must preserve literal backticks and paths: use single-quoted heredocs such as <<'EOF' or a python3 - <<'PY' program with Path.write_text literal strings.",
+		"- Do not put markdown content that contains backticks inside double-quoted shell strings or unquoted heredocs; shell command substitution can erase refs and produce empty slots.",
 		`- Then write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md".`,
 		`- Then write "$write_root/asis-draft-manifest.json" last using the manifest shape guide below and outputs for exactly those three markdown files.`,
 		"- End the same command with these existence checks before exit:",
@@ -541,6 +545,7 @@ func asIsFirstPassWriteSequence(task acpruntime.Task) string {
 		`  test -s "$draft_root/architect-summary.md"`,
 		`  test -s "$write_root/asis-draft-manifest.json"`,
 		"- If any check would fail, fix the missing target in that same command before returning; do not rely on focused repair to create it later.",
+		`- Also check the markdown has no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and".`,
 	}, "\n")
 }
 
@@ -605,6 +610,7 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		"- proposal.md must contain non-empty sections named Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes.",
 		"- changelog.md must contain non-empty sections named Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps.",
 		"- For high/medium findings, include a bullet-only Top Actionable Findings section with one bullet per finding and all required fields on that same bullet line: exact Finding ID, copied Severity value from the finding block, Affected surface/path from Related IDs/Evidence, Recommended operator action, and Residual gap.",
+		"- If current-run findings are non-empty, do not write Finding ID: none, Finding ID: n/a, Finding ID: unavailable, or similar placeholder IDs in any proposal/changelog bullet.",
 		"- Do not split one finding across multiple bullets; do not write Severity: unspecified when findings.md has a - Severity: field; copy the exact high/medium/low value from that finding.",
 		"- Do not use markdown tables for actionable findings.",
 		fmt.Sprintf(`- Exact proposals draft manifest target: %q.`, manifestTarget),
@@ -628,6 +634,7 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		"- changelog.md contains Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps.",
 		"- If typed shard completeness is visible, proposal.md and changelog.md both include the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal and no-shard-coverage-blocker statement when there are no failed or incomplete shards.",
 		"- If findings.md has any - ID: lines, both markdown targets cite at least one exact current-run finding ID.",
+		"- If any Top Actionable Findings section is present while findings are non-empty, every Finding ID field uses an exact current-run finding ID, never none/n/a/unavailable.",
 		"- No markdown target says structured findings are absent when findings.md is non-empty, and no target uses synthetic finding placeholders.",
 		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",
 	)

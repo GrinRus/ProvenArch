@@ -244,6 +244,9 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 		if runtimeDraftTextHasMetadataOnlyEvidenceBullet(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q includes metadata-only JSON keys as evidence instead of architecture or proposal signals", idx, output.Path))
 		}
+		if runtimeDraftTextHasEmptyEvidenceReferenceSlot(text) {
+			problems = append(problems, fmt.Sprintf("outputs[%d].path %q contains empty evidence reference slots, likely from shell-expanded markdown paths", idx, output.Path))
+		}
 		if strings.TrimSpace(stepID) == "init.step2.asis_docs" || strings.TrimSpace(stepID) == "refresh.step2.asis_docs" {
 			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
@@ -750,6 +753,27 @@ func runtimeDraftTextHasMetadataOnlyEvidenceBullet(text string) bool {
 	return false
 }
 
+func runtimeDraftTextHasEmptyEvidenceReferenceSlot(text string) bool {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(?:from|checked|read|use|using|under|for|at)(?::)?\s{2,}(?:and|under|for|to|\.|,|;|$)`),
+		regexp.MustCompile(`(?i):\s{2,}and\s{2,}`),
+		regexp.MustCompile(`(?i)\b(?:under|for|from)\s+\.\s*$`),
+		regexp.MustCompile(`(?i)\buse\s{2,}and\s{2,}`),
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		for _, pattern := range patterns {
+			if pattern.FindStringIndex(trimmed) != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type runtimeDraftShardCompleteness struct {
 	planned    int
 	succeeded  int
@@ -848,6 +872,9 @@ func runtimeDraftTextFindingsProposalDisconnect(text string, draftRoot string, r
 	}
 	if placeholder := runtimeDraftTextSyntheticFindingPlaceholder(text); placeholder != "" {
 		return fmt.Sprintf("uses synthetic current-run finding placeholder %q despite non-empty current-run findings", placeholder) + findingsHint
+	}
+	if placeholder := runtimeDraftProposalTextHasPlaceholderFindingIDBullet(text); placeholder != "" {
+		return fmt.Sprintf("uses placeholder Finding ID %q in actionable findings despite non-empty current-run findings", placeholder) + findingsHint
 	}
 	if !runtimeDraftTextReferencesAnyFindingID(text, findings.ids) {
 		return "does not reference any current-run finding ID despite non-empty current-run findings" + findingsHint
@@ -1064,6 +1091,49 @@ func runtimeDraftProposalTextHasFindingActionability(text string, findingIDs []s
 		return true
 	}
 	return false
+}
+
+func runtimeDraftProposalTextHasPlaceholderFindingIDBullet(text string) string {
+	body, ok := runtimeDraftMarkdownSectionBody(text, runtimeDraftMarkdownSectionSpec{
+		name:         "Top Actionable Findings",
+		alternatives: [][]string{{"top", "actionable", "finding"}},
+	})
+	if !ok {
+		return ""
+	}
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !runtimeDraftProposalLineIsBullet(trimmed) {
+			continue
+		}
+		value := runtimeDraftProposalFindingIDFieldValue(trimmed)
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "none", "n/a", "na", "not-applicable", "not_applicable", "unavailable", "finding-unavailable", "finding_unavailable", "no-current-run-finding-id":
+			return value
+		}
+	}
+	return ""
+}
+
+func runtimeDraftProposalFindingIDFieldValue(line string) string {
+	lower := strings.ToLower(line)
+	idx := strings.Index(lower, "finding id")
+	if idx < 0 {
+		return ""
+	}
+	value := strings.TrimSpace(line[idx+len("finding id"):])
+	value = strings.TrimLeft(value, " \t:`")
+	for end, r := range value {
+		switch r {
+		case ';', ',', '|', '`', '\t', '\n', '\r':
+			return strings.TrimSpace(value[:end])
+		}
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(fields[0])
 }
 
 func runtimeDraftProposalLineIsBullet(line string) bool {
