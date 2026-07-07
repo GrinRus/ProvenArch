@@ -157,6 +157,81 @@ func TestCompileC4DiagramsDeterministicArtifactsAndIndex(t *testing.T) {
 	}
 }
 
+func TestCompileC4DiagramsDeduplicatesRepeatedDatastoreNodes(t *testing.T) {
+	t.Parallel()
+
+	ws := writeReportsWorkspace(t)
+	compiler := NewCompiler(ws)
+
+	entities := []contracts.Entity{
+		{
+			ID:         "svc.ledger",
+			Type:       "service",
+			Name:       "ledger",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "services/ledger/main.go"}}},
+		},
+		{
+			ID:         "db.ledger",
+			Type:       "datastore",
+			Name:       "ledger-db",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "db/ledger.sql"}}},
+		},
+		{
+			ID:         "db.ledger",
+			Type:       "datastore",
+			Name:       "ledger-db duplicate",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "db/ledger-copy.sql"}}},
+		},
+		{
+			ID:         "db.ledger.primary",
+			Type:       "datastore",
+			Name:       "ledger-db",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "db/ledger-primary.sql"}}},
+		},
+	}
+	edges := []contracts.Edge{
+		{
+			ID:         "edge.ledger.db",
+			Type:       "depends_on",
+			From:       "svc.ledger",
+			To:         "db.ledger",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "services/ledger/repository.go"}}},
+		},
+		{
+			ID:         "edge.ledger.db.primary",
+			Type:       "depends_on",
+			From:       "svc.ledger",
+			To:         "db.ledger.primary",
+			Provenance: contracts.Provenance{Evidence: []contracts.Evidence{{Repo: "sample", Path: "services/ledger/primary_repository.go"}}},
+		},
+	}
+
+	if _, err := compiler.CompileC4Diagrams(entities, edges); err != nil {
+		t.Fatalf("compile c4 diagrams: %v", err)
+	}
+
+	contextContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-context.mmd"))
+	if err != nil {
+		t.Fatalf("read context diagram: %v", err)
+	}
+	contextText := string(contextContent)
+	if got := strings.Count(contextText, "Datastore: ledger-db"); got != 1 {
+		t.Fatalf("expected one context datastore node, got %d:\n%s", got, contextText)
+	}
+
+	containerContent, err := os.ReadFile(filepath.Join(ws.Path, "reports/diagrams/c4-container.mmd"))
+	if err != nil {
+		t.Fatalf("read container diagram: %v", err)
+	}
+	containerText := string(containerContent)
+	if got := strings.Count(containerText, "Datastore: ledger-db"); got != 1 {
+		t.Fatalf("expected one container datastore node, got %d:\n%s", got, containerText)
+	}
+	if got := strings.Count(containerText, "|depends_on|"); got != 1 {
+		t.Fatalf("expected valid edge to remain after deduplication, got:\n%s", containerText)
+	}
+}
+
 func TestCompileC4DiagramsStrictEvidenceIncludesGaps(t *testing.T) {
 	t.Parallel()
 

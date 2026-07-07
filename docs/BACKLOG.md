@@ -452,6 +452,30 @@ Suggested PR slices:
     UX quality, with leakage scan results over promoted artifacts
   - do not commit generated live E2E evidence unless it is converted into an intentional
     fixture/golden file
+- `18G Step2 first-pass Excellent blocker`
+  - harden `step2.asis_docs` normal prompt/validation so first-pass `overview.md`,
+    `summary.md`, `architect-summary.md` and `asis-draft-manifest.json` are validation-ready
+    without `draft_artifact_enrichment`
+  - reject and prevent stale downstream final/citation-index availability wording in step2
+    operator-facing markdown; when those downstream indexes are absent during step2, omit their
+    status instead of publishing `unavailable` / `not yet present` claims
+  - preserve exact typed shard completeness (`planned=<n> succeeded=<n> failed=<n>
+    incomplete=<n>`), concrete repo/path or staged artifact refs and decision-ready operator
+    summary in the first provider filesystem work unit
+  - add prompt/validation regressions from the `smoke-tiny-bank-20260707T053308Z` evidence:
+    first-pass downstream-index wording must fail, clean first-pass step2 output must pass
+    without focused repair
+- `18H Step4 first-pass actionability blocker`
+  - harden `step4.proposals` normal prompt/validation so first-pass proposal/changelog output
+    links medium/high current-run findings to exact finding IDs, copied severities, affected
+    surfaces/paths and concrete recommended operator actions
+  - keep the bullet-only actionable finding format and reject generic `inspect` / `review` /
+    `decide`-only plans when medium/high findings exist
+  - ensure first-pass proposal/changelog text does not rely on focused repair to become
+    operator-actionable, while keeping ACP from deterministically synthesizing proposal content
+  - add live-shaped regression from `smoke-tiny-bank-20260707T053308Z`: `low_actionability`
+    first-pass proposal output must fail before promotion, and exact linked actionable bullets
+    must pass without `runtime_quality.repair_heavy`
 
 ## Cleanup follow-up (post-beta, owner confirmation required)
 

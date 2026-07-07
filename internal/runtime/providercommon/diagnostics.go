@@ -184,6 +184,39 @@ func emitCollectManifestRepairExhaustedDiagnostic(task acpruntime.Task, provider
 	emitDiagnostic(task, "collect manifest repair exhausted", fields)
 }
 
+func emitCollectManifestShapeCleanupScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, snapshot artifactSnapshot, cause error) {
+	fields := snapshot.diagnosticFields()
+	fields["provider"] = string(provider)
+	fields["shard_id"] = strings.TrimSpace(task.ShardID)
+	fields["action"] = "manifest_shape_cleanup"
+	fields["recovery_mode"] = "collect_manifest_shape_cleanup"
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest shape cleanup scheduled", fields)
+}
+
+func emitCollectManifestShapeCleanupCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, phase StallPhase) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"recovery_mode": "collect_manifest_shape_cleanup",
+	}
+	if phase != "" {
+		fields["stall_phase"] = strings.TrimSpace(string(phase))
+	}
+	emitDiagnostic(task, "collect manifest shape cleanup completed", fields)
+}
+
+func emitCollectManifestShapeCleanupExhaustedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, diagnostic StallDiagnostic, cause error) {
+	fields := diagnostic.fields(provider, task, "")
+	fields["recovery_mode"] = "collect_manifest_shape_cleanup"
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest shape cleanup exhausted", fields)
+}
+
 func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestRuntimeRecoveryReport) {
 	fields := map[string]any{
 		"provider":       string(provider),

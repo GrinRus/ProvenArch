@@ -123,6 +123,39 @@ func TestRuntimeDiagnosticCountersSurfaceRepairStallPressure(t *testing.T) {
 	}
 }
 
+func TestRuntimeDiagnosticCountersIgnoreValidArtifactControlledStop(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{}
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "provider command finished",
+		Fields: map[string]any{
+			"exit_reason":    "stall",
+			"artifact_valid": true,
+			"artifact_state": "valid",
+			"stall_phase":    "post_artifact",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "focused artifact repair completed",
+		Fields: map[string]any{
+			"recovery_mode": "draft_artifact_enrichment",
+			"stall_phase":   "post_artifact",
+		},
+	})
+
+	counters := execution.runtimeRecoveryCounters
+	if counters.ValidArtifactControlledStops != 1 {
+		t.Fatalf("expected one valid controlled stop, got %+v", counters)
+	}
+	if counters.StallCount != 0 || counters.PostArtifactStalls != 0 {
+		t.Fatalf("valid controlled stop must not count as stall pressure: %+v", counters)
+	}
+	if signals := runtimeRecoveryQualitySignals(counters, 0); hasRunQualitySignal(signals, "runtime_quality.stall_pressure") {
+		t.Fatalf("valid controlled stop must not emit stall pressure: %#v", signals)
+	}
+}
+
 func TestArtifactTextPlaceholderLikeFlagsGenericRuntimeChangelog(t *testing.T) {
 	t.Parallel()
 
@@ -266,7 +299,7 @@ func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
 		"artifact_quality.empty_semantic_model",
 		"artifact_quality.model_entities_missing",
 		"artifact_quality.placeholder_artifact",
-		"artifact_quality.findings_empty_with_coverage_gap",
+		"artifact_quality.empty_findings_with_gaps",
 		"artifact_quality.c4_gap_only",
 		"artifact_quality.hidden_provider_document",
 	} {

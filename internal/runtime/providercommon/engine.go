@@ -22,7 +22,7 @@ const (
 	defaultPreArtifactStallWindow  = 75 * time.Second
 	defaultRetryPreArtifactWindow  = 3 * time.Minute
 	defaultCollectEnrichmentWindow = 90 * time.Second
-	defaultCollectRepairWindow     = 3 * time.Minute
+	defaultCollectRepairWindow     = 5 * time.Minute
 	defaultFocusedRepairWindow     = 90 * time.Second
 	defaultRepairValidStopWindow   = 250 * time.Millisecond
 	defaultStallPollInterval       = 2 * time.Second

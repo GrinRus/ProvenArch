@@ -74,7 +74,7 @@ Harness больше не пишет `blackbox_e2e_steps_*`: эти файлы �
 15) Для headless providers runtime использует общий artifact-only process engine и тонкие adapters; stdout/stderr являются diagnostics, а success берётся только из валидных artifacts.
 16) Frontend live release check покрывает только real user-facing `init-inspect` artifact/UI/API inspection. Cancellation coverage должна жить в deterministic fake-runtime UI/API tests, не в trusted live provider release gate. Optional `UI_E2E_QA_SMOKE=1` допускается только для non-release/fake-runtime UX evidence и не является machine execution verdict input; release UX readiness still requires Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`.
 17) Для flexible combinations можно использовать `python3 scripts/live-e2e-plan.py ... --format shell`; этот tool только печатает прямые `full-run-batch-matrix.sh` команды и не заменяет release harness.
-18) `reports/taskruns/<run_id>-quality.json` is telemetry/evidence only; `artifact_quality:*` warnings must not fail batch/matrix/release execution verdicts. Artifact quality is accepted or rejected only by `swe_artifact_quality_assessment_<matrix-id>.md`.
+18) `reports/taskruns/<run_id>-quality.json` is public black-box evidence. Any `quality_signals[].code` with prefix `artifact_quality.` and legacy `artifact_quality:` run warning fails artifact-quality status and strict batch/matrix/release verdicts while preserving separate `runtime_contract_status`; broader artifact judgment still belongs in `swe_artifact_quality_assessment_<matrix-id>.md`.
 
 ## Fail-Fast Host Check
 Перед DoD и matrix run сначала проверить, подходит ли хост для canonical release slices:
@@ -119,7 +119,7 @@ PY
 1) Host/tree/provider/path preflight: проверить trusted host, clean tree/worktree, provider binaries, writable roots, canonical path checkout'ы и pinned SHA. Зафиксировать step report и остановиться на blockers.
 2) Selector and direct command planning: выбрать catalog slice или сгенерировать direct command через `scripts/live-e2e-plan.py --format shell`; не запускать wrapper и не править canonical matrices. Зафиксировать planned command/evidence.
 3) Matrix execution monitoring: запускать только `scripts/full-run-batch-matrix.sh`, отслеживать matrix/profile status, batch owner heartbeat, driver logs и durable inventories.
-4) Backend execution evidence inspection: читать `run_matrix_*`, `execution_report_*`, taskrun quality JSON telemetry, raw metadata/logs и inventory/status evidence; классифицировать primary execution failure после каждого профиля.
+4) Backend execution evidence inspection: читать `run_matrix_*`, `execution_report_*`, taskrun quality JSON public signals, raw metadata/logs и inventory/status evidence; классифицировать primary execution failure после каждого профиля, отдельно фиксируя `runtime_contract_status` и `artifact_quality_status`.
 5) Frontend UI/API inspection: читать frontend init result JSON/MD reports, Playwright/server logs, screenshot refs и UI/API evidence; dependent skips после backend failure не считать independent frontend regression. Ask UX smoke evidence учитывать как UX assessment evidence, не как machine execution verdict source.
 6) Release execution verdict verification: проверить `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; verifier additionally requires accepted SWE UX and artifact-quality reports next to the verdict JSON.
 7) Final black-box report: свести по шагам `goal / action / observed evidence / status / primary classification / next decision`; для `release full` все constituent verdict JSON должны иметь `PASS` and accepted companion SWE reports.
@@ -129,7 +129,7 @@ PY
 - `artifact_source` только `snapshot`
 - Нет `runtime_parse`, `runner_unavailable`, `runtime_timeout`, `infra_*`, `summary_missing`, `precheck_failed`
 - Frontend init-inspect passed для всех трёх release providers (`qwen`, `claude`, `codex`)
-- Accepted SWE UX assessment and accepted SWE artifact-quality assessment; bank-like collapse к одному `cite.runtime-summary` is an artifact-quality finding, not a machine execution blocker
+- Accepted SWE UX assessment and accepted SWE artifact-quality assessment; product-emitted `artifact_quality.*` signals such as bank-like collapse to one generic `cite.runtime-summary` are strict artifact-quality blockers, while broader SWE judgment remains a companion assessment
 - Для одного `profile_id` shard-plan invariant между `baseline` и `parallel-default` = `passed`
 - Для `release full` все constituent `release_verdict_<matrix-id>.json` должны иметь `PASS`
 

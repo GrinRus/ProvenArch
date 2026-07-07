@@ -95,6 +95,7 @@ QUALITY_COUNTER_KEYS = (
     "stall_count",
     "pre_artifact_stalls",
     "post_artifact_stalls",
+    "valid_artifact_controlled_stops",
     "zero_output_pre_artifact_stalls",
     "partial_failure_count",
 )
@@ -105,6 +106,7 @@ FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS = (
     "draft_artifact_repair_exhausted",
     "draft_artifact_enrichment_exhausted",
 )
+STEP_ID_PATTERN = re.compile(r"\b(?:(?:init|refresh)\.step[0-4]\.[a-z0-9_]+|qa\.ask)\b")
 
 FRONTEND_PROVIDERS = ("qwen-code", "claude-code", "codex-code")
 FRONTEND_LIVE_RESULT_FILENAME = "frontend-e2e-result.json"
@@ -170,14 +172,29 @@ def parse_int(value: str, default: int = 0) -> int:
 
 
 def extract_artifact_quality_warnings(quality_payload: dict[str, Any]) -> list[str]:
+    extracted: list[str] = []
+    seen: set[str] = set()
+    signals = quality_payload.get("quality_signals") or []
+    if isinstance(signals, list):
+        for signal in signals:
+            if not isinstance(signal, dict):
+                continue
+            code = str(signal.get("code", "")).strip()
+            if not code.startswith("artifact_quality."):
+                continue
+            message = str(signal.get("message", "")).strip()
+            text = f"{code}: {message}" if message else code
+            if text and text not in seen:
+                extracted.append(text)
+                seen.add(text)
     warnings = quality_payload.get("run_warnings") or []
     if not isinstance(warnings, list):
-        return []
-    extracted: list[str] = []
+        return extracted
     for warning in warnings:
         text = str(warning).strip()
-        if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX):
+        if text.startswith(ARTIFACT_QUALITY_WARNING_PREFIX) and text not in seen:
             extracted.append(text)
+            seen.add(text)
     return extracted
 
 
@@ -216,6 +233,9 @@ def extract_raw_runtime_stall_counters(paths: list[Path]) -> Counter[str]:
         error_text = str(lifecycle.get("error", "")).strip()
         if exit_reason != "stall" and "runtime_stalled" not in error_text:
             continue
+        if raw_lifecycle_has_valid_artifact(lifecycle, diagnostics) and not str(diagnostics.get("validation_error", "")).strip():
+            counters["valid_artifact_controlled_stops"] += 1
+            continue
         stall_phase = str(diagnostics.get("stall_phase", "")).strip()
         if not stall_phase:
             if "runtime_stalled_before_artifacts" in error_text:
@@ -240,6 +260,388 @@ def extract_raw_runtime_stall_counters(paths: list[Path]) -> Counter[str]:
         ):
             counters["zero_output_pre_artifact_stalls"] += 1
     return counters
+
+
+def extract_step_id_from_text(text: str) -> str:
+    match = STEP_ID_PATTERN.search(text or "")
+    return match.group(0) if match else ""
+
+
+def extract_step_id_from_payload(payload: dict[str, Any]) -> str:
+    candidates: list[Any] = [
+        payload.get("step_id"),
+        payload.get("current_step"),
+        payload.get("current_step_id"),
+    ]
+    for key in ("task", "meta", "fields", "diagnostics"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.extend([nested.get("step_id"), nested.get("current_step"), nested.get("current_step_id")])
+    for value in candidates:
+        step_id = extract_step_id_from_text(str(value or ""))
+        if step_id:
+            return step_id
+    message = str(payload.get("message") or payload.get("msg") or payload.get("error") or "")
+    return extract_step_id_from_text(message)
+
+
+def runtime_log_string(payload: dict[str, Any], key: str) -> str:
+    for source in (
+        payload,
+        payload.get("fields") if isinstance(payload.get("fields"), dict) else {},
+        payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {},
+    ):
+        if not isinstance(source, dict):
+            continue
+        value = source.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def runtime_log_bool(payload: dict[str, Any], key: str) -> bool:
+    for source in (
+        payload,
+        payload.get("fields") if isinstance(payload.get("fields"), dict) else {},
+        payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {},
+    ):
+        if not isinstance(source, dict):
+            continue
+        if key not in source:
+            continue
+        value = source.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "valid", "passed", "succeeded"}
+    return False
+
+
+def artifact_state_from_payload(payload: dict[str, Any]) -> str:
+    return runtime_log_string(payload, "artifact_state").strip().lower()
+
+
+def payload_has_valid_artifact(payload: dict[str, Any]) -> bool:
+    if runtime_log_bool(payload, "artifact_valid"):
+        return True
+    return artifact_state_from_payload(payload) in {"valid", "passed", "succeeded", "success"}
+
+
+def raw_lifecycle_has_valid_artifact(lifecycle: dict[str, Any], diagnostics: dict[str, Any]) -> bool:
+    for source in (lifecycle, diagnostics):
+        raw_valid = source.get("artifact_valid")
+        if isinstance(raw_valid, bool) and raw_valid:
+            return True
+        if isinstance(raw_valid, str) and raw_valid.strip().lower() in {"1", "true", "yes"}:
+            return True
+        state = str(source.get("artifact_state") or source.get("manifest_state") or "").strip().lower()
+        if state in {"valid", "passed", "succeeded", "success"}:
+            return True
+    return False
+
+
+def compact_runtime_excerpt(text: str, limit: int = 180) -> str:
+    cleaned = " ".join(str(text or "").strip().split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
+
+
+def is_generic_runtime_excerpt(text: str) -> bool:
+    lower = " ".join(str(text or "").strip().lower().split())
+    return lower in {
+        "retry scheduled",
+        "runtime_stalled_after_artifacts",
+        "runtime stalled after artifacts",
+        "provider command finished",
+        "provider command started",
+    }
+
+
+def classify_step_validation_text(text: str) -> str:
+    lower = text.lower()
+    if not lower:
+        return "unknown"
+    if (
+        "no structured finding" in lower
+        or "does not reference any current-run finding id" in lower
+        or "synthetic current-run finding placeholder" in lower
+    ):
+        return "finding_linkage"
+    if "medium/high" in lower or "top actionable findings" in lower or "actionable proposal" in lower:
+        return "low_actionability"
+    if "markdown table" in lower:
+        return "markdown_table"
+    if (
+        "malformed markdown" in lower
+        or "inline-code" in lower
+        or "code-fence" in lower
+        or "unbalanced inline backtick" in lower
+        or "unbalanced backtick" in lower
+        or "balanced backticks" in lower
+    ):
+        return "markdown_syntax"
+    if "bootstrap" in lower or "scaffold" in lower or "placeholder" in lower:
+        return "placeholder_or_scaffold"
+    if (
+        "manifest" in lower
+        or "unknown field" in lower
+        or "outputs[]" in lower
+        or "citations[" in lower
+        or "semantic/questions" in lower
+    ):
+        return "manifest_shape"
+    if "shard completeness" in lower or "typed shard" in lower:
+        return "shard_completeness"
+    if "final-run-index" in lower or "citation-index" in lower or "canonical document count" in lower:
+        return "index_count"
+    if "write set" in lower or "outside the draft artifact write set" in lower:
+        return "write_set"
+    return "unknown"
+
+
+def merge_validation_class(current: str, candidate: str) -> str:
+    if not candidate or candidate == "unknown":
+        return current or "unknown"
+    return candidate
+
+
+def collect_runtime_step_pressure(workspace_roots: list[Path], run_ids: set[str]) -> dict[str, dict[str, Any]]:
+    pressure: dict[str, dict[str, Any]] = {}
+    seen_paths: set[Path] = set()
+
+    def stats_for(step_id: str) -> dict[str, Any]:
+        return pressure.setdefault(
+            step_id,
+            {
+                "repair_attempts": 0,
+                "repair_exhausted": 0,
+                "stall_count": 0,
+                "valid_artifact_controlled_stops": 0,
+                "final_validation_class": "unknown",
+                "first_validation_error_excerpt": "",
+                "terminal_validation_error_excerpt": "",
+                "stop_kind": "",
+                "initial_artifact_state": "",
+            },
+        )
+
+    def remember_validation(step_stats: dict[str, Any], text: str) -> None:
+        excerpt = compact_runtime_excerpt(text)
+        if not excerpt:
+            return
+        existing = str(step_stats.get("first_validation_error_excerpt") or "")
+        if existing and is_generic_runtime_excerpt(existing) and not is_generic_runtime_excerpt(excerpt):
+            step_stats["first_validation_error_excerpt"] = excerpt
+        elif not existing and not is_generic_runtime_excerpt(excerpt):
+            step_stats["first_validation_error_excerpt"] = excerpt
+        terminal_existing = str(step_stats.get("terminal_validation_error_excerpt") or "")
+        if (
+            not terminal_existing
+            or not is_generic_runtime_excerpt(excerpt)
+            or is_generic_runtime_excerpt(terminal_existing)
+        ):
+            step_stats["terminal_validation_error_excerpt"] = excerpt
+
+    def remember_state(step_stats: dict[str, Any], state: str) -> None:
+        state = str(state or "").strip().lower()
+        if state and not step_stats.get("initial_artifact_state"):
+            step_stats["initial_artifact_state"] = state
+
+    def remember_stop_kind(step_stats: dict[str, Any], stop_kind: str) -> None:
+        if stop_kind and not step_stats.get("stop_kind"):
+            step_stats["stop_kind"] = stop_kind
+
+    for workspace_root in workspace_roots:
+        logs_root = workspace_root / "reports" / "taskruns" / "logs"
+        for log_path in sorted(logs_root.glob("*.ndjson")):
+            if log_path in seen_paths:
+                continue
+            seen_paths.add(log_path)
+            try:
+                lines = read_text_file(log_path).splitlines()
+            except Exception:
+                continue
+            for raw_line in lines:
+                if not raw_line.strip():
+                    continue
+                try:
+                    payload = json.loads(raw_line)
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                step_id = extract_step_id_from_payload(payload)
+                if not step_id:
+                    continue
+                run_id = runtime_log_string(payload, "run_id")
+                if run_ids and run_id and run_id not in run_ids:
+                    continue
+                message = str(payload.get("message") or payload.get("msg") or "").strip()
+                combined = " ".join(
+                    str(part or "")
+                    for part in (
+                        message,
+                        runtime_log_string(payload, "recovery_stage"),
+                        runtime_log_string(payload, "recovery_mode"),
+                        runtime_log_string(payload, "validation_error"),
+                        runtime_log_string(payload, "error"),
+                    )
+                ).lower()
+                kind = str(payload.get("kind") or "").strip()
+                validation_text = runtime_log_string(payload, "validation_error") or runtime_log_string(payload, "error")
+                if not validation_text and kind != "runtime_output":
+                    validation_text = message
+                retry_is_actual_repair = (
+                    "retry scheduled" in combined
+                    and (
+                        runtime_log_string(payload, "recovery_mode") == "fresh_process"
+                        or runtime_log_string(payload, "action") == "fresh_process_after_invalid_artifacts"
+                    )
+                )
+                collect_manifest_repair_scheduled = (
+                    "collect manifest repair scheduled" in combined
+                    or "collect manifest shape cleanup scheduled" in combined
+                )
+                if "focused artifact repair scheduled" in combined or collect_manifest_repair_scheduled or retry_is_actual_repair:
+                    step_stats = stats_for(step_id)
+                    step_stats["repair_attempts"] += 1
+                    remember_stop_kind(step_stats, "repair_retry")
+                    remember_state(step_stats, artifact_state_from_payload(payload))
+                    remember_validation(step_stats, validation_text)
+                collect_manifest_repair_exhausted = (
+                    "collect manifest repair exhausted" in combined
+                    or "collect manifest shape cleanup exhausted" in combined
+                )
+                if "focused artifact repair exhausted" in combined or "repair exhausted" in combined or collect_manifest_repair_exhausted:
+                    step_stats = stats_for(step_id)
+                    step_stats["repair_exhausted"] += 1
+                    if not collect_manifest_repair_scheduled:
+                        step_stats["repair_attempts"] += 1
+                    remember_stop_kind(step_stats, "repair_exhausted")
+                    remember_state(step_stats, artifact_state_from_payload(payload))
+                    remember_validation(step_stats, validation_text)
+                validation_class = classify_step_validation_text(validation_text)
+                if validation_class != "unknown":
+                    step_stats = stats_for(step_id)
+                    step_stats["final_validation_class"] = merge_validation_class(
+                        str(step_stats.get("final_validation_class", "unknown")),
+                        validation_class,
+                    )
+                    remember_validation(step_stats, validation_text)
+                if "runtime_stalled" in combined or runtime_log_string(payload, "exit_reason") == "stall":
+                    step_stats = stats_for(step_id)
+                    remember_state(step_stats, artifact_state_from_payload(payload))
+                    if payload_has_valid_artifact(payload) and not runtime_log_string(payload, "validation_error").strip():
+                        step_stats["valid_artifact_controlled_stops"] += 1
+                        remember_stop_kind(step_stats, "valid_artifact_controlled_stop")
+                    else:
+                        step_stats["stall_count"] += 1
+                        remember_stop_kind(step_stats, "actual_stall")
+                        remember_validation(step_stats, validation_text or combined)
+
+        raw_root = workspace_root / "reports" / "taskruns" / "raw"
+        for meta_path in sorted(raw_root.glob("*-meta.json")):
+            if meta_path in seen_paths:
+                continue
+            seen_paths.add(meta_path)
+            try:
+                payload = read_json(meta_path)
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+            step_id = extract_step_id_from_text(str(task.get("step_id") or ""))
+            if not step_id:
+                step_id = extract_step_id_from_payload(payload)
+            if not step_id:
+                continue
+            run_id = str(task.get("run_id") or "").strip()
+            if run_ids and run_id and run_id not in run_ids:
+                continue
+            diagnostics = payload.get("diagnostics") or {}
+            if not isinstance(diagnostics, dict):
+                diagnostics = {}
+            lifecycle = diagnostics.get("provider_lifecycle") or {}
+            if not isinstance(lifecycle, dict):
+                lifecycle = {}
+            error_text = str(lifecycle.get("error") or diagnostics.get("error") or "")
+            validation_class = classify_step_validation_text(error_text)
+            if validation_class != "unknown":
+                step_stats = stats_for(step_id)
+                step_stats["final_validation_class"] = merge_validation_class(
+                    str(step_stats.get("final_validation_class", "unknown")),
+                    validation_class,
+                )
+                remember_validation(step_stats, error_text)
+            if str(lifecycle.get("exit_reason", "")).strip() == "stall" or "runtime_stalled" in error_text:
+                step_stats = stats_for(step_id)
+                remember_state(step_stats, str(lifecycle.get("artifact_state") or diagnostics.get("artifact_state") or ""))
+                if raw_lifecycle_has_valid_artifact(lifecycle, diagnostics) and not str(diagnostics.get("validation_error", "")).strip():
+                    step_stats["valid_artifact_controlled_stops"] += 1
+                    remember_stop_kind(step_stats, "valid_artifact_controlled_stop")
+                else:
+                    step_stats["stall_count"] += 1
+                    remember_stop_kind(step_stats, "actual_stall")
+                    remember_validation(step_stats, error_text)
+    return pressure
+
+
+def excellent_blockers_by_step_from_pressure(
+    provider: str,
+    run_index: int,
+    run_ids: set[str],
+    issues: list[str],
+    pressure: dict[str, dict[str, Any]],
+    repair_attempts: int,
+    stall_count: int,
+) -> list[dict[str, Any]]:
+    issue_set = set(issues)
+    entries: list[dict[str, Any]] = []
+
+    def append_entry(step_id: str, blocker_code: str, step_stats: dict[str, Any]) -> None:
+        entries.append(
+            {
+                "provider": provider,
+                "run_index": run_index,
+                "run_ids": sorted(run_ids),
+                "step_id": step_id,
+                "blocker_code": blocker_code,
+                "repair_attempts": int(step_stats.get("repair_attempts", 0) or 0),
+                "stall_count": int(step_stats.get("stall_count", 0) or 0),
+                "valid_artifact_controlled_stops": int(step_stats.get("valid_artifact_controlled_stops", 0) or 0),
+                "final_validation_class": str(step_stats.get("final_validation_class") or "unknown"),
+                "first_validation_error_excerpt": str(step_stats.get("first_validation_error_excerpt") or ""),
+                "terminal_validation_error_excerpt": str(step_stats.get("terminal_validation_error_excerpt") or ""),
+                "stop_kind": str(step_stats.get("stop_kind") or ""),
+                "initial_artifact_state": str(step_stats.get("initial_artifact_state") or ""),
+            }
+        )
+
+    if "execution:repair-exhausted" in issue_set:
+        repair_code = "runtime_quality.repair_exhausted"
+        for step_id, step_stats in sorted(pressure.items()):
+            if int(step_stats.get("repair_exhausted", 0) or 0) > 0:
+                append_entry(step_id, repair_code, step_stats)
+        if not any(item["blocker_code"] == repair_code for item in entries):
+            append_entry("unknown", repair_code, {"repair_attempts": repair_attempts, "stall_count": 0, "final_validation_class": "unknown", "stop_kind": "repair_retry"})
+    if "execution:repair-heavy" in issue_set:
+        repair_code = "runtime_quality.repair_heavy"
+        for step_id, step_stats in sorted(pressure.items()):
+            if int(step_stats.get("repair_attempts", 0) or 0) > 0:
+                append_entry(step_id, repair_code, step_stats)
+        if not any(item["blocker_code"] == repair_code for item in entries):
+            append_entry("unknown", repair_code, {"repair_attempts": repair_attempts, "stall_count": 0, "final_validation_class": "unknown", "stop_kind": "repair_retry"})
+    if "execution:stall-pressure" in issue_set:
+        for step_id, step_stats in sorted(pressure.items()):
+            if int(step_stats.get("stall_count", 0) or 0) > 0:
+                append_entry(step_id, "runtime_quality.stall_pressure", step_stats)
+        if not any(item["blocker_code"] == "runtime_quality.stall_pressure" for item in entries):
+            append_entry("unknown", "runtime_quality.stall_pressure", {"repair_attempts": 0, "stall_count": stall_count, "final_validation_class": "unknown", "stop_kind": "actual_stall"})
+    return entries
 
 
 def parse_run_results(path: Path) -> list[dict[str, Any]]:
@@ -1155,7 +1557,15 @@ def bool_score(value: bool, weight: int) -> int:
     return weight if value else 0
 
 
-def verdict(total: int) -> str:
+def verdict(total: int, issues: list[str] | None = None, hard_pass: bool = True) -> str:
+    issue_set = set(issues or [])
+    if not hard_pass or "quality:artifact-quality" in issue_set:
+        return "Blocked"
+    if (
+        {"execution:repair-heavy", "execution:repair-exhausted", "execution:stall-pressure", "execution:partial-failures"}
+        & issue_set
+    ) or any(issue.startswith("analysis:") for issue in issue_set):
+        return "Needs review"
     if total >= 85:
         return "Excellent"
     if total >= 70:
@@ -1176,6 +1586,9 @@ class RunEvaluation:
     analysis: int
     total: int
     verdict: str
+    runtime_contract_status: str = "failed"
+    artifact_quality_status: str = "passed"
+    artifact_quality_failed: bool = False
     init_signal: int = 0
     refresh_signal: int = 0
     refresh_findings: int = 0
@@ -1188,6 +1601,7 @@ class RunEvaluation:
     stall_count: int = 0
     pre_artifact_stalls: int = 0
     post_artifact_stalls: int = 0
+    valid_artifact_controlled_stops: int = 0
     zero_output_pre_artifact_stalls: int = 0
     partial_failure_count: int = 0
     quality_alerts: int = 0
@@ -1200,14 +1614,36 @@ class RunEvaluation:
     runtime_timeout: bool = False
     infra_signal_terminated: bool = False
     infra_incomplete_cycle: bool = False
+    quality_gates_failed: bool = False
     summary_missing: bool = False
     precheck_failed: bool = False
     runtime_flow_failed: bool = False
     cancellation_like: bool = False
     artifact_quality_findings: int = 0
+    excellent_blockers: list[str] = field(default_factory=list)
+    excellent_blockers_by_step: list[dict[str, Any]] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
     issue_details: list[str] = field(default_factory=list)
     error_codes: list[str] = field(default_factory=list)
+
+
+def excellent_blockers_from_issues(issues: list[str]) -> list[str]:
+    blockers: list[str] = []
+    issue_set = set(issues)
+    if "quality:artifact-quality" in issue_set:
+        blockers.append("artifact-quality blockers")
+    for issue, label in (
+        ("execution:repair-heavy", "runtime_quality.repair_heavy"),
+        ("execution:repair-exhausted", "runtime_quality.repair_exhausted"),
+        ("execution:stall-pressure", "runtime_quality.stall_pressure"),
+        ("execution:partial-failures", "runtime_quality.partial_failures"),
+    ):
+        if issue in issue_set:
+            blockers.append(label)
+    for issue in sorted(issue_set):
+        if issue.startswith("analysis:"):
+            blockers.append(issue)
+    return blockers
 
 
 def evaluate_run(
@@ -1332,6 +1768,7 @@ def evaluate_run(
     running_runs_detected = parse_int(parse_markdown_scalar(summary_text, "running_runs_detected"), 0) if summary_text else 0
     run_history_running = int(run_history_counts.get("running", 0))
     api_status = parse_api_status(summary_text)
+    quality_gates_value = first_token(parse_markdown_scalar(summary_text, "quality_gates")) if summary_text else ""
     terminal_process_failure = terminal_process_failed_summary(
         summary_path.exists(),
         run_status.get("state", ""),
@@ -1358,6 +1795,11 @@ def evaluate_run(
     headless_rows = parse_headless_rows(rows, provider)
     init_row = headless_rows.get("init")
     refresh_row = headless_rows.get("refresh")
+    pressure_run_ids = {
+        str(row.get("run_id", "")).strip()
+        for row in (init_row, refresh_row)
+        if row and str(row.get("run_id", "")).strip()
+    }
     quality_counter_totals: Counter[str] = Counter()
     for row in (init_row, refresh_row):
         if not row:
@@ -1379,6 +1821,7 @@ def evaluate_run(
             int(raw_stall_counter_totals.get(key, 0)),
         )
     has_runtime_counter_source = any(int(quality_counter_totals.get(key, 0)) > 0 for key in QUALITY_COUNTER_KEYS)
+    step_pressure = collect_runtime_step_pressure(workspace_roots, pressure_run_ids)
 
     repair_attempts = int(quality_counter_totals.get("repair_attempts", 0))
     repair_exhausted = int(quality_counter_totals.get("repair_exhausted", 0))
@@ -1387,6 +1830,7 @@ def evaluate_run(
     stall_count = int(quality_counter_totals.get("stall_count", 0))
     pre_artifact_stalls = int(quality_counter_totals.get("pre_artifact_stalls", 0))
     post_artifact_stalls = int(quality_counter_totals.get("post_artifact_stalls", 0))
+    valid_artifact_controlled_stops = int(quality_counter_totals.get("valid_artifact_controlled_stops", 0))
     zero_output_pre_artifact_stalls = int(quality_counter_totals.get("zero_output_pre_artifact_stalls", 0))
     partial_failure_count = int(quality_counter_totals.get("partial_failure_count", 0))
     quality_alerts = int(quality_counter_totals.get("quality_alerts", 0))
@@ -1406,8 +1850,14 @@ def evaluate_run(
             details.append(
                 "execution/runtime-stalls-raw -> "
                 f"raw_meta_stalls={int(raw_stall_counter_totals.get('stall_count', 0))} "
+                f"valid_artifact_controlled_stops={int(raw_stall_counter_totals.get('valid_artifact_controlled_stops', 0))} "
                 f"zero_output_pre_artifact={int(raw_stall_counter_totals.get('zero_output_pre_artifact_stalls', 0))}"
             )
+    if valid_artifact_controlled_stops > 0:
+        details.append(
+            "execution/runtime-controlled-stops -> "
+            f"valid_artifact_controlled_stops={valid_artifact_controlled_stops} (diagnostic only, not an Excellent blocker)"
+        )
     if partial_failure_count > 0:
         issues.append("execution:partial-failures")
         details.append(f"execution/partial-failures -> partial_failure_count={partial_failure_count}")
@@ -1580,6 +2030,9 @@ def evaluate_run(
     )
     infra_incomplete_cycle = failure_reason == "infra_incomplete_cycle"
     partial_failures_hit = partial_failure_count > 0
+    quality_gates_failed = failure_reason == "quality" or quality_gates_value == "failed"
+    if partial_failures_hit:
+        quality_gates_failed = True
     if not terminal_process_failure:
         if expected_runs > 0 and completed_runs != expected_runs:
             infra_incomplete_cycle = True
@@ -1623,6 +2076,11 @@ def evaluate_run(
         issues.append("reliability:partial-failures")
         details.append(
             f"reliability/partial-failures -> partial_failure_count={partial_failure_count}"
+        )
+    if quality_gates_failed:
+        issues.append("reliability:quality-gates-failed")
+        details.append(
+            f"reliability/quality-gates-failed -> {summary_path}: quality_gates={quality_gates_value or '-'} failure_reason={failure_reason or '-'}"
         )
     if cancellation_like:
         issues.append("reliability:cancellation-like")
@@ -1774,7 +2232,7 @@ def evaluate_run(
                         str(reason).strip() for reason in evidence_reasons if str(reason).strip()
                     )
             if artifact_quality_warnings:
-                issues.append("artifact:quality-warning")
+                issues.append("quality:artifact-quality")
                 for warning in artifact_quality_warnings:
                     details.append(f"artifact/quality-warning -> {analysis_quality_path}: {warning}")
             if analysis_evidence_reasons:
@@ -2036,6 +2494,9 @@ def evaluate_run(
 
     analysis = bool_score(overview_ok, 10) + bool_score(findings_ok, 10) + bool_score(coverage_ok, 10) + bool_score(questions_ok, 10)
 
+    artifact_quality_failed = "quality:artifact-quality" in issues
+    quality_gates_failed = quality_gates_failed or artifact_quality_failed
+
     failure_class = "none"
     if summary_missing:
         failure_class = "summary_missing"
@@ -2051,6 +2512,8 @@ def evaluate_run(
         failure_class = "runner_unavailable"
     elif infra_signal_terminated:
         failure_class = "infra_signal_terminated"
+    elif quality_gates_failed:
+        failure_class = "quality_gates_failed"
     elif infra_incomplete_cycle:
         failure_class = "infra_incomplete_cycle"
     elif validator_verdict_failed_hit or runtime_flow_failed:
@@ -2083,6 +2546,7 @@ def evaluate_run(
             "runner_unavailable",
             "runtime_contract_failed",
             "infra_signal_terminated",
+            "quality_gates_failed",
             "infra_incomplete_cycle",
             "runtime_flow_failed",
         }:
@@ -2094,15 +2558,22 @@ def evaluate_run(
             runner_unavailable_hit = runner_unavailable_hit or classified_failure == "runner_unavailable"
         runtime_timeout = runtime_timeout or classified_failure == "runtime_timeout"
         infra_signal_terminated = infra_signal_terminated or classified_failure == "infra_signal_terminated"
+        quality_gates_failed = quality_gates_failed or classified_failure == "quality_gates_failed"
         if not ignore_classified_incomplete:
             infra_incomplete_cycle = infra_incomplete_cycle or classified_failure == "infra_incomplete_cycle"
         summary_missing = summary_missing or classified_failure == "summary_missing"
 
+    analysis_issue = any(issue.startswith("analysis:") for issue in issues)
+    artifact_quality_status = "failed" if artifact_quality_failed else ("needs_review" if analysis_issue else "passed")
     hard_pass = (
         h1
         and h2
         and h3
+        and h4
         and snapshot_ok
+        and not quality_gates_failed
+        and not artifact_quality_failed
+        and not semantic_hard_fail
         and not runtime_flow_failed
         and not summary_missing
         and not runtime_timeout
@@ -2110,7 +2581,38 @@ def evaluate_run(
         and not infra_incomplete_cycle
     )
 
+    non_artifact_quality_gate_failed = quality_gates_failed and not artifact_quality_failed
+    runtime_contract_passed = (
+        api_status == "succeeded"
+        and h2
+        and h3
+        and h4
+        and snapshot_ok
+        and contract == 20
+        and not non_artifact_quality_gate_failed
+        and not summary_missing
+        and not runtime_timeout
+        and not runner_unavailable_hit
+        and not runtime_contract_failed_hit
+        and not infra_signal_terminated
+        and not infra_incomplete_cycle
+        and not runtime_flow_failed
+    )
+    runtime_contract_status = "passed" if runtime_contract_passed else "failed"
+    if runtime_contract_status == "passed" and artifact_quality_status == "failed":
+        details.append("quality/artifact-quality-status -> runtime passed, artifact quality failed")
+
     total = reliability + contract + analysis
+    unique_issues = sorted(set(issues))
+    excellent_blockers_by_step = excellent_blockers_by_step_from_pressure(
+        provider,
+        run_index,
+        pressure_run_ids,
+        unique_issues,
+        step_pressure,
+        repair_attempts,
+        stall_count,
+    )
     return RunEvaluation(
         provider=provider,
         run_index=run_index,
@@ -2120,7 +2622,10 @@ def evaluate_run(
         contract=contract,
         analysis=analysis,
         total=total,
-        verdict=verdict(total),
+        verdict=verdict(total, unique_issues, hard_pass),
+        runtime_contract_status=runtime_contract_status,
+        artifact_quality_status=artifact_quality_status,
+        artifact_quality_failed=artifact_quality_failed,
         init_signal=init_signal,
         refresh_signal=refresh_signal,
         refresh_findings=int(refresh_row["findings"]) if refresh_row else 0,
@@ -2133,6 +2638,7 @@ def evaluate_run(
         stall_count=stall_count,
         pre_artifact_stalls=pre_artifact_stalls,
         post_artifact_stalls=post_artifact_stalls,
+        valid_artifact_controlled_stops=valid_artifact_controlled_stops,
         zero_output_pre_artifact_stalls=zero_output_pre_artifact_stalls,
         partial_failure_count=partial_failure_count,
         quality_alerts=quality_alerts,
@@ -2145,12 +2651,15 @@ def evaluate_run(
         runtime_timeout=runtime_timeout,
         infra_signal_terminated=infra_signal_terminated,
         infra_incomplete_cycle=infra_incomplete_cycle,
+        quality_gates_failed=quality_gates_failed,
         summary_missing=summary_missing,
         precheck_failed=False,
         runtime_flow_failed=runtime_flow_failed,
         cancellation_like=cancellation_like,
         artifact_quality_findings=len(artifact_quality_warnings),
-        issues=sorted(set(issues)),
+        excellent_blockers=excellent_blockers_from_issues(unique_issues),
+        excellent_blockers_by_step=excellent_blockers_by_step,
+        issues=unique_issues,
         issue_details=details,
         error_codes=sorted(set(error_codes)),
     )
@@ -2262,23 +2771,67 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
     lines = [
         "# Run Matrix",
         "",
-        "| provider | run | hard_pass | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | issues |",
-        "|---|---:|---:|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
+    split_status_runs = [
+        f"{item.provider} run{item.run_index}"
+        for item in runs
+        if item.runtime_contract_status == "passed" and item.artifact_quality_status == "failed"
+    ]
+    if split_status_runs:
+        lines.extend(
+            [
+                f"- runtime passed, artifact quality failed: {', '.join(split_status_runs)}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "| provider | run | hard_pass | runtime_contract_status | artifact_quality_status | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | artifact_quality_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | valid_artifact_controlled_stops | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | excellent_blockers | issues |",
+            "|---|---:|---:|---|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        ]
+    )
     for item in runs:
         lines.append(
             "| "
-            f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.reliability} | {item.contract} | "
+            f"{item.provider} | {item.run_index} | {int(item.hard_pass)} | {item.runtime_contract_status} | "
+            f"{item.artifact_quality_status} | {item.reliability} | {item.contract} | "
             f"{item.analysis} | {item.total} | {item.verdict} | {item.artifact_source} | {int(item.semantic_hard_fail)} | {item.failure_class} | "
             f"{int(item.runtime_contract_failed)} | {int(item.runner_unavailable)} | {int(item.runtime_timeout)} | {int(item.infra_signal_terminated)} | "
-            f"{int(item.infra_incomplete_cycle)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
+            f"{int(item.infra_incomplete_cycle)} | {int(item.quality_gates_failed)} | {int(item.artifact_quality_failed)} | {int(item.summary_missing)} | {int(item.precheck_failed)} | {int(item.runtime_flow_failed)} | {int(item.cancellation_like)} | {item.off_topic_hits} | "
             f"{item.init_signal} | {item.refresh_signal} | "
             f"{item.refresh_findings} | {item.refresh_questions} | {item.refresh_cov_missing} | "
             f"{item.repair_attempts} | {item.repair_exhausted} | {item.fresh_retries} | {item.focused_repairs} | "
             f"{item.stall_count} | {item.pre_artifact_stalls} | {item.post_artifact_stalls} | "
-            f"{item.zero_output_pre_artifact_stalls} | {item.partial_failure_count} | {item.quality_alerts} | {item.artifact_quality_findings} | "
+            f"{item.valid_artifact_controlled_stops} | {item.zero_output_pre_artifact_stalls} | {item.partial_failure_count} | {item.quality_alerts} | {item.artifact_quality_findings} | "
+            f"{', '.join(item.excellent_blockers) if item.excellent_blockers else '-'} | "
             f"{', '.join(item.issues) if item.issues else '-'} |"
         )
+    step_entries = [
+        entry
+        for item in runs
+        for entry in item.excellent_blockers_by_step
+    ]
+    lines.extend(["", "## Excellent Blockers By Step", ""])
+    if not step_entries:
+        lines.append("- none")
+    else:
+        lines.extend(
+            [
+                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt | terminal_validation_error_excerpt |",
+                "|---|---:|---|---|---:|---:|---:|---|---|---|---|---|",
+            ]
+        )
+        for entry in step_entries:
+            lines.append(
+                "| "
+                f"{md_cell(entry.get('provider', '-'))} | {md_cell(entry.get('run_index', '-'))} | "
+                f"{md_cell(entry.get('step_id', '-'))} | {md_cell(entry.get('blocker_code', '-'))} | "
+                f"{md_cell(entry.get('repair_attempts', 0))} | {md_cell(entry.get('stall_count', 0))} | "
+                f"{md_cell(entry.get('valid_artifact_controlled_stops', 0))} | "
+                f"{md_cell(entry.get('final_validation_class', 'unknown'))} | {md_cell(entry.get('stop_kind', '-'))} | "
+                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} | "
+                f"{md_cell(entry.get('terminal_validation_error_excerpt', '-'))} |"
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -2418,6 +2971,7 @@ def provider_matrix_rows(
                 "stall_count": sum(item.stall_count for item in items),
                 "pre_artifact_stalls": sum(item.pre_artifact_stalls for item in items),
                 "post_artifact_stalls": sum(item.post_artifact_stalls for item in items),
+                "valid_artifact_controlled_stops": sum(item.valid_artifact_controlled_stops for item in items),
                 "zero_output_pre_artifact_stalls": sum(item.zero_output_pre_artifact_stalls for item in items),
                 "partial_failure_count": sum(item.partial_failure_count for item in items),
                 "quality_alerts": sum(item.quality_alerts for item in items),
@@ -2429,6 +2983,8 @@ def provider_matrix_rows(
                 "infra_signal_terminated_failures": sum(1 for item in items if item.infra_signal_terminated),
                 "infra_incomplete_cycle_failures": sum(1 for item in items if item.infra_incomplete_cycle),
                 "artifact_quality_findings": sum(item.artifact_quality_findings for item in items),
+                "quality_gates_failed_failures": sum(1 for item in items if item.quality_gates_failed),
+                "artifact_quality_failed_failures": sum(1 for item in items if item.artifact_quality_failed),
                 "summary_missing_failures": sum(1 for item in items if item.summary_missing),
                 "precheck_failed_failures": sum(1 for item in items if item.precheck_failed),
                 "runtime_flow_failed_failures": sum(1 for item in items if item.runtime_flow_failed),
@@ -2457,6 +3013,7 @@ def write_execution_report(
     hard_pass_all = sum(1 for run in runs if run.hard_pass)
     semantic_hard_fail_runs = sum(1 for run in runs if run.semantic_hard_fail)
     runtime_flow_failed_runs = sum(1 for run in runs if run.runtime_flow_failed)
+    artifact_quality_failed_runs = sum(1 for run in runs if run.artifact_quality_failed)
     repair_attempts_total = sum(run.repair_attempts for run in runs)
     repair_exhausted_total = sum(run.repair_exhausted for run in runs)
     fresh_retries_total = sum(run.fresh_retries for run in runs)
@@ -2464,14 +3021,22 @@ def write_execution_report(
     stall_count_total = sum(run.stall_count for run in runs)
     pre_artifact_stalls_total = sum(run.pre_artifact_stalls for run in runs)
     post_artifact_stalls_total = sum(run.post_artifact_stalls for run in runs)
+    valid_artifact_controlled_stops_total = sum(run.valid_artifact_controlled_stops for run in runs)
     zero_output_pre_artifact_stalls_total = sum(run.zero_output_pre_artifact_stalls for run in runs)
     partial_failure_count_total = sum(run.partial_failure_count for run in runs)
     quality_alerts_total = sum(run.quality_alerts for run in runs)
+    split_status_runs = [
+        f"{run.provider} run{run.run_index}"
+        for run in runs
+        if run.runtime_contract_status == "passed" and run.artifact_quality_status == "failed"
+    ]
     declared_meta = normalize_declared_repos_meta(preflight)
     declared_repos = declared_meta.get("declared_repos") or []
     issue_counter = Counter()
+    excellent_blocker_counter = Counter()
     for run in runs:
         issue_counter.update(run.issues)
+        excellent_blocker_counter.update(run.excellent_blockers)
     snapshot_runs = sum(1 for run in runs if run.artifact_source == "snapshot")
 
     lines = [
@@ -2491,10 +3056,12 @@ def write_execution_report(
         "",
         "## Backend Execution Verdict",
         f"- hard_pass_runs: {hard_pass_all}/{len(runs)}",
+        f"- artifact_quality_failed_runs: {artifact_quality_failed_runs}/{len(runs)}",
+        f"- runtime passed, artifact quality failed: {', '.join(split_status_runs) if split_status_runs else '-'}",
         f"- runtime_flow_failed_runs: {runtime_flow_failed_runs}/{len(runs)}",
         f"- primary_failure_classes: {', '.join(sorted({run.failure_class for run in runs if run.failure_class and run.failure_class != '-'})) or 'none'}",
         "",
-        "Machine execution verdict is based on runtime/preflight/frontend execution evidence only. Artifact quality signals below are telemetry for SWE assessment and do not flip the machine execution verdict.",
+        "Runtime contract status is reported separately from artifact quality status. Strict hard-pass requires both runtime execution and artifact quality to pass.",
         "",
         "## Runtime Recovery And Artifact Telemetry",
         f"- semantic_hard_fail_runs: {semantic_hard_fail_runs}/{len(runs)}",
@@ -2506,19 +3073,57 @@ def write_execution_report(
         f"- stall_count: {stall_count_total}",
         f"- pre_artifact_stalls: {pre_artifact_stalls_total}",
         f"- post_artifact_stalls: {post_artifact_stalls_total}",
+        f"- valid_artifact_controlled_stops: {valid_artifact_controlled_stops_total}",
         f"- zero_output_pre_artifact_stalls: {zero_output_pre_artifact_stalls_total}",
         f"- partial_failure_count: {partial_failure_count_total}",
         f"- quality_alerts: {quality_alerts_total}",
         f"- artifact_quality_findings: {sum(run.artifact_quality_findings for run in runs)}",
         "",
-        "## Frontend Live Smoke Verdict",
-        *frontend_live_verdict_lines(frontend, active_providers),
-        "",
-        "## Provider Matrix",
-        "",
-        "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
+        "## Excellent Blockers",
     ]
+    if excellent_blocker_counter:
+        for blocker, count in excellent_blocker_counter.most_common():
+            lines.append(f"- {blocker}: {count} run(s).")
+    else:
+        lines.append("- none")
+    step_entries = [
+        entry
+        for run in runs
+        for entry in run.excellent_blockers_by_step
+    ]
+    lines.extend(["", "## Excellent Blockers By Step", ""])
+    if not step_entries:
+        lines.append("- none")
+    else:
+        lines.extend(
+            [
+                "| provider | run | step_id | blocker_code | repair_attempts | stall_count | valid_artifact_controlled_stops | final_validation_class | stop_kind | initial_artifact_state | first_validation_error_excerpt | terminal_validation_error_excerpt |",
+                "|---|---:|---|---|---:|---:|---:|---|---|---|---|---|",
+            ]
+        )
+        for entry in step_entries:
+            lines.append(
+                "| "
+                f"{md_cell(entry.get('provider', '-'))} | {md_cell(entry.get('run_index', '-'))} | "
+                f"{md_cell(entry.get('step_id', '-'))} | {md_cell(entry.get('blocker_code', '-'))} | "
+                f"{md_cell(entry.get('repair_attempts', 0))} | {md_cell(entry.get('stall_count', 0))} | "
+                f"{md_cell(entry.get('valid_artifact_controlled_stops', 0))} | "
+                f"{md_cell(entry.get('final_validation_class', 'unknown'))} | {md_cell(entry.get('stop_kind', '-'))} | "
+                f"{md_cell(entry.get('initial_artifact_state', '-'))} | {md_cell(entry.get('first_validation_error_excerpt', '-'))} | "
+                f"{md_cell(entry.get('terminal_validation_error_excerpt', '-'))} |"
+            )
+    lines.extend(
+        [
+            "",
+            "## Frontend Live Smoke Verdict",
+            *frontend_live_verdict_lines(frontend, active_providers),
+            "",
+            "## Provider Matrix",
+            "",
+            "| provider | runs | pass_rate | avg_total | std_total | avg_reliability | avg_contract | avg_analysis | avg_refresh_signal | std_refresh_signal | avg_refresh_findings | avg_refresh_questions | avg_refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | valid_artifact_controlled_stops | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | off_topic_hits | semantic_hard_fail_runs | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | artifact_quality_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | error_codes | frontend_live_pass_rate |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|",
+        ]
+    )
     for row in provider_rows:
         lines.append(
             "| "
@@ -2527,10 +3132,10 @@ def write_execution_report(
             f"{row['avg_signal']:.2f} | {row['std_signal']:.2f} | {row['avg_findings']:.2f} | {row['avg_questions']:.2f} | "
             f"{row['avg_cov_missing']:.2f} | {row['repair_attempts']} | {row['repair_exhausted']} | {row['fresh_retries']} | "
             f"{row['focused_repairs']} | {row['stall_count']} | {row['pre_artifact_stalls']} | {row['post_artifact_stalls']} | "
-            f"{row['zero_output_pre_artifact_stalls']} | "
+            f"{row['valid_artifact_controlled_stops']} | {row['zero_output_pre_artifact_stalls']} | "
             f"{row['partial_failure_count']} | {row['quality_alerts']} | {row['artifact_quality_findings']} | {row['off_topic_hits']} | {row['semantic_hard_fail_runs']} | "
             f"{row['runtime_contract_failed_failures']} | {row['runner_unavailable_failures']} | {row['runtime_timeout_failures']} | {row['infra_signal_terminated_failures']} | "
-            f"{row['infra_incomplete_cycle_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
+            f"{row['infra_incomplete_cycle_failures']} | {row['quality_gates_failed_failures']} | {row['artifact_quality_failed_failures']} | {row['summary_missing_failures']} | {row['precheck_failed_failures']} | {row['runtime_flow_failed_failures']} | {row['cancellation_like_failures']} | "
             f"{row['artifact_sources']} | {row['error_codes']} | {row['frontend_pass_rate']:.2f} |"
         )
 
@@ -2607,6 +3212,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "provider",
         "run",
         "hard_pass",
+        "runtime_contract_status",
+        "artifact_quality_status",
+        "artifact_quality_failed",
         "reliability",
         "contract",
         "analysis",
@@ -2624,6 +3232,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "stall_count",
         "pre_artifact_stalls",
         "post_artifact_stalls",
+        "valid_artifact_controlled_stops",
         "zero_output_pre_artifact_stalls",
         "partial_failure_count",
         "quality_alerts",
@@ -2635,11 +3244,14 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "runtime_timeout",
         "infra_signal_terminated",
         "infra_incomplete_cycle",
+        "quality_gates_failed",
         "summary_missing",
         "precheck_failed",
         "runtime_flow_failed",
         "cancellation_like",
         "artifact_quality_findings",
+        "excellent_blockers",
+        "excellent_blockers_by_step",
         "off_topic_hits",
         "issues",
     ]
@@ -2651,6 +3263,9 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     run.provider,
                     str(run.run_index),
                     str(int(run.hard_pass)),
+                    run.runtime_contract_status,
+                    run.artifact_quality_status,
+                    str(int(run.artifact_quality_failed)),
                     str(run.reliability),
                     str(run.contract),
                     str(run.analysis),
@@ -2668,6 +3283,7 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(run.stall_count),
                     str(run.pre_artifact_stalls),
                     str(run.post_artifact_stalls),
+                    str(run.valid_artifact_controlled_stops),
                     str(run.zero_output_pre_artifact_stalls),
                     str(run.partial_failure_count),
                     str(run.quality_alerts),
@@ -2679,11 +3295,14 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     str(int(run.runtime_timeout)),
                     str(int(run.infra_signal_terminated)),
                     str(int(run.infra_incomplete_cycle)),
+                    str(int(run.quality_gates_failed)),
                     str(int(run.summary_missing)),
                     str(int(run.precheck_failed)),
                     str(int(run.runtime_flow_failed)),
                     str(int(run.cancellation_like)),
                     str(run.artifact_quality_findings),
+                    ",".join(run.excellent_blockers),
+                    json.dumps(run.excellent_blockers_by_step, ensure_ascii=True, separators=(",", ":")),
                     str(run.off_topic_hits),
                     ",".join(run.issues),
                 ]

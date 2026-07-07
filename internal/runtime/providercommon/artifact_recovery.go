@@ -553,11 +553,84 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair wrote outside shard-pack-manifest.json", err)
 	}
 	if err := adapter.ValidateArtifacts(task); err != nil {
+		if shouldRetryCollectManifestShapeCleanup(err) {
+			if cleanupResult, cleanupErr, handled := runCollectManifestShapeCleanup(ctx, task, adapter, repairAdapter, repairResult, beforeRepairFiles, err, repairPolicy, policy); handled {
+				return true, cleanupResult, cleanupErr
+			}
+		}
 		emitCollectManifestRepairExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair did not produce valid collect artifacts", err)
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
 	return true, repairResult, nil
+}
+
+func runCollectManifestShapeCleanup(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, repairAdapter CollectManifestRepairAdapter, baseResult acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, validationErr error, repairPolicy ActivityPolicy, policy RecoveryPolicy) (acpruntime.Result, error, bool) {
+	emitCollectManifestShapeCleanupScheduledDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task), validationErr)
+	spec, err := repairAdapter.CollectManifestRepairCommandSpec(task, validationErr)
+	if err != nil {
+		return acpruntime.Result{}, classifyCommandFailure(adapter, task, baseResult, err), true
+	}
+	cleanupResult, cleanupRunErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	if cleanupRunErr != nil {
+		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+			return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup wrote outside shard-pack-manifest.json", err), true
+		}
+		var cleanupStalled StallError
+		if errors.As(cleanupRunErr, &cleanupStalled) {
+			if policy.AcceptValidArtifactsAfterStop {
+				if err := adapter.ValidateArtifacts(task); err == nil {
+					emitCollectManifestShapeCleanupCompletedDiagnostic(task, adapter.Provider(), cleanupStalled.Diagnostic.StallPhase)
+					return cleanupResult, nil, true
+				}
+			}
+			emitCollectManifestShapeCleanupExhaustedDiagnostic(task, adapter.Provider(), cleanupStalled.Diagnostic, cleanupRunErr)
+			return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup stalled before valid artifacts were available", cleanupRunErr), true
+		}
+		return acpruntime.Result{}, classifyCommandFailure(adapter, task, cleanupResult, cleanupRunErr), true
+	}
+	if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup wrote outside shard-pack-manifest.json", err), true
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		emitCollectManifestShapeCleanupExhaustedDiagnostic(task, adapter.Provider(), runtimeArtifactSnapshot(task).stallDiagnostic(), err)
+		return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup did not produce valid collect artifacts", err), true
+	}
+	emitCollectManifestShapeCleanupCompletedDiagnostic(task, adapter.Provider(), "")
+	return cleanupResult, nil, true
+}
+
+func shouldRetryCollectManifestShapeCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := strings.ToLower(strings.TrimSpace(err.Error()))
+	if detail == "" {
+		return false
+	}
+	if strings.Contains(detail, "repo evidence path") ||
+		strings.Contains(detail, "process-contaminated") ||
+		strings.Contains(detail, "process contaminated") ||
+		strings.Contains(detail, "outside shard-pack-manifest.json") ||
+		strings.Contains(detail, "wrote forbidden files") ||
+		strings.Contains(detail, "authored markdown") ||
+		strings.Contains(detail, "empty authored markdown") ||
+		strings.Contains(detail, "bootstrap-only") {
+		return false
+	}
+	if strings.Contains(detail, "citations") && strings.Contains(detail, ".id must be unique") {
+		return true
+	}
+	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
+		return true
+	}
+	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") {
+		return true
+	}
+	if strings.Contains(detail, "documents") && strings.Contains(detail, "citation_ids") && strings.Contains(detail, "references") {
+		return true
+	}
+	return false
 }
 
 func recoverCollectManifestDeterministically(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
@@ -916,8 +989,8 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	if !policy.RepairDraftArtifactsOnce || !runtimedrafts.IsDraftStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
 	}
-	if isDraftBootstrapOnlyValidationFailure(validationErr) {
-		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, stage+"_bootstrap_only")
+	if shouldRecoverDraftRepairValidationWithEnrichment(task, validationErr) {
+		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, draftRepairEnrichmentStage(stage, validationErr))
 	}
 	repairAdapter, ok := adapter.(DraftArtifactRepairAdapter)
 	if !ok {
@@ -951,7 +1024,7 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic.StallPhase)
 					return true, repairResult, nil
-				} else if isDraftBootstrapOnlyValidationFailure(err) {
+				} else if shouldRecoverDraftRepairValidationWithEnrichment(task, err) {
 					emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", repairStalled.Diagnostic, repairErr)
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, repairResult, err, "draft_artifact_repair_stalled")
@@ -984,7 +1057,7 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 							emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 							emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic.StallPhase)
 							return true, retryResult, nil
-						} else if isDraftBootstrapOnlyValidationFailure(err) {
+						} else if shouldRecoverDraftRepairValidationWithEnrichment(task, err) {
 							emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "stalled", runtimeArtifactSnapshot(task))
 							emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", retryStalled.Diagnostic, retryErr)
 							return recoverDraftArtifactEnrichment(ctx, task, adapter, retryResult, err, "draft_artifact_repair_retry_stalled")
@@ -1002,7 +1075,7 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 			if err := adapter.ValidateArtifacts(task); err != nil {
 				emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 				emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-				if isDraftBootstrapOnlyValidationFailure(err) {
+				if shouldRecoverDraftRepairValidationWithEnrichment(task, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, retryResult, err, "draft_artifact_repair_retry_invalid")
 				}
 				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, retryResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
@@ -1013,7 +1086,7 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 		}
 		emitDraftArtifactRepairSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		emitFocusedArtifactRepairExhaustedDiagnostic(task, adapter.Provider(), "draft_artifact_repair", runtimeArtifactSnapshot(task).stallDiagnostic(), err)
-		if isDraftBootstrapOnlyValidationFailure(err) {
+		if shouldRecoverDraftRepairValidationWithEnrichment(task, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, repairResult, err, "draft_artifact_repair_invalid")
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "draft_artifact_repair", "draft artifact repair did not produce valid draft artifact contract", err)
@@ -1429,6 +1502,7 @@ func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool 
 	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
 		strings.Contains(text, "generic conditional shard-gap wording") ||
 		strings.Contains(text, "does not report exact current-run shard status") ||
+		strings.Contains(text, "does not report exact current-run proposal shard completeness") ||
 		strings.Contains(text, "does not report exact current-run shard completeness")
 }
 
@@ -1646,6 +1720,54 @@ func isDraftBootstrapOnlyValidationFailure(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "bootstrap-only placeholder draft content")
+}
+
+func shouldRecoverDraftRepairValidationWithEnrichment(task acpruntime.Task, err error) bool {
+	if err == nil || !runtimedrafts.IsDraftStep(task.StepID) {
+		return false
+	}
+	if isDraftBootstrapOnlyValidationFailure(err) {
+		return true
+	}
+	text := err.Error()
+	recoverable := []string{
+		"runtime draft manifest outputs are invalid:",
+		"parse runtime draft manifest:",
+		"malformed markdown inline-code",
+		"does not report exact current-run shard status",
+		"does not report exact current-run shard completeness",
+		"does not report exact current-run proposal shard completeness",
+		"uses generic conditional shard-gap wording",
+		"does not reference any current-run finding ID",
+		"uses synthetic current-run finding placeholder",
+		"claims no structured finding summary",
+		"does not link medium/high current-run findings",
+		"uses markdown table for medium/high actionable findings",
+		"is missing substantive proposal section",
+		"is missing substantive proposal changelog section",
+		"does not include concrete repo/path, citation, or staged artifact evidence references",
+		"does not include a decision-ready operator summary",
+		"claims staging shard evidence is empty",
+		"mentions downstream or runtime-only evidence in step0 constitution content",
+	}
+	for _, marker := range recoverable {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftRepairEnrichmentStage(stage string, err error) string {
+	suffix := "draft_semantic"
+	if isDraftBootstrapOnlyValidationFailure(err) {
+		suffix = "bootstrap_only"
+	}
+	base := strings.TrimSpace(stage)
+	if base == "" {
+		base = "contract"
+	}
+	return base + "_" + suffix
 }
 
 func runFocusedArtifactRepairCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, baseResult acpruntime.Result, buildSpec func() (CommandSpec, error)) (acpruntime.Result, error, error) {

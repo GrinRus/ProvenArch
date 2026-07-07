@@ -39,35 +39,37 @@ type runtimeStepQuality struct {
 }
 
 type runQualityTotals struct {
-	Steps                       int `json:"steps"`
-	SemanticEntities            int `json:"semantic_entities"`
-	SemanticEdges               int `json:"semantic_edges"`
-	FindingsCount               int `json:"findings_count"`
-	QuestionsCount              int `json:"questions_count"`
-	CoverageObserved            int `json:"coverage_observed"`
-	CoverageMissing             int `json:"coverage_missing"`
-	WarningsCount               int `json:"warnings_count"`
-	SignalScore                 int `json:"signal_score"`
-	RepairAttempts              int `json:"repair_attempts"`
-	RepairExhausted             int `json:"repair_exhausted"`
-	FreshRetries                int `json:"fresh_retries"`
-	FocusedRepairs              int `json:"focused_repairs"`
-	StallCount                  int `json:"stall_count"`
-	PreArtifactStalls           int `json:"pre_artifact_stalls"`
-	PostArtifactStalls          int `json:"post_artifact_stalls"`
-	ZeroOutputPreArtifactStalls int `json:"zero_output_pre_artifact_stalls"`
-	PartialFailureCount         int `json:"partial_failure_count"`
+	Steps                        int `json:"steps"`
+	SemanticEntities             int `json:"semantic_entities"`
+	SemanticEdges                int `json:"semantic_edges"`
+	FindingsCount                int `json:"findings_count"`
+	QuestionsCount               int `json:"questions_count"`
+	CoverageObserved             int `json:"coverage_observed"`
+	CoverageMissing              int `json:"coverage_missing"`
+	WarningsCount                int `json:"warnings_count"`
+	SignalScore                  int `json:"signal_score"`
+	RepairAttempts               int `json:"repair_attempts"`
+	RepairExhausted              int `json:"repair_exhausted"`
+	FreshRetries                 int `json:"fresh_retries"`
+	FocusedRepairs               int `json:"focused_repairs"`
+	StallCount                   int `json:"stall_count"`
+	PreArtifactStalls            int `json:"pre_artifact_stalls"`
+	PostArtifactStalls           int `json:"post_artifact_stalls"`
+	ValidArtifactControlledStops int `json:"valid_artifact_controlled_stops"`
+	ZeroOutputPreArtifactStalls  int `json:"zero_output_pre_artifact_stalls"`
+	PartialFailureCount          int `json:"partial_failure_count"`
 }
 
 type runtimeRecoveryCounters struct {
-	RepairAttempts              int
-	RepairExhausted             int
-	FreshRetries                int
-	FocusedRepairs              int
-	StallCount                  int
-	PreArtifactStalls           int
-	PostArtifactStalls          int
-	ZeroOutputPreArtifactStalls int
+	RepairAttempts               int
+	RepairExhausted              int
+	FreshRetries                 int
+	FocusedRepairs               int
+	StallCount                   int
+	PreArtifactStalls            int
+	PostArtifactStalls           int
+	ValidArtifactControlledStops int
+	ZeroOutputPreArtifactStalls  int
 }
 
 type runFailureClassification struct {
@@ -145,17 +147,6 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	versions := normalizeRuntimeVersions(e.runtimeVersions)
 	renderContext := e.terminalRenderContext(status)
 	artifactInventory, artifactInventorySignals := assessRunArtifactInventory(e.workspace, e.runID, status, renderContext)
-	runWarnings := append([]string(nil), e.warnings...)
-	qualitySignals := artifactQualitySignalsFromWarnings(e.warnings)
-	qualitySignals = append(qualitySignals, assessLiveReportSurfaceSignals(e.workspace, renderContext, status)...)
-	qualitySignals = append(qualitySignals, artifactInventorySignals...)
-	qualitySignals = append(qualitySignals, runtimeRecoveryQualitySignals(e.runtimeRecoveryCounters, len(e.partialFailures))...)
-	for _, signal := range qualitySignals {
-		runWarnings = append(runWarnings, signal.Message)
-	}
-	runWarnings = normalizeOrderedUniqueStrings(runWarnings)
-	qualitySignals = normalizeRunQualitySignals(qualitySignals)
-
 	steps := append([]runtimeStepQuality(nil), e.runtimeStepMetrics...)
 	sort.Slice(steps, func(i, j int) bool {
 		if steps[i].StepID == steps[j].StepID {
@@ -187,8 +178,20 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	totals.StallCount = e.runtimeRecoveryCounters.StallCount
 	totals.PreArtifactStalls = e.runtimeRecoveryCounters.PreArtifactStalls
 	totals.PostArtifactStalls = e.runtimeRecoveryCounters.PostArtifactStalls
+	totals.ValidArtifactControlledStops = e.runtimeRecoveryCounters.ValidArtifactControlledStops
 	totals.ZeroOutputPreArtifactStalls = e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls
 	totals.PartialFailureCount = len(e.partialFailures)
+
+	runWarnings := append([]string(nil), e.warnings...)
+	qualitySignals := artifactQualitySignalsFromWarnings(e.warnings)
+	qualitySignals = append(qualitySignals, assessLiveReportSurfaceSignals(e.workspace, renderContext, status, steps, totals)...)
+	qualitySignals = append(qualitySignals, artifactInventorySignals...)
+	qualitySignals = append(qualitySignals, runtimeRecoveryQualitySignals(e.runtimeRecoveryCounters, len(e.partialFailures))...)
+	for _, signal := range qualitySignals {
+		runWarnings = append(runWarnings, signal.Message)
+	}
+	runWarnings = normalizeOrderedUniqueStrings(runWarnings)
+	qualitySignals = normalizeRunQualitySignals(qualitySignals)
 
 	summary := runQualitySummary{
 		Version:           1,
@@ -228,6 +231,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		"stall_count":                     totals.StallCount,
 		"pre_artifact_stalls":             totals.PreArtifactStalls,
 		"post_artifact_stalls":            totals.PostArtifactStalls,
+		"valid_artifact_controlled_stops": totals.ValidArtifactControlledStops,
 		"zero_output_pre_artifact_stalls": totals.ZeroOutputPreArtifactStalls,
 		"partial_failure_count":           totals.PartialFailureCount,
 	})
@@ -235,7 +239,7 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 }
 
 func assessLiveReportSurfaceWarnings(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus) []string {
-	signals := assessLiveReportSurfaceSignals(ws, ctx, status)
+	signals := assessLiveReportSurfaceSignals(ws, ctx, status, nil, runQualityTotals{})
 	warnings := make([]string, 0, len(signals))
 	for _, signal := range signals {
 		warnings = append(warnings, signal.Message)
@@ -307,6 +311,10 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 	if diagnosticFieldBool(fields, "zero_output_pre_artifact_stall") {
 		e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls++
 	}
+	if isValidArtifactControlledStopDiagnostic(message, fields) {
+		e.runtimeRecoveryCounters.ValidArtifactControlledStops++
+		return
+	}
 
 	phase := diagnosticFieldString(fields, "stall_phase")
 	if phase == "" || !isActualRuntimeStallDiagnostic(message, fields) {
@@ -323,6 +331,9 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 }
 
 func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool {
+	if isValidArtifactControlledStopDiagnostic(message, fields) {
+		return false
+	}
 	action := diagnosticFieldString(fields, "action")
 	recoveryMode := diagnosticFieldString(fields, "recovery_mode")
 	validationError := diagnosticFieldString(fields, "validation_error")
@@ -332,11 +343,34 @@ func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool 
 	case "retry exhausted":
 		return true
 	case "retry completed":
-		return recoveryMode == "fresh_process_artifact_only"
-	case "focused artifact repair completed", "collect manifest repair completed":
-		return true
+		return recoveryMode == "fresh_process_artifact_only" && !diagnosticArtifactValid(fields)
 	case "focused artifact repair exhausted", "collect manifest repair exhausted":
 		return strings.Contains(validationError, "runtime_stalled")
+	default:
+		return false
+	}
+}
+
+func isValidArtifactControlledStopDiagnostic(message string, fields map[string]any) bool {
+	if message != "provider command finished" {
+		return false
+	}
+	if diagnosticFieldString(fields, "exit_reason") != "stall" {
+		return false
+	}
+	if diagnosticFieldString(fields, "validation_error") != "" {
+		return false
+	}
+	return diagnosticArtifactValid(fields)
+}
+
+func diagnosticArtifactValid(fields map[string]any) bool {
+	if diagnosticFieldBool(fields, "artifact_valid") {
+		return true
+	}
+	switch diagnosticFieldString(fields, "artifact_state") {
+	case "valid", "succeeded", "success":
+		return true
 	default:
 		return false
 	}
@@ -389,7 +423,7 @@ func jsonScalarString(value any) string {
 	}
 }
 
-func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus) []runQualitySignal {
+func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus, steps []runtimeStepQuality, totals runQualityTotals) []runQualitySignal {
 	if status != RunStatusSucceeded || ctx.ReportMode != reports.ReportModeNormal {
 		return nil
 	}
@@ -420,17 +454,12 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 
 	if overviewText, ok := readRel("reports/as-is/overview.md"); ok {
 		nonEmpty := 0
-		placeholder := false
 		for _, line := range strings.Split(overviewText, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue
 			}
 			nonEmpty++
-			lower := strings.ToLower(trimmed)
-			if strings.Contains(lower, "no ") && strings.Contains(lower, " yet") {
-				placeholder = true
-			}
 		}
 		if reportHasIncompleteBanner(overviewText) {
 			signals = append(signals, runQualitySignal{
@@ -440,12 +469,25 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 				Path:     "reports/as-is/overview.md",
 			})
 		}
-		if nonEmpty < 4 || placeholder {
+		if nonEmpty < 4 || overviewLooksPlaceholder(overviewText) {
 			signals = append(signals, runQualitySignal{
 				Code:     "artifact_quality.overview_placeholder",
 				Severity: "warning",
 				Message:  "artifact_quality: overview report is too sparse or placeholder-like for a succeeded run",
 				Path:     "reports/as-is/overview.md",
+			})
+		}
+	}
+
+	criticalGapCategories := []string{}
+	if coverageText, ok := readRel("reports/coverage/summary.md"); ok {
+		criticalGapCategories = criticalCoverageGapCategories(coverageText)
+		if reportHasIncompleteBanner(coverageText) || coverageHasIncompleteFallback(coverageText) {
+			signals = append(signals, runQualitySignal{
+				Code:     "artifact_quality.coverage_incomplete",
+				Severity: "warning",
+				Message:  "artifact_quality: coverage summary still indicates incomplete analysis in a succeeded run",
+				Path:     "reports/coverage/summary.md",
 			})
 		}
 	}
@@ -459,17 +501,15 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 				Path:     "reports/findings/findings.md",
 			})
 		}
-	}
-
-	if coverageText, ok := readRel("reports/coverage/summary.md"); ok {
-		if reportHasIncompleteBanner(coverageText) || coverageHasIncompleteFallback(coverageText) {
+		if len(criticalGapCategories) > 0 && findingsReportsNoFindings(findingsText) {
 			signals = append(signals, runQualitySignal{
-				Code:     "artifact_quality.coverage_incomplete",
+				Code:     "artifact_quality.empty_findings_with_gaps",
 				Severity: "warning",
-				Message:  "artifact_quality: coverage summary still indicates incomplete analysis in a succeeded run",
-				Path:     "reports/coverage/summary.md",
+				Message:  "artifact_quality: findings are empty while critical coverage gaps remain",
+				Path:     "reports/findings/findings.md",
 			})
 		}
+		signals = append(signals, proposalsFindingsAlignmentSignals(readRel, findingsText)...)
 	}
 
 	if questionsText, ok := readRel("reports/coverage/open-questions.md"); ok {
@@ -483,7 +523,354 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 		}
 	}
 
+	if collectStepsObserved(steps) &&
+		totals.CoverageObserved > 0 &&
+		totals.SemanticEntities == 0 &&
+		totals.SemanticEdges == 0 &&
+		totals.FindingsCount == 0 {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.low_semantic_density",
+			Severity: "warning",
+			Message:  "artifact_quality: successful run observed coverage but produced no semantic entities, edges, or findings",
+		})
+	}
+
+	if diagramsArePlaceholderOnly(ws, readRel) {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.diagram_placeholder_only",
+			Severity: "warning",
+			Message:  "artifact_quality: diagrams contain only gap nodes without component or code views",
+			Path:     "reports/diagrams",
+		})
+	}
+
 	return normalizeRunQualitySignals(signals)
+}
+
+func overviewLooksPlaceholder(text string) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "no ") && strings.Contains(lower, " yet") {
+		return true
+	}
+	placeholderMarkers := []string{
+		"provider wrote this draft artifact under the required draft_final_root",
+		"draft artifact under the required draft_final_root",
+		"placeholder",
+		"todo",
+	}
+	for _, marker := range placeholderMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func criticalCoverageGapCategories(text string) []string {
+	categories := map[string]struct{}{}
+	scanCoverageMissingBullets(text, func(value string) {
+		if category := canonicalCoverageGapCategory(value); category != "" {
+			categories[category] = struct{}{}
+		}
+	})
+	if len(categories) == 0 {
+		scanCoverageAllBullets(text, func(value string) {
+			if category := canonicalCoverageGapCategory(value); category != "" {
+				categories[category] = struct{}{}
+			}
+		})
+	}
+	ordered := make([]string, 0, len(categories))
+	for category := range categories {
+		ordered = append(ordered, category)
+	}
+	sort.Strings(ordered)
+	return ordered
+}
+
+func scanCoverageMissingBullets(text string, visit func(string)) {
+	inMissing := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "## ") {
+			heading := strings.TrimSpace(strings.TrimPrefix(lower, "## "))
+			inMissing = heading == "missing" || heading == "missing coverage" || heading == "coverage missing"
+			continue
+		}
+		if !inMissing || !strings.HasPrefix(trimmed, "- ") {
+			continue
+		}
+		visit(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+	}
+}
+
+func scanCoverageAllBullets(text string, visit func(string)) {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			visit(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+		}
+	}
+}
+
+func canonicalCoverageGapCategory(value string) string {
+	normalized := normalizeCoverageGapText(value)
+	switch {
+	case strings.Contains(normalized, "owner team id") ||
+		(strings.Contains(normalized, "owner") && (strings.Contains(normalized, "mapping") || strings.Contains(normalized, "team") || strings.Contains(normalized, "ownership"))):
+		return "owner_mapping"
+	case strings.Contains(normalized, "runbook") ||
+		(strings.Contains(normalized, "operational") && (strings.Contains(normalized, "handoff") || strings.Contains(normalized, "procedure") || strings.Contains(normalized, "playbook"))):
+		return "operational_runbook"
+	case strings.Contains(normalized, "third party") ||
+		(strings.Contains(normalized, "external") && (strings.Contains(normalized, "dependency") || strings.Contains(normalized, "system") || strings.Contains(normalized, "integration"))):
+		return "external_dependency"
+	case strings.Contains(normalized, "datastore") ||
+		strings.Contains(normalized, "database") ||
+		strings.Contains(normalized, "storage") ||
+		strings.Contains(normalized, "persistence"):
+		return "datastore_storage"
+	case strings.Contains(normalized, "ci cd") ||
+		strings.Contains(normalized, "cicd") ||
+		strings.Contains(normalized, "continuous integration") ||
+		strings.Contains(normalized, "workflow") ||
+		strings.Contains(normalized, "pipeline"):
+		return "cicd"
+	case strings.Contains(normalized, "api") ||
+		strings.Contains(normalized, "interface") ||
+		strings.Contains(normalized, "endpoint"):
+		return "api_interface"
+	default:
+		return ""
+	}
+}
+
+func normalizeCoverageGapText(value string) string {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"`", " ",
+		"_", " ",
+		"-", " ",
+		":", " ",
+		".", " ",
+		",", " ",
+		"/", " ",
+		"(", " ",
+		")", " ",
+	)
+	return strings.Join(strings.Fields(replacer.Replace(lower)), " ")
+}
+
+func findingsReportsNoFindings(text string) bool {
+	return strings.Contains(strings.ToLower(text), "no findings reported.")
+}
+
+type markdownFindingsSummary struct {
+	IDs            []string
+	HighOrMediumID bool
+}
+
+func proposalsFindingsAlignmentSignals(readRel func(string) (string, bool), findingsText string) []runQualitySignal {
+	findings := summarizeMarkdownFindings(findingsText)
+	if len(findings.IDs) == 0 || findingsReportsNoFindings(findingsText) {
+		return nil
+	}
+	proposalText, proposalOK := readRel("proposals/runtime-recommendations.md")
+	changelogText, changelogOK := readRel("reports/changelog/runtime-proposals.md")
+	if !proposalOK && !changelogOK {
+		return nil
+	}
+	combined := strings.Join([]string{proposalText, changelogText}, "\n")
+	signals := []runQualitySignal{}
+	if proposalTextDeniesStructuredFindings(combined) || !artifactTextReferencesAnyFindingID(combined, findings.IDs) {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.proposals_findings_disconnected",
+			Severity: "warning",
+			Message:  "artifact_quality: proposals/changelog are disconnected from non-empty findings",
+			Path:     "proposals/runtime-recommendations.md",
+		})
+	}
+	if findings.HighOrMediumID && !proposalTextHasFindingActionability(combined, findings.IDs) {
+		signals = append(signals, runQualitySignal{
+			Code:     "artifact_quality.proposals_low_actionability",
+			Severity: "warning",
+			Message:  "artifact_quality: medium/high findings exist but proposals lack finding-linked operator action and affected surface",
+			Path:     "proposals/runtime-recommendations.md",
+		})
+	}
+	return signals
+}
+
+func summarizeMarkdownFindings(text string) markdownFindingsSummary {
+	summary := markdownFindingsSummary{}
+	currentID := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "- id:"):
+			currentID = firstMarkdownFieldValue(trimmed[len("- id:"):])
+			if currentID != "" {
+				summary.IDs = append(summary.IDs, currentID)
+			}
+		case strings.HasPrefix(lower, "- severity:"):
+			severity := strings.ToLower(firstMarkdownFieldValue(trimmed[len("- severity:"):]))
+			if currentID != "" && (severity == "high" || severity == "medium") {
+				summary.HighOrMediumID = true
+			}
+		}
+	}
+	summary.IDs = normalizeOrderedUniqueStrings(summary.IDs)
+	return summary
+}
+
+func firstMarkdownFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	value = strings.Trim(value, "` \t:;,")
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "` \t:;,.")
+}
+
+func proposalTextDeniesStructuredFindings(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"no structured finding summary was present",
+		"no structured findings were present",
+		"no structured finding summary",
+		"no source-level architecture change is approved",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactTextReferencesAnyFindingID(text string, findingIDs []string) bool {
+	lower := strings.ToLower(text)
+	for _, id := range findingIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" && strings.Contains(lower, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func proposalTextHasFindingActionability(text string, findingIDs []string) bool {
+	lower := strings.ToLower(text)
+	if !artifactTextReferencesAnyFindingID(text, findingIDs) {
+		return false
+	}
+	actionMarkers := []string{
+		"recommended operator action",
+		"recommended action",
+		"operator action",
+		"follow-up",
+		"follow up",
+		"remediate",
+		"replace",
+		"add ",
+		"update ",
+		"document ",
+		"assign ",
+	}
+	surfaceMarkers := []string{
+		"affected surface",
+		"affected path",
+		"service",
+		"component",
+		"datastore",
+		"runbook",
+		"src/",
+		"services/",
+		"internal/",
+		"cmd/",
+		".go",
+		".yaml",
+		".yml",
+		".ts",
+		".tsx",
+	}
+	return textContainsAny(lower, actionMarkers) && textContainsAny(lower, surfaceMarkers)
+}
+
+func textContainsAny(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectStepsObserved(steps []runtimeStepQuality) bool {
+	for _, step := range steps {
+		stepID := strings.ToLower(strings.TrimSpace(step.StepID))
+		if strings.Contains(stepID, ".step1.collect") {
+			return true
+		}
+	}
+	return false
+}
+
+func diagramsArePlaceholderOnly(ws workspace.Root, readRel func(string) (string, bool)) bool {
+	contextText, contextOK := readRel("reports/diagrams/c4-context.mmd")
+	containerText, containerOK := readRel("reports/diagrams/c4-container.mmd")
+	if !contextOK || !containerOK {
+		return false
+	}
+	if hasDiagramFiles(ws, "reports/diagrams/components") || hasDiagramFiles(ws, "reports/diagrams/code") {
+		return false
+	}
+	return mermaidDiagramIsGapOnly(contextText) && mermaidDiagramIsGapOnly(containerText)
+}
+
+func hasDiagramFiles(ws workspace.Root, rel string) bool {
+	abs, err := ws.Resolve(rel)
+	if err != nil {
+		return false
+	}
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".mmd") {
+			return true
+		}
+	}
+	return false
+}
+
+func mermaidDiagramIsGapOnly(text string) bool {
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "gap:") {
+		return false
+	}
+	evidenceMarkers := []string{
+		"evidence-backed services:",
+		"service:",
+		"datastore:",
+		"external:",
+		"actor:",
+	}
+	for _, marker := range evidenceMarkers {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func assessRunArtifactInventory(
@@ -757,14 +1144,20 @@ func artifactTextHasEvidenceMarkers(lower string) bool {
 }
 
 func findingsCoverageGapSignals(ws workspace.Root, finalIndex contracts.FinalRunIndex, finalIndexOK bool) []runQualitySignal {
-	missingTerms := []string{}
+	categories := map[string]struct{}{}
 	if finalIndexOK {
-		missingTerms = append(missingTerms, finalIndex.Semantic.Coverage.Missing...)
+		for _, value := range finalIndex.Semantic.Coverage.Missing {
+			if category := canonicalCoverageGapCategory(value); category != "" {
+				categories[category] = struct{}{}
+			}
+		}
 	}
 	if coverageText, ok := readWorkspaceText(ws, "reports/coverage/summary.md"); ok {
-		missingTerms = append(missingTerms, markdownSectionBullets(coverageText, "Missing")...)
+		for _, category := range criticalCoverageGapCategories(coverageText) {
+			categories[category] = struct{}{}
+		}
 	}
-	if !hasCriticalCoverageGap(missingTerms) {
+	if len(categories) == 0 {
 		return nil
 	}
 	findingsText, ok := readWorkspaceText(ws, "reports/findings/findings.md")
@@ -776,64 +1169,20 @@ func findingsCoverageGapSignals(ws workspace.Root, finalIndex contracts.FinalRun
 			Path:     "reports/findings/findings.md",
 		}}
 	}
-	if finalIndexOK && len(finalIndex.Semantic.Findings) > 0 && !strings.Contains(findingsText, "No findings reported.") {
+	if finalIndexOK && len(finalIndex.Semantic.Findings) > 0 && !findingsReportsNoFindings(findingsText) {
 		return nil
 	}
 	hasStructuredFinding := strings.Contains(findingsText, "## ") &&
 		(strings.Contains(findingsText, "- Severity:") || strings.Contains(strings.ToLower(findingsText), "severity"))
-	if hasStructuredFinding && !strings.Contains(findingsText, "No findings reported.") {
+	if hasStructuredFinding && !findingsReportsNoFindings(findingsText) {
 		return nil
 	}
 	return []runQualitySignal{{
-		Code:     "artifact_quality.findings_empty_with_coverage_gap",
+		Code:     "artifact_quality.empty_findings_with_gaps",
 		Severity: "warning",
-		Message:  "artifact_quality: critical coverage gaps are present but findings report is empty or placeholder-like",
+		Message:  "artifact_quality: findings are empty while critical coverage gaps remain",
 		Path:     "reports/findings/findings.md",
 	}}
-}
-
-func markdownSectionBullets(text string, sectionTitle string) []string {
-	title := strings.ToLower(strings.TrimSpace(sectionTitle))
-	inSection := false
-	values := []string{}
-	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") {
-			current := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
-			inSection = strings.EqualFold(current, title)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "# ") {
-			inSection = false
-			continue
-		}
-		if !inSection || !strings.HasPrefix(trimmed, "- ") {
-			continue
-		}
-		value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
-		if value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
-}
-
-func hasCriticalCoverageGap(values []string) bool {
-	for _, value := range values {
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if normalized == "" {
-			continue
-		}
-		if strings.Contains(normalized, "owner") ||
-			strings.Contains(normalized, "operational") ||
-			strings.Contains(normalized, "runbook") ||
-			strings.Contains(normalized, "external dependency") ||
-			strings.Contains(normalized, "external dependencies") ||
-			strings.Contains(normalized, "dependency map") {
-			return true
-		}
-	}
-	return false
 }
 
 func semanticScaffoldSignals(finalIndex contracts.FinalRunIndex, inventory runArtifactInventory) []runQualitySignal {
@@ -975,8 +1324,7 @@ func forbiddenProviderArtifactPathComponent(rawPath string) string {
 	normalized := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath))))
 	for _, component := range strings.Split(normalized, "/") {
 		trimmed := strings.TrimSpace(strings.ToLower(component))
-		switch trimmed {
-		case ".qwen", ".claude", ".codex", ".git", ".hg", ".svn", "node_modules":
+		if trimmed == "node_modules" || strings.HasPrefix(trimmed, ".") {
 			return component
 		}
 	}

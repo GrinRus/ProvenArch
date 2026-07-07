@@ -20,6 +20,8 @@ func TestStepSpecificPolicyDefinesSharedDraftOnlyObligationsForStep0(t *testing.
 	required := []string{
 		`Do NOT delegate to agent/subagent helpers.`,
 		`Do NOT use todo_write-style planning or long plan narration.`,
+		`Do not mention later collection steps`,
+		`not confirmed in the current constitution evidence`,
 		`constitution-draft.json must use the runtime draft manifest contract exactly; legacy constitution schemas are forbidden.`,
 		`This is a draft-only step; do not invent semantic entities, edges, findings, or questions on stdout.`,
 	}
@@ -158,8 +160,12 @@ func TestCollectFirstActionSectionDefinesEvidenceFirstTargets(t *testing.T) {
 		`Read at most the first 6000 bytes from any file.`,
 		`Assigned path_scopes may be directories for discovery, but manifest citations and semantic provenance paths must resolve to concrete existing files, never directories.`,
 		`prove every citation/provenance repo evidence path with file-level checks such as test -f, rg --files, or portable find ... -type f -print`,
+		`Every citations[].id must be unique`,
+		`derive each citation id from the shard/document stem plus the repo path slug`,
 		`If a scoped path is missing or directory-only, record it as coverage.missing or a question instead of using it as citation/provenance evidence.`,
 		`Syntax-only checks such as jq empty or python3 -m json.tool are insufficient`,
+		`verify semantic.questions[] all have id and text, citations[].id has no duplicates`,
+		`every citation has non-empty claim_ids and document_ids`,
 		`Use python3, not python; do not use GNU-only find -printf; do not assign to the zsh-reserved status variable.`,
 		`Do not emit analysis-only prose, status/progress narration, todo/planning, broad repo sweeps, or any second read-only preflight before writing the artifact pair.`,
 		`Before both targets exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings, template programs, or nested quote tricks`,
@@ -487,6 +493,8 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	required := []string{
 		`CONSTITUTION FIRST-ACTION DRAFT ARTIFACTS:`,
 		`FIRST CONSTITUTION DRAFT COMMAND:`,
+		`Same provider turn requirement`,
+		`fresh-overwrite charter-overview.md before final success`,
 		`write_root='/tmp/workspace/reports/taskruns/run-1/constitution'`,
 		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
 		`cat > "$write_root/constitution-draft.json" <<'ACP_DRAFT_MANIFEST_JSON'`,
@@ -519,6 +527,23 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	if strings.Contains(section, "# Baseline Subagents") {
 		t.Fatalf("constitution first action must write YAML subagents, not markdown:\n%s", section)
 	}
+	charter := runtimeDraftFirstActionFileTemplate(task, runtimedrafts.Output{
+		Path:          "charter-overview.md",
+		CanonicalPath: "charter/overview.md",
+		Kind:          "charter",
+		Title:         "Constitution",
+	})
+	for _, forbidden := range []string{
+		"collected shard evidence",
+		"validator output",
+		"final index",
+		"runtime repair",
+		"downstream pipeline",
+	} {
+		if strings.Contains(strings.ToLower(charter), forbidden) {
+			t.Fatalf("constitution bootstrap scaffold must not contain downstream/runtime-only wording %q:\n%s", forbidden, charter)
+		}
+	}
 
 	var bundle struct {
 		Agents []struct {
@@ -540,7 +565,7 @@ func TestConstitutionFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 }
 
-func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
+func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -557,18 +582,51 @@ func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	required := []string{
 		`AS-IS FIRST-ACTION DRAFT ARTIFACTS:`,
 		`FIRST AS-IS DRAFT COMMAND:`,
+		`one bounded evidence-read/write filesystem work unit`,
+		`read current-run staged evidence first`,
+		`then write asis-draft-manifest.json last before returning`,
+		`a manifest-only first write before markdown is invalid`,
+		`Same provider turn requirement`,
+		`validation-ready markdown files exist`,
+		`Your first response item for this step must be the filesystem command itself`,
+		`Exact as-is draft manifest target: "/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json"`,
+		`Exact overview target: "/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md"`,
+		`Exact coverage summary target: "/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md"`,
+		`Exact architect summary target: "/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md"`,
+		`Run one filesystem command as the next action`,
+		`the first provider item must be command_execution`,
+		`perform only a bounded current-run evidence read/list`,
+		`write all three markdown targets first, then write the manifest last before returning`,
+		`AS-IS FIRST-PASS WRITE SEQUENCE:`,
 		`write_root='/tmp/workspace/reports/taskruns/run-1/asis'`,
 		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
-		`cat > "$write_root/asis-draft-manifest.json" <<'ACP_DRAFT_MANIFEST_JSON'`,
-		`cat > "$draft_root/overview.md" <<'ACP_DRAFT_FILE'`,
-		`cat > "$draft_root/summary.md" <<'ACP_DRAFT_FILE'`,
-		`cat > "$draft_root/architect-summary.md" <<'ACP_DRAFT_FILE'`,
+		`mkdir -p "$write_root" "$draft_root"`,
+		`bounded evidence reads/lists from the current-run staged evidence index below`,
+		`Markdown writes must preserve literal backticks and paths`,
+		`single-quoted heredocs such as <<'EOF' or a python3 - <<'PY' program`,
+		`Do not put markdown content that contains backticks inside double-quoted shell strings or unquoted heredocs`,
+		`write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md"`,
+		`write "$write_root/asis-draft-manifest.json" last`,
+		`test -s "$draft_root/overview.md"`,
+		`test -s "$draft_root/summary.md"`,
+		`test -s "$draft_root/architect-summary.md"`,
+		`test -s "$write_root/asis-draft-manifest.json"`,
+		`do not rely on focused repair to create it later`,
+		`no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and"`,
+		`AS-IS DRAFT MANIFEST SHAPE GUIDE:`,
 		`"run_id": "run-1"`,
 		`"step_id": "init.step2.asis_docs"`,
 		`"step_contract": "as_is"`,
+		`"summary": "Evidence-backed manifest for provider-authored runtime artifacts."`,
 		`"canonical_path": "reports/as-is/overview.md"`,
 		`"canonical_path": "reports/coverage/summary.md"`,
 		`"canonical_path": "reports/agent-outputs/architect/summary.md"`,
+		`Current-run staged evidence index`,
+		`AS-IS FIRST-PASS SELF-CHECK:`,
+		`The first write set was not manifest-only`,
+		`summary.md and architect-summary.md contain the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal`,
+		`explicit no-shard-coverage-blocker statement that current-run shard coverage is not a blocker`,
+		`architect-summary.md says what is complete, what is missing, what the operator should inspect or decide next, and residual risk`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(section, needle) {
@@ -578,16 +636,15 @@ func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	if got := strings.Count(section, "FIRST AS-IS DRAFT COMMAND:"); got != 1 {
 		t.Fatalf("expected as-is first-action command once, got %d:\n%s", got, section)
 	}
-	if got := strings.Count(section, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
-		t.Fatalf("expected one as-is manifest heredoc, got delimiter count %d:\n%s", got, section)
-	}
-	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 6 {
-		t.Fatalf("expected three as-is draft file heredocs, got delimiter count %d:\n%s", got, section)
-	}
 	for _, forbidden := range []string{
+		"cat >",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"ACP_DRAFT_FILE",
 		"Provider wrote this draft artifact",
 		"Provider wrote the required",
+		"Drafted required runtime artifacts",
 		"drafted required runtime artifacts",
+		"The first draft artifact set is bootstrap-only",
 		"no findings reported.",
 	} {
 		if strings.Contains(section, forbidden) {
@@ -596,7 +653,87 @@ func TestAsIsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	}
 }
 
-func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
+func TestDocFirstFilesystemPolicyIncludesCurrentRunEvidenceIndex(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runID := "run-1"
+	finalRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	emptyJSONPaths := []string{
+		filepath.Join(finalRoot, "final-run-index.json"),
+		filepath.Join(finalRoot, "citation-index.json"),
+		filepath.Join(finalRoot, "reports", "coverage", "summary.md"),
+		filepath.Join(workspace, "reports", "taskruns", runID, "staging", "shards", "bank", "shard-pack-manifest.json"),
+	}
+	for _, path := range emptyJSONPaths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir fixture path: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("write fixture path: %v", err)
+		}
+	}
+	findingsPath := filepath.Join(finalRoot, "reports", "findings", "findings.md")
+	if err := os.MkdirAll(filepath.Dir(findingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir findings path: %v", err)
+	}
+	if err := os.WriteFile(findingsPath, []byte("# Findings\n\n- ID: `finding.bank.owner.gap`\n- Severity: `medium`\n"), 0o644); err != nil {
+		t.Fatalf("write findings fixture: %v", err)
+	}
+	shardSummaryPath := filepath.Join(workspace, "reports", "taskruns", runID+"-init-step1-collect-shard-summary-bank.json")
+	if err := os.MkdirAll(filepath.Dir(shardSummaryPath), 0o755); err != nil {
+		t.Fatalf("mkdir shard summary path: %v", err)
+	}
+	if err := os.WriteFile(shardSummaryPath, []byte(`{"items":[{"status":"succeeded"},{"status":"succeeded"},{"status":"failed"},{"status":"pending"}]}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write shard summary fixture: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:            runID,
+		StepID:           "init.step2.asis_docs",
+		StepContract:     "as_is",
+		Workspace:        workspace,
+		WriteRoot:        filepath.Join(workspace, "reports", "taskruns", runID, "asis"),
+		DraftFinalRoot:   finalRoot,
+		ReadContextRoots: []string{finalRoot},
+		AgentRole:        "architect",
+	}
+
+	policy := DocFirstFilesystemPolicy(task)
+	for _, needle := range []string{
+		"Current-run staged evidence index",
+		filepath.ToSlash(filepath.Join(finalRoot, "final-run-index.json")),
+		filepath.ToSlash(filepath.Join(finalRoot, "citation-index.json")),
+		filepath.ToSlash(filepath.Join(finalRoot, "reports", "coverage", "summary.md")),
+		filepath.ToSlash(filepath.Join(workspace, "reports", "taskruns", runID+"-init-step1-collect-shard-summary-bank.json")),
+		"planned=<n> succeeded=<n> failed=<n> incomplete=<n>",
+		"planned=4 succeeded=2 failed=1 incomplete=1",
+		"summary.md and architect-summary.md must state exact shard completeness counts",
+		"explicit no-shard-coverage-blocker statement",
+	} {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected as-is policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+
+	task.StepID = "init.step4.proposals"
+	task.StepContract = "proposals"
+	task.WriteRoot = filepath.Join(workspace, "reports", "taskruns", runID, "proposals")
+	policy = DocFirstFilesystemPolicy(task)
+	for _, needle := range []string{
+		"Exact current-run findings source",
+		"reports/taskruns/run-1/staging/final/reports/findings/findings.md",
+		filepath.ToSlash(filepath.Join(finalRoot, "reports", "findings", "findings.md")),
+		"Do not use synthetic finding placeholders",
+		"High/medium findings require one bullet per finding",
+		"finding.bank.owner.gap severity=medium",
+	} {
+		if !strings.Contains(policy, needle) {
+			t.Fatalf("expected proposals policy to contain %q, got:\n%s", needle, policy)
+		}
+	}
+}
+
+func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 	t.Parallel()
 
 	task := acpruntime.Task{
@@ -613,16 +750,43 @@ func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	required := []string{
 		`PROPOSALS FIRST-ACTION DRAFT ARTIFACTS:`,
 		`FIRST PROPOSALS DRAFT COMMAND:`,
-		`write_root='/tmp/workspace/reports/taskruns/run-1/proposals'`,
-		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
-		`cat > "$write_root/proposals-draft-manifest.json" <<'ACP_DRAFT_MANIFEST_JSON'`,
-		`cat > "$draft_root/proposal.md" <<'ACP_DRAFT_FILE'`,
-		`cat > "$draft_root/changelog.md" <<'ACP_DRAFT_FILE'`,
+		`one bounded evidence-read/write filesystem work unit`,
+		`read current-run staged findings/coverage/index evidence first`,
+		`then write proposals-draft-manifest.json last before returning`,
+		`a manifest-only first write before proposal/changelog markdown is invalid`,
+		`Same provider turn requirement`,
+		`validation-ready markdown files exist`,
+		`proposal.md and changelog.md must both contain the exact literal shard completeness shape planned=<n> succeeded=<n> failed=<n> incomplete=<n>`,
+		`both files must also state an explicit no-shard-coverage-blocker`,
+		`staging/final/reports/*`,
+		`bullet-only Top Actionable Findings section`,
+		`do not write Finding ID: none, Finding ID: n/a, Finding ID: unavailable`,
+		`proposal.md must contain non-empty sections named Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes`,
+		`changelog.md must contain non-empty sections named Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps`,
+		`Do not use markdown tables for actionable findings`,
+		`no structured current-run finding ID`,
+		`finding unavailable`,
+		`Exact proposals draft manifest target: "/tmp/workspace/reports/taskruns/run-1/proposals/proposals-draft-manifest.json"`,
+		`Exact proposal target: "/tmp/workspace/reports/taskruns/run-1/staging/final/proposal.md"`,
+		`Exact changelog target: "/tmp/workspace/reports/taskruns/run-1/staging/final/changelog.md"`,
+		`Run one filesystem command as the next action`,
+		`perform only a bounded current-run evidence read/list`,
+		`write proposal.md and changelog.md first with all required sections, then write the manifest last before returning`,
+		`PROPOSALS DRAFT MANIFEST SHAPE GUIDE:`,
 		`"run_id": "run-1"`,
 		`"step_id": "init.step4.proposals"`,
 		`"step_contract": "proposals"`,
+		`"summary": "Evidence-backed manifest for provider-authored runtime artifacts."`,
 		`"canonical_path": "proposals/runtime-recommendations.md"`,
 		`"canonical_path": "reports/changelog/runtime-proposals.md"`,
+		`Current-run staged evidence index`,
+		`proposal.md and changelog.md must both state exact shard completeness in this literal shape`,
+		`PROPOSALS FIRST-PASS SELF-CHECK:`,
+		`The first write set was not manifest-only`,
+		`proposal.md contains Decision / recommended operator action, Evidence used, Proposed changes or follow-up plan, and Risks, gaps, and out-of-scope notes`,
+		`changelog.md contains Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps`,
+		`proposal.md and changelog.md both include the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal`,
+		`every Finding ID field uses an exact current-run finding ID, never none/n/a/unavailable`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(section, needle) {
@@ -632,16 +796,15 @@ func TestProposalsFirstActionSectionWritesExactDraftSetFirst(t *testing.T) {
 	if got := strings.Count(section, "FIRST PROPOSALS DRAFT COMMAND:"); got != 1 {
 		t.Fatalf("expected proposals first-action command once, got %d:\n%s", got, section)
 	}
-	if got := strings.Count(section, "ACP_DRAFT_MANIFEST_JSON"); got != 2 {
-		t.Fatalf("expected one proposals manifest heredoc, got delimiter count %d:\n%s", got, section)
-	}
-	if got := strings.Count(section, "ACP_DRAFT_FILE"); got != 4 {
-		t.Fatalf("expected two proposals draft file heredocs, got delimiter count %d:\n%s", got, section)
-	}
 	for _, forbidden := range []string{
+		"cat >",
+		"ACP_DRAFT_MANIFEST_JSON",
+		"ACP_DRAFT_FILE",
 		"Provider wrote this draft artifact",
 		"Provider wrote the required",
+		"Drafted required runtime artifacts",
 		"drafted required runtime artifacts",
+		"The first proposals draft artifact set is bootstrap-only",
 		"no findings reported.",
 	} {
 		if strings.Contains(section, forbidden) {
@@ -790,9 +953,10 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalAsIsDraftSurface(t *testing.T) 
 	required := []string{
 		`Write asis-draft-manifest.json in write_root.`,
 		`Write overview.md, summary.md, and architect-summary.md only under draft_final_root.`,
-		`Use the FIRST AS-IS DRAFT COMMAND skeleton above as the first draft artifact set`,
-		`The first draft artifact set is bootstrap-only`,
-		`replace placeholder scaffold text with evidence-backed as-is content`,
+		`Use the FIRST AS-IS DRAFT COMMAND above as an evidence-first write contract`,
+		`The first draft artifact set must already be validation-ready`,
+		`read bounded staged evidence first`,
+		`first-pass content is evidence-backed as-is content`,
 		`Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces`,
 		`asis-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="as_is", agent_role, and outputs[]; optional top-level metadata is limited to summary and updated_at.`,
 		`"step_contract": "as_is"`,
@@ -846,8 +1010,10 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testin
 	required := []string{
 		`Write proposals-draft-manifest.json in write_root.`,
 		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
-		`The first proposals draft artifact set is bootstrap-only`,
-		`replace placeholder scaffold text with evidence-backed proposal/changelog content`,
+		`Use the FIRST PROPOSALS DRAFT COMMAND above as an evidence-first write contract`,
+		`The first proposals draft artifact set must already be validation-ready`,
+		`read current-run findings/coverage/index evidence first`,
+		`first-pass content is evidence-backed proposal/changelog content`,
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,
 		`Do NOT add legacy top-level fields such as pipeline, step, generated_at, domain_id, proposals, info_findings_noted, or orphan_coverage_gaps.`,
 		`"step_contract": "proposals"`,
