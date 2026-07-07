@@ -2,6 +2,32 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.8 - 2026-07-07
+
+Beta patch release for artifact-quality acceptance hardening and live E2E diagnostics after `v0.1.7`.
+
+Highlights:
+- Added product-level `artifact_quality.*` signals for weak but formally valid architecture outputs, including placeholder/scaffold artifacts, empty findings with coverage gaps, low semantic density, gap-only diagrams, proposals/findings disconnects and low-actionability proposals.
+- Split live E2E verdict reporting into runtime contract status and artifact quality status, so live matrices can report `runtime passed, artifact quality failed` instead of treating valid-but-useless artifacts as an optimistic PASS.
+- Made any `artifact_quality.*` signal a strict live matrix/release blocker while preserving the ProvenArch/live boundary: product logic emits generic public artifact facts, and live E2E reads only public reports and taskrun quality JSON.
+- Tightened `Excellent` verdict policy: `analysis:*` issues, runtime repair-heavy paths and real stall pressure now cap the run at `Needs review` even when strict runtime/artifact gates pass.
+- Added step-level Excellent blocker diagnostics with repair attempts, stall counts, validation classes and first/terminal validation excerpts for faster live-run triage.
+- Hardened collect manifest repair and draft validation around citation-id uniqueness, semantic question shape, step2 as-is evidence, step4 finding linkage and proposal actionability.
+- Recorded follow-up backlog slices for the remaining first-pass Codex smoke blockers: `step2.asis_docs` downstream-index wording and `step4.proposals` low-actionability first-pass output.
+
+Verification notes:
+- PR #120 merged after green PR checks for merge commit `7f65499`.
+- Local validation for the product patch passed before merge: `make contracts`, `make test`, `make lint` and `make build`.
+- Release metadata validation passed before tagging: `git diff --check`, docs sync, release distribution checks, `make contracts`, `make test`, `make lint` and `make build` with exact Node.js `22.21.1`.
+- Codex diagnostic smoke `smoke-tiny-bank-20260707T053308Z` reached strict `PASS` with `runtime_contract_status=passed`, `artifact_quality_status=passed`, `artifact_quality_failed=0` and no `artifact_quality.*` blockers.
+- The same diagnostic smoke remained `Needs review`, not `Excellent`, because first-pass `init.step2.asis_docs` and `init.step4.proposals` still required focused repair/stall recovery.
+
+Known limitations:
+- `v0.1.8` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- This release does not claim canonical `RELEASE READY` status without a fresh trusted-machine `reports/release_verdict_<matrix-id>.json` plus accepted SWE UX and artifact-quality assessments.
+- The remaining first-pass `Excellent` blockers are tracked in `docs/BACKLOG.md` as `18G Step2 first-pass Excellent blocker` and `18H Step4 first-pass actionability blocker`.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.7 - 2026-06-11
 
 CI-only beta patch release for live artifact quality hardening and Review UI readability after `v0.1.6`.

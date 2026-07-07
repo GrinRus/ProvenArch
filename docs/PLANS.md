@@ -417,6 +417,13 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
   artifacts. Canonical live release gate remains blocked on this host because Open edX/OpenStack
   canonical path checkouts under `/tmp/provenarch-live-e2e` are missing; no `RELEASE READY` claim is
   made without a fresh `release_verdict_*.json`.
+- 2026-07-07: PR #120 merged into `main` at `7f65499` after green PR checks. Started `v0.1.8`
+  beta release metadata branch for artifact-quality acceptance hardening, live E2E Excellent
+  diagnostics and the recorded `smoke-tiny-bank-20260707T053308Z` Codex diagnostic evidence. The
+  diagnostic reached strict `PASS` and artifact-quality `passed`, but stayed `Needs review` because
+  `init.step2.asis_docs` and `init.step4.proposals` still required focused repair. The release can be
+  prepared as beta/RC evidence, but must not claim canonical `RELEASE READY` without a fresh
+  `release_verdict_*.json` plus accepted SWE UX/artifact-quality assessments.
 ### Plan ID
 EP-20260508-oss-readiness-hardening
 
