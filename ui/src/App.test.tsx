@@ -2037,8 +2037,12 @@ describe("App", () => {
     );
 
     await renderConsoleApp();
+    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-publish"));
+    await screen.findByTestId("publish-panel");
+    await waitFor(() => expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step"));
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
 
     const filters = await screen.findByTestId("publish-artifact-filters");
     expect(filters).toHaveAttribute("role", "tablist");

@@ -863,11 +863,13 @@ code {
 }
 
 .status-block {
+  min-width: 0;
   margin-top: 0.72rem;
   padding: 0.72rem;
   border: 1px solid var(--line-soft);
   border-radius: 0.48rem;
   background: var(--surface-muted);
+  overflow-wrap: anywhere;
 }
 
 .status-block.compact {
@@ -879,9 +881,17 @@ code {
 }
 
 .repo-summary {
+  min-width: 0;
   margin-top: 0.65rem;
   padding-top: 0.6rem;
   border-top: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+}
+
+.status-block code,
+.repo-summary code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .check-list {

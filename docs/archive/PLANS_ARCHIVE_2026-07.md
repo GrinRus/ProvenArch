@@ -5,6 +5,46 @@ Closed ExecPlans archived from `docs/PLANS.md` in July 2026.
 This archive preserves implementation-complete plan evidence; residual trusted-host, live-quality, owner/admin and owner-decision workstreams remain active in `docs/PLANS.md`.
 
 ### Plan ID
+EP-20260708-console-source-hydration-recovery
+
+### Context
+Follow-up medium-depth rendered UX/UI audit found two operator issues after the initial Console V2 hardening slice. Source could render the default `my-service` sample draft instead of the backend auto-init `workspace.yaml` repo when Go-authored YAML used four-space list indentation; saving from that state could overwrite a valid manifest with sample values. Manifest reload failures also kept the shell visible but did not surface a clear recoverable error. A post-commit audit then found one remaining P2 mobile readability issue: long workspace/source paths in validation status blocks could create internal clipped overflow even though page-level overflow was absent.
+
+### Goals (must have)
+- [x] Hydrate guided Source repos/docs imports from both UI-authored and Go-authored `workspace.yaml` indentation.
+- [x] Preserve hydrated repo values when the operator saves Source without making edits.
+- [x] Surface workspace manifest reload failures as visible recoverable console errors while keeping Refresh and current shell controls available.
+- [x] Run focused UI tests, full UI test/typecheck, exact-node build, full DoD and bounded fake live smoke before the first commit.
+- [x] Run a follow-up medium live UX/UI audit and close the remaining rendered P2 path readability finding in a second commit.
+
+### Non-goals
+- [x] Do not change public API response shapes, workspace schema/spec, runtime contracts, or backend run behavior.
+- [x] Do not write to analyzed source repositories.
+- [x] Do not run release/regres matrices or create `release_verdict_*` artifacts.
+
+### Files changed
+- `ui/src/lib/workspaceSetupState.ts`
+- `ui/src/hooks/useManifestEditor.ts`
+- `ui/src/App.test.tsx`
+- `ui/src/styles.css`
+- `docs/PLANS.md`
+- `docs/archive/PLANS_ARCHIVE_2026-07.md`
+- `internal/api/ui_dist/*`
+
+### Acceptance criteria
+- [x] Source form/table hydrate `repos[]` from Go-style `workspace.yaml` with four-space list indentation.
+- [x] Saving the hydrated Source form preserves the loaded repo and does not persist the sample `my-service` draft.
+- [x] Manifest reload failure shows a visible `Error: ...` message while TopStatusBar, Refresh, and current shell remain mounted.
+- [x] Live fake Source screenshot shows the real auto-init repo path/name before any manual Source edit.
+- [x] Mobile Source/Readiness validation status blocks wrap long path/code values without page-level overflow or sub-44px actionable controls.
+
+### Progress log
+- 2026-07-08: Implemented parser/recovery regression fixes and added focused component tests. Full UI suite, typecheck, exact-node build, `make contracts`, `make test`, `make lint`, and bounded fake live smoke passed before commit `bd1dc18`.
+- 2026-07-08: Post-commit fake live smoke passed at `http://127.0.0.1:18180` with workspace `/tmp/provenarch-ui-ux-postcommit-workspace.szRzFG`; smoke screenshots were written to `/tmp/provenarch-ui-ux-postcommit-results.DUvVSX` and manual audit evidence to `/tmp/provenarch-ui-ux-postcommit-manual.RKz9lE`. Source hydration evidence showed `provenarch`, no `my-service`, and no sample Git URL.
+- 2026-07-08: Manual desktop/mobile audit found no console errors, failed requests, viewport overflow, sub-threshold controls or running reduced-motion animations. The only remaining finding was P2 internal clipped overflow for long path/code values in status/summary blocks.
+- 2026-07-08: Added status/repo summary path wrapping and stabilized the Publish filter regression test. Full UI suite and typecheck passed; exact-node `make build` passed. Focused live mobile check at `http://127.0.0.1:18182` with workspace `/tmp/provenarch-ui-ux-finalfix-workspace.Qi8h13` wrote evidence to `/tmp/provenarch-ui-ux-finalfix-manual.mQnFg8` and confirmed zero viewport overflow, zero small controls, zero console errors and zero failed requests.
+
+### Plan ID
 EP-20260708-console-v2-ux-ui-remediation
 
 ### Context
