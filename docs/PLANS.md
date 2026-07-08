@@ -88,6 +88,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Implement the first focused UI polish slice without schema/API/runtime contract changes.
 - [x] Add or update UI tests for changed shell behavior.
 - [x] Run relevant verification and commit the slice.
+- [x] Implement the Review hierarchy slice so the review queue and selected preview are primary while the full artifact explorer is secondary.
+- [x] Add mobile Review section jumps for long first-time review sessions.
+- [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
 - [ ] Do not change workspace, runtime, artifact, schema, or API contracts in this UX polish slice.
@@ -101,23 +104,29 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 3) Run live E2E host/tool/provider preflight for the medium path; continue only if runbook prerequisites are satisfied.
 4) Write a UX/UI report with findings, state coverage, recovery gaps and prioritized fixes.
 5) Implement the smallest coherent improvement slice: context-aware Activity drawer, progressive-disclosure inspector, and successful-run review emphasis.
-6) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-7) Commit and use the report to drive the next iteration.
+6) Implement the next Review-focused slice: primary review queue, selected evidence preview, secondary artifact explorer and mobile section jumps.
+7) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+8) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
 - `ui/src/components/RightInspector.tsx`
 - `ui/src/components/ActiveRunStrip.tsx`
+- `ui/src/components/StagePanels.tsx`
 - `ui/src/components/ConsoleShellPrimitives.test.tsx`
+- `ui/src/App.test.tsx`
+- `ui/e2e/live-flow.spec.ts`
 - `ui/src/styles.css`
 - `reports/ux_ui_assessment_20260708.md`
 - `docs/PLANS.md`
 
 ### Acceptance criteria
-- [ ] Activity drawer keeps active/failed run diagnostics easy to open, but does not consume review/publish attention after success by default.
-- [ ] Right inspector keeps `Next action` prominent and collapses or summarizes empty/secondary sections without hiding hard blockers, warnings, evidence, runtime safety or Git publication access.
-- [ ] Active run strip highlights review/artifact state after a successful run instead of making stale `current_step` the dominant signal.
-- [ ] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
+- [x] Activity drawer keeps active/failed run diagnostics easy to open, but does not consume review/publish attention after success by default.
+- [x] Right inspector keeps `Next action` prominent and collapses or summarizes empty/secondary sections without hiding hard blockers, warnings, evidence, runtime safety or Git publication access.
+- [x] Active run strip highlights review/artifact state after a successful run instead of making stale `current_step` the dominant signal.
+- [x] Review makes the queue and selected evidence preview the primary path, while the full artifact explorer is an explicit secondary disclosure.
+- [x] Mobile Review exposes section jumps before the long evidence/queue/artifact/trust stack.
+- [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
 - [ ] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
 
 ### Risks
@@ -129,6 +138,8 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Started UX/UI quality loop. Read project mission, architecture, pipeline spec, live E2E runbook, design baseline, current UX smoke report and shell implementation.
 - 2026-07-08: Fresh fake-runtime rendered smoke passed (`run_20260708_094849_001`, QA `run_20260708_094856_002`) and confirmed the primary UX debt: succeeded Review/Ask/Publish screens were dominated by old init logs and repeated empty inspector sections. Medium live E2E was blocked before execution as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` exists but is not a Git checkout at the pinned SHA; no canonical matrix or curated repo file was changed.
 - 2026-07-08: Implemented slice 1 shell polish: context-aware Activity drawer, progressive-disclosure right inspector and review-oriented active run strip. Targeted shell tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_095725_001`, QA `run_20260708_095731_002`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`; commit prepared for this slice.
+- 2026-07-08: Implemented slice 2 Review hierarchy polish: queue/selected preview are now the primary review path, full artifact explorer is a secondary disclosure, selected queue items are highlighted, and mobile Review exposes section jumps. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_102054_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
+- 2026-07-08: Re-ran the medium `regres long` preflight through `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`. Writable roots and provider binaries were present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`), but `/tmp/provenarch-live-e2e/posthog/posthog` still failed `git rev-parse HEAD` because it is not a Git checkout. Matrix execution remains blocked as `operational_host_preflight_failed`; no canonical matrix or curated repo file was changed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

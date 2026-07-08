@@ -1636,6 +1636,11 @@ describe("App", () => {
     await renderConsoleApp();
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
+    expect(screen.getByTestId("review-section-jumps")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("review-artifact-explorer-toggle")).toHaveTextContent("Secondary browser");
+    expect(explorer).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByTestId("review-artifact-explorer-toggle"));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
     expect(explorer).toHaveTextContent("reports/as-is");
     expect(explorer).toHaveTextContent("report");
     expect(explorer).toHaveTextContent("diagram");
@@ -1709,6 +1714,7 @@ describe("App", () => {
 
     await renderConsoleApp();
 
+    fireEvent.click(await screen.findByTestId("review-artifact-explorer-toggle"));
     const filters = await screen.findByTestId("review-artifact-filters");
     const artifactPanel = screen.getByTestId("results-artifacts-panel");
     expect(filters).toHaveAttribute("role", "tablist");
@@ -1934,6 +1940,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-review"));
     await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
     expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview");
+    fireEvent.click(screen.getByTestId("review-artifact-explorer-toggle"));
     expect(within(screen.getByTestId("review-artifact-explorer")).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected");
   });
 

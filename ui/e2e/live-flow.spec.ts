@@ -300,6 +300,19 @@ async function selectRunLogsMode(page: Page, mode: "events" | "raw" | "all"): Pr
   await page.getByTestId("run-logs-mode-select").selectOption(mode, { timeout: 10_000 });
 }
 
+async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
+  const explorer = page.getByTestId("review-artifact-explorer");
+  await expect(explorer).toBeVisible();
+  const isOpen = await explorer.evaluate((node) => ("open" in node ? Boolean(node.open) : true));
+  if (!isOpen) {
+    await page.getByTestId("review-artifact-explorer-toggle").click();
+  }
+  await expect
+    .poll(async () => explorer.evaluate((node) => ("open" in node ? Boolean(node.open) : true)), { timeout: 5_000 })
+    .toBe(true);
+  return explorer;
+}
+
 async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
   await page.reload();
   await expect(page.getByTestId("review-panel")).toBeVisible();
@@ -430,7 +443,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
   await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
   await expect(page.getByTestId("review-citation-coverage")).toBeVisible();
-  const reviewArtifactExplorer = page.getByTestId("review-artifact-explorer");
+  const reviewArtifactExplorer = await openReviewArtifactExplorer(page);
   const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
   await expect(diagramButtons.first()).toBeVisible();
 

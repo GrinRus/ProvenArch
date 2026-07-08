@@ -2046,6 +2046,7 @@ function ReviewEvidenceWorkbench({
 }) {
   const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
   const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
+  const artifactExplorerMode = reviewQueue.length === 0 ? "empty-queue" : "review-queue";
   const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
   const visibleArtifactCount = visibleArtifactGroups.reduce((sum, group) => sum + group.artifacts.length, 0);
 
@@ -2057,56 +2058,76 @@ function ReviewEvidenceWorkbench({
 
   return (
     <div className="review-workbench">
-      <aside className="review-artifact-explorer" data-testid="review-artifact-explorer">
-        <ReviewQueuePanel queue={reviewQueue} onOpenArtifact={onOpenArtifact} />
-        <div className="section-heading-row">
-          <h2>Artifact explorer</h2>
-          <StatusBadge tone={visibleArtifactGroups.length > 0 ? "ok" : "info"}>
-            {artifactFilter === "all" ? `${artifactGroups.length} groups` : `${visibleArtifactCount} refs`}
-          </StatusBadge>
-        </div>
-        <TabNav
-          ariaLabel="Review artifact filters"
-          className="artifact-filter-tabs"
-          testId="review-artifact-filters"
-          value={artifactFilter}
-          onChange={setArtifactFilter}
-          options={REVIEW_ARTIFACT_FILTERS}
-        />
-        {visibleArtifactGroups.length === 0 ? (
-          <p className="hint">
-            {artifactGroups.length === 0
-              ? "No selected-run artifacts yet. Run Analysis before evidence review."
-              : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
-          </p>
-        ) : (
-          <div className="artifact-group-list" data-testid="results-artifacts-panel">
-            {visibleArtifactGroups.map((group) => (
-              <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
-                <div className="artifact-group-heading">
-                  <h3>{group.name}</h3>
-                  <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
-                </div>
-                <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
-                  {group.artifacts.map((artifact) => (
-                    <li key={`${artifact.kind}-${artifact.path}`}>
-                      <ArtifactPathButton
-                        path={artifact.path}
-                        label={artifact.label}
-                        kind={artifact.kind}
-                        selected={artifact.path === selectedArtifact}
-                        onOpenArtifact={onOpenArtifact}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+      <nav className="review-section-jumps" aria-label="Review sections" data-testid="review-section-jumps">
+        <a href="#review-evidence-preview">Preview</a>
+        <a href="#review-queue">Queue</a>
+        <a href="#review-artifacts">Artifacts</a>
+        <a href="#review-trust">Trust</a>
+      </nav>
+
+      <aside className="review-task-lane" id="review-task-lane" aria-label="Review tasks and supporting artifacts">
+        <ReviewQueuePanel queue={reviewQueue} selectedArtifact={selectedArtifact} onOpenArtifact={onOpenArtifact} />
+        <details
+          key={artifactExplorerMode}
+          className="review-artifact-explorer"
+          data-testid="review-artifact-explorer"
+          id="review-artifacts"
+          open={reviewQueue.length === 0 ? true : undefined}
+        >
+          <summary className="review-artifact-explorer-summary" data-testid="review-artifact-explorer-toggle">
+            <span className="review-artifact-summary-copy">
+              <strong>Artifact explorer</strong>
+              <span>Secondary browser for all generated files.</span>
+            </span>
+            <StatusBadge tone={visibleArtifactGroups.length > 0 ? "ok" : "info"}>
+              {artifactFilter === "all" ? `${artifactGroups.length} groups` : `${visibleArtifactCount} refs`}
+            </StatusBadge>
+          </summary>
+          <div className="review-artifact-explorer-body">
+            <TabNav
+              ariaLabel="Review artifact filters"
+              className="artifact-filter-tabs"
+              testId="review-artifact-filters"
+              value={artifactFilter}
+              onChange={setArtifactFilter}
+              options={REVIEW_ARTIFACT_FILTERS}
+            />
+            {visibleArtifactGroups.length === 0 ? (
+              <p className="hint">
+                {artifactGroups.length === 0
+                  ? "No selected-run artifacts yet. Run Analysis before evidence review."
+                  : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
+              </p>
+            ) : (
+              <div className="artifact-group-list" data-testid="results-artifacts-panel">
+                {visibleArtifactGroups.map((group) => (
+                  <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
+                    <div className="artifact-group-heading">
+                      <h3>{group.name}</h3>
+                      <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
+                    </div>
+                    <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
+                      {group.artifacts.map((artifact) => (
+                        <li key={`${artifact.kind}-${artifact.path}`}>
+                          <ArtifactPathButton
+                            path={artifact.path}
+                            label={artifact.label}
+                            kind={artifact.kind}
+                            selected={artifact.path === selectedArtifact}
+                            onOpenArtifact={onOpenArtifact}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </details>
       </aside>
 
-      <section className="review-evidence-preview" data-testid="review-evidence-preview">
+      <section className="review-evidence-preview" id="review-evidence-preview" data-testid="review-evidence-preview">
         <div className="section-heading-row">
           <div>
             <h2>Evidence preview</h2>
@@ -2185,7 +2206,7 @@ function ReviewEvidenceWorkbench({
         ) : null}
       </section>
 
-      <aside className="review-intel" data-testid="review-citation-coverage">
+      <aside className="review-intel" id="review-trust" data-testid="review-citation-coverage">
         <div className="section-heading-row">
           <h2>Citations / coverage</h2>
           <StatusBadge tone={trustStatus.tone}>{trustStatus.label}</StatusBadge>
@@ -2233,9 +2254,17 @@ function ReviewEvidenceWorkbench({
   );
 }
 
-function ReviewQueuePanel({ queue, onOpenArtifact }: { queue: ReviewQueueItem[]; onOpenArtifact: (path: string) => void }) {
+function ReviewQueuePanel({
+  queue,
+  selectedArtifact,
+  onOpenArtifact,
+}: {
+  queue: ReviewQueueItem[];
+  selectedArtifact: string;
+  onOpenArtifact: (path: string) => void;
+}) {
   return (
-    <section className="review-queue" data-testid="review-queue">
+    <section className="review-queue" id="review-queue" data-testid="review-queue">
       <div className="section-heading-row">
         <h2>Review Queue</h2>
         <StatusBadge tone={queue.length > 0 ? "warn" : "ok"}>{queue.length}</StatusBadge>
@@ -2248,7 +2277,8 @@ function ReviewQueuePanel({ queue, onOpenArtifact }: { queue: ReviewQueueItem[];
             <li key={item.id}>
               <button
                 type="button"
-                className="review-queue-item"
+                className={`review-queue-item${item.path === selectedArtifact ? " is-selected" : ""}`}
+                aria-current={item.path === selectedArtifact ? "true" : undefined}
                 aria-label={`Review queue item: ${item.title}`}
                 onClick={() => onOpenArtifact(item.path)}
               >

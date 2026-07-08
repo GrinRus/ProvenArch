@@ -32,6 +32,14 @@ status: blocked
 primary classification: operational_host_preflight_failed
 next decision: do not run matrix from this host state; prepare the exact pinned PostHog checkout or symlink per runbook section `2.2`, then rerun from a clean committed tree or clean worktree.
 
+2026-07-08 slice 2 retry:
+goal: re-check whether the requested medium live E2E can start after the Review UX slice.
+action: ran fail-fast host checks, generated the direct command with `python3 scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`, checked provider binaries and probed `/tmp/provenarch-live-e2e/posthog/posthog` with `git rev-parse HEAD`.
+observed evidence: `/tmp/provenarch-live-e2e` and `/tmp/provenarch-test_arch_project` are writable directories; generated command still targets `examples/e2e-matrix.regres-long.yaml` with qwen-only baseline and `scripts/full-run-batch-matrix.sh`; binaries report `qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`; PostHog canonical path still returns `fatal: not a git repository`.
+status: blocked
+primary classification: operational_host_preflight_failed
+next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -64,8 +72,8 @@ P0:
 
 P1:
 - Keep advanced runtime settings collapsed by default outside explicit operator interaction or warnings.
-- Rebalance Review internals so `Needs review` queue and selected preview are primary, while full artifact explorer is secondary.
-- Add mobile section jump controls for Review/Publish if the page still feels too long after shell disclosure changes.
+- Rebalance Review internals so `Needs review` queue and selected preview are primary, while full artifact explorer is secondary. Completed in Slice 2 for Review.
+- Add mobile section jump controls for Review/Publish if the page still feels too long after shell disclosure changes. Completed in Slice 2 for Review; Publish remains a later candidate if rendered evidence shows the same friction.
 
 ## Acceptance Criteria For Slice 1
 
@@ -99,5 +107,32 @@ Observed improvement:
 
 Residual UX work for next iteration:
 - Readiness still exposes advanced runtime settings too prominently during the live smoke path.
-- Review still shows queue and full artifact explorer with similar visual weight; a later slice should make the queue the primary lane and put the full explorer behind a secondary disclosure/tab.
-- Mobile Review remains long even after shell compaction; add section jump controls if next visual pass still shows navigation friction.
+- Non-happy path UX still needs a dedicated pass across failed runs, retry paths, provider unavailable states, QA failures and publish blockers.
+- Medium live E2E remains blocked by host preflight until `/tmp/provenarch-live-e2e/posthog/posthog` is a valid pinned Git checkout and the tree is clean.
+
+## Slice 2 Result
+
+Implemented:
+- `ReviewEvidenceWorkbench` now separates the left side into a primary review task lane and a secondary full artifact explorer disclosure.
+- `ReviewQueuePanel` highlights the currently selected queue item, making the selected evidence preview traceable back to the operator action.
+- Review mobile layout now exposes section jumps for `Preview`, `Queue`, `Artifacts` and `Trust` before the long review stack.
+- Live Playwright opens the secondary artifact explorer explicitly before selecting diagram artifacts, matching the new UI hierarchy.
+
+Post-change evidence:
+- targeted component test: `npm run --prefix ui test -- App.test.tsx --run` -> `66 passed`
+- UI typecheck: `npm run --prefix ui typecheck` -> passed
+- UI test suite: `npm run --prefix ui test -- --run` -> `82 passed`
+- build: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build` -> passed
+- rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:18180 UI_E2E_QA_SMOKE=1 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-review-slice-results.Y78xBZ npm run --prefix ui e2e:live` -> `1 passed`
+- updated init run: `run_20260708_102054_001`
+- updated screenshots: `/tmp/provenarch-ui-review-slice-results.Y78xBZ/frontend-review-desktop.png`, `/tmp/provenarch-ui-review-slice-results.Y78xBZ/frontend-review-mobile.png`
+
+Observed improvement:
+- First-time Review now starts with the next review tasks and selected evidence, not a full file catalog.
+- Full artifact browsing remains discoverable through an explicit disclosure and keeps the existing `review-artifact-explorer` test surface.
+- Mobile Review has stable section-level navigation before preview, queue, artifacts and trust/citation sections.
+
+Residual UX work after Slice 2:
+- Readiness advanced settings still deserve a first-run simplification pass.
+- Publish should receive the same mobile/long-form review treatment only if screenshots show comparable navigation friction.
+- Error, retry and provider-unavailable paths still need a dedicated non-happy-path UX pass.
