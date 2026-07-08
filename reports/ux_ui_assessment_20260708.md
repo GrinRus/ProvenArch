@@ -40,6 +40,14 @@ status: blocked
 primary classification: operational_host_preflight_failed
 next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
 
+2026-07-08 slice 3 retry:
+goal: re-check whether the requested medium live E2E can start after the Readiness UX slice.
+action: ran fail-fast host checks, generated the direct command with `python3 scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`, checked provider binaries and probed `/tmp/provenarch-live-e2e/posthog/posthog` with `git rev-parse HEAD`.
+observed evidence: `/tmp/provenarch-live-e2e` and `/tmp/provenarch-test_arch_project` are writable directories; generated command still targets `examples/e2e-matrix.regres-long.yaml` with qwen-only baseline and `scripts/full-run-batch-matrix.sh`; binaries report `qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`; PostHog canonical path still returns `fatal: not a git repository`.
+status: blocked
+primary classification: operational_host_preflight_failed
+next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -71,7 +79,7 @@ P0:
 - Make `ActiveRunStrip` switch to review language after success: show `Review state`, artifact count and warning/error count instead of stale `Current step`.
 
 P1:
-- Keep advanced runtime settings collapsed by default outside explicit operator interaction or warnings.
+- Keep advanced runtime settings collapsed by default outside explicit operator interaction or warnings. Completed in Slice 3 for the Readiness live-smoke path.
 - Rebalance Review internals so `Needs review` queue and selected preview are primary, while full artifact explorer is secondary. Completed in Slice 2 for Review.
 - Add mobile section jump controls for Review/Publish if the page still feels too long after shell disclosure changes. Completed in Slice 2 for Review; Publish remains a later candidate if rendered evidence shows the same friction.
 
@@ -106,7 +114,6 @@ Observed improvement:
 - Empty inspector sections are compact but still discoverable; open questions and evidence refs remain visible because they affect review/publish decisions.
 
 Residual UX work for next iteration:
-- Readiness still exposes advanced runtime settings too prominently during the live smoke path.
 - Non-happy path UX still needs a dedicated pass across failed runs, retry paths, provider unavailable states, QA failures and publish blockers.
 - Medium live E2E remains blocked by host preflight until `/tmp/provenarch-live-e2e/posthog/posthog` is a valid pinned Git checkout and the tree is clean.
 
@@ -133,6 +140,30 @@ Observed improvement:
 - Mobile Review has stable section-level navigation before preview, queue, artifacts and trust/citation sections.
 
 Residual UX work after Slice 2:
-- Readiness advanced settings still deserve a first-run simplification pass.
 - Publish should receive the same mobile/long-form review treatment only if screenshots show comparable navigation friction.
 - Error, retry and provider-unavailable paths still need a dedicated non-happy-path UX pass.
+
+## Slice 3 Result
+
+Implemented:
+- `ReadinessStagePanel` now gives advanced runtime settings a compact operator-tools disclosure with descriptive summary copy.
+- Advanced runtime panels remain closed by default in the first-run Readiness path, while the exact timeout/execution/permissions/provider override panels remain one click away.
+- Live Playwright still opens the advanced disclosure to prove the settings are reachable, then closes it before the Readiness screenshot so first-run evidence reflects the intended hierarchy.
+
+Post-change evidence:
+- targeted component test: `npm run --prefix ui test -- App.test.tsx --run` -> `66 passed`
+- UI typecheck: `npm run --prefix ui typecheck` -> passed
+- UI test suite: `npm run --prefix ui test -- --run` -> `82 passed`
+- build: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed
+- rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:18180 UI_E2E_QA_SMOKE=1 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-readiness-slice-results.Py1ckv npm run --prefix ui e2e:live` -> `1 passed`
+- updated init run: `run_20260708_104434_001`
+- updated screenshot: `/tmp/provenarch-ui-readiness-slice-results.Py1ckv/frontend-readiness-desktop.png`
+
+Observed improvement:
+- First-run Readiness foregrounds validation, local readiness and run-first-analysis actions instead of detailed runtime tuning panels.
+- Operator controls remain discoverable with concrete scope text: timeouts, execution policy, permissions and per-step providers.
+
+Residual UX work after Slice 3:
+- Error, retry and provider-unavailable paths still need a dedicated non-happy-path UX pass.
+- Publish should receive the same mobile/long-form review treatment only if screenshots show comparable navigation friction.

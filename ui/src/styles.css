@@ -866,6 +866,42 @@ code {
   font-weight: 760;
 }
 
+.readiness-advanced-settings {
+  background: var(--surface);
+}
+
+.readiness-advanced-settings summary {
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.advanced-summary-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+}
+
+.advanced-summary-copy strong,
+.advanced-summary-copy span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.advanced-summary-copy span {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 520;
+}
+
+.readiness-advanced-settings[open] {
+  background: var(--surface-muted);
+}
+
+.readiness-advanced-settings[open] summary {
+  padding-bottom: 0.58rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
 .advanced-block textarea {
   margin-top: 0.65rem;
 }

@@ -367,9 +367,14 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
   await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
-  await page.locator("summary").filter({ hasText: /^Advanced runtime settings$/ }).click();
+  const readinessAdvancedSettings = page.getByTestId("readiness-advanced-settings");
+  await expect(readinessAdvancedSettings).toBeVisible();
+  await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
+  await page.getByTestId("readiness-advanced-settings").locator("summary").click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
+  await page.getByTestId("readiness-advanced-settings").locator("summary").click();
+  await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
 
   await page.getByTestId("stage-readiness").click();
   await page.getByTestId("workspace-validate-btn").click();

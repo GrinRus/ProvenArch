@@ -384,8 +384,14 @@ export function ReadinessStagePanel({
       {doctorResult ? <DoctorChecklist doctorResult={doctorResult} /> : null}
       {firstRunStatus ? <p className="status ok">{firstRunStatus}</p> : null}
 
-      <details className="advanced-block">
-        <summary>Advanced runtime settings</summary>
+      <details className="advanced-block readiness-advanced-settings" data-testid="readiness-advanced-settings">
+        <summary>
+          <span className="advanced-summary-copy">
+            <strong>Advanced runtime settings</strong>
+            <span>Timeouts, execution policy, permissions, and per-step provider overrides.</span>
+          </span>
+          <StatusBadge tone="info">operator tools</StatusBadge>
+        </summary>
         {runtimeSettingsPanel}
       </details>
     </section>

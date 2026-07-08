@@ -1411,6 +1411,10 @@ describe("App", () => {
     expect(runtimeSummary).toHaveTextContent("best_effort");
     expect(runtimeSummary).toHaveTextContent("fake");
     expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
+    const advancedSettings = screen.getByTestId("readiness-advanced-settings");
+    expect(advancedSettings).toHaveTextContent("Timeouts, execution policy, permissions, and per-step provider overrides.");
+    expect(advancedSettings).toHaveTextContent("operator tools");
+    expect(advancedSettings).not.toHaveAttribute("open");
   });
 
   it("renders Charter V2 workbench summary, card overview, and prompt bundle status", async () => {

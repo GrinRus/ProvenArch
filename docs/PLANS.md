@@ -90,6 +90,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Run relevant verification and commit the slice.
 - [x] Implement the Review hierarchy slice so the review queue and selected preview are primary while the full artifact explorer is secondary.
 - [x] Add mobile Review section jumps for long first-time review sessions.
+- [x] Simplify first-run Readiness by keeping advanced runtime tools compact and closed during the primary readiness path.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -105,8 +106,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 4) Write a UX/UI report with findings, state coverage, recovery gaps and prioritized fixes.
 5) Implement the smallest coherent improvement slice: context-aware Activity drawer, progressive-disclosure inspector, and successful-run review emphasis.
 6) Implement the next Review-focused slice: primary review queue, selected evidence preview, secondary artifact explorer and mobile section jumps.
-7) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-8) Commit and use the report to drive the next iteration.
+7) Implement the next Readiness-focused slice: keep exact runtime controls available while preserving the first-run readiness path and screenshot hierarchy.
+8) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+9) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -126,6 +128,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Active run strip highlights review/artifact state after a successful run instead of making stale `current_step` the dominant signal.
 - [x] Review makes the queue and selected evidence preview the primary path, while the full artifact explorer is an explicit secondary disclosure.
 - [x] Mobile Review exposes section jumps before the long evidence/queue/artifact/trust stack.
+- [x] Readiness keeps advanced runtime panels out of the first-run visual path while preserving direct operator access to timeouts/execution/permissions/provider overrides.
 - [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
 - [ ] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
 
@@ -140,6 +143,8 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 1 shell polish: context-aware Activity drawer, progressive-disclosure right inspector and review-oriented active run strip. Targeted shell tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_095725_001`, QA `run_20260708_095731_002`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`; commit prepared for this slice.
 - 2026-07-08: Implemented slice 2 Review hierarchy polish: queue/selected preview are now the primary review path, full artifact explorer is a secondary disclosure, selected queue items are highlighted, and mobile Review exposes section jumps. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_102054_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
 - 2026-07-08: Re-ran the medium `regres long` preflight through `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`. Writable roots and provider binaries were present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`), but `/tmp/provenarch-live-e2e/posthog/posthog` still failed `git rev-parse HEAD` because it is not a Git checkout. Matrix execution remains blocked as `operational_host_preflight_failed`; no canonical matrix or curated repo file was changed.
+- 2026-07-08: Implemented slice 3 Readiness polish: advanced runtime settings now render as a compact operator-tools disclosure, default closed, with live smoke verifying the settings remain reachable but closing them before the readiness screenshot. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_104434_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
+- 2026-07-08: Re-ran the medium `regres long` preflight after slice 3. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; no canonical matrix or curated repo file was changed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
