@@ -288,7 +288,7 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
    - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permissions
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
@@ -560,7 +560,7 @@ flowchart TD
 - MVP использует только artifact-only runtime contract.
 - Runtime пишет required step artifacts в `write_root` / `draft_final_root` и завершает процесс без semantic JSON на stdout.
 - Orchestrator принимает шаг только после read-only validation artifacts и persisted runtime execution metadata.
-- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`.
+- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`. UI показывает такие pending requests в `Analysis` как triage summary с target/reason, rule/decision и next actions; approve/deny broker остаётся future scope.
 - Observation без evidence запрещён policy и examples.
 
 ### 13.3. Skills/prompts editing через UI

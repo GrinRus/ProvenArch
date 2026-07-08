@@ -2716,12 +2716,22 @@ describe("App", () => {
     await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
+    const permissionRecovery = await screen.findByTestId("runtime-permission-recovery");
+    expect(permissionRecovery).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Permission triage")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("1 pending request")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Blocked step")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("init.step1.collect")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Policy rule")).toBeInTheDocument();
+    expect(
+      within(permissionRecovery).getByText("Use Readiness - Advanced runtime settings - Runtime Permissions to choose the intended mode/channel."),
+    ).toBeInTheDocument();
     expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
     expect(screen.getByText("perm-1")).toBeInTheDocument();
-    expect(screen.getByText("needs_user")).toBeInTheDocument();
-    expect(screen.getByText("ask_unsafe_operation")).toBeInTheDocument();
-    expect(screen.getByText("npm install")).toBeInTheDocument();
-    expect(screen.getByText("package install requires review")).toBeInTheDocument();
+    expect(screen.getAllByText("needs_user").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("ask_unsafe_operation").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("npm install").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("package install requires review").length).toBeGreaterThan(0);
   });
 
   it("renders Analysis V2 run progress, timeline, and shard drilldown", async () => {

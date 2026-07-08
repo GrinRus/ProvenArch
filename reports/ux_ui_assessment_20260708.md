@@ -365,7 +365,7 @@ Implemented:
 - Partial collect failures are deduplicated by `shard_id`, so repeated error/repair/stall rows for one shard do not inflate failed-shard counts.
 - Recovery actions now distinguish failed shard inspection, provider/artifact readiness and raw-output stdout/stderr comparison before retry.
 
-Post-change evidence so far:
+Post-change evidence:
 - targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `67 passed`
 - UI typecheck: `npm --prefix ui run typecheck` -> passed
 - full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`83` UI tests, `230` Python tests)
@@ -393,3 +393,23 @@ Observed evidence:
 UX conclusion:
 - Slice 9 is ready for the next medium run, but this host cannot currently satisfy the canonical PostHog path prerequisite.
 - This is an operational trusted-host blocker, not evidence against the new `analysis-live-diagnostics` UI.
+
+## Slice 11 Result
+
+Implemented:
+- Added a `Permission triage` panel to `Analysis -> Pending permissions` for managed-mode runtime permission stops.
+- The panel summarizes blocked step, operation, decision, policy rule, primary target/reason and safe next actions before the raw request table.
+- Existing pending permission request data remains the only input; there is no backend/API/schema change and no new approve/deny broker.
+
+Post-change evidence so far:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `67 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `83` UI tests, Vite build and Go build)
+
+Observed improvement:
+- First-time operators no longer have to infer the meaning of `needs_user`, `ask_unsafe_operation` and `path_or_command` from a raw table.
+- The recovery path is explicit: inspect command/path and reason, choose the intended permission mode/channel in Readiness, then retry the failed pipeline only when the request is expected.
+
+Residual UX work after Slice 11:
+- Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.
+- Approve/deny broker remains future scope; the current UI makes the stop understandable but does not resolve requests in-place.

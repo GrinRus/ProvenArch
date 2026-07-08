@@ -116,6 +116,7 @@ Must show:
 - step timeline for `init.step0.constitution` through `init.step4.proposals`;
 - shard table with repo/path/provider/status/artifacts/duration;
 - failed-run live diagnostics for shard counters, focused repair, stall pressure, terminal excerpt and raw-output refs;
+- pending permission triage with blocked step, operation, decision, policy rule, target/reason and safe next actions;
 - blocker, evidence refs and runtime safety in inspector;
 - live logs with highlighted error/warning rows.
 
@@ -300,6 +301,7 @@ V2 selectors should be stable and explicit:
   `runtime-safety-panel`, `git-publication-panel`;
 - Analysis: `analysis-run-timeline`, `analysis-shard-table`, `analysis-run-progress`,
   `analysis-live-diagnostics`,
+  `runtime-permission-recovery`,
   `analysis-review-blocker-btn`;
 - Review: `review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`,
   `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`;

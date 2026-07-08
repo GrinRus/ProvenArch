@@ -1320,6 +1320,41 @@ code {
   font-size: 0.82rem;
 }
 
+.permission-recovery-panel {
+  display: grid;
+  gap: 0.58rem;
+  margin-bottom: 0.72rem;
+  padding: 0.62rem;
+  border: 1px solid var(--warning-panel-line);
+  border-radius: 0.46rem;
+  background: var(--warning-panel-bg);
+}
+
+.permission-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.permission-recovery-grid > div {
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid rgba(184, 83, 9, 0.16);
+  border-radius: 0.4rem;
+  background: var(--surface);
+}
+
+.permission-recovery-grid strong {
+  display: block;
+  margin-top: 0.14rem;
+  overflow-wrap: anywhere;
+  font-size: 0.84rem;
+}
+
+.permission-request-summary {
+  margin-top: 0;
+}
+
 .analysis-timeline {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
