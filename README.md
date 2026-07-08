@@ -112,9 +112,9 @@ acp serve
 В onboarding UI:
 
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
-2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref` и `docs.imports_path`.
+2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
 3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
-4. `Ready`: проверьте summary и откройте Console V2 или сразу запустите первый `init` analysis.
+4. `Ready`: проверьте summary, откройте Console V2 после validation или запустите первый `init` analysis после successful local readiness check.
 
 Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
 Валидный manifest можно сразу довести до `Ready` после выбора runner; manifest с ошибками вернёт
@@ -122,8 +122,8 @@ acp serve
 
 После onboarding основной UI остаётся прежним:
 
-1. `Source`: редактируйте repo inventory и docs imports; repo table покажет источник, ref и validation state.
-2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts.
+1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state.
+2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; первый analysis остаётся disabled до successful doctor result.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
 4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table и warning/error drilldown.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
@@ -264,7 +264,7 @@ model/entities/, model/edges/     # derived entity-per-file model
 
 UI показывает то же состояние через stage-based console:
 
-- `Source` / `Readiness`: repo table, repo sources, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
+- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
 - `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, cancel и bootstrap resume newest active/newest completed run;
 - `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;

@@ -5,6 +5,175 @@ Closed ExecPlans archived from `docs/PLANS.md` in July 2026.
 This archive preserves implementation-complete plan evidence; residual trusted-host, live-quality, owner/admin and owner-decision workstreams remain active in `docs/PLANS.md`.
 
 ### Plan ID
+EP-20260708-console-source-hydration-recovery
+
+### Context
+Follow-up medium-depth rendered UX/UI audit found two operator issues after the initial Console V2 hardening slice. Source could render the default `my-service` sample draft instead of the backend auto-init `workspace.yaml` repo when Go-authored YAML used four-space list indentation; saving from that state could overwrite a valid manifest with sample values. Manifest reload failures also kept the shell visible but did not surface a clear recoverable error. A post-commit audit then found one remaining P2 mobile readability issue: long workspace/source paths in validation status blocks could create internal clipped overflow even though page-level overflow was absent.
+
+### Goals (must have)
+- [x] Hydrate guided Source repos/docs imports from both UI-authored and Go-authored `workspace.yaml` indentation.
+- [x] Preserve hydrated repo values when the operator saves Source without making edits.
+- [x] Surface workspace manifest reload failures as visible recoverable console errors while keeping Refresh and current shell controls available.
+- [x] Run focused UI tests, full UI test/typecheck, exact-node build, full DoD and bounded fake live smoke before the first commit.
+- [x] Run a follow-up medium live UX/UI audit and close the remaining rendered P2 path readability finding in a second commit.
+
+### Non-goals
+- [x] Do not change public API response shapes, workspace schema/spec, runtime contracts, or backend run behavior.
+- [x] Do not write to analyzed source repositories.
+- [x] Do not run release/regres matrices or create `release_verdict_*` artifacts.
+
+### Files changed
+- `ui/src/lib/workspaceSetupState.ts`
+- `ui/src/hooks/useManifestEditor.ts`
+- `ui/src/App.test.tsx`
+- `ui/src/styles.css`
+- `docs/PLANS.md`
+- `docs/archive/PLANS_ARCHIVE_2026-07.md`
+- `internal/api/ui_dist/*`
+
+### Acceptance criteria
+- [x] Source form/table hydrate `repos[]` from Go-style `workspace.yaml` with four-space list indentation.
+- [x] Saving the hydrated Source form preserves the loaded repo and does not persist the sample `my-service` draft.
+- [x] Manifest reload failure shows a visible `Error: ...` message while TopStatusBar, Refresh, and current shell remain mounted.
+- [x] Live fake Source screenshot shows the real auto-init repo path/name before any manual Source edit.
+- [x] Mobile Source/Readiness validation status blocks wrap long path/code values without page-level overflow or sub-44px actionable controls.
+
+### Progress log
+- 2026-07-08: Implemented parser/recovery regression fixes and added focused component tests. Full UI suite, typecheck, exact-node build, `make contracts`, `make test`, `make lint`, and bounded fake live smoke passed before commit `bd1dc18`.
+- 2026-07-08: Post-commit fake live smoke passed at `http://127.0.0.1:18180` with workspace `/tmp/provenarch-ui-ux-postcommit-workspace.szRzFG`; smoke screenshots were written to `/tmp/provenarch-ui-ux-postcommit-results.DUvVSX` and manual audit evidence to `/tmp/provenarch-ui-ux-postcommit-manual.RKz9lE`. Source hydration evidence showed `provenarch`, no `my-service`, and no sample Git URL.
+- 2026-07-08: Manual desktop/mobile audit found no console errors, failed requests, viewport overflow, sub-threshold controls or running reduced-motion animations. The only remaining finding was P2 internal clipped overflow for long path/code values in status/summary blocks.
+- 2026-07-08: Added status/repo summary path wrapping and stabilized the Publish filter regression test. Full UI suite and typecheck passed; exact-node `make build` passed. Focused live mobile check at `http://127.0.0.1:18182` with workspace `/tmp/provenarch-ui-ux-finalfix-workspace.Qi8h13` wrote evidence to `/tmp/provenarch-ui-ux-finalfix-manual.mQnFg8` and confirmed zero viewport overflow, zero small controls, zero console errors and zero failed requests.
+
+### Plan ID
+EP-20260708-console-v2-ux-ui-remediation
+
+### Context
+Medium-depth rendered UX/UI audit follow-up for Console V2. This completed remediation slice locked the first round of audited behavior: recoverable refresh handling, onboarding recent-workspace density, Review/Publish artifact filters, operator-facing microcopy, semantic CSS aliases, shared control sizing and regression tests. Backend APIs, schemas, runtime contracts and source-repo write boundaries remained unchanged.
+
+### Goals (must have)
+- [x] Keep P0 criteria documented as a no-op class for this slice.
+- [x] Add UI recovery coverage for transient API/bootstrap failures so an already-open console stays usable and Refresh remains available.
+- [x] Preserve readiness gating, fake runtime labels, source include/exclude scope persistence, StageRail keyboard/mobile behavior, TabNav ARIA semantics and CSS token guard coverage.
+- [x] Collapse onboarding Recent workspaces to three entries by default with a reveal-all affordance.
+- [x] Add client-side Review and Publish artifact filters over existing artifact data only.
+- [x] Remove user-facing raw step-id copy from Proposals empty state and rename Readiness rail helper copy to operator-facing language.
+- [x] Add semantic CSS aliases for recurring focus/sidebar/warning colors while preserving the current visual palette.
+
+### Non-goals
+- [x] Do not change public API response shapes, workspace schema/spec, runtime contracts or backend behavior.
+- [x] Do not run release/regres matrix or create `release_verdict_*` artifacts.
+- [x] Do not write to analyzed source repos.
+- [x] Do not introduce a new UI library or redesign the Console shell.
+
+### Acceptance criteria
+- [x] UI tests cover refresh recovery, collapsed recents, Review/Publish filters and existing regression behavior.
+- [x] `npm run --prefix ui test -- --run` passes.
+- [x] `npm run --prefix ui typecheck` passes.
+- [x] Exact-node `make contracts`, `make test`, `make lint`, and `make build` pass.
+- [x] Bounded fake live smoke passes without `release_verdict_*` artifacts.
+
+### Progress log
+- 2026-07-08: Implemented and verified the first Console V2 UX/UI hardening slice. Bounded fake live smoke passed at `http://127.0.0.1:18180` with workspace `/tmp/provenarch-ui-ux-remediation.IEYY48`; automated screenshots were written under `/tmp/provenarch-ui-ux-remediation-results`, manual rendered screenshots/report under `/tmp/provenarch-ui-ux-remediation-manual`. Build still reported the known large lazy dependency chunk warning.
+- 2026-07-08: Archived after follow-up audit opened `EP-20260708-console-source-hydration-recovery` for the remaining Source hydration/recovery P1 issues.
+
+### Plan ID
+EP-20260707-console-v2-ux-hardening
+
+### Context
+Follow-up P1 slice from the Console V2 UX audit. The target was a reviewable frontend-only hardening pass: readiness gating must not imply the first analysis is runnable before local doctor checks pass, fake runtime labels must stay unambiguous, source analysis include/exclude should be editable without raw YAML, and mobile/navigation controls need consistent sizing and affordance. Backend APIs, schemas, runtime contracts, fixtures, canonical matrices and source repositories remained unchanged.
+
+### Goals (must have)
+- [x] Gate onboarding/Readiness `Run first analysis` behind successful local readiness while keeping `Open console` available after workspace/source/runtime validation.
+- [x] Display `fake` / `fake baseline` consistently across readiness, analysis, Ask/run and top-status surfaces without changing response shapes.
+- [x] Add guided include/exclude editing for existing `repos[].analysis.include/exclude` and replace source table advanced-only copy with scope counts.
+- [x] Normalize shared interactive sizing/tokens, TabNav accessibility semantics and mobile StageRail active-stage visibility.
+- [x] Update focused UI tests, including CSS token guard and StageRail keyboard/scroll behavior.
+- [x] Run full DoD plus bounded fake-runtime frontend live smoke.
+
+### Non-goals
+- [x] Do not change public API, backend runtime behavior, workspace schema/spec, schemas, fixtures, canonical matrices or release verdict artifacts.
+- [x] Do not include P2 visual polish or broader redesign in this slice.
+
+### Approach
+1) Add internal UI helpers/types for runtime labels and analysis scope drafts while serializing the existing `workspace.yaml` contract.
+2) Apply guided Source/onboarding scope controls and readiness/doctor gating copy in the shell and stage panels.
+3) Consolidate tab semantics and control sizing in shared CSS/component primitives.
+4) Preserve keyboard behavior and add narrow-viewport StageRail scroll visibility.
+5) Update tests, docs and verification evidence.
+
+### Files changed
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PLANS.md`
+- `docs/archive/PLANS_ARCHIVE_2026-07.md`
+- `ui/src/App.tsx`
+- `ui/src/App.test.tsx`
+- `ui/src/components/*`
+- `ui/src/hooks/useManifestEditor.ts`
+- `ui/src/lib/*`
+- `ui/src/styles.css`
+
+### Acceptance criteria
+- [x] UI tests and typecheck pass.
+- [x] Full DoD passes with exact Node toolchain.
+- [x] Fake runtime live smoke passes and no `release_verdict_*` artifacts are created.
+- [x] Source include/exclude persists to existing manifest fields without schema/spec changes.
+- [x] Checked core screens have no actionable interactive controls below desktop/mobile minimums.
+
+### Risks
+- Live smoke and manual QA depend on local browser/toolchain availability; classify host blockers separately instead of weakening the harness.
+- CSS sizing changes can affect dense tables/tabs; rendered desktop/mobile QA must inspect overflow and wrapping.
+
+### Progress log
+- 2026-07-07: Started P1 UX hardening slice; implemented guided analysis scope, readiness gating, fake runtime labels, TabNav semantics, control tokens and StageRail scroll behavior.
+- 2026-07-07: Full DoD passed with `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts`, `make test`, `make lint`, `make build`.
+- 2026-07-07: Final bounded fake live smoke passed against `http://127.0.0.1:18191` with `UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-ux-fix-final2-results` and run `run_20260707_182109_001`; manual rendered audit evidence is in `/tmp/provenarch-ui-ux-fix-final2-manual/manual-rendered-audit.json`.
+- 2026-07-07: Archived the completed plan so `docs/PLANS.md` keeps only active workstreams.
+
+### Plan ID
+EP-20260707-ux-live-smoke-review
+
+### Context
+The current task is a diagnostic UX review pass over Console V2: capture present rendered behavior with a small live browser E2E smoke, classify host/tool blockers separately from product UX, and propose focused design improvements. This is not a release readiness run and must not edit canonical live matrices, contracts, schemas, or provider presets.
+
+### Goals (must have)
+- [x] Run or explicitly classify the minimal frontend UX live smoke from `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+- [x] Capture current UI state evidence for Source, Readiness, Analysis, Review, Publish and mobile Review where available.
+- [x] Inspect the rendered UI enough to identify high-impact workflow, hierarchy, state-coverage and responsive issues.
+- [x] Produce a concise current-state report and prioritized UX/design fixes.
+
+### Non-goals
+- [ ] Do not change product UI/API behavior in this pass.
+- [ ] Do not run a canonical release gate or treat diagnostic smoke as release readiness.
+- [ ] Do not edit canonical release matrices, curated repo presets, schemas or runtime contracts.
+
+### Approach
+1) Read required project/runbook context and UI smoke contract.
+2) Check host prerequisites, especially exact Node/npm, Playwright browser availability and fake-runtime UI path.
+3) Run the smallest feasible frontend live smoke or record the precise operational blocker.
+4) Review screenshots/test evidence and current UI implementation shape.
+5) Write current-state findings and prioritize a small reviewable UX improvement slice.
+
+### Files changed
+- `docs/PLANS.md`
+- `reports/ux_current_state_20260707.md`
+
+### Acceptance criteria
+- [x] Host/tool readiness and smoke result are recorded with evidence paths.
+- [x] UX findings are prioritized by operator workflow impact.
+- [x] Proposed fixes are scoped and do not require schema/contract changes unless explicitly called out.
+
+### Risks
+- Exact Node.js `22.21.1` may be missing on the host; classify as `precheck_failed`/host blocker rather than bypassing exact-toolchain policy.
+- Existing generated reports/screenshots may be local diagnostic artifacts and should not be treated as release evidence.
+
+### Progress log
+- 2026-07-07: Started diagnostic UX live smoke review. Initial preflight found current PATH Node.js `25.9.0`, while `.node-version` requires `22.21.1`.
+- 2026-07-07: Downloaded exact diagnostic Node.js `22.21.1` to `/tmp/provenarch-node-v22.21.1`, ran `make build`, started fake-runtime `acp serve`, and passed `ui/e2e/live-flow.spec.ts` with `UI_E2E_QA_SMOKE=1`.
+- 2026-07-07: Captured current state in `reports/ux_current_state_20260707.md` with screenshot paths, API evidence, findings and proposed UX fixes.
+- 2026-07-07: Archived the completed diagnostic plan during the Console V2 UX hardening slice so `docs/PLANS.md` keeps only active workstreams.
+
+### Plan ID
 EP-20260702-active-plan-reconciliation
 
 ### Context

@@ -1,6 +1,7 @@
 import { useMemo, useReducer, useRef, useState } from "react";
 
 import type { Diagnostic, GuidedRepo, ValidateResponse } from "../lib/appContracts";
+import { splitAnalysisScopeLines } from "../lib/analysisScope";
 import { guidedReposReducer, initialGuidedRepos, parseGuidedSetupFromManifest } from "../lib/workspaceSetupState";
 import { loadWorkspaceManifest, saveWorkspaceManifest, validateWorkspaceAPI } from "../lib/workspaceApi";
 
@@ -45,8 +46,9 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
       if (guidedSetup?.docsImportsPath) {
         setGuidedDocsImportsPath(guidedSetup.docsImportsPath);
       }
-    } catch {
+    } catch (requestError) {
       setManifestContent("");
+      throw requestError;
     }
   }
 
@@ -109,6 +111,8 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
       const pathValue = repo.path.trim();
       const gitURLValue = repo.git_url.trim();
       const refValue = repo.ref.trim();
+      const includeGlobs = splitAnalysisScopeLines(repo.analysis_include);
+      const excludeGlobs = splitAnalysisScopeLines(repo.analysis_exclude);
 
       if (!name) {
         throw new Error("repo name is required for every entry");
@@ -133,6 +137,21 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
       }
       if (refValue) {
         lines.push(`    ref: ${yamlScalar(refValue)}`);
+      }
+      if (includeGlobs.length > 0 || excludeGlobs.length > 0) {
+        lines.push("    analysis:");
+        if (includeGlobs.length > 0) {
+          lines.push("      include:");
+          for (const pattern of includeGlobs) {
+            lines.push(`        - ${yamlScalar(pattern)}`);
+          }
+        }
+        if (excludeGlobs.length > 0) {
+          lines.push("      exclude:");
+          for (const pattern of excludeGlobs) {
+            lines.push(`        - ${yamlScalar(pattern)}`);
+          }
+        }
       }
     }
 

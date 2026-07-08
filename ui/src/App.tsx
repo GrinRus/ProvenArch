@@ -33,6 +33,7 @@ import {
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
+import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -215,15 +216,20 @@ export default function App() {
   }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
-    await bootstrapSystemVersion();
-    const status = await loadOnboardingStatus();
-    syncOnboardingStatus(status);
-    if (!status.can_enter_console) {
-      setConsoleReady(false);
-      return;
+    setError(null);
+    try {
+      await bootstrapSystemVersion();
+      const status = await loadOnboardingStatus();
+      syncOnboardingStatus(status);
+      if (!status.can_enter_console) {
+        setConsoleReady(false);
+        return;
+      }
+      await bootstrapConsoleData({ validateWorkspace: true });
+      setConsoleReady(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
     }
-    await bootstrapConsoleData({ validateWorkspace: true });
-    setConsoleReady(true);
   }
 
   async function bootstrapSystemVersion() {
@@ -640,6 +646,8 @@ export default function App() {
     [doctorWarnings.length, guidedDocsImportsPath, guidedRepos.length, setupDoctorResult, validateResult],
   );
 
+  const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
+
   const runtimeSafety = useMemo<InspectorItem[]>(
     () => [
       {
@@ -681,8 +689,6 @@ export default function App() {
     ],
     [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
-
-  const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
 
   const publishExternalGateItems = useMemo(
     () => [
