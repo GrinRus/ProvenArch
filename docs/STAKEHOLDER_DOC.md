@@ -80,7 +80,7 @@ Epic matrix:
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
 - в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые; terminal `run_canceled` и restart-reconciled failed states показываются пользователю как `canceled`/`recovered`;
 - при повторном открытии UI выбирает newest active run и ведёт в `Analysis`, иначе newest completed artifact run и ведёт в `Review`;
-- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run с пояснением cooperative stop, terminal canceled/restart-reconciled status/history/activity labels, recovery copy и сохранения taskrun evidence/history.
+- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run с пояснением cooperative stop, terminal canceled/restart-reconciled status/history/activity labels, retained-evidence recovery actions/copy и сохранения taskrun evidence/history.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;
@@ -288,7 +288,7 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
    - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`

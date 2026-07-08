@@ -740,6 +740,7 @@ export default function App() {
       (runStatus?.error_code ? 1 : 0) +
       (activeStage === "publish" && artifactCount === 0 ? 1 : 0),
     runBlockersCount: (runStatus?.pending_permissions?.length ?? 0) + (runStatus?.error_code ? 1 : 0) + (runStatus?.status === "failed" ? 1 : 0),
+    runErrorCode: runStatus?.error_code ?? undefined,
     reviewFindingsCount: openQuestions.trim() ? 1 : 0,
     releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
   }), [activeStage, artifactCount, blockers.length, doctorFailures.length, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
@@ -1156,6 +1157,7 @@ function deriveNextAction(
     blockersCount: number;
     hardBlockersCount: number;
     runBlockersCount: number;
+    runErrorCode?: string | null;
     reviewFindingsCount: number;
     releaseBlockersCount: number;
   },
@@ -1174,6 +1176,22 @@ function deriveNextAction(
     };
   }
   if (activeStage === "analysis" && state.runBlockersCount > 0) {
+    if (isRunCanceled(state.runErrorCode)) {
+      return {
+        label: "Review retained run evidence",
+        description: "The selected run was canceled; inspect retained History evidence or start a new analysis when ready.",
+        primaryActionId: "analysis",
+        intent: "focus-analysis-blocker",
+      };
+    }
+    if (isRunReconciledAfterRestart(state.runErrorCode)) {
+      return {
+        label: "Review retained run evidence",
+        description: "The selected run was recovered after restart; inspect retained History evidence or start a new analysis when ready.",
+        primaryActionId: "analysis",
+        intent: "focus-analysis-blocker",
+      };
+    }
     return {
       label: "Review blocker",
       description: "Focus the failed shard, pending permission or runtime error before retrying analysis.",

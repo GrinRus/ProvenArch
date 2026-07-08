@@ -3504,6 +3504,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
     expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("Review retained run evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("The selected run was canceled; inspect retained History evidence");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Canceled run");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("taskrun evidence remains in History");
   });
@@ -3624,6 +3626,14 @@ describe("App", () => {
     expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("recovered run");
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was reconciled after restart before log entries were captured: run_reconciled_after_restart");
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("History retains the run; start a new run if analysis still matters.");
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovered after restart");
+    expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
+    expect(recovery).toHaveTextContent("the reconciled run and its taskrun evidence stay in History");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("Review retained run evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("The selected run was recovered after restart; inspect retained History evidence");
   });
 
   it("switches to the next available run when the selected run disappears during refresh", async () => {

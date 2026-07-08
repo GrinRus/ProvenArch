@@ -1190,11 +1190,14 @@ function AnalysisFailureRecovery({
   const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
   const badgeTone = canceled || reconciled ? "warn" : "error";
   const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
-  const retryLabel = canceled ? `Run ${retryPipeline} again` : `Retry ${retryPipeline}`;
-  const reviewLabel = canceled ? "Review retained evidence" : "Review blocker details";
+  const retainedRun = canceled || reconciled;
+  const retryLabel = retainedRun ? `Run ${retryPipeline} again` : `Retry ${retryPipeline}`;
+  const reviewLabel = retainedRun ? "Review retained evidence" : "Review blocker details";
   const retentionHint = canceled
     ? "Starting again creates a new run; the canceled run and its taskrun evidence stay in History."
-    : "Retry starts a new run; the failed run remains available in History for audit and comparison.";
+    : reconciled
+      ? "Starting again creates a new run; the reconciled run and its taskrun evidence stay in History."
+      : "Retry starts a new run; the failed run remains available in History for audit and comparison.";
 
   return (
     <section className="analysis-recovery-panel" data-testid="analysis-failure-recovery">

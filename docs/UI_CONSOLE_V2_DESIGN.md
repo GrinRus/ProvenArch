@@ -194,7 +194,7 @@ Every stage must have explicit surfaces for:
 - warning vs blocking issue;
 - active run, cancelled run, failed run and succeeded run;
 - cooperative cancellation guidance for active selected runs, including preserved taskrun evidence/history;
-- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels in shared shell surfaces, explain retained History evidence and run-again behavior separately from runtime failures;
+- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels in shared shell surfaces, explain retained History evidence and use run-again/review-retained-evidence actions separately from runtime failures;
 - managed runtime permission mode and pending permission requests;
 - read-only Ask runs;
 - Git dirty/clean/ready-after-review states;

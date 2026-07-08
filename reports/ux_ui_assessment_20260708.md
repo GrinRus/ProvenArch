@@ -534,3 +534,24 @@ Observed improvement:
 Residual UX work after Slice 17:
 - Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
 - Continue deterministic polish on remaining retry states that still use generic failure copy or hide the next action behind raw logs.
+
+## Slice 18 Result
+
+Implemented:
+- Made Analysis recovery actions retained-evidence aware for restart-reconciled runs, matching the canceled-run path.
+- Terminal canceled/recovered Analysis runs now use `Run <pipeline> again` and `Review retained evidence` instead of generic retry/blocker wording.
+- The global right-inspector next action now says `Review retained run evidence` for terminal canceled/recovered selected runs instead of `Review blocker`.
+- Generic runtime/provider failures still keep the existing `Retry <pipeline>` and blocker-review language.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `69 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `86` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who sees a restart-reconciled run no longer gets generic failed-run actions.
+- The recovery panel and global inspector now consistently frame stopped/reconciled terminal runs as retained evidence plus a fresh run, not as a provider crash to retry blindly.
+
+Residual UX work after Slice 18:
+- Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
+- Continue deterministic polish on remaining publish/onboarding/provider-unavailable recovery states while waiting for a trusted host that can run the medium live matrix.
