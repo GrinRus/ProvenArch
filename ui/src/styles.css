@@ -544,6 +544,14 @@ code {
   font-weight: 760;
 }
 
+.activity-drawer.is-collapsed .activity-summary {
+  min-height: 2.45rem;
+}
+
+.activity-drawer.is-collapsed .activity-summary-copy .hint {
+  max-width: min(72vw, 56rem);
+}
+
 .activity-drawer-body {
   max-height: min(24vh, 14rem);
   padding: 0 1rem 0.85rem;
@@ -1269,6 +1277,46 @@ code {
 
 .right-inspector .inspector-section + .inspector-section {
   margin-top: 0.62rem;
+}
+
+.right-inspector .inspector-disclosure {
+  padding: 0;
+}
+
+.inspector-disclosure summary {
+  min-height: 2.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0.55rem 0.68rem;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 780;
+}
+
+.inspector-disclosure[open] {
+  padding-bottom: 0.64rem;
+}
+
+.inspector-disclosure[open] summary {
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 0.56rem;
+}
+
+.inspector-disclosure > .hint,
+.inspector-disclosure > .inspector-list {
+  margin-left: 0.68rem;
+  margin-right: 0.68rem;
+}
+
+.inspector-disclosure.is-empty summary {
+  color: var(--ink-muted);
+}
+
+.inspector-disclosure.has-items:not([open]) {
+  background: var(--surface-muted);
 }
 
 .inspector-title {

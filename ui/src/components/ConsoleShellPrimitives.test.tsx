@@ -2,10 +2,11 @@ import { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ActiveRunStrip } from "./ActiveRunStrip";
 import { ActivityDrawer } from "./ActivityDrawer";
 import { RightInspector } from "./RightInspector";
 import { StageRail } from "./StageRail";
-import type { RunLogEntry } from "../lib/appContracts";
+import type { RunLogEntry, RunReviewSummaryResponse } from "../lib/appContracts";
 import type { StageId, StageOption } from "../lib/consoleTypes";
 
 const stages: StageOption[] = [
@@ -129,7 +130,7 @@ describe("console shell primitives", () => {
     }
   });
 
-  it("prioritizes inspector blockers while keeping empty sections and artifact links accessible", () => {
+  it("prioritizes inspector blockers while keeping empty sections discoverable but collapsed", () => {
     const onPrimaryAction = vi.fn();
     const onOpenArtifact = vi.fn();
 
@@ -155,12 +156,12 @@ describe("console shell primitives", () => {
     expect(screen.getByTestId("inspector-primary-action")).toBeDisabled();
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Hard blockers");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Workspace invalid");
-    expect(screen.getByTestId("review-warnings-panel")).toHaveTextContent("No review warnings.");
-    expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("No open questions loaded.");
-    expect(screen.getByTestId("evidence-refs-panel")).toHaveTextContent("No evidence yet.");
-    expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("Workspace status unavailable.");
-    expect(screen.getByTestId("runtime-safety-panel")).toHaveTextContent("Runtime profile unavailable.");
-    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("Git publication path unavailable.");
+    expect(screen.getByTestId("review-warnings-panel")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("open-questions-panel")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("evidence-refs-panel")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("workspace-health-panel")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("runtime-safety-panel")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("git-publication-panel")).not.toHaveAttribute("open");
 
     fireEvent.click(screen.getByRole("button", { name: "Open evidence reference" }));
 
@@ -186,7 +187,7 @@ describe("console shell primitives", () => {
 
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("review");
     expect(screen.getByTestId("inspector-primary-action")).toBeEnabled();
-    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No hard blockers detected.");
+    expect(screen.getByTestId("blockers-panel")).not.toHaveAttribute("open");
     expect(screen.getByTestId("open-questions-panel")).toHaveTextContent("Open questions");
 
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
@@ -194,15 +195,15 @@ describe("console shell primitives", () => {
     expect(onPrimaryAction).toHaveBeenCalledTimes(1);
   });
 
-  it("renders activity drawer empty/export-disabled state without hiding log controls", () => {
+  it("opens activity drawer by default for active run diagnostics", () => {
     const handlers = activityHandlers();
 
     render(<ActivityDrawer {...handlers} selectedRunId="run-empty" selectedRunStatus="running" logs={[]} renderedLogs="" runLogsStatus="" canExport={false} taskrunPaths={[]} />);
 
     expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
-    expect(screen.getByTestId("activity-drawer")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("activity-drawer")).toHaveAttribute("open");
     expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("Activity / Events");
-    expect(screen.getByText("0 log entries for run-empty")).toBeInTheDocument();
+    expect(screen.getByText(/running run · 0 log entries/)).toBeInTheDocument();
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Logs will appear when the selected run emits events or raw output.");
     expect(screen.getByTestId("run-logs-copy-btn")).toBeDisabled();
     expect(screen.getByTestId("run-logs-download-btn")).toBeDisabled();
@@ -234,6 +235,7 @@ describe("console shell primitives", () => {
     );
 
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run failed before log entries were captured: runtime_contract_failed");
+    expect(screen.getByTestId("activity-drawer")).toHaveAttribute("open");
   });
 
   it("renders activity drawer logs, taskrun artifact links and control callbacks", () => {
@@ -275,7 +277,7 @@ describe("console shell primitives", () => {
       />,
     );
 
-    expect(screen.getByText("2 log entries for run-logs")).toBeInTheDocument();
+    expect(screen.getByText(/succeeded run · 2 log entries · last: provider emitted warning/)).toBeInTheDocument();
     expect(screen.getByTestId("activity-drawer")).not.toHaveAttribute("open");
     expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("Logs copied.");
     expect(screen.getAllByText("Logs copied.").length).toBeGreaterThan(0);
@@ -296,6 +298,65 @@ describe("console shell primitives", () => {
     expect(handlers.onCopyRunLogs).toHaveBeenCalledTimes(1);
     expect(handlers.onDownloadRunLogs).toHaveBeenCalledTimes(1);
     expect(handlers.onOpenArtifact).toHaveBeenCalledWith("reports/taskruns/run-1/runtime/runtime-execution.json");
+  });
+
+  it("summarizes succeeded runs around reviewable artifacts instead of stale current step", () => {
+    const reviewSummary: RunReviewSummaryResponse = {
+      run_id: "run-success",
+      pipeline: "init",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: "2026-04-03T12:00:04Z",
+      current_step: "init.step4.proposals",
+      warnings: [],
+      error_code: null,
+      error: null,
+      steps: [
+        {
+          step_id: "init.step0.constitution",
+          key: "step0_constitution",
+          label: "Charter",
+          state: "done",
+          provider: "fake",
+          artifact_count: 2,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "charter ready",
+        },
+        {
+          step_id: "init.step1.collect",
+          key: "step1_collect",
+          label: "Collect",
+          state: "done",
+          provider: "fake",
+          artifact_count: 3,
+          artifact_paths: [],
+          taskrun_paths: [],
+          warnings_count: 0,
+          errors_count: 0,
+          last_message: "collect ready",
+        },
+      ],
+    };
+
+    render(
+      <ActiveRunStrip
+        runStatus={null}
+        reviewSummary={reviewSummary}
+        runtimeLabel="fake"
+        cancelBusy={false}
+        selectedRunIsActive={false}
+        onCancel={vi.fn()}
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("active-run-strip")).toHaveTextContent("evidence ready for review");
+    expect(screen.getByTestId("active-run-strip")).toHaveTextContent("Review state");
+    expect(screen.getByTestId("active-run-strip")).toHaveTextContent("5 artifacts ready");
+    expect(screen.getByTestId("active-run-strip")).not.toHaveTextContent("Current step");
   });
 });
 

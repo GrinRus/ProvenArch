@@ -29,6 +29,11 @@ export function ActiveRunStrip({
   const status = runStatus?.status ?? reviewSummary?.status ?? "idle";
   const runID = runStatus?.run_id ?? reviewSummary?.run_id;
   const currentStep = runStatus?.current_step ?? reviewSummary?.current_step ?? activeStep?.step_id ?? "not running";
+  const artifactCount = steps.reduce((sum, step) => sum + step.artifact_count, 0);
+  const isSucceeded = status === "succeeded";
+  const runContext = reviewSummary?.pipeline ?? runStatus?.pipeline ?? "pipeline";
+  const primaryStatLabel = isSucceeded ? "Review state" : "Current step";
+  const primaryStatValue = isSucceeded ? (artifactCount > 0 ? `${artifactCount} artifacts ready` : "review ready") : currentStep;
   const elapsed = elapsedLabel(runStatus?.started_at ?? reviewSummary?.started_at, runStatus?.finished_at ?? reviewSummary?.finished_at);
 
   return (
@@ -40,16 +45,17 @@ export function ActiveRunStrip({
         <div>
           <strong>{runID || "No run selected"}</strong>
           <span>
-            {reviewSummary?.pipeline ?? runStatus?.pipeline ?? "pipeline"} · {runtimeLabel}
+            {runContext} · {runtimeLabel}
+            {isSucceeded ? " · evidence ready for review" : ""}
           </span>
         </div>
       </div>
       <div className="active-run-stat">
-        <span className="metric-label">Current step</span>
-        <strong>{currentStep}</strong>
+        <span className="metric-label">{primaryStatLabel}</span>
+        <strong>{primaryStatValue}</strong>
       </div>
       <div className="active-run-stat">
-        <span className="metric-label">Progress</span>
+        <span className="metric-label">{isSucceeded ? "Steps complete" : "Progress"}</span>
         <strong>
           {steps.length > 0 ? `${doneCount}/${steps.length}` : "0/5"} steps
         </strong>

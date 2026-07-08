@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import { formatTimestamp } from "../lib/runState";
 import type { RunLogEntry } from "../lib/appContracts";
 import { ArtifactPathButton } from "./ConsolePrimitives";
@@ -37,17 +39,33 @@ export function ActivityDrawer({
   taskrunPaths,
   onOpenArtifact,
 }: ActivityDrawerProps) {
+  const shouldOpenForRunState = selectedRunStatus === "queued" || selectedRunStatus === "running" || selectedRunStatus === "failed";
+  const [isOpen, setIsOpen] = useState(shouldOpenForRunState);
   const recentLogs = logs.slice(-6).reverse();
+  const lastLog = logs.length > 0 ? logs[logs.length - 1] : undefined;
   const hasSelectedRun = Boolean(selectedRunId);
   const emptyLogMessage = !hasSelectedRun
     ? "No selected run. Start or select a run to stream activity."
     : selectedRunStatus === "failed"
       ? `Run failed before log entries were captured${selectedRunError ? `: ${selectedRunError}` : "."}`
       : "No run logs yet. Logs will appear when the selected run emits events or raw output.";
-  const drawerSummary = hasSelectedRun ? `${logs.length} log entries for ${selectedRunId}` : "No selected run";
-  const drawerStatus = runLogsStatus || (recentLogs.length > 0 ? `${recentLogs.length} recent` : "Open");
+  const drawerSummary = hasSelectedRun
+    ? `${selectedRunStatus ? `${selectedRunStatus} run` : "selected run"} · ${logs.length} log entries${lastLog ? ` · last: ${lastLog.message}` : ` for ${selectedRunId}`}`
+    : "No selected run";
+  const drawerStatus = runLogsStatus || (isOpen ? `${recentLogs.length} recent` : `${recentLogs.length} recent · open logs`);
+
+  useEffect(() => {
+    setIsOpen(shouldOpenForRunState);
+  }, [selectedRunId, selectedRunStatus, shouldOpenForRunState]);
+
   return (
-    <details className="activity-drawer" aria-label="Selected run activity drawer" data-testid="activity-drawer">
+    <details
+      className={`activity-drawer${isOpen ? " is-open" : " is-collapsed"}`}
+      aria-label="Selected run activity drawer"
+      data-testid="activity-drawer"
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
       <summary className="activity-summary" data-testid="activity-drawer-toggle">
         <span className="activity-summary-copy">
           <strong>Activity / Events</strong>

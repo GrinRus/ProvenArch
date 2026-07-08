@@ -53,9 +53,9 @@ export function RightInspector({
       <InspectorList testId="review-warnings-panel" title="Review warnings" emptyLabel="No review warnings." items={reviewWarnings} onOpenArtifact={onOpenArtifact} />
       <InspectorList testId="open-questions-panel" title="Open questions" emptyLabel="No open questions loaded." items={openQuestionItems} onOpenArtifact={onOpenArtifact} />
       <InspectorList testId="evidence-refs-panel" title="Evidence refs" emptyLabel="No evidence yet." items={evidenceRefs} onOpenArtifact={onOpenArtifact} />
-      <InspectorList testId="workspace-health-panel" title="Workspace health" emptyLabel="Workspace status unavailable." items={workspaceHealth} onOpenArtifact={onOpenArtifact} />
-      <InspectorList testId="runtime-safety-panel" title="Runtime safety" emptyLabel="Runtime profile unavailable." items={runtimeSafety} onOpenArtifact={onOpenArtifact} />
-      <InspectorList testId="git-publication-panel" title="Git publication" emptyLabel="Git publication path unavailable." items={gitPublication} onOpenArtifact={onOpenArtifact} />
+      <InspectorList testId="workspace-health-panel" title="Workspace health" emptyLabel="Workspace status unavailable." items={workspaceHealth} onOpenArtifact={onOpenArtifact} secondary />
+      <InspectorList testId="runtime-safety-panel" title="Runtime safety" emptyLabel="Runtime profile unavailable." items={runtimeSafety} onOpenArtifact={onOpenArtifact} secondary />
+      <InspectorList testId="git-publication-panel" title="Git publication" emptyLabel="Git publication path unavailable." items={gitPublication} onOpenArtifact={onOpenArtifact} secondary />
     </aside>
   );
 }
@@ -66,33 +66,51 @@ type InspectorListProps = {
   emptyLabel: string;
   items: InspectorItem[];
   onOpenArtifact: (path: string) => void;
+  secondary?: boolean;
 };
 
-function InspectorList({ testId, title, emptyLabel, items, onOpenArtifact }: InspectorListProps) {
+function InspectorList({ testId, title, emptyLabel, items, onOpenArtifact, secondary = false }: InspectorListProps) {
+  const hasItems = items.length > 0;
+  const hasAttention = items.some((item) => item.severity === "error" || item.severity === "warn");
+  const compact = !hasItems || (secondary && !hasAttention);
+  const countLabel = hasItems ? `${items.length}` : "0";
+  if (compact) {
+    return (
+      <details className={`inspector-section inspector-disclosure${hasItems ? " has-items" : " is-empty"}`} data-testid={testId}>
+        <summary>
+          <span>{title}</span>
+          <span className="count-pill">{countLabel}</span>
+        </summary>
+        {hasItems ? <InspectorItems title={title} items={items} onOpenArtifact={onOpenArtifact} /> : <p className="hint">{emptyLabel}</p>}
+      </details>
+    );
+  }
   return (
     <section className="inspector-section" data-testid={testId}>
       <div className="section-heading-row">
         <h2>{title}</h2>
-        <span className="count-pill">{items.length}</span>
+        <span className="count-pill">{countLabel}</span>
       </div>
-      {items.length === 0 ? (
-        <p className="hint">{emptyLabel}</p>
-      ) : (
-        <ul className="inspector-list">
-          {items.map((item, index) => (
-            <li key={`${title}-${item.label}-${index}`} className={`inspector-item ${item.severity}`}>
-              <span className={`inspector-item-icon ${item.severity}`} aria-label={item.severity}>
-                {severityGlyphs[item.severity]}
-              </span>
-              <div>
-                <p className="inspector-item-title">{item.label}</p>
-                <p className="hint">{item.detail}</p>
-                {item.path ? <EvidenceLink path={item.path} onOpenArtifact={onOpenArtifact} /> : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <InspectorItems title={title} items={items} onOpenArtifact={onOpenArtifact} />
     </section>
+  );
+}
+
+function InspectorItems({ title, items, onOpenArtifact }: { title: string; items: InspectorItem[]; onOpenArtifact: (path: string) => void }) {
+  return (
+    <ul className="inspector-list">
+      {items.map((item, index) => (
+        <li key={`${title}-${item.label}-${index}`} className={`inspector-item ${item.severity}`}>
+          <span className={`inspector-item-icon ${item.severity}`} aria-label={item.severity}>
+            {severityGlyphs[item.severity]}
+          </span>
+          <div>
+            <p className="inspector-item-title">{item.label}</p>
+            <p className="hint">{item.detail}</p>
+            {item.path ? <EvidenceLink path={item.path} onOpenArtifact={onOpenArtifact} /> : null}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

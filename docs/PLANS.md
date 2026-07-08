@@ -75,6 +75,62 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260708-ux-ui-quality-loop
+
+### Context
+The user requested an iterative UX/UI quality loop for the ACP operator console: understand the product and user journey, inspect every screen, run live E2E on a medium task when host prerequisites allow it, write a UX/UI quality report, plan improvements, commit, and repeat until a first-time operator can complete the happy path and recovery paths clearly. Existing diagnostic evidence in `reports/ux_current_state_20260707.md` shows the fake-runtime UI flow passes, but the rendered console is still too dense around shared shell chrome: Activity drawer, right inspector, and active run summary compete with the stage workbench.
+
+### Goals (must have)
+- [x] Map the current user journey across onboarding, Source, Readiness, Charter, Analysis, Review, Proposals, Ask and Publish.
+- [x] Capture rendered UI evidence for desktop and mobile with the deterministic fake-runtime live smoke.
+- [x] Attempt the requested medium live E2E path only through public runbook surfaces; classify host/provider blockers instead of changing canonical matrices or curated repos.
+- [x] Write a current UX/UI quality assessment and actionable improvement plan.
+- [x] Implement the first focused UI polish slice without schema/API/runtime contract changes.
+- [x] Add or update UI tests for changed shell behavior.
+- [x] Run relevant verification and commit the slice.
+
+### Non-goals
+- [ ] Do not change workspace, runtime, artifact, schema, or API contracts in this UX polish slice.
+- [ ] Do not edit canonical release matrices, curated repo files, or add a wrapper over the matrix harness.
+- [ ] Do not treat deterministic fake-runtime UX evidence as release readiness.
+- [ ] Do not redesign the console visual language; preserve the approved dense operator-console direction.
+
+### Approach
+1) Study project docs, current UI implementation, design baseline and existing UX evidence.
+2) Run fake-runtime rendered QA and inspect screenshots across primary screens.
+3) Run live E2E host/tool/provider preflight for the medium path; continue only if runbook prerequisites are satisfied.
+4) Write a UX/UI report with findings, state coverage, recovery gaps and prioritized fixes.
+5) Implement the smallest coherent improvement slice: context-aware Activity drawer, progressive-disclosure inspector, and successful-run review emphasis.
+6) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+7) Commit and use the report to drive the next iteration.
+
+### Files expected to change
+- `ui/src/components/ActivityDrawer.tsx`
+- `ui/src/components/RightInspector.tsx`
+- `ui/src/components/ActiveRunStrip.tsx`
+- `ui/src/components/ConsoleShellPrimitives.test.tsx`
+- `ui/src/styles.css`
+- `reports/ux_ui_assessment_20260708.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [ ] Activity drawer keeps active/failed run diagnostics easy to open, but does not consume review/publish attention after success by default.
+- [ ] Right inspector keeps `Next action` prominent and collapses or summarizes empty/secondary sections without hiding hard blockers, warnings, evidence, runtime safety or Git publication access.
+- [ ] Active run strip highlights review/artifact state after a successful run instead of making stale `current_step` the dominant signal.
+- [ ] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
+- [ ] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
+
+### Risks
+- Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
+- Live provider runs can fail on quota/auth/toolchain/path prerequisites; those must be classified as operational blockers, not product UX regressions.
+- UI density improvements can break existing live E2E selectors if test IDs or visible controls move unexpectedly.
+
+### Progress log
+- 2026-07-08: Started UX/UI quality loop. Read project mission, architecture, pipeline spec, live E2E runbook, design baseline, current UX smoke report and shell implementation.
+- 2026-07-08: Fresh fake-runtime rendered smoke passed (`run_20260708_094849_001`, QA `run_20260708_094856_002`) and confirmed the primary UX debt: succeeded Review/Ask/Publish screens were dominated by old init logs and repeated empty inspector sections. Medium live E2E was blocked before execution as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` exists but is not a Git checkout at the pinned SHA; no canonical matrix or curated repo file was changed.
+- 2026-07-08: Implemented slice 1 shell polish: context-aware Activity drawer, progressive-disclosure right inspector and review-oriented active run strip. Targeted shell tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_095725_001`, QA `run_20260708_095731_002`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`; commit prepared for this slice.
+
+### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
 
 ### Context
