@@ -567,6 +567,7 @@ Implemented:
 Post-change evidence:
 - targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `70 passed`
 - UI typecheck: `npm --prefix ui run typecheck` -> passed
+- fake-runtime rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:49994 UI_E2E_QA_SMOKE=0 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-provider-recovery-results.ijdm004g ./scripts/run-npm.sh run --prefix ui e2e:live` -> `1 passed` (`run_20260708_194304_001`)
 - full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `87` UI tests, Vite build and Go build)
 
 Observed improvement:
@@ -577,3 +578,25 @@ Observed improvement:
 Residual UX work after Slice 19:
 - Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
 - Continue deterministic polish on onboarding/provider-selection and any remaining retry states while waiting for a trusted host that can run the medium live matrix.
+
+## Slice 20 Result
+
+Implemented:
+- Added a dedicated `Provider readiness recovery` panel to Readiness for headless runtime, `runner_unavailable` reroutes and runtime-provider doctor failures.
+- The panel shows selected provider, doctor status/message, suggested fix, command override env var, expected command and the last run blocker before retry.
+- The global inspector route from provider-unavailable Analysis opens Readiness without starting `init` or `refresh`.
+- Existing selected run status and doctor response remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `70 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `87` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who lands in Readiness from a provider outage now sees binary/auth/quota recovery in the first viewport instead of generic readiness cards only.
+- The recovery surface explains the exact env override (`ACP_CODEX_CMD`, `ACP_QWEN_CMD` or `ACP_CLAUDE_CMD`) and doctor suggestion before telling the operator to retry Analysis.
+- The retry path is safer because the Readiness action does not accidentally start a new run.
+
+Residual UX work after Slice 20:
+- Medium live rerun remains blocked on this host: `/tmp/provenarch-live-e2e` is absent and `/tmp` remains below the 5 GiB matrix guard.
+- Continue deterministic polish on first-run provider selection and remaining retry/error states while waiting for a trusted host that can run the medium live matrix.

@@ -286,7 +286,7 @@ arch-workspace/
    - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
    - wizard summary, domain/team card overview и baseline prompt bundle status для “Конституции” в `Charter`
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
-   - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
+   - readiness validation, summary cards, provider readiness recovery, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
    - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy

@@ -125,7 +125,7 @@ acp serve
 После onboarding основной UI остаётся прежним:
 
 1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state.
-2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; первый analysis остаётся disabled до successful doctor result.
+2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
 4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table, warning/error drilldown, failed-run recovery path и live diagnostics для shard/repair/stall/raw-output сигналов; terminal canceled/restart-reconciled runs показываются как `canceled`/`recovered`, а provider-unavailable failures ведут к Readiness checks before retry.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety/recovery panel и подготовьте git changes.
@@ -267,7 +267,7 @@ model/entities/, model/edges/     # derived entity-per-file model
 
 UI показывает то же состояние через stage-based console:
 
-- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist, compact runtime profile summary и collapsed advanced runtime tools;
+- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, validation diagnostics, readiness cards, provider readiness recovery, doctor checklist, compact runtime profile summary и collapsed advanced runtime tools;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
 - `Analysis`: run mission control, canonical `step0..step4` timeline, failed-run recovery path, live diagnostics for shard/repair/stall/raw-output signals, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, provider-unavailable Readiness recovery, cooperative cancel guidance, terminal canceled/recovered outcome labels in status/history/activity, retained-evidence recovery actions и bootstrap resume newest active/newest completed run;
 - `Review`: primary review queue, selected evidence markdown/Mermaid preview, secondary grouped artifact explorer, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;

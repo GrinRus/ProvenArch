@@ -257,6 +257,8 @@ export type ReadinessStageProps = {
   firstRunStatus: string;
   setupRuntime: string;
   setupRuntimeProvider: string;
+  selectedRunErrorCode?: string | null;
+  selectedRunError?: string | null;
   onSetupRuntimeChange: (value: string) => void;
   onSetupRuntimeProviderChange: (value: string) => void;
   onValidateWorkspace: () => void;
@@ -279,6 +281,8 @@ export function ReadinessStagePanel({
   firstRunStatus,
   setupRuntime,
   setupRuntimeProvider,
+  selectedRunErrorCode,
+  selectedRunError,
   onSetupRuntimeChange,
   onSetupRuntimeProviderChange,
   onValidateWorkspace,
@@ -293,6 +297,8 @@ export function ReadinessStagePanel({
 }: ReadinessStageProps) {
   const validated = validateResult?.ok === true;
   const localReady = doctorResult?.ok === true;
+  const runtimeCheck = doctorResult?.checks.find((check) => check.id === "runtime_provider");
+  const showProviderRecovery = isRunnerUnavailable(selectedRunErrorCode) || setupRuntime === "headless" || runtimeCheck?.status === "fail";
   return (
     <section className="panel stage-panel" data-testid="readiness-panel">
       <div className="stage-header">
@@ -331,6 +337,16 @@ export function ReadinessStagePanel({
         runtimePermissionEffective={runtimePermissionEffective}
         runtimeStepProviderEffective={runtimeStepProviderEffective}
       />
+
+      {showProviderRecovery ? (
+        <ProviderReadinessRecovery
+          setupRuntime={setupRuntime}
+          setupRuntimeProvider={setupRuntimeProvider}
+          runtimeCheck={runtimeCheck}
+          selectedRunErrorCode={selectedRunErrorCode}
+          selectedRunError={selectedRunError}
+        />
+      ) : null}
 
       <div className="columns compact">
         <div>
@@ -396,6 +412,110 @@ export function ReadinessStagePanel({
       </details>
     </section>
   );
+}
+
+function ProviderReadinessRecovery({
+  setupRuntime,
+  setupRuntimeProvider,
+  runtimeCheck,
+  selectedRunErrorCode,
+  selectedRunError,
+}: {
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  runtimeCheck?: DoctorResponse["checks"][number];
+  selectedRunErrorCode?: string | null;
+  selectedRunError?: string | null;
+}) {
+  const providerLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
+  const providerCommand = providerCommandHint(setupRuntimeProvider);
+  const envOverride = providerCommandEnv(setupRuntimeProvider);
+  const doctorStatus = runtimeCheck ? `${runtimeCheck.label}: ${runtimeCheck.status}` : "not checked";
+  const lastRunBlocker = isRunnerUnavailable(selectedRunErrorCode) ? "runner_unavailable" : "none selected";
+  const summary = isRunnerUnavailable(selectedRunErrorCode)
+    ? "The selected run stopped because provider/tool availability failed. Confirm the provider command, auth/quota and runtime mode before retrying."
+    : runtimeCheck?.status === "fail"
+      ? "The runtime provider doctor check is failing. Fix the provider command, auth or quota before starting analysis."
+      : "Headless provider mode is selected. Run local readiness after provider changes before starting analysis.";
+
+  return (
+    <section className="provider-recovery-panel" data-testid="provider-readiness-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Provider readiness recovery</h2>
+          <p className="hint">{summary}</p>
+        </div>
+        <StatusBadge tone={runtimeCheck?.status === "pass" ? "ok" : "warn"}>{runtimeCheck?.status === "pass" ? "provider ready" : "provider check"}</StatusBadge>
+      </div>
+      <div className="provider-recovery-grid">
+        <div>
+          <span className="metric-label">Selected provider</span>
+          <strong>{providerLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Doctor check</span>
+          <strong>{doctorStatus}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Command override</span>
+          <strong>{envOverride}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Last run blocker</span>
+          <strong>{lastRunBlocker}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs provider-recovery-detail">
+        <div>
+          <dt>Expected command</dt>
+          <dd>{providerCommand}</dd>
+        </div>
+        <div>
+          <dt>Doctor message</dt>
+          <dd>{runtimeCheck?.message || selectedRunError || "Run local readiness to check provider availability."}</dd>
+        </div>
+        {runtimeCheck?.suggestion ? (
+          <div>
+            <dt>Suggested fix</dt>
+            <dd>{runtimeCheck.suggestion}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Run Check local readiness after fixing provider binary, authentication or quota.</li>
+        <li>
+          Use {envOverride} when the executable is not on PATH or uses a custom location.
+        </li>
+        <li>Return to Analysis and retry only after the Runtime provider doctor check passes.</li>
+      </ul>
+    </section>
+  );
+}
+
+function providerCommandHint(provider: string): string {
+  switch (provider) {
+    case "qwen-code":
+      return "qwen";
+    case "codex-code":
+      return "codex";
+    case "claude-code":
+      return "claude or claude-code";
+    default:
+      return provider || "provider command";
+  }
+}
+
+function providerCommandEnv(provider: string): string {
+  switch (provider) {
+    case "qwen-code":
+      return "ACP_QWEN_CMD";
+    case "codex-code":
+      return "ACP_CODEX_CMD";
+    case "claude-code":
+      return "ACP_CLAUDE_CMD";
+    default:
+      return "ACP_RUNTIME_PROVIDER";
+  }
 }
 
 function SourceRepoTable({

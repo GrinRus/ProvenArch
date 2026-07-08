@@ -3468,6 +3468,36 @@ describe("App", () => {
           artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
         },
       },
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: false,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/workspace",
+        manifest_present: true,
+        runtime: {
+          selected: true,
+          runtime: "headless",
+          runtime_provider: "codex-code",
+          provider_source: "override",
+        },
+        can_enter_console: true,
+        recent_workspaces: [],
+      },
+      doctorResponse: {
+        ok: false,
+        summary: "needs attention",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          {
+            id: "runtime_provider",
+            label: "Runtime provider",
+            status: "fail",
+            message: "Provider ID: codex-code; usage limit reached",
+            suggestion: "Run codex login, confirm quota, or set ACP_CODEX_CMD to a working provider command.",
+          },
+        ],
+      },
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3500,6 +3530,18 @@ describe("App", () => {
     const startCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh").length;
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
     expect(screen.getByTestId("stage-readiness")).toHaveClass("is-selected");
+    const providerRecovery = screen.getByTestId("provider-readiness-recovery");
+    expect(providerRecovery).toHaveTextContent("Provider readiness recovery");
+    expect(providerRecovery).toHaveTextContent("codex-code");
+    expect(providerRecovery).toHaveTextContent("ACP_CODEX_CMD");
+    expect(providerRecovery).toHaveTextContent("runner_unavailable");
+    expect(providerRecovery).toHaveTextContent("provider quota exhausted");
+
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("Runtime provider: fail");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("usage limit reached");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("confirm quota");
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh")).toHaveLength(startCallsBefore);
   });
 

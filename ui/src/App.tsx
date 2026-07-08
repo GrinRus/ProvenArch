@@ -953,6 +953,8 @@ export default function App() {
           firstRunStatus={firstRunStatus}
           setupRuntime={setupRuntime}
           setupRuntimeProvider={setupRuntimeProvider}
+          selectedRunErrorCode={runStatus?.error_code}
+          selectedRunError={runStatus?.error}
           onSetupRuntimeChange={handleSetupRuntimeChange}
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
           onValidateWorkspace={() => void handleValidateWorkspace()}

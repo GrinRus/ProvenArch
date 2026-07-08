@@ -88,6 +88,7 @@ Primary action: `Run readiness check`.
 
 Must show:
 - grouped checks for workspace, repositories, runtime provider, permissions and artifacts;
+- provider readiness recovery for headless provider, `runner_unavailable`, or runtime-provider doctor failure states;
 - runtime profile summary: timeouts, execution, permissions, step providers;
 - blocking vs warning distinction;
 - runtime safety status.
@@ -240,6 +241,7 @@ empty/partial state rather than changing backend contracts implicitly.
 - Readiness:
   - `GET /api/system/doctor`;
   - `POST /api/workspace/validate`;
+  - selected run `error_code` for provider recovery context;
   - `GET/PUT /api/runtime/timeouts`, `GET/PUT /api/runtime/execution`,
     `GET/PUT /api/runtime/permissions`, `GET /api/runtime/profile`.
 - Charter:

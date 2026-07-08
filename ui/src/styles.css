@@ -1053,7 +1053,8 @@ code {
 }
 
 .readiness-card,
-.runtime-profile-summary {
+.runtime-profile-summary,
+.provider-recovery-panel {
   min-width: 0;
   padding: 0.72rem;
   border: 1px solid var(--line-soft);
@@ -1081,11 +1082,44 @@ code {
   background: var(--surface);
 }
 
+.provider-recovery-panel {
+  display: grid;
+  gap: 0.62rem;
+  margin-bottom: 0.8rem;
+  border-color: rgba(161, 98, 7, 0.24);
+  background: var(--warn-soft);
+}
+
 .runtime-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.62rem;
   margin-top: 0.62rem;
+}
+
+.provider-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
+.provider-recovery-grid > div {
+  min-width: 0;
+  padding: 0.54rem;
+  border: 1px solid rgba(161, 98, 7, 0.18);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.provider-recovery-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.provider-recovery-detail {
+  margin: 0;
 }
 
 .runtime-summary-grid > div {
@@ -3751,6 +3785,7 @@ code {
 
   .readiness-card-grid,
   .runtime-summary-grid,
+  .provider-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,
@@ -3827,6 +3862,7 @@ code {
   .readiness-card-grid,
   .onboarding-progress-steps,
   .runtime-summary-grid,
+  .provider-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,
@@ -4079,6 +4115,7 @@ code {
   .repo-field-grid,
   .readiness-card-grid,
   .runtime-summary-grid,
+  .provider-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .charter-card-stats,
