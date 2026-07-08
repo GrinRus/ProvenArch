@@ -8,6 +8,8 @@ export type RunStatusLike = {
   warnings?: string[] | null;
 };
 
+export type RunOutcomeTone = "info" | "ok" | "warn" | "error";
+
 export function dedupeArtifactsByPath<T extends { path: string }>(items: T[]): T[] {
   const deduped = new Map<string, T>();
   for (const artifact of items) {
@@ -118,6 +120,34 @@ export function deriveRunLifecycleState(runStatus: RunStatusLike | null): "activ
 
 export function normalizeRunErrorCode(errorCode?: string | null): string {
   return String(errorCode ?? "").trim().toLowerCase();
+}
+
+export function runOutcomeLabel(runStatus: Pick<RunStatusLike, "status" | "error_code"> | null | undefined, fallback = "idle"): string {
+  if (!runStatus?.status) {
+    return fallback;
+  }
+  const errorCode = normalizeRunErrorCode(runStatus.error_code);
+  if (runStatus.status === "failed" && isRunCanceled(errorCode)) {
+    return "canceled";
+  }
+  if (runStatus.status === "failed" && isRunReconciledAfterRestart(errorCode)) {
+    return "recovered";
+  }
+  return runStatus.status;
+}
+
+export function runOutcomeTone(runStatus: Pick<RunStatusLike, "status" | "error_code"> | null | undefined): RunOutcomeTone {
+  const outcome = runOutcomeLabel(runStatus);
+  if (outcome === "succeeded") {
+    return "ok";
+  }
+  if (outcome === "failed") {
+    return "error";
+  }
+  if (outcome === "queued" || outcome === "running" || outcome === "canceled" || outcome === "recovered") {
+    return "warn";
+  }
+  return "info";
 }
 
 export function isRunCanceled(errorCode?: string | null): boolean {

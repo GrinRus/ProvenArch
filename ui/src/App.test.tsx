@@ -3450,6 +3450,19 @@ describe("App", () => {
       createFetchMock({
         runID,
         runStarted: true,
+        runList: [
+          {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:02:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: "run_canceled",
+            error: "canceled by request",
+          },
+        ],
         runStatus: {
           [runID]: {
             run_id: runID,
@@ -3471,6 +3484,14 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("canceled");
+    expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("canceled");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
+    expect(screen.getByTestId("runs-history-table")).toHaveTextContent("canceled");
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent("canceled");
+    expect(activeRunStrip).toHaveTextContent("Stopped step");
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Canceled run");
     expect(recovery).toHaveTextContent("run_canceled");
@@ -3555,6 +3576,19 @@ describe("App", () => {
       createFetchMock({
         runID,
         runStarted: true,
+        runList: [
+          {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step1.collect",
+            warnings: [],
+            error_code: "run_reconciled_after_restart",
+            error: "orphaned run reconciled after restart",
+          },
+        ],
         runStatus: {
           [runID]: {
             run_id: runID,
@@ -3576,7 +3610,14 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("recovered");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
+    expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("recovered");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent("recovered");
+    expect(activeRunStrip).toHaveTextContent("Recovered step");
   });
 
   it("switches to the next available run when the selected run disappears during refresh", async () => {

@@ -104,6 +104,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add cooperative cancel guidance for active selected runs without changing cancel API behavior.
 - [x] Distinguish terminal canceled/reconciled runs from runtime failures in Analysis recovery and inspector copy.
 - [x] Distinguish terminal canceled/reconciled Q&A runs from answer validation/runtime failures in Ask recovery.
+- [x] Show terminal canceled/reconciled Analysis runs as `canceled`/`recovered` across status, mission control, active run summary and history.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -129,8 +130,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 14) Clarify active-run cancellation as cooperative stop with taskrun evidence/history preserved.
 15) Distinguish terminal `run_canceled` and restart-reconciled runs from runtime/provider failures.
 16) Extend the same terminal canceled/reconciled language to Ask/Q&A answer runs without changing the async QA API.
-17) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-18) Commit and use the report to drive the next iteration.
+17) Promote the same terminal outcome labels into Analysis status, mission control, active run summary and history counts while leaving generic runtime failures as `failed`.
+18) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+19) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -172,6 +174,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Right inspector hard blockers expose pending permission step, rule, target and reason instead of a generic pending message.
 - [x] Active selected runs explain that cancel is cooperative and preserves taskrun evidence/history.
 - [x] Terminal canceled runs show stopped-step/run-again/History evidence copy instead of generic runtime-failure recovery.
+- [x] Terminal canceled/restart-reconciled Analysis runs show `canceled`/`recovered` in status, mission control, active run summary and History without reclassifying generic runtime failures.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -201,6 +204,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 12 right-inspector permission blocker copy without backend/schema changes. Pending permissions now surface as `Permission: <action>` with step, decision/rule, target and reason in the global hard-blocker panel; targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 13 active-run cancellation guidance without backend/API/schema changes. Active selected runs now explain that cancel requests a cooperative stop and keeps taskrun evidence in History; targeted primitive test (`10` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 14 terminal cancellation recovery copy without backend/API/schema changes. Terminal `run_canceled` runs now show canceled/stopped-step/run-again/retained-History evidence wording in Analysis recovery and right-inspector blockers, while restart-reconciled runs use preserved-evidence copy; targeted App test (`68` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-08: Implemented slice 16 Analysis outcome-label polish without backend/API/schema changes. Terminal `run_canceled` and restart-reconciled failed runs now display as `canceled`/`recovered` in Analysis header, mission control, status panel, active run strip and History counts/table; generic runtime/provider failures remain `failed`. Targeted App/primitive tests (`79` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

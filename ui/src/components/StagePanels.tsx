@@ -11,7 +11,7 @@ import { analysisScopeSummary } from "../lib/analysisScope";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
-import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, parseTimeOrMin } from "../lib/runState";
+import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 import type {
   Artifact,
   Diagnostic,
@@ -974,9 +974,7 @@ export function AnalysisStagePanel({
           <h1>Analysis</h1>
           <p className="hint">Run init or refresh, monitor active steps, inspect pending permissions, and select history.</p>
         </div>
-        <StatusBadge tone={selectedRunIsActive ? "warn" : runStatus?.status === "succeeded" ? "ok" : runStatus?.status === "failed" ? "error" : "info"}>
-          {runStatus?.status ?? "idle"}
-        </StatusBadge>
+        <StatusBadge tone={selectedRunIsActive ? "warn" : runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
 
       <div className="actions">
@@ -1120,9 +1118,7 @@ function AnalysisRunProgress({
     <section className="analysis-progress" data-testid="analysis-run-progress">
       <div className="section-heading-row">
         <h2>Run mission control</h2>
-        <StatusBadge tone={runStatus?.status === "succeeded" ? "ok" : runStatus?.status === "failed" ? "error" : runStatus ? "warn" : "info"}>
-          {runStatus?.status ?? "idle"}
-        </StatusBadge>
+        <StatusBadge tone={runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
       <div className="analysis-progress-grid">
         <div>
@@ -2153,11 +2149,27 @@ function RunHistoryTable({
   runCounters: { running: number; succeeded: number; failed: number };
   onSelectRun: (runId: string) => void;
 }) {
+  const terminalOutcomeCounts = runList.reduce(
+    (counts, run) => {
+      const label = runOutcomeLabel(run);
+      if (label === "failed") {
+        counts.failed += 1;
+      } else if (label === "canceled") {
+        counts.canceled += 1;
+      } else if (label === "recovered") {
+        counts.recovered += 1;
+      }
+      return counts;
+    },
+    { failed: 0, canceled: 0, recovered: 0 },
+  );
+
   return (
     <section className="subsection" data-testid="runs-history-panel">
       <h2>History</h2>
       <p className="hint">
-        Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
+        Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {terminalOutcomeCounts.failed} | Canceled: {terminalOutcomeCounts.canceled} |
+        Recovered: {terminalOutcomeCounts.recovered}
       </p>
       {runList.length === 0 ? (
         <p>No runs yet.</p>
@@ -2190,7 +2202,9 @@ function RunHistoryTable({
                       {run.run_id}
                     </button>
                   </td>
-                  <td>{run.status}</td>
+                  <td>
+                    <StatusBadge tone={runOutcomeTone(run)}>{runOutcomeLabel(run)}</StatusBadge>
+                  </td>
                   <td>{run.pipeline}</td>
                   <td>{formatTimestamp(run.started_at)}</td>
                   <td>{formatTimestamp(run.finished_at)}</td>
@@ -3796,7 +3810,7 @@ export function AskStagePanel({
           <h1>Ask</h1>
           <p className="hint">Ask agent-backed questions over existing workspace artifacts. Source repos and canonical outputs stay unchanged.</p>
         </div>
-        <StatusBadge tone={qaRunStatusTone(qaRun)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
+        <StatusBadge tone={runOutcomeTone(qaRun)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
       </div>
 
       <div className="qa-workbench">
@@ -3825,7 +3839,7 @@ export function AskStagePanel({
                   >
                     <span className="qa-history-question">{run.question || run.run_id}</span>
                     <span className="qa-history-meta">
-                      <StatusBadge tone={qaRunStatusTone(run)}>{qaRunOutcomeLabel(run)}</StatusBadge>
+                      <StatusBadge tone={runOutcomeTone(run)}>{runOutcomeLabel(run, "unknown")}</StatusBadge>
                       <span>{qaRunProviderLabel(run)}</span>
                     </span>
                     <span className="qa-history-time">{formatTimestamp(run.finished_at || run.started_at)}</span>
@@ -3857,7 +3871,7 @@ export function AskStagePanel({
             <div className="run-summary qa-run-summary" data-testid="qa-run-status">
               <div>
                 <p>
-                  Run <code>{qaRun.run_id}</code> status: <strong>{qaRunOutcomeLabel(qaRun)}</strong>
+                  Run <code>{qaRun.run_id}</code> status: <strong>{runOutcomeLabel(qaRun, "unknown")}</strong>
                 </p>
                 <p>Runtime provider: {qaRunProviderLabel(qaRun)}</p>
               </div>
@@ -4054,36 +4068,6 @@ function qaFailureGuidance(errorCode: string, warningCount: number): string {
     return "Review warnings and audit artifacts, then retry when the issue is understood.";
   }
   return "Review logs and audit artifacts, then retry the same question when the cause is clear.";
-}
-
-function qaRunOutcomeLabel(run: Pick<QARunResponse, "status" | "error_code"> | null | undefined): string {
-  if (!run?.status) {
-    return "unknown";
-  }
-  const errorCode = run.error_code || "";
-  if (run.status === "failed" && isRunCanceled(errorCode)) {
-    return "canceled";
-  }
-  if (run.status === "failed" && isRunReconciledAfterRestart(errorCode)) {
-    return "recovered";
-  }
-  return run.status;
-}
-
-function qaRunStatusTone(run: Pick<QARunResponse, "status" | "error_code"> | null | undefined): "info" | "ok" | "warn" | "error" {
-  if (run?.status === "succeeded") {
-    return "ok";
-  }
-  if (run?.status === "failed" && (isRunCanceled(run.error_code || "") || isRunReconciledAfterRestart(run.error_code || ""))) {
-    return "warn";
-  }
-  if (run?.status === "failed") {
-    return "error";
-  }
-  if (run?.status === "queued" || run?.status === "running") {
-    return "warn";
-  }
-  return "info";
 }
 
 function qaRunProviderLabel(run: QARunResponse | null): string {

@@ -491,3 +491,25 @@ Observed improvement:
 
 Residual UX work after Slice 15:
 - Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` has about `3.3GiB` free, below the 5 GiB matrix guard.
+
+## Slice 16 Result
+
+Implemented:
+- Added shared run outcome helpers so terminal `run_canceled` and restart-reconciled failed runs render as `canceled` / `recovered`.
+- Analysis header, run mission control, run status panel, active run strip and History now use those outcome labels instead of raw generic `failed`.
+- History separates `Failed`, `Canceled` and `Recovered` counts while generic runtime/provider failures remain `failed`.
+- Reused the same helper for Ask/Q&A run history and selected-run status so Analysis and Ask stay consistent.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx ConsoleShellPrimitives.test.tsx` -> `79 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `86` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator no longer sees a canceled or restart-reconciled run as a red generic runtime failure in the main Analysis status surfaces.
+- The active run strip now labels terminal canceled/recovered runs with `Stopped step` / `Recovered step`, matching the recovery panel language.
+- Run History makes operational stops auditable without inflating the generic failure count.
+
+Residual UX work after Slice 16:
+- Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` remains below the 5 GiB matrix guard.
+- Next deterministic slice should continue across remaining non-happy-path surfaces, especially activity drawer failure summaries and any retry states that still collapse user intent into generic failure copy.

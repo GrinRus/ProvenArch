@@ -1,6 +1,7 @@
 import { StatusBadge } from "./ConsolePrimitives";
 import type { RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
+import { isRunCanceled, isRunReconciledAfterRestart, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 
 type ActiveRunStripProps = {
   runStatus: RunStatusResponse | null;
@@ -27,12 +28,17 @@ export function ActiveRunStrip({
   const warningCount = runReviewWarningCount(runStatus, reviewSummary);
   const errorCount = runReviewErrorCount(runStatus, reviewSummary);
   const status = runStatus?.status ?? reviewSummary?.status ?? "idle";
+  const outcomeSource = runStatus ?? reviewSummary;
+  const outcomeLabel = runOutcomeLabel(outcomeSource);
+  const outcomeTone = runOutcomeTone(outcomeSource);
   const runID = runStatus?.run_id ?? reviewSummary?.run_id;
   const currentStep = runStatus?.current_step ?? reviewSummary?.current_step ?? activeStep?.step_id ?? "not running";
   const artifactCount = steps.reduce((sum, step) => sum + step.artifact_count, 0);
   const isSucceeded = status === "succeeded";
+  const isCanceled = isRunCanceled(outcomeSource?.error_code);
+  const isRecovered = isRunReconciledAfterRestart(outcomeSource?.error_code);
   const runContext = reviewSummary?.pipeline ?? runStatus?.pipeline ?? "pipeline";
-  const primaryStatLabel = isSucceeded ? "Review state" : "Current step";
+  const primaryStatLabel = isSucceeded ? "Review state" : isCanceled ? "Stopped step" : isRecovered ? "Recovered step" : "Current step";
   const primaryStatValue = isSucceeded ? (artifactCount > 0 ? `${artifactCount} artifacts ready` : "review ready") : currentStep;
   const elapsed = elapsedLabel(runStatus?.started_at ?? reviewSummary?.started_at, runStatus?.finished_at ?? reviewSummary?.finished_at);
   const showCancelGuidance = selectedRunIsActive && (status === "queued" || status === "running");
@@ -40,9 +46,7 @@ export function ActiveRunStrip({
   return (
     <section className="active-run-strip" data-testid="active-run-strip" aria-label="active run summary">
       <div className="active-run-main">
-        <StatusBadge tone={status === "succeeded" ? "ok" : status === "failed" ? "error" : status === "running" || status === "queued" ? "warn" : "info"}>
-          {status}
-        </StatusBadge>
+        <StatusBadge tone={outcomeTone}>{outcomeLabel}</StatusBadge>
         <div>
           <strong>{runID || "No run selected"}</strong>
           <span>

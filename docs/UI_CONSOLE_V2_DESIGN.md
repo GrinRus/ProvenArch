@@ -116,6 +116,7 @@ Must show:
 - step timeline for `init.step0.constitution` through `init.step4.proposals`;
 - shard table with repo/path/provider/status/artifacts/duration;
 - failed-run live diagnostics for shard counters, focused repair, stall pressure, terminal excerpt and raw-output refs;
+- canceled/restart-reconciled terminal runs labeled as `canceled`/`recovered` across status, mission control, active run summary and history;
 - pending permission triage with blocked step, operation, decision, policy rule, target/reason and safe next actions;
 - blocker, evidence refs and runtime safety in inspector, including permission blocker step/rule/target/reason detail;
 - live logs with highlighted error/warning rows.
@@ -193,7 +194,7 @@ Every stage must have explicit surfaces for:
 - warning vs blocking issue;
 - active run, cancelled run, failed run and succeeded run;
 - cooperative cancellation guidance for active selected runs, including preserved taskrun evidence/history;
-- terminal canceled and restart-reconciled runs must explain retained History evidence and run-again behavior separately from runtime failures;
+- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels, explain retained History evidence and run-again behavior separately from runtime failures;
 - managed runtime permission mode and pending permission requests;
 - read-only Ask runs;
 - Git dirty/clean/ready-after-review states;
