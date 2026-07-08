@@ -433,3 +433,22 @@ Observed improvement:
 Residual UX work after Slice 12:
 - Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.
 - Approve/deny broker remains future scope.
+
+## Slice 13 Result
+
+Implemented:
+- Added active-run cancellation guidance to the shared active run strip.
+- The hint appears only for selected queued/running runs and states that cancel requests a cooperative stop while taskrun evidence stays in History.
+- Existing cancel API behavior remains unchanged; this is UI copy and layout only.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run src/components/ConsoleShellPrimitives.test.tsx` -> `10 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `84` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator can distinguish stopping the active run from deleting evidence or losing audit history.
+- Succeeded review-ready runs remain focused on evidence review and do not show cancellation guidance.
+
+Residual UX work after Slice 13:
+- Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.

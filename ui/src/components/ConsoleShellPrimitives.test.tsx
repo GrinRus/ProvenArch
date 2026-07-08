@@ -6,7 +6,7 @@ import { ActiveRunStrip } from "./ActiveRunStrip";
 import { ActivityDrawer } from "./ActivityDrawer";
 import { RightInspector } from "./RightInspector";
 import { StageRail } from "./StageRail";
-import type { RunLogEntry, RunReviewSummaryResponse } from "../lib/appContracts";
+import type { RunLogEntry, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 import type { StageId, StageOption } from "../lib/consoleTypes";
 
 const stages: StageOption[] = [
@@ -357,6 +357,36 @@ describe("console shell primitives", () => {
     expect(screen.getByTestId("active-run-strip")).toHaveTextContent("Review state");
     expect(screen.getByTestId("active-run-strip")).toHaveTextContent("5 artifacts ready");
     expect(screen.getByTestId("active-run-strip")).not.toHaveTextContent("Current step");
+    expect(screen.queryByTestId("active-run-cancel-guidance")).not.toBeInTheDocument();
+  });
+
+  it("explains cooperative cancellation for active selected runs", () => {
+    const runStatus: RunStatusResponse = {
+      run_id: "run-active-cancel",
+      pipeline: "refresh",
+      status: "running",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: null,
+      current_step: "refresh.step1.collect",
+      warnings: [],
+      error_code: null,
+      error: null,
+    };
+
+    render(
+      <ActiveRunStrip
+        runStatus={runStatus}
+        reviewSummary={null}
+        runtimeLabel="qwen-code"
+        cancelBusy={false}
+        selectedRunIsActive
+        onCancel={vi.fn()}
+        onOpenAnalysis={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("active-run-strip")).toHaveTextContent("refresh.step1.collect");
+    expect(screen.getByTestId("active-run-cancel-guidance")).toHaveTextContent("Cancel requests a cooperative stop; taskrun evidence stays in History.");
   });
 });
 

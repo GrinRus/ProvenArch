@@ -80,7 +80,7 @@ Epic matrix:
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
 - в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые;
 - при повторном открытии UI выбирает newest active run и ведёт в `Analysis`, иначе newest completed artifact run и ведёт в `Review`;
-- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run.
+- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run с пояснением cooperative stop и сохранения taskrun evidence/history.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;

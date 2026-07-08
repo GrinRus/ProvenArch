@@ -191,6 +191,7 @@ Every stage must have explicit surfaces for:
 - empty workspace / no run / no artifacts;
 - warning vs blocking issue;
 - active run, cancelled run, failed run and succeeded run;
+- cooperative cancellation guidance for active selected runs, including preserved taskrun evidence/history;
 - managed runtime permission mode and pending permission requests;
 - read-only Ask runs;
 - Git dirty/clean/ready-after-review states;

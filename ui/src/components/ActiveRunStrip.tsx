@@ -35,6 +35,7 @@ export function ActiveRunStrip({
   const primaryStatLabel = isSucceeded ? "Review state" : "Current step";
   const primaryStatValue = isSucceeded ? (artifactCount > 0 ? `${artifactCount} artifacts ready` : "review ready") : currentStep;
   const elapsed = elapsedLabel(runStatus?.started_at ?? reviewSummary?.started_at, runStatus?.finished_at ?? reviewSummary?.finished_at);
+  const showCancelGuidance = selectedRunIsActive && (status === "queued" || status === "running");
 
   return (
     <section className="active-run-strip" data-testid="active-run-strip" aria-label="active run summary">
@@ -71,12 +72,19 @@ export function ActiveRunStrip({
         </strong>
       </div>
       <div className="active-run-actions">
-        <button type="button" className="link-button" onClick={onOpenAnalysis}>
-          Open Analysis
-        </button>
-        <button type="button" onClick={onCancel} disabled={!runID || !selectedRunIsActive || cancelBusy}>
-          {cancelBusy ? "Canceling" : "Cancel"}
-        </button>
+        <div className="active-run-action-buttons">
+          <button type="button" className="link-button" onClick={onOpenAnalysis}>
+            Open Analysis
+          </button>
+          <button type="button" onClick={onCancel} disabled={!runID || !selectedRunIsActive || cancelBusy}>
+            {cancelBusy ? "Canceling" : "Cancel"}
+          </button>
+        </div>
+        {showCancelGuidance ? (
+          <p className="active-run-cancel-note" data-testid="active-run-cancel-guidance">
+            Cancel requests a cooperative stop; taskrun evidence stays in History.
+          </p>
+        ) : null}
       </div>
     </section>
   );

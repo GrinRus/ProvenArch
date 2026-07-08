@@ -101,6 +101,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Implement a live diagnostics UX slice for shard collection, focused repair and partial failure recovery.
 - [x] Implement pending permission triage so managed-mode `runtime_permission_required` failures are understandable before raw table inspection.
 - [x] Mirror pending permission step/rule/target/reason detail in the right inspector hard blocker.
+- [x] Add cooperative cancel guidance for active selected runs without changing cancel API behavior.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -123,8 +124,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 11) Use the medium matrix result to design the next live diagnostics slice: shard-plan progress, succeeded/failed/repairing counts, repair attempt state, terminal validation excerpt, raw-output refs and concrete rerun/triage actions.
 12) Improve managed permission recovery UX using existing pending request fields: blocked step, operation, decision/rule, target/reason and safe next actions.
 13) Mirror managed permission blocker context in the right inspector so the global hard-blocker surface stays actionable.
-14) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-15) Commit and use the report to drive the next iteration.
+14) Clarify active-run cancellation as cooperative stop with taskrun evidence/history preserved.
+15) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+16) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -163,6 +165,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Live diagnostics distinguish provider activity, focused repair, partial collect continuation and terminal runtime contract failure.
 - [x] Pending permission requests expose a triage summary, target/reason, policy rule, decision and safe next actions before the raw request table.
 - [x] Right inspector hard blockers expose pending permission step, rule, target and reason instead of a generic pending message.
+- [x] Active selected runs explain that cancel is cooperative and preserves taskrun evidence/history.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -190,6 +193,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Attempted the next `regres long` qwen-only medium rerun from clean commit `8a7786a`. Preflight passed for clean tree, provider binaries and report root, but `/tmp/provenarch-live-e2e` was absent and restoring canonical PostHog path checkout failed with `No space left on device` after the partial object store reached about `3.3G` and `/tmp` had only `116MiB` free. Removed the temporary partial checkout and stopped before matrix execution as `operational_host_preflight_failed`; rerun requires a trusted host or volume with enough space for the pinned PostHog checkout.
 - 2026-07-08: Implemented slice 11 pending permission triage in `Analysis -> Pending permissions` without backend/schema changes. The panel now summarizes blocked step, operation, decision, policy rule, primary target/reason and safe next actions before the raw request table; approve/deny broker remains future scope. Targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 12 right-inspector permission blocker copy without backend/schema changes. Pending permissions now surface as `Permission: <action>` with step, decision/rule, target and reason in the global hard-blocker panel; targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-08: Implemented slice 13 active-run cancellation guidance without backend/API/schema changes. Active selected runs now explain that cancel requests a cooperative stop and keeps taskrun evidence in History; targeted primitive test (`10` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
