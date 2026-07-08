@@ -864,25 +864,34 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByTestId("onboarding-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Create or open a workspace");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Workspace path is not selected.");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("select or create a workspace");
     fireEvent.change(screen.getByLabelText("Architecture workspace path"), {
       target: { value: "/tmp/onboarding-workspace" },
     });
     fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
 
     await screen.findByText("Selected: /tmp/onboarding-workspace");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Save and validate sources");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/bundle")).toBe(false);
     fireEvent.click(screen.getByTestId("onboarding-sources-save"));
 
     expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Select the runner");
     fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
 
     await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Check local readiness");
     expect(screen.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
     expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Local readiness checked");
     expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Check local readiness before first analysis.");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("First analysis waits for: run local readiness check");
 
     fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
     await screen.findByTestId("onboarding-doctor-result");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Run first analysis");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("Ready to run the first analysis.");
     expect(screen.getByTestId("onboarding-run-first-analysis")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("onboarding-enter-console"));
@@ -992,12 +1001,18 @@ describe("App", () => {
     await screen.findByText("Selected: /tmp/onboarding-workspace");
 
     fireEvent.change(screen.getByLabelText("Runtime"), { target: { value: "headless" } });
+    fireEvent.click(screen.getByTestId("onboarding-sources-save"));
+    expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
+    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
     fireEvent.click(screen.getByText("Check readiness"));
 
     const doctorPanel = await screen.findByTestId("onboarding-doctor-result");
     expect(doctorPanel).toHaveTextContent("Provider ID: claude-code");
     expect(doctorPanel).toHaveTextContent("checked: claude, claude-code");
     expect(doctorPanel).toHaveTextContent("ACP_CLAUDE_CMD");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix local readiness blockers");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Provider ID: claude-code");
   });
 
   it("reopens an existing workspace and enters console after validation without rewriting sources", async () => {
@@ -1271,7 +1286,11 @@ describe("App", () => {
     const nameInputs = screen.getAllByLabelText("Name");
     fireEvent.change(nameInputs[1], { target: { value: "my-service" } });
 
-    await waitFor(() => expect(screen.getAllByText(/repo_name_duplicate/i)).toHaveLength(2));
+    await waitFor(() => expect(screen.getByTestId("onboarding-sources-save")).toBeDisabled());
+    expect(screen.getAllByText(/repo_name_duplicate/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix source fields");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("repo_name_duplicate");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("fix source diagnostic repo_name_duplicate");
     expect(screen.getByTestId("onboarding-sources-save")).toBeDisabled();
   });
 

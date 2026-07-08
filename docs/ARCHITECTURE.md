@@ -45,7 +45,7 @@
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
-   - UI first-run entrypoint использует pre-console `OnboardingShell`, а не девятую product stage: `Workspace -> Sources -> Runner -> Ready`, затем переход в Console V2
+   - UI first-run entrypoint использует pre-console `OnboardingShell`, а не девятую product stage: `Workspace -> Sources -> Runner -> Ready`, с верхним setup summary для current step/current blocker/next action и затем переходом в Console V2
    - UI shell организован как Proven Arch console: top health strip (actual build/version metadata, workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events
    - Guided setup поддерживает multi-repo (`repos[]`) с add/remove rows, optional `ref` и compact analysis include/exclude editor over existing `repos[].analysis.include/exclude`; Source показывает repo table с name/source/ref, validation state и include/exclude summary
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary и collapsed advanced runtime tools disclosure для timeout/execution/permission/provider overrides
@@ -78,7 +78,7 @@
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
-   - First-run flow начинается до Console V2: пользователь выбирает/создаёт workspace или открывает Recent workspace, добавляет один или несколько repos через существующее `workspace.yaml.repos[]`, выбирает runner (`fake` recommended, live providers explicit opt-in), проходит readiness summary и только затем входит в stages `Source / Readiness / Charter / Analysis`
+   - First-run flow начинается до Console V2: пользователь выбирает/создаёт workspace или открывает Recent workspace, добавляет один или несколько repos через существующее `workspace.yaml.repos[]`, выбирает runner (`fake` recommended, live providers explicit opt-in), видит setup summary с главным blocker и причинами disabled actions, проходит readiness summary и только затем входит в stages `Source / Readiness / Charter / Analysis`
    - После onboarding `Source` остаётся editable для изменения repos/imports и guided analysis scope; GitHub/GitLab URL является default entry, local folder остаётся supported mode, raw `workspace.yaml` editor спрятан в Advanced, readiness checklist берётся из `GET /api/system/doctor`, первый `init` запускается кнопкой `Run first analysis` только после successful doctor result
 
 3) **Orchestrator (`internal/orchestrator`)** *(implemented baseline)*

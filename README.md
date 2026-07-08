@@ -111,6 +111,8 @@ acp serve
 
 В onboarding UI:
 
+Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает.
+
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
 3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.

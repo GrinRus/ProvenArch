@@ -35,9 +35,14 @@ Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publ
 
 Ключевые вопросы первого экрана:
 - готов ли workspace;
+- что следующий пользовательский шаг;
 - что сейчас делает pipeline;
 - где блокер;
 - какие artifacts/evidence можно ревьюить или публиковать.
+
+Pre-console onboarding (`Workspace -> Sources -> Runner -> Ready`) должен показывать setup summary
+с current step, next action, current blocker и причинами disabled actions для `Open console` /
+`Run first analysis`, чтобы первый запуск не требовал читать raw diagnostics.
 
 ## Shell contract
 

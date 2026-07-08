@@ -95,6 +95,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add an explicit Ask/Q&A failed-run recovery path with audit refs and same-question retry.
 - [x] Keep the secondary Review artifact explorer stable while switching filters during evidence review.
 - [x] Add Publish readiness summary and mobile section jumps for the final Git handoff path.
+- [x] Add onboarding setup summary with current blocker, next action and explicit disabled-action reasons.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -113,19 +114,22 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 7) Implement the next Readiness-focused slice: keep exact runtime controls available while preserving the first-run readiness path and screenshot hierarchy.
 8) Implement non-happy-path recovery polish for failed Analysis and Ask runs.
 9) Implement Publish handoff polish: publication readiness summary, mobile section jumps and rendered mobile Publish evidence.
-10) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-11) Commit and use the report to drive the next iteration.
+10) Implement onboarding first-run polish: current setup blocker, next action and disabled-action reasons.
+11) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+12) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
 - `ui/src/components/RightInspector.tsx`
 - `ui/src/components/ActiveRunStrip.tsx`
+- `ui/src/components/OnboardingShell.tsx`
 - `ui/src/components/StagePanels.tsx`
 - `ui/src/components/ConsoleShellPrimitives.test.tsx`
 - `ui/src/App.test.tsx`
 - `ui/e2e/live-flow.spec.ts`
 - `ui/src/styles.css`
 - `reports/ux_ui_assessment_20260708.md`
+- `docs/UI_CONSOLE_V2_DESIGN.md`
 - `docs/PLANS.md`
 
 ### Acceptance criteria
@@ -139,6 +143,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Ask failed runs show classification, blocked step, QA audit refs, warnings and a retry action for the same question.
 - [x] Review artifact explorer stays open and keeps filtered artifact lists visible while switching between diagram/report/proposal/runtime groups.
 - [x] Publish shows publication set, gate, open-question and Git-action state above the fold and exposes mobile jumps for `Diff`, `Preview`, `Gate` and `Commit`.
+- [x] Onboarding shows the current setup step, current blocker, next action and disabled-action reason before the user enters Console V2.
 - [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
 - [x] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
 
@@ -161,6 +166,8 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Re-ran the medium `regres long` preflight after slice 5. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; no canonical matrix, curated repo file or wrapper script was changed.
 - 2026-07-08: Implemented slice 6 Publish handoff polish: Publish now shows an above-the-fold readiness summary for publication set, gate state, open questions and Git action; mobile Publish exposes sticky section jumps for `Diff`, `Preview`, `Gate` and `Commit`; live smoke now captures `frontend-publish-mobile.png`. Targeted App tests, typecheck, frontend live E2E contract tests, build, fake-runtime rendered smoke (`run_20260708_121704_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
 - 2026-07-08: Re-ran the medium `regres long` preflight after slice 6. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
+- 2026-07-08: Implemented slice 7 onboarding blocker-summary polish: the pre-console onboarding screen now shows current setup step, next action, current blocker, per-step status and disabled-action reasons for `Open console` / `Run first analysis`. Targeted App tests, typecheck, full UI Vitest suite, build, rendered onboarding smoke (`/tmp/provenarch-ui-onboarding-summary-results.KbB5En`), fake-runtime rendered smoke (`run_20260708_124024_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
+- 2026-07-08: Re-ran the medium `regres long` preflight after slice 7. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

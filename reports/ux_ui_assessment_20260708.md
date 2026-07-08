@@ -72,6 +72,14 @@ status: blocked
 primary classification: operational_host_preflight_failed
 next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
 
+2026-07-08 slice 7 retry:
+goal: re-check whether the requested medium live E2E can start after the onboarding blocker-summary UX slice.
+action: ran fail-fast host checks, generated the direct command with `python3 scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`, checked provider binaries and probed `/tmp/provenarch-live-e2e/posthog/posthog` with `git rev-parse HEAD`.
+observed evidence: `/tmp/provenarch-live-e2e` and `/tmp/provenarch-test_arch_project` are writable directories; generated command still targets `examples/e2e-matrix.regres-long.yaml` with qwen-only baseline and `scripts/full-run-batch-matrix.sh`; binaries report `qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`; PostHog canonical path still returns `fatal: not a git repository`; current worktree is dirty because slice 7 is in progress and not an acceptance run.
+status: blocked
+primary classification: operational_host_preflight_failed
+next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -271,4 +279,31 @@ Observed improvement:
 
 Residual UX work after Slice 6:
 - Medium live E2E remains blocked by trusted-host repo setup until `/tmp/provenarch-live-e2e/posthog/posthog` is restored as the pinned Git checkout and the run starts from a clean committed tree.
-- A future full completion audit should re-check onboarding error states and provider permission UI after the trusted-host blocker is resolved.
+- Onboarding error states and provider permission UI remained future audit candidates before Slice 7.
+
+## Slice 7 Result
+
+Implemented:
+- `OnboardingShell` now shows an above-the-fold setup progress summary before Console V2: current step, next action, current blocker and per-step status details.
+- The `Ready` card now explains why `Open console` and `Run first analysis` are disabled, using existing workspace/source/runtime/doctor state.
+- Source setup errors such as `repo_name_duplicate` and runner readiness blockers such as missing provider commands are elevated into the top onboarding summary instead of living only in lower diagnostics.
+- Desktop and mobile onboarding layout keep the progress summary readable without adding backend API, schema or runtime contract changes.
+
+Post-change evidence:
+- targeted component test: `npm run --prefix ui test -- App.test.tsx --run` -> `67 passed`
+- UI typecheck: `npm run --prefix ui typecheck` -> passed
+- UI test suite: `npm run --prefix ui test -- --run` -> `83 passed`
+- build: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build` -> passed
+- rendered onboarding smoke: `/tmp/provenarch-ui-onboarding-summary-results.KbB5En/onboarding-initial-desktop.png`, `/tmp/provenarch-ui-onboarding-summary-results.KbB5En/onboarding-initial-mobile.png`, `/tmp/provenarch-ui-onboarding-summary-results.KbB5En/onboarding-source-error-desktop.png`
+- fake-runtime rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:18180 UI_E2E_QA_SMOKE=1 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-onboarding-slice-results.TSpfmo npm run --prefix ui e2e:live` -> `1 passed`
+- updated init run: `run_20260708_124024_001`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed
+
+Observed improvement:
+- First-time operators now see the current setup blocker before interacting with lower cards.
+- Disabled primary actions now tell the user what to fix next, including source validation diagnostics and readiness blockers.
+- Recoverable onboarding source errors are visible in three aligned places: top blocker summary, affected repo row and Ready action hint.
+
+Residual UX work after Slice 7:
+- Medium live E2E remains blocked by trusted-host repo setup until `/tmp/provenarch-live-e2e/posthog/posthog` is restored as the pinned Git checkout and the run starts from a clean committed tree.
+- Provider permission approval/denial UI remains a future deeper non-happy-path audit area once a trusted-host live run can produce representative pending-permission evidence.
