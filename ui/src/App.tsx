@@ -896,7 +896,8 @@ export default function App() {
       selectedRunIsActive={selectedRunIsActive}
       selectedRunId={runStatus?.run_id}
       selectedRunStatus={runStatus?.status}
-      selectedRunError={runStatus?.error_code ?? runStatus?.error ?? undefined}
+      selectedRunErrorCode={runStatus?.error_code ?? undefined}
+      selectedRunError={runStatus?.error ?? undefined}
       logs={filteredRunLogs}
       renderedLogs={runLogsRendered}
       runLogsStatus={runLogsStatus}

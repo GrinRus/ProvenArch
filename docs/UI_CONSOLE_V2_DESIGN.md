@@ -55,7 +55,7 @@ Pre-console onboarding (`Workspace -> Sources -> Runner -> Ready`) должен 
 - **Central workbench**: stage-specific dense operator surface, без landing/hero layout.
 - **Right inspector**: `Next action`, blockers/warnings, evidence refs, runtime safety, Git path
   в зависимости от stage.
-- **Bottom activity drawer**: `Event timeline`, `Raw agent stream`, `All`, copy/download/filter
+- **Bottom activity drawer**: `Event timeline`, `Raw agent stream`, `All`, copy/download/filter and outcome-aware empty-log recovery copy
   actions where applicable.
 
 Visual direction:
@@ -194,7 +194,7 @@ Every stage must have explicit surfaces for:
 - warning vs blocking issue;
 - active run, cancelled run, failed run and succeeded run;
 - cooperative cancellation guidance for active selected runs, including preserved taskrun evidence/history;
-- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels, explain retained History evidence and run-again behavior separately from runtime failures;
+- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels in shared shell surfaces, explain retained History evidence and run-again behavior separately from runtime failures;
 - managed runtime permission mode and pending permission requests;
 - read-only Ask runs;
 - Git dirty/clean/ready-after-review states;

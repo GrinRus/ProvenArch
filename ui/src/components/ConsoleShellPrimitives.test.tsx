@@ -225,7 +225,8 @@ describe("console shell primitives", () => {
         {...handlers}
         selectedRunId="run-failed"
         selectedRunStatus="failed"
-        selectedRunError="runtime_contract_failed"
+        selectedRunErrorCode="runtime_contract_failed"
+        selectedRunError="runtime draft invalid"
         logs={[]}
         renderedLogs=""
         runLogsStatus=""
@@ -236,6 +237,48 @@ describe("console shell primitives", () => {
 
     expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run failed before log entries were captured: runtime_contract_failed");
     expect(screen.getByTestId("activity-drawer")).toHaveAttribute("open");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("failed run");
+
+    rerender(
+      <ActivityDrawer
+        {...handlers}
+        selectedRunId="run-canceled"
+        selectedRunStatus="failed"
+        selectedRunErrorCode="run_canceled"
+        selectedRunError="canceled by request"
+        logs={[]}
+        renderedLogs=""
+        runLogsStatus=""
+        canExport={false}
+        taskrunPaths={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("canceled run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveClass("warning");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was canceled before log entries were captured: run_canceled");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Taskrun evidence remains in History.");
+    expect(screen.getByTestId("activity-empty-state")).not.toHaveTextContent("Run failed before log entries");
+
+    rerender(
+      <ActivityDrawer
+        {...handlers}
+        selectedRunId="run-recovered"
+        selectedRunStatus="failed"
+        selectedRunErrorCode="run_reconciled_after_restart"
+        selectedRunError="orphaned run reconciled after restart"
+        logs={[]}
+        renderedLogs=""
+        runLogsStatus=""
+        canExport={false}
+        taskrunPaths={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("recovered run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveClass("warning");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was reconciled after restart before log entries were captured: run_reconciled_after_restart");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("History retains the run; start a new run if analysis still matters.");
   });
 
   it("renders activity drawer logs, taskrun artifact links and control callbacks", () => {

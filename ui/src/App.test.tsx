@@ -3492,6 +3492,9 @@ describe("App", () => {
     const activeRunStrip = await screen.findByTestId("active-run-strip");
     expect(activeRunStrip).toHaveTextContent("canceled");
     expect(activeRunStrip).toHaveTextContent("Stopped step");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("canceled run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was canceled before log entries were captured: run_canceled");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Taskrun evidence remains in History.");
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Canceled run");
     expect(recovery).toHaveTextContent("run_canceled");
@@ -3618,6 +3621,9 @@ describe("App", () => {
     const activeRunStrip = await screen.findByTestId("active-run-strip");
     expect(activeRunStrip).toHaveTextContent("recovered");
     expect(activeRunStrip).toHaveTextContent("Recovered step");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("recovered run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was reconciled after restart before log entries were captured: run_reconciled_after_restart");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("History retains the run; start a new run if analysis still matters.");
   });
 
   it("switches to the next available run when the selected run disappears during refresh", async () => {

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 
-import { formatTimestamp } from "../lib/runState";
+import { formatTimestamp, runOutcomeLabel } from "../lib/runState";
 import type { RunLogEntry } from "../lib/appContracts";
 import { ArtifactPathButton } from "./ConsolePrimitives";
 
 type ActivityDrawerProps = {
   selectedRunId?: string;
   selectedRunStatus?: string;
+  selectedRunErrorCode?: string;
   selectedRunError?: string;
   logs: RunLogEntry[];
   renderedLogs: string;
@@ -25,6 +26,7 @@ type ActivityDrawerProps = {
 export function ActivityDrawer({
   selectedRunId,
   selectedRunStatus,
+  selectedRunErrorCode,
   selectedRunError,
   logs,
   renderedLogs,
@@ -44,15 +46,22 @@ export function ActivityDrawer({
   const recentLogs = logs.slice(-6).reverse();
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : undefined;
   const hasSelectedRun = Boolean(selectedRunId);
+  const selectedRunOutcome = selectedRunStatus ? runOutcomeLabel({ status: selectedRunStatus, error_code: selectedRunErrorCode }, selectedRunStatus) : "";
+  const selectedRunDetail = selectedRunErrorCode || selectedRunError;
   const emptyLogMessage = !hasSelectedRun
     ? "No selected run. Start or select a run to stream activity."
-    : selectedRunStatus === "failed"
-      ? `Run failed before log entries were captured${selectedRunError ? `: ${selectedRunError}` : "."}`
-      : "No run logs yet. Logs will appear when the selected run emits events or raw output.";
+    : selectedRunOutcome === "canceled"
+      ? `Run was canceled before log entries were captured${selectedRunDetail ? `: ${selectedRunDetail}` : "."} Taskrun evidence remains in History.`
+      : selectedRunOutcome === "recovered"
+        ? `Run was reconciled after restart before log entries were captured${selectedRunDetail ? `: ${selectedRunDetail}` : "."} History retains the run; start a new run if analysis still matters.`
+        : selectedRunStatus === "failed"
+          ? `Run failed before log entries were captured${selectedRunDetail ? `: ${selectedRunDetail}` : "."}`
+          : "No run logs yet. Logs will appear when the selected run emits events or raw output.";
   const drawerSummary = hasSelectedRun
-    ? `${selectedRunStatus ? `${selectedRunStatus} run` : "selected run"} · ${logs.length} log entries${lastLog ? ` · last: ${lastLog.message}` : ` for ${selectedRunId}`}`
+    ? `${selectedRunOutcome ? `${selectedRunOutcome} run` : "selected run"} · ${logs.length} log entries${lastLog ? ` · last: ${lastLog.message}` : ` for ${selectedRunId}`}`
     : "No selected run";
   const drawerStatus = runLogsStatus || (isOpen ? `${recentLogs.length} recent` : `${recentLogs.length} recent · open logs`);
+  const emptyStateTone = selectedRunOutcome === "canceled" || selectedRunOutcome === "recovered" ? " warning" : selectedRunStatus === "failed" ? " failed" : "";
 
   useEffect(() => {
     setIsOpen(shouldOpenForRunState);
@@ -125,7 +134,7 @@ export function ActivityDrawer({
         ) : null}
 
         {recentLogs.length === 0 ? (
-          <div className={`activity-empty-state${selectedRunStatus === "failed" ? " failed" : ""}`} data-testid="activity-empty-state">
+          <div className={`activity-empty-state${emptyStateTone}`} data-testid="activity-empty-state">
             <strong>{hasSelectedRun ? "No log entries" : "No run selected"}</strong>
             <span>{emptyLogMessage}</span>
           </div>

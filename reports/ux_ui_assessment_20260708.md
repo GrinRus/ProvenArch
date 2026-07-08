@@ -513,3 +513,24 @@ Observed improvement:
 Residual UX work after Slice 16:
 - Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` remains below the 5 GiB matrix guard.
 - Next deterministic slice should continue across remaining non-happy-path surfaces, especially activity drawer failure summaries and any retry states that still collapse user intent into generic failure copy.
+
+## Slice 17 Result
+
+Implemented:
+- Made the shared Activity drawer outcome-aware for terminal `run_canceled` and restart-reconciled runs.
+- The drawer summary now shows `canceled run` / `recovered run` instead of raw `failed run` when the selected run has those terminal classifications.
+- Empty-log recovery copy now explains retained History evidence for canceled runs and restart reconciliation for recovered runs; generic runtime/provider failures still say `Run failed before log entries`.
+- Split Activity drawer inputs so `error_code` drives classification while human error text remains separate.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx ConsoleShellPrimitives.test.tsx` -> `79 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `86` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who opens Activity after a canceled/reconciled terminal run no longer sees the stop described as a provider/runtime crash.
+- The shared shell now uses the same canceled/recovered language as Analysis recovery, History and the active run strip.
+
+Residual UX work after Slice 17:
+- Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
+- Continue deterministic polish on remaining retry states that still use generic failure copy or hide the next action behind raw logs.

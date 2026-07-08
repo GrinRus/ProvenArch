@@ -2934,6 +2934,11 @@ code {
   background: var(--err-soft);
 }
 
+.activity-empty-state.warning {
+  border-color: var(--warning-panel-line);
+  background: var(--warn-soft);
+}
+
 .activity-empty-state strong {
   font-size: 0.86rem;
 }
