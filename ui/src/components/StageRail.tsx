@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import type { StageId, StageOption } from "../lib/consoleTypes";
 
@@ -28,6 +28,14 @@ const stageIconPaths: Record<StageId, string[]> = {
 
 export function StageRail({ stages, activeStage, onStageChange }: StageRailProps) {
   const [collapsed, setCollapsed] = useState(() => (typeof window === "undefined" || !window.matchMedia ? false : window.matchMedia("(max-width: 900px)").matches));
+  const stageRefs = useRef(new Map<StageId, HTMLButtonElement>());
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia?.("(max-width: 900px)").matches) {
+      return;
+    }
+    stageRefs.current.get(activeStage)?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [activeStage]);
 
   function focusStage(stage: StageOption) {
     const testId = stage.testId ?? `stage-${stage.id}`;
@@ -78,6 +86,13 @@ export function StageRail({ stages, activeStage, onStageChange }: StageRailProps
           aria-current={stage.id === activeStage ? "step" : undefined}
           onClick={() => onStageChange(stage.id)}
           onKeyDown={(event) => handleStageKeyDown(event, index)}
+          ref={(node) => {
+            if (node) {
+              stageRefs.current.set(stage.id, node);
+            } else {
+              stageRefs.current.delete(stage.id);
+            }
+          }}
           data-testid={stage.testId ?? `stage-${stage.id}`}
           title={`${stage.label}: ${stage.description}`}
         >

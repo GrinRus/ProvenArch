@@ -1,3 +1,5 @@
+import { runtimeDisplayLabel } from "../lib/runtimeDisplay";
+
 type TopStatusBarProps = {
   buildVersion: string;
   buildCommit: string;
@@ -35,6 +37,7 @@ export function TopStatusBar({
   }).format(new Date());
   const versionLabel = buildVersion.trim() || "dev";
   const buildTitle = `commit=${buildCommit || "none"} built=${buildBuilt || "unknown"} ui=${uiBundle || "embedded"}`;
+  const runtimeLabel = runtimeDisplayLabel(runtimeMode, runtimeProvider);
 
   return (
     <header className="top-status-bar" data-testid="top-status-bar">
@@ -66,8 +69,7 @@ export function TopStatusBar({
         </span>
         <span className="top-meta-item">
           <TopMetaIcon type="runtime" />
-          Runtime {runtimeMode}
-          {runtimeMode === "headless" ? ` / ${runtimeProvider}` : ""}
+          Runtime {runtimeLabel}
         </span>
         <span className="top-meta-item">
           <TopMetaIcon type="permission" />

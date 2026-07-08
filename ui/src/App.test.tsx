@@ -760,6 +760,66 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2"));
   }, 15_000);
 
+  it("keeps the console recoverable when refresh API bootstrap fails and then recovers", async () => {
+    const baseFetch = createFetchMock();
+    let failNextStatus = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (failNextStatus && method === "GET" && url === "/api/onboarding/status") {
+        failNextStatus = false;
+        throw new Error("server unavailable");
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    failNextStatus = true;
+    fireEvent.click(screen.getByTestId("console-refresh-btn"));
+
+    expect(await screen.findByText("Error: server unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("top-status-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("console-refresh-btn")).toBeEnabled();
+    expect(screen.getByTestId("workspace-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("console-refresh-btn"));
+
+    await waitFor(() => expect(screen.queryByText("Error: server unavailable")).not.toBeInTheDocument());
+    expect(screen.getByTestId("top-status-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("console-refresh-btn")).toBeEnabled();
+  });
+
+  it("keeps the console recoverable when workspace manifest reload fails", async () => {
+    const baseFetch = createFetchMock();
+    let failNextManifest = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (failNextManifest && method === "GET" && url === "/api/workspace/manifest") {
+        failNextManifest = false;
+        throw new Error("workspace manifest unavailable");
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    failNextManifest = true;
+    fireEvent.click(screen.getByTestId("console-refresh-btn"));
+
+    expect(await screen.findByText("Error: workspace manifest unavailable")).toBeInTheDocument();
+    expect(screen.getByTestId("top-status-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("console-refresh-btn")).toBeEnabled();
+    expect(screen.getByTestId("workspace-panel")).toBeInTheDocument();
+  });
+
   it("supports stage navigation and settings relocation without compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
@@ -817,6 +877,14 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
 
     await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
+    expect(screen.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
+    expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Local readiness checked");
+    expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Check local readiness before first analysis.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
+    await screen.findByTestId("onboarding-doctor-result");
+    expect(screen.getByTestId("onboarding-run-first-analysis")).not.toBeDisabled();
+
     fireEvent.click(screen.getByTestId("onboarding-enter-console"));
 
     expect(await screen.findByTestId("top-status-bar")).toBeInTheDocument();
@@ -1050,6 +1118,56 @@ describe("App", () => {
     });
   });
 
+  it("collapses launcher recent workspaces to three and reveals the rest on demand", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        onboardingStatus: {
+          ok: true,
+          launcher_mode: true,
+          workspace_selected: false,
+          workspace_ready: false,
+          workspace: "",
+          manifest_present: false,
+          runtime: {
+            selected: false,
+            runtime: "fake",
+            runtime_provider: "claude-code",
+            provider_source: "default",
+          },
+          can_enter_console: false,
+          recent_workspaces: [
+            { path: "/tmp/recent-workspace-1", last_opened_at: "2026-06-04T10:00:00Z", exists: true },
+            { path: "/tmp/recent-workspace-2", last_opened_at: "2026-06-04T09:00:00Z", exists: true },
+            { path: "/tmp/recent-workspace-3", last_opened_at: "2026-06-04T08:00:00Z", exists: true },
+            { path: "/tmp/recent-workspace-4", last_opened_at: "2026-06-04T07:00:00Z", exists: true },
+            { path: "/tmp/recent-workspace-5", last_opened_at: "2026-06-04T06:00:00Z", exists: false },
+          ],
+        },
+      }),
+    );
+
+    render(<App />);
+
+    const recents = await screen.findByTestId("onboarding-recent-workspaces");
+    expect(recents).toHaveTextContent("/tmp/recent-workspace-1");
+    expect(recents).toHaveTextContent("/tmp/recent-workspace-2");
+    expect(recents).toHaveTextContent("/tmp/recent-workspace-3");
+    expect(recents).not.toHaveTextContent("/tmp/recent-workspace-4");
+    expect(recents).not.toHaveTextContent("/tmp/recent-workspace-5");
+
+    fireEvent.click(within(recents).getByRole("button", { name: "Show 2 more workspaces" }));
+
+    expect(recents).toHaveTextContent("/tmp/recent-workspace-4");
+    expect(recents).toHaveTextContent("/tmp/recent-workspace-5");
+    expect(within(recents).getAllByRole("button", { name: "Open" })[4]).toBeDisabled();
+
+    fireEvent.click(within(recents).getByRole("button", { name: "Show fewer workspaces" }));
+
+    expect(recents).not.toHaveTextContent("/tmp/recent-workspace-4");
+    expect(recents).not.toHaveTextContent("/tmp/recent-workspace-5");
+  });
+
   it("lets the operator forget a missing recent workspace", async () => {
     const fetchMock = createFetchMock({
       onboardingStatus: {
@@ -1210,7 +1328,7 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
-  it("renders the Source V2 repo table with explicit advanced-only analysis scope", async () => {
+  it("renders the Source V2 repo table with guided analysis scope summary", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
     await renderConsoleApp();
@@ -1222,7 +1340,7 @@ describe("App", () => {
     expect(sourceTable).toHaveTextContent("Source");
     expect(sourceTable).toHaveTextContent("Ref");
     expect(sourceTable).toHaveTextContent("Analysis include/exclude");
-    expect(sourceTable).toHaveTextContent("Advanced workspace.yaml only");
+    expect(sourceTable).toHaveTextContent("all files");
     expect(sourceTable).toHaveTextContent("Git URL");
     expect(sourceTable).toHaveTextContent("https://github.com/org/my-service.git");
   });
@@ -1280,7 +1398,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-readiness"));
 
     const readinessCards = await screen.findByTestId("readiness-summary-cards");
-    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Run local readiness checks before starting analysis.");
+    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Check local readiness before first analysis.");
     expect(readinessCards).toHaveTextContent("Workspace");
     expect(readinessCards).toHaveTextContent("Repositories");
     expect(readinessCards).toHaveTextContent("Runtime provider");
@@ -1291,7 +1409,7 @@ describe("App", () => {
     expect(runtimeSummary).toHaveTextContent("step 1800s / pipeline 2400s");
     expect(runtimeSummary).toHaveTextContent("sequential / max 1");
     expect(runtimeSummary).toHaveTextContent("best_effort");
-    expect(runtimeSummary).toHaveTextContent("qwen-code");
+    expect(runtimeSummary).toHaveTextContent("fake");
     expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
   });
 
@@ -1566,6 +1684,55 @@ describe("App", () => {
     expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
   });
 
+  it("filters Review artifacts by report, diagram, proposal, and runtime groups", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+              { path: "proposals/proposal-payments/proposal.md", kind: "proposal", label: "Payments proposal" },
+              { path: "reports/changelog/2026-04-03.md", kind: "changelog", label: "Iteration changelog" },
+              { path: "reports/taskruns/run-1/staging/final/final-run-index.json", kind: "taskrun", label: "Final run index" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/open-questions.md": "",
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    const filters = await screen.findByTestId("review-artifact-filters");
+    const artifactPanel = screen.getByTestId("results-artifacts-panel");
+    expect(filters).toHaveAttribute("role", "tablist");
+    expect(within(filters).getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Diagrams" }));
+    await waitFor(() => expect(artifactPanel).toHaveTextContent("C4 context"));
+    expect(artifactPanel).not.toHaveTextContent("As-is overview");
+    expect(artifactPanel).not.toHaveTextContent("Payments proposal");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Proposals" }));
+    await waitFor(() => expect(artifactPanel).toHaveTextContent("Payments proposal"));
+    expect(artifactPanel).toHaveTextContent("Iteration changelog");
+    expect(artifactPanel).not.toHaveTextContent("C4 context");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Runtime" }));
+    await waitFor(() => expect(artifactPanel).toHaveTextContent("Final run index"));
+    expect(artifactPanel).not.toHaveTextContent("As-is overview");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Reports" }));
+    await waitFor(() => expect(artifactPanel).toHaveTextContent("As-is overview"));
+    expect(artifactPanel).not.toHaveTextContent("Final run index");
+  });
+
   it("renders an explicit sparse state for Review domain map without model artifacts", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1795,7 +1962,6 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await renderConsoleApp();
-    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-publish"));
 
@@ -1840,6 +2006,62 @@ describe("App", () => {
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(1);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(1);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith("/api/git/diff") && !String(call[0]).includes("run_id="))).toBe(true);
+  });
+
+  it("filters Publish artifact refs while preserving the selected artifact preview", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
+              { path: "reports/diagrams/c4-context.mmd", kind: "diagram", label: "C4 context" },
+              { path: "proposals/adr-001.md", kind: "proposal", label: "ADR 001" },
+              { path: "reports/changelog/2026-04-03.md", kind: "changelog", label: "Iteration changelog" },
+              { path: "reports/taskruns/run-1/staging/shards/payments/runtime-execution.json", kind: "taskrun", label: "Runtime execution" },
+            ],
+          },
+        },
+        artifactText: {
+          "reports/coverage/summary.md": "Coverage ready for publication.\n",
+          "reports/coverage/open-questions.md": "",
+          "reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+          "proposals/adr-001.md": "# ADR 001\n",
+          "reports/changelog/2026-04-03.md": "# Iteration changelog\n",
+          "reports/taskruns/run-1/staging/shards/payments/runtime-execution.json": "{\"ok\":true}\n",
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    const filters = await screen.findByTestId("publish-artifact-filters");
+    expect(filters).toHaveAttribute("role", "tablist");
+    expect(within(filters).getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
+    const publishArtifactList = () => screen.getByRole("list", { name: "publish artifact preview list" });
+
+    fireEvent.click(within(publishArtifactList()).getByRole("button", { name: /ADR 001.*proposals\/adr-001\.md/i }));
+    await waitFor(() => expect(screen.getByTestId("publish-selected-preview-content")).toHaveTextContent("# ADR 001"));
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Diagrams" }));
+    await waitFor(() => expect(publishArtifactList()).toHaveTextContent("reports/diagrams/c4-context.mmd"));
+    expect(publishArtifactList()).not.toHaveTextContent("proposals/adr-001.md");
+    expect(screen.getByTestId("publish-selected-preview-content")).toHaveTextContent("# ADR 001");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Taskruns" }));
+    await waitFor(() => expect(publishArtifactList()).toHaveTextContent("reports/taskruns/run-1/staging/shards/payments/runtime-execution.json"));
+    expect(publishArtifactList()).not.toHaveTextContent("reports/coverage/summary.md");
+
+    fireEvent.click(within(filters).getByRole("tab", { name: "Changed" }));
+    await waitFor(() => expect(publishArtifactList()).toHaveTextContent("reports/coverage/summary.md"));
+    expect(publishArtifactList()).toHaveTextContent("proposals/adr-001.md");
+    expect(publishArtifactList()).not.toHaveTextContent("reports/taskruns/run-1/staging/shards/payments/runtime-execution.json");
+    expect(screen.getByRole("list", { name: "changed workspace files" })).toHaveTextContent("reports/coverage/summary.md");
   });
 
   it("keeps raw proposal and changelog artifacts when a final run index is available", async () => {
@@ -2143,6 +2365,9 @@ describe("App", () => {
 
     fireEvent.change(screen.getByLabelText("Repo source type"), { target: { value: "path" } });
     fireEvent.change(await screen.findByLabelText("Local checkout path"), { target: { value: "/tmp/my-service" } });
+    fireEvent.click(screen.getByText("Analysis scope"));
+    fireEvent.change(screen.getByLabelText("Include globs"), { target: { value: "services/**\ncmd/**" } });
+    fireEvent.change(screen.getByLabelText("Exclude globs"), { target: { value: "**/vendor/**" } });
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
     fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
@@ -2153,15 +2378,23 @@ describe("App", () => {
     const putCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/workspace/manifest" && (init as RequestInit | undefined)?.method === "PUT");
     const savedManifest = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as { content?: string };
     expect(savedManifest.content).toContain('path: "/tmp/my-service"');
+    expect(savedManifest.content).toContain("analysis:");
+    expect(savedManifest.content).toContain("include:");
+    expect(savedManifest.content).toContain('        - "services/**"');
+    expect(savedManifest.content).toContain('        - "cmd/**"');
+    expect(savedManifest.content).toContain("exclude:");
+    expect(savedManifest.content).toContain('        - "**/vendor/**"');
   });
 
   it("hydrates guided first-run form from loaded workspace manifest", async () => {
+    const goStyleManifest =
+      'version: 1\nrepos:\n    - name: "loaded-service"\n      path: "/tmp/loaded-service"\n      ref: "main"\n      analysis:\n        include:\n          - "services/**"\n        exclude:\n          - "**/vendor/**"\ndocs:\n    imports_path: "./docs/imported"\n';
+    const fetchMock = createFetchMock({
+      manifestContent: goStyleManifest,
+    });
     vi.stubGlobal(
       "fetch",
-      createFetchMock({
-        manifestContent:
-          'version: 1\nrepos:\n  - name: "loaded-service"\n    path: "/tmp/loaded-service"\n    ref: "main"\ndocs:\n  imports_path: "./docs/imported"\n',
-      }),
+      fetchMock,
     );
 
     await renderConsoleApp();
@@ -2170,7 +2403,21 @@ describe("App", () => {
     expect(screen.getByLabelText("Repo source type")).toHaveValue("path");
     expect(screen.getByDisplayValue("/tmp/loaded-service")).toBeInTheDocument();
     expect(screen.getByDisplayValue("main")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Analysis scope"));
+    expect(screen.getByDisplayValue("services/**")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("**/vendor/**")).toBeInTheDocument();
     expect(screen.getByDisplayValue("./docs/imported")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+    await screen.findByTestId("workspace-validate-result");
+
+    const putCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/workspace/manifest" && (init as RequestInit | undefined)?.method === "PUT");
+    const savedManifest = JSON.parse(String((putCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as { content?: string };
+    expect(savedManifest.content).toContain('name: "loaded-service"');
+    expect(savedManifest.content).toContain('path: "/tmp/loaded-service"');
+    expect(savedManifest.content).toContain('imports_path: "./docs/imported"');
+    expect(savedManifest.content).not.toContain("my-service");
+    expect(savedManifest.content).not.toContain("https://github.com/org/my-service.git");
   });
 
   it("shows validation suggestions as next actions", async () => {
@@ -2453,7 +2700,7 @@ describe("App", () => {
 
     const shardTable = await screen.findByTestId("analysis-shard-table");
     expect(shardTable).toHaveTextContent("payments");
-    expect(shardTable).toHaveTextContent("qwen-code");
+    expect(shardTable).toHaveTextContent("fake");
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
     expect(shardTable).toHaveTextContent("2s");

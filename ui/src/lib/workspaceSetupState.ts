@@ -43,6 +43,8 @@ export function parseGuidedSetupFromManifest(content: string): GuidedSetupFromMa
   const repos: GuidedRepo[] = [];
   let currentRepo: Partial<GuidedRepo> | null = null;
   let section = "";
+  let repoAnalysisList: "include" | "exclude" | "" = "";
+  let repoIndent: number | null = null;
   let docsImportsPath: string | undefined;
 
   const flushRepo = () => {
@@ -57,6 +59,8 @@ export function parseGuidedSetupFromManifest(content: string): GuidedSetupFromMa
           mode: "git_url",
           git_url: currentRepo.git_url,
           ref: currentRepo.ref ?? "",
+          analysis_include: currentRepo.analysis_include ?? "",
+          analysis_exclude: currentRepo.analysis_exclude ?? "",
         }),
       );
     } else if (currentRepo.path) {
@@ -66,6 +70,8 @@ export function parseGuidedSetupFromManifest(content: string): GuidedSetupFromMa
           mode: "path",
           path: currentRepo.path,
           ref: currentRepo.ref ?? "",
+          analysis_include: currentRepo.analysis_include ?? "",
+          analysis_exclude: currentRepo.analysis_exclude ?? "",
         }),
       );
     }
@@ -86,19 +92,39 @@ export function parseGuidedSetupFromManifest(content: string): GuidedSetupFromMa
     }
 
     if (section === "repos") {
-      const repoStart = /^\s*-\s*(.*)$/.exec(line);
+      const analysisListItem = /^(\s*)-\s*(.*)$/.exec(line);
+      if (analysisListItem && currentRepo && repoAnalysisList && repoIndent !== null && analysisListItem[1].length > repoIndent) {
+        const value = parseYAMLScalar(analysisListItem[2]);
+        if (repoAnalysisList === "include") {
+          currentRepo.analysis_include = [currentRepo.analysis_include, value].filter(Boolean).join("\n");
+        } else {
+          currentRepo.analysis_exclude = [currentRepo.analysis_exclude, value].filter(Boolean).join("\n");
+        }
+        continue;
+      }
+
+      const repoStart = /^(\s*)-\s*(.*)$/.exec(line);
       if (repoStart) {
         flushRepo();
         currentRepo = {};
-        const inline = repoStart[1].trim();
+        repoIndent = repoStart[1].length;
+        repoAnalysisList = "";
+        const inline = repoStart[2].trim();
         if (inline) {
           applyRepoField(currentRepo, inline);
         }
         continue;
       }
 
+      const analysisListStart = /^\s+(include|exclude):\s*$/.exec(line);
+      if (analysisListStart && currentRepo) {
+        repoAnalysisList = analysisListStart[1] as "include" | "exclude";
+        continue;
+      }
+
       const repoField = /^\s+([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(line);
       if (repoField && currentRepo) {
+        repoAnalysisList = repoField[1] === "analysis" ? repoAnalysisList : "";
         applyRepoField(currentRepo, `${repoField[1]}: ${repoField[2]}`);
       }
       continue;

@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 import { LocalPathCombobox } from "./LocalPathCombobox";
+import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 
 type OnboardingShellProps = {
   busy: boolean;
@@ -68,7 +71,9 @@ export function OnboardingShell({
   const hasRepoDraftErrors = Array.from(repoDiagnosticsByID.values()).some((diagnostics) => diagnostics.some((diagnostic) => diagnostic.level === "error"));
   const sourcesReady = validateResult?.ok === true && !hasRepoDraftErrors;
   const runtimeReady = status?.runtime.selected === true;
+  const localReady = doctorResult?.ok === true;
   const canEnterConsole = status?.can_enter_console === true && sourcesReady && runtimeReady;
+  const canRunFirstAnalysis = canEnterConsole && localReady;
 
   return (
     <main className="onboarding-shell" data-testid="onboarding-shell">
@@ -176,6 +181,13 @@ export function OnboardingShell({
                     <input id={`onboardingRepoRef-${repo.id}`} value={repo.ref} onChange={(event) => onRepoChange(repo.id, { ref: event.target.value })} />
                   </div>
                 </div>
+                <RepoAnalysisScopeFields
+                  repoId={`onboarding-${repo.id}`}
+                  include={repo.analysis_include}
+                  exclude={repo.analysis_exclude}
+                  onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
+                  onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
+                />
                 <RepoDiagnostics diagnostics={repoDiagnosticsByID.get(repo.id) ?? []} />
               </div>
             ))}
@@ -241,15 +253,17 @@ export function OnboardingShell({
               <li className={workspaceReady ? "is-ready" : ""}>Workspace selected</li>
               <li className={sourcesReady ? "is-ready" : ""}>Sources validated</li>
               <li className={runtimeReady ? "is-ready" : ""}>Runner selected</li>
+              <li className={localReady ? "is-ready" : ""}>Local readiness checked</li>
             </ul>
             <div className="actions">
               <button type="button" onClick={onEnterConsole} disabled={busy || !canEnterConsole} data-testid="onboarding-enter-console">
                 Open console
               </button>
-              <button type="button" onClick={onRunFirstAnalysis} disabled={busy || !canEnterConsole} data-testid="onboarding-run-first-analysis">
+              <button type="button" onClick={onRunFirstAnalysis} disabled={busy || !canRunFirstAnalysis} title={canEnterConsole && !localReady ? "Check local readiness before first analysis." : undefined} data-testid="onboarding-run-first-analysis">
                 Run first analysis
               </button>
             </div>
+            {canEnterConsole && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
             {firstRunStatus ? <p className="status">{firstRunStatus}</p> : null}
           </section>
         </div>
@@ -269,6 +283,10 @@ function RecentWorkspacesList({
   onOpen: (path: string) => void;
   onForget: (path: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleWorkspaces = expanded ? recentWorkspaces : recentWorkspaces.slice(0, 3);
+  const hiddenCount = Math.max(0, recentWorkspaces.length - visibleWorkspaces.length);
+
   if (recentWorkspaces.length === 0) {
     return <p className="recent-workspace-empty">No recent workspaces yet.</p>;
   }
@@ -278,7 +296,7 @@ function RecentWorkspacesList({
         <strong>Recent workspaces</strong>
         <span>{recentWorkspaces.length}/10</span>
       </div>
-      {recentWorkspaces.map((workspace) => (
+      {visibleWorkspaces.map((workspace) => (
         <div className={workspace.exists ? "recent-workspace-row" : "recent-workspace-row is-missing"} key={workspace.path}>
           <div>
             <code>{workspace.path}</code>
@@ -296,6 +314,11 @@ function RecentWorkspacesList({
           </div>
         </div>
       ))}
+      {recentWorkspaces.length > 3 ? (
+        <button type="button" className="link-button recent-workspace-toggle" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Show fewer workspaces" : `Show ${hiddenCount} more workspaces`}
+        </button>
+      ) : null}
     </div>
   );
 }

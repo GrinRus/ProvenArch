@@ -246,6 +246,8 @@ export type GuidedRepo = {
   path: string;
   git_url: string;
   ref: string;
+  analysis_include: string;
+  analysis_exclude: string;
 };
 
 export type WizardContract = {
@@ -454,6 +456,8 @@ export function makeGuidedRepo(partial?: Partial<GuidedRepo>): GuidedRepo {
     path: partial?.path ?? "/absolute/path/to/repository",
     git_url: partial?.git_url ?? "https://github.com/org/repository.git",
     ref: partial?.ref ?? "",
+    analysis_include: partial?.analysis_include ?? "",
+    analysis_exclude: partial?.analysis_exclude ?? "",
   };
 }
 

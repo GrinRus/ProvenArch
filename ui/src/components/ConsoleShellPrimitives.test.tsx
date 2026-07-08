@@ -10,7 +10,7 @@ import type { StageId, StageOption } from "../lib/consoleTypes";
 
 const stages: StageOption[] = [
   { id: "source", label: "Source", description: "Repos & imports", status: "done" },
-  { id: "readiness", label: "Readiness", description: "Validate & doctor", status: "active" },
+  { id: "readiness", label: "Readiness", description: "Validate setup", status: "active" },
   { id: "charter", label: "Charter", description: "Scope & rules", status: "pending" },
   { id: "analysis", label: "Analysis", description: "Run pipeline", status: "blocked", count: 2 },
   { id: "review", label: "Review", description: "Evidence & findings", status: "pending" },
@@ -83,6 +83,50 @@ describe("console shell primitives", () => {
       writable: true,
       value: originalMatchMedia,
     });
+  });
+
+  it("keeps the active stage visible in narrow inspection viewports", async () => {
+    const originalMatchMedia = window.matchMedia;
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        matches: true,
+        media: "(max-width: 900px)",
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    render(<StageRailHarness />);
+    fireEvent.click(screen.getByTestId("stage-publish"));
+
+    await waitFor(() => expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step"));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "center" });
+
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia,
+    });
+    if (originalScrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    } else {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it("prioritizes inspector blockers while keeping empty sections and artifact links accessible", () => {

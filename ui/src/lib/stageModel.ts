@@ -2,7 +2,7 @@ import type { StageId, StageOption, StageStatus } from "./consoleTypes";
 
 export const stageDefinitions: Record<StageId, { label: string; description: string }> = {
   source: { label: "Source", description: "Repos & imports" },
-  readiness: { label: "Readiness", description: "Validate & doctor" },
+  readiness: { label: "Readiness", description: "Validate setup" },
   charter: { label: "Charter", description: "Scope & rules" },
   analysis: { label: "Analysis", description: "Run pipeline" },
   review: { label: "Review", description: "Evidence & findings" },

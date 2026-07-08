@@ -2,10 +2,14 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, type Componen
 
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
+import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
+import { TabNav } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
+import { analysisScopeSummary } from "../lib/analysisScope";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
+import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 import { formatTimestamp, parseTimeOrMin } from "../lib/runState";
 import type {
@@ -35,6 +39,26 @@ const MermaidPreview = lazy(async () => {
   const module = await import("./MermaidPreview");
   return { default: module.MermaidPreview };
 });
+
+type ReviewArtifactFilter = "all" | "reports" | "diagrams" | "proposals" | "runtime";
+type PublishArtifactFilter = "all" | "changed" | "reports" | "proposals" | "diagrams" | "taskruns";
+
+const REVIEW_ARTIFACT_FILTERS: Array<{ id: ReviewArtifactFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "reports", label: "Reports" },
+  { id: "diagrams", label: "Diagrams" },
+  { id: "proposals", label: "Proposals" },
+  { id: "runtime", label: "Runtime" },
+];
+
+const PUBLISH_ARTIFACT_FILTERS: Array<{ id: PublishArtifactFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "changed", label: "Changed" },
+  { id: "reports", label: "Reports" },
+  { id: "proposals", label: "Proposals" },
+  { id: "diagrams", label: "Diagrams" },
+  { id: "taskruns", label: "Taskruns" },
+];
 
 export type SourceStageProps = {
   busy: boolean;
@@ -100,7 +124,7 @@ export function SourceStagePanel({
         </div>
         <div className="metric-tile">
           <span className="metric-label">Runtime</span>
-          <strong>{setupRuntime === "headless" ? setupRuntimeProvider : setupRuntime}</strong>
+          <strong>{runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true })}</strong>
         </div>
       </div>
 
@@ -167,6 +191,13 @@ export function SourceStagePanel({
                 />
               </div>
             </div>
+            <RepoAnalysisScopeFields
+              repoId={`guided-${repo.id}`}
+              include={repo.analysis_include}
+              exclude={repo.analysis_exclude}
+              onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
+              onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
+            />
           </div>
         ))}
       </div>
@@ -288,12 +319,13 @@ export function ReadinessStagePanel({
           {!validated
             ? "Validate workspace before checking local runtime readiness."
             : !localReady
-              ? "Run local readiness checks before starting analysis."
+              ? "Check local readiness before first analysis."
               : "Readiness gates are clear; run first analysis when you are ready to generate evidence."}
         </span>
       </div>
 
       <RuntimeProfileSummary
+        setupRuntime={setupRuntime}
         runtimeTimeoutEffective={runtimeTimeoutEffective}
         runtimeExecutionEffective={runtimeExecutionEffective}
         runtimePermissionEffective={runtimePermissionEffective}
@@ -339,12 +371,13 @@ export function ReadinessStagePanel({
           type="button"
           onClick={onRunFirstAnalysis}
           disabled={busy || !validated || !localReady}
-          title={validated && !localReady ? "Run local readiness before starting analysis." : undefined}
+          title={validated && !localReady ? "Check local readiness before first analysis." : undefined}
           data-testid="setup-run-first-btn"
         >
           Run first analysis
         </button>
       </div>
+      {validated && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
 
       <WorkspaceValidationResult validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
       {doctorStatus ? <p className="status">{doctorStatus}</p> : null}
@@ -408,7 +441,7 @@ function SourceRepoTable({
                   </td>
                   <td>{repo.ref || resolved?.ref || "current/default"}</td>
                   <td>
-                    <span className="status warn">Advanced workspace.yaml only</span>
+                    <span className="status">{analysisScopeSummary(repo.analysis_include, repo.analysis_exclude)}</span>
                   </td>
                   <td>
                     <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
@@ -508,7 +541,7 @@ function ReadinessSummaryCards({
       <ReadinessCard
         title="Runtime provider"
         tone={doctorTone(runtimeCheck?.status) ?? (setupRuntime === "fake" ? "ok" : "warn")}
-        status={setupRuntime === "headless" ? setupRuntimeProvider : "fake"}
+        status={runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true })}
         detail={runtimeCheck?.message ?? "doctor check has not run in this session"}
       />
       <ReadinessCard
@@ -528,11 +561,13 @@ function ReadinessSummaryCards({
 }
 
 function RuntimeProfileSummary({
+  setupRuntime,
   runtimeTimeoutEffective,
   runtimeExecutionEffective,
   runtimePermissionEffective,
   runtimeStepProviderEffective,
 }: {
+  setupRuntime: string;
   runtimeTimeoutEffective: RuntimeTimeoutValues;
   runtimeExecutionEffective: RuntimeExecutionValues;
   runtimePermissionEffective: RuntimePermissionValues;
@@ -540,6 +575,7 @@ function RuntimeProfileSummary({
 }) {
   const providerValues = Object.values(runtimeStepProviderEffective).filter(Boolean);
   const uniqueProviders = [...new Set(providerValues)];
+  const providerSummary = setupRuntime === "fake" ? "fake" : uniqueProviders.length > 0 ? uniqueProviders.join(", ") : "default provider";
   return (
     <section className="runtime-profile-summary" data-testid="readiness-runtime-summary">
       <div className="section-heading-row">
@@ -567,7 +603,7 @@ function RuntimeProfileSummary({
         </div>
         <div>
           <span className="metric-label">Step providers</span>
-          <strong>{uniqueProviders.length > 0 ? uniqueProviders.join(", ") : "default provider"}</strong>
+          <strong>{providerSummary}</strong>
         </div>
       </div>
       <p className="hint">Advanced runtime settings remain available below for exact persisted/effective/source values.</p>
@@ -891,7 +927,7 @@ export function AnalysisStagePanel({
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
-  const runtimeLabel = setupRuntime === "fake" ? "fake" : `${setupRuntime}/${setupRuntimeProvider}`;
+  const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
   const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
   const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
 
@@ -963,6 +999,7 @@ export function AnalysisStagePanel({
       <AnalysisStepReview
         steps={reviewSteps}
         selectedStep={selectedReviewStep}
+        runtimeMode={setupRuntime}
         runReviewStatus={runReviewStatus}
         runLogs={runLogs}
         gitDiff={gitDiff}
@@ -1102,6 +1139,7 @@ function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {
 function AnalysisStepReview({
   steps,
   selectedStep,
+  runtimeMode,
   runReviewStatus,
   runLogs,
   gitDiff,
@@ -1114,6 +1152,7 @@ function AnalysisStepReview({
 }: {
   steps: RunReviewStep[];
   selectedStep: RunReviewStep | null;
+  runtimeMode: string;
   runReviewStatus: string;
   runLogs: RunLogEntry[];
   gitDiff: GitDiffResponse | null;
@@ -1152,7 +1191,7 @@ function AnalysisStepReview({
                 <span className="step-index">{index}</span>
                 <strong>{step.label}</strong>
                 <code>{step.step_id}</code>
-                <span>{step.provider || "provider pending"}</span>
+                <span>{providerDisplayLabel(runtimeMode, step.provider)}</span>
                 <span>
                   {step.artifact_count} artifacts · {step.warnings_count}/{step.errors_count} warn/error
                 </span>
@@ -1160,26 +1199,19 @@ function AnalysisStepReview({
             ))}
           </div>
 
-          <div className="step-review-tabs" role="tablist" aria-label="Step review tabs">
-            {(["artifacts", "logs", "evidence", "diff"] as const).map((tab) => (
-              <button
-                type="button"
-                key={tab}
-                role="tab"
-                aria-selected={view === tab}
-                className={view === tab ? "is-active" : ""}
-                data-testid={`analysis-step-tab-${tab}`}
-                onClick={() => {
-                  onViewChange(tab);
-                  if (tab === "diff" && selectedStep?.step_id) {
-                    onLoadGitDiff({ stepId: selectedStep.step_id });
-                  }
-                }}
-              >
-                {capitalize(tab)}
-              </button>
-            ))}
-          </div>
+          <TabNav
+            ariaLabel="Step review tabs"
+            className="step-review-tabs"
+            testId="analysis-step-tabs"
+            value={view}
+            onChange={(tab) => {
+              onViewChange(tab);
+              if (tab === "diff" && selectedStep?.step_id) {
+                onLoadGitDiff({ stepId: selectedStep.step_id });
+              }
+            }}
+            options={(["artifacts", "logs", "evidence", "diff"] as const).map((tab) => ({ id: tab, label: capitalize(tab), testId: `analysis-step-tab-${tab}` }))}
+          />
 
           <div className="step-review-body">
             {view === "artifacts" ? (
@@ -1430,7 +1462,7 @@ function buildAnalysisShardRows(
       key,
       stepId,
       scope: last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace",
-      provider: fieldString(last?.fields, "provider") || provider,
+      provider: setupRuntime === "fake" ? "fake" : fieldString(last?.fields, "provider") || provider,
       status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
       artifactRef: last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only"),
       duration: durationFromLogFields(last?.fields),
@@ -1764,28 +1796,17 @@ export function ReviewStagePanel({
             </button>
           </section>
         ) : null}
-        <div className="review-tabs" role="tablist" aria-label="Review views">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={reviewView === "evidence"}
-            className={reviewView === "evidence" ? "is-active" : ""}
-            data-testid="review-view-evidence-tab"
-            onClick={() => setReviewView("evidence")}
-          >
-            Evidence
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={reviewView === "domain-map"}
-            className={reviewView === "domain-map" ? "is-active" : ""}
-            data-testid="review-view-domain-map-tab"
-            onClick={() => setReviewView("domain-map")}
-          >
-            Domain map
-          </button>
-        </div>
+        <TabNav
+          ariaLabel="Review views"
+          className="review-tabs"
+          testId="review-tabs"
+          value={reviewView}
+          onChange={setReviewView}
+          options={[
+            { id: "evidence", label: "Evidence", testId: "review-view-evidence-tab" },
+            { id: "domain-map", label: "Domain map", testId: "review-view-domain-map-tab" },
+          ]}
+        />
         {reviewView === "domain-map" ? (
           <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
         ) : (
@@ -2024,6 +2045,9 @@ function ReviewEvidenceWorkbench({
   onOpenArtifact: (path: string) => void;
 }) {
   const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
+  const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
+  const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
+  const visibleArtifactCount = visibleArtifactGroups.reduce((sum, group) => sum + group.artifacts.length, 0);
 
   useEffect(() => {
     if (evidenceView === "diff" && selectedArtifact) {
@@ -2037,13 +2061,27 @@ function ReviewEvidenceWorkbench({
         <ReviewQueuePanel queue={reviewQueue} onOpenArtifact={onOpenArtifact} />
         <div className="section-heading-row">
           <h2>Artifact explorer</h2>
-          <StatusBadge tone={artifactGroups.length > 0 ? "ok" : "info"}>{artifactGroups.length} groups</StatusBadge>
+          <StatusBadge tone={visibleArtifactGroups.length > 0 ? "ok" : "info"}>
+            {artifactFilter === "all" ? `${artifactGroups.length} groups` : `${visibleArtifactCount} refs`}
+          </StatusBadge>
         </div>
-        {artifactGroups.length === 0 ? (
-          <p className="hint">No selected-run artifacts yet. Run Analysis before evidence review.</p>
+        <TabNav
+          ariaLabel="Review artifact filters"
+          className="artifact-filter-tabs"
+          testId="review-artifact-filters"
+          value={artifactFilter}
+          onChange={setArtifactFilter}
+          options={REVIEW_ARTIFACT_FILTERS}
+        />
+        {visibleArtifactGroups.length === 0 ? (
+          <p className="hint">
+            {artifactGroups.length === 0
+              ? "No selected-run artifacts yet. Run Analysis before evidence review."
+              : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
+          </p>
         ) : (
           <div className="artifact-group-list" data-testid="results-artifacts-panel">
-            {artifactGroups.map((group) => (
+            {visibleArtifactGroups.map((group) => (
               <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
                 <div className="artifact-group-heading">
                   <h3>{group.name}</h3>
@@ -2078,20 +2116,14 @@ function ReviewEvidenceWorkbench({
             Approve selected evidence
           </button>
         </div>
-        <div className="evidence-preview-tabs" role="tablist" aria-label="Artifact workbench tabs">
-          {(["preview", "diff", "evidence", "logs"] as const).map((tab) => (
-            <button
-              type="button"
-              key={tab}
-              role="tab"
-              aria-selected={evidenceView === tab}
-              className={evidenceView === tab ? "is-active" : ""}
-              onClick={() => setEvidenceView(tab)}
-            >
-              {capitalize(tab)}
-            </button>
-          ))}
-        </div>
+        <TabNav
+          ariaLabel="Artifact workbench tabs"
+          className="evidence-preview-tabs"
+          testId="evidence-preview-tabs"
+          value={evidenceView}
+          onChange={setEvidenceView}
+          options={(["preview", "diff", "evidence", "logs"] as const).map((tab) => ({ id: tab, label: capitalize(tab) }))}
+        />
         {evidenceView === "preview" ? (
           selectedArtifactIsMermaid ? (
             <div data-testid="run-diagram-content-panel">
@@ -2348,6 +2380,44 @@ function groupArtifactsByFolder(artifacts: Artifact[]): ArtifactGroup[] {
   return Array.from(groups.entries())
     .sort(([left], [right]) => reviewArtifactGroupPriority(left) - reviewArtifactGroupPriority(right) || left.localeCompare(right))
     .map(([name, groupArtifacts]) => ({ name, artifacts: groupArtifacts.sort((left, right) => left.path.localeCompare(right.path)) }));
+}
+
+function filterReviewArtifactGroups(groups: ArtifactGroup[], filter: ReviewArtifactFilter): ArtifactGroup[] {
+  if (filter === "all") {
+    return groups;
+  }
+  return groups
+    .map((group) => ({
+      ...group,
+      artifacts: group.artifacts.filter((artifact) => reviewArtifactMatchesFilter(artifact, filter)),
+    }))
+    .filter((group) => group.artifacts.length > 0);
+}
+
+function reviewArtifactMatchesFilter(artifact: Artifact, filter: ReviewArtifactFilter): boolean {
+  const path = artifact.path;
+  if (filter === "diagrams") {
+    return artifact.kind === "diagram" || path.startsWith("reports/diagrams/");
+  }
+  if (filter === "proposals") {
+    return artifact.kind === "proposal" || artifact.kind === "changelog" || path.startsWith("proposals/") || path.startsWith("reports/changelog/");
+  }
+  if (filter === "runtime") {
+    return artifact.kind === "taskrun" || path.startsWith("reports/taskruns/");
+  }
+  if (filter === "reports") {
+    return (
+      (artifact.kind === "report" || artifact.kind === "agent-output" || path.startsWith("reports/")) &&
+      !path.startsWith("reports/diagrams/") &&
+      !path.startsWith("reports/changelog/") &&
+      !path.startsWith("reports/taskruns/")
+    );
+  }
+  return true;
+}
+
+function reviewArtifactFilterLabel(filter: ReviewArtifactFilter): string {
+  return REVIEW_ARTIFACT_FILTERS.find((option) => option.id === filter)?.label ?? "Selected";
 }
 
 function reviewArtifactGroupName(path: string): string {
@@ -2712,7 +2782,7 @@ export function ProposalsStagePanel({
             <StatusBadge tone={proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalReview.packages.length} groups</StatusBadge>
           </div>
           {proposalReview.packages.length === 0 ? (
-            <p className="hint">No proposal or changelog artifacts yet. Run Analysis through `step4.proposals` before publication review.</p>
+            <p className="hint">No proposal or changelog artifacts yet. Run Analysis until proposals are generated before publication review.</p>
           ) : (
             <div className="proposal-package-list">
               {proposalReview.packages.map((group) => (
@@ -2749,20 +2819,14 @@ export function ProposalsStagePanel({
               Approve proposal
             </button>
           </div>
-          <div className="proposal-preview-tabs" role="tablist" aria-label="Proposal review tabs" data-testid="proposal-preview-tabs">
-            {(["preview", "evidence", "changelog", "diff", "logs"] as const).map((view) => (
-              <button
-                type="button"
-                role="tab"
-                aria-selected={proposalView === view}
-                className={proposalView === view ? "is-active" : ""}
-                key={view}
-                onClick={() => setProposalView(view)}
-              >
-                {proposalTabLabel(view)}
-              </button>
-            ))}
-          </div>
+          <TabNav
+            ariaLabel="Proposal review tabs"
+            className="proposal-preview-tabs"
+            testId="proposal-preview-tabs"
+            value={proposalView}
+            onChange={setProposalView}
+            options={(["preview", "evidence", "changelog", "diff", "logs"] as const).map((view) => ({ id: view, label: proposalTabLabel(view) }))}
+          />
 
           {proposalView === "preview" ? (
             <div className="proposal-tab-panel">
@@ -3227,9 +3291,9 @@ export function AskStagePanel({
                 <p>
                   Run <code>{qaRun.run_id}</code> status: <strong>{qaRun.status}</strong>
                 </p>
-                <p>Runtime provider: {qaRun.provider || qaRun.runtime_provider || "pending"}</p>
+                <p>Runtime provider: {qaRunProviderLabel(qaRun)}</p>
               </div>
-              <a href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
+              <a className="link-button" href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
                 Open run logs
               </a>
               {qaRun.error ? <p className="status err">{qaRun.error}</p> : null}
@@ -3338,7 +3402,13 @@ function qaRunStatusTone(status?: QARunResponse["status"]): "info" | "ok" | "war
 }
 
 function qaRunProviderLabel(run: QARunResponse | null): string {
-  return run?.provider || run?.runtime_provider || "agent-backed";
+  if (!run) {
+    return "agent-backed";
+  }
+  if (run.provider === "fake") {
+    return "fake";
+  }
+  return run.provider || run.runtime_provider || "agent-backed";
 }
 
 function mergeQARunHistory(run: QARunResponse, history: QARunResponse[], mode: "prepend" | "preserve" = "prepend"): QARunResponse[] {
@@ -3385,7 +3455,12 @@ export function PublishStagePanel({
   const [publishView, setPublishView] = useState<"preview" | "diff" | "evidence" | "changelog">("preview");
   const [localSelectedPath, setLocalSelectedPath] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
+  const [artifactFilter, setArtifactFilter] = useState<PublishArtifactFilter>("all");
   const publishArtifacts = artifacts.filter((artifact) => artifact.path.trim().length > 0);
+  const changedPathSet = new Set(gitDiff?.files.map((file) => file.path) ?? []);
+  const filteredPublishArtifacts = publishArtifacts.filter((artifact) => publishArtifactMatchesFilter(artifact, artifactFilter, changedPathSet));
+  const visibleChangedFiles = artifactFilter === "all" || artifactFilter === "changed" ? (gitDiff?.files ?? []) : [];
+  const selectedDiffFilePath = gitDiff?.selected_file?.path;
   const effectiveSelectedPath =
     (localSelectedPath && publishArtifacts.some((artifact) => artifact.path === localSelectedPath) ? localSelectedPath : "") ||
     (selectedArtifact && publishArtifacts.some((artifact) => artifact.path === selectedArtifact) ? selectedArtifact : "") ||
@@ -3515,18 +3590,26 @@ export function PublishStagePanel({
               ))}
             </div>
           )}
-          {gitDiff?.files.length ? (
+          <TabNav
+            ariaLabel="Publish artifact filters"
+            className="artifact-filter-tabs"
+            testId="publish-artifact-filters"
+            value={artifactFilter}
+            onChange={setArtifactFilter}
+            options={PUBLISH_ARTIFACT_FILTERS}
+          />
+          {visibleChangedFiles.length ? (
             <div className="publish-artifact-list compact" role="list" aria-label="changed workspace files">
-              {gitDiff.files.slice(0, 16).map((file) => (
+              {visibleChangedFiles.slice(0, 16).map((file) => (
                 <div key={file.path} role="listitem">
                   <button
                     type="button"
-                    className={`publish-artifact-row${gitDiff.selected_file?.path === file.path ? " is-selected" : ""}`}
+                    className={`publish-artifact-row${selectedDiffFilePath === file.path ? " is-selected" : ""}`}
                     onClick={() => {
                       setPublishView("diff");
                       onLoadGitDiff({ path: file.path });
                     }}
-                    aria-pressed={gitDiff.selected_file?.path === file.path}
+                    aria-pressed={selectedDiffFilePath === file.path}
                   >
                     <span>{file.path}</span>
                     <code>
@@ -3537,38 +3620,40 @@ export function PublishStagePanel({
               ))}
             </div>
           ) : null}
-          <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
-            {publishArtifacts.slice(0, 12).map((artifact) => (
-              <div key={artifact.path} role="listitem">
-                <button
-                  type="button"
-                  className={`publish-artifact-row${activePreviewPath === artifact.path ? " is-selected" : ""}`}
-                  onClick={() => handleSelectPublishArtifact(artifact.path)}
-                  aria-pressed={activePreviewPath === artifact.path}
-                >
-                  <span>{artifact.label || artifact.path}</span>
-                  <code>{artifact.path}</code>
-                </button>
-              </div>
-            ))}
-          </div>
+          {filteredPublishArtifacts.length === 0 ? (
+            <p className="empty-state" data-testid="publish-artifact-filter-empty">
+              {publishArtifacts.length === 0
+                ? "No selected-run artifacts are available for publication preview."
+                : `No ${publishArtifactFilterLabel(artifactFilter).toLowerCase()} artifact refs are available in this publication view.`}
+            </p>
+          ) : (
+            <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
+              {filteredPublishArtifacts.slice(0, 12).map((artifact) => (
+                <div key={artifact.path} role="listitem">
+                  <button
+                    type="button"
+                    className={`publish-artifact-row${activePreviewPath === artifact.path ? " is-selected" : ""}`}
+                    onClick={() => handleSelectPublishArtifact(artifact.path)}
+                    aria-pressed={activePreviewPath === artifact.path}
+                  >
+                    <span>{artifact.label || artifact.path}</span>
+                    <code>{artifact.path}</code>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="publish-preview-panel" data-testid="publish-preview-panel">
-          <div className="publish-preview-tabs" role="tablist" aria-label="Publish preview tabs" data-testid="publish-preview-tabs">
-            {(["preview", "diff", "evidence", "changelog"] as const).map((view) => (
-              <button
-                key={view}
-                type="button"
-                className={publishView === view ? "is-active" : ""}
-                onClick={() => setPublishView(view)}
-                aria-selected={publishView === view}
-                role="tab"
-              >
-                {publishTabLabel(view)}
-              </button>
-            ))}
-          </div>
+          <TabNav
+            ariaLabel="Publish preview tabs"
+            className="publish-preview-tabs"
+            testId="publish-preview-tabs"
+            value={publishView}
+            onChange={setPublishView}
+            options={(["preview", "diff", "evidence", "changelog"] as const).map((view) => ({ id: view, label: publishTabLabel(view) }))}
+          />
           <div className="publish-tab-panel" data-testid="publish-tab-panel">
             {publishView === "preview" ? (
               <div className="publish-selected-preview" data-testid="publish-selected-preview">
@@ -3715,6 +3800,38 @@ type PublishGateItem = {
   detail: string;
   tone: "info" | "ok" | "warn" | "error";
 };
+
+function publishArtifactMatchesFilter(artifact: Artifact, filter: PublishArtifactFilter, changedPathSet: Set<string>): boolean {
+  const path = artifact.path;
+  if (filter === "all") {
+    return true;
+  }
+  if (filter === "changed") {
+    return changedPathSet.has(path);
+  }
+  if (filter === "reports") {
+    return (
+      (artifact.kind === "report" || artifact.kind === "agent-output" || path.startsWith("reports/")) &&
+      !path.startsWith("reports/diagrams/") &&
+      !path.startsWith("reports/changelog/") &&
+      !path.startsWith("reports/taskruns/")
+    );
+  }
+  if (filter === "proposals") {
+    return artifact.kind === "proposal" || artifact.kind === "changelog" || path.startsWith("proposals/") || path.startsWith("reports/changelog/");
+  }
+  if (filter === "diagrams") {
+    return artifact.kind === "diagram" || path.startsWith("reports/diagrams/");
+  }
+  if (filter === "taskruns") {
+    return artifact.kind === "taskrun" || path.startsWith("reports/taskruns/");
+  }
+  return true;
+}
+
+function publishArtifactFilterLabel(filter: PublishArtifactFilter): string {
+  return PUBLISH_ARTIFACT_FILTERS.find((option) => option.id === filter)?.label ?? "Selected";
+}
 
 function buildPublishFolderSummaries(artifacts: Artifact[]): Array<{ folder: string; count: number; sample: string }> {
   const grouped = new Map<string, Artifact[]>();

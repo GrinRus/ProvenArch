@@ -59,6 +59,45 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
+### Plan ID
+EP-20260708-console-source-hydration-recovery
+
+### Context
+Follow-up medium-depth rendered UX/UI audit found two P1 operator issues after the initial hardening slice. First, Source could render the default `my-service` sample draft instead of the actual auto-init `workspace.yaml` repo when the backend YAML used Go-style four-space indentation; pressing `Save and validate sources` could then overwrite a valid workspace manifest with sample values. Second, a failed workspace manifest reload left the existing shell visible but did not surface a clear recoverable error to the operator.
+
+### Goals (must have)
+- [x] Hydrate guided Source repos/docs imports from both UI-authored and Go-authored `workspace.yaml` indentation.
+- [x] Preserve hydrated repo values when the operator saves Source without making edits.
+- [x] Surface workspace manifest reload failures as visible recoverable console errors while keeping Refresh and current shell controls available.
+- [ ] Run focused UI tests, full UI test/typecheck, exact-node build, and bounded fake live smoke before committing.
+- [ ] Run a follow-up medium live UX/UI audit and close any remaining rendered findings in a second commit.
+
+### Non-goals
+- [ ] Do not change public API response shapes, workspace schema/spec, runtime contracts, or backend run behavior.
+- [ ] Do not write to analyzed source repositories.
+- [ ] Do not run release/regres matrices or create `release_verdict_*` artifacts.
+
+### Approach
+1) Make the guided manifest parser indentation-tolerant for repo entries and nested `analysis.include/exclude`.
+2) Let manifest fetch failures propagate to the existing recoverable top-level error instead of silently replacing Source with an empty/sample draft.
+3) Add regression tests covering Go-style auto-init manifests, save preservation, and manifest reload recovery.
+4) Verify through UI tests/typecheck/build and a bounded fake live smoke before the first commit.
+
+### Files expected to change
+- `ui/src/lib/workspaceSetupState.ts`
+- `ui/src/hooks/useManifestEditor.ts`
+- `ui/src/App.test.tsx`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Source form/table hydrate `repos[]` from Go-style `workspace.yaml` with four-space list indentation.
+- [x] Saving the hydrated Source form preserves the loaded repo and does not persist the sample `my-service` draft.
+- [x] Manifest reload failure shows a visible `Error: ...` message while TopStatusBar, Refresh, and current shell remain mounted.
+- [ ] Live fake Source screenshot shows the real auto-init repo path/name before any manual Source edit.
+
+### Progress log
+- 2026-07-08: Implemented parser/recovery regression fixes and added focused component tests. Targeted Vitest command passed for manifest recovery, guided hydration, and Source table coverage.
+
 ### Continuous Backlog Queue Policy
 
 Current normal product backlog queue is empty. `docs/STAKEHOLDER_DOC.md` marks MVP product epics as done within the current beta boundary, and `docs/BACKLOG.md` remains a reference/acceptance backlog rather than the active execution queue.
