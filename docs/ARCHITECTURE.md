@@ -309,7 +309,7 @@
 4) Proposals -> agent-authored drafts + automatic promotion + derived model rebuild
 
 On-demand capability:
-- Target Q&A capability использует async runtime-backed run `pipeline="qa"` / step id `qa.ask`: orchestrator собирает deterministic `reports/taskruns/<run_id>/qa/context-pack.json` из `charter/cards`, `model`, `reports/as-is`, `reports/findings`, `reports/coverage`, `proposals`, `reports/changelog` и configured `docs.imports_path`, исключая `reports/taskruns/**`; runtime provider с role `system-analyst-qa` и `skills/prompt-packs/qa.md` пишет только `reports/taskruns/<run_id>/qa/qa-answer.json`.
+- Target Q&A capability использует async runtime-backed run `pipeline="qa"` / step id `qa.ask`: orchestrator собирает deterministic `reports/taskruns/<run_id>/qa/context-pack.json` из `charter/cards`, `model`, `reports/as-is`, `reports/findings`, `reports/coverage`, `proposals`, `reports/changelog` и configured `docs.imports_path`, исключая `reports/taskruns/**`; runtime provider с role `system-analyst-qa` и `skills/prompt-packs/qa.md` пишет только `reports/taskruns/<run_id>/qa/qa-answer.json`; UI показывает status/history, citations/unresolved, audit refs and failed-run recovery with same-question retry over the same API surface.
 - Current compatibility surfaces `acp qa` и `POST /api/qa/ask` остаются deterministic workspace-backed read-only service без runtime invocation до полной миграции внешних consumers.
 
 Execution modes:
@@ -335,7 +335,7 @@ Execution modes:
 
 ## Boundary notes
 - Native GitHub/GitLab webhook listener, hosted control plane and external SCM app integration остаются вне MVP; required integration surface — CLI batch job, optional trusted internal API trigger.
-- Async Q&A API writes only run-scoped audit artifacts under `reports/taskruns/<run_id>/qa/` and must not mutate source repos or canonical architecture outputs. Legacy `POST /api/qa/ask` remains read-only and deterministic.
+- Async Q&A API writes only run-scoped audit artifacts under `reports/taskruns/<run_id>/qa/` and must not mutate source repos or canonical architecture outputs; failed QA runs keep their taskrun diagnostics available for UI recovery and retry. Legacy `POST /api/qa/ask` remains read-only and deterministic.
 
 ## Progress tracking
 - Каноническая матрица stakeholder-статусов: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

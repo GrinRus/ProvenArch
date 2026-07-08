@@ -2415,6 +2415,7 @@ code {
 .qa-answer-panel,
 .qa-composer,
 .qa-run-summary,
+.qa-recovery-panel,
 .qa-answer,
 .qa-readonly-safety-panel,
 .qa-citations-panel,
@@ -2458,6 +2459,38 @@ code {
 
 .qa-empty-answer {
   background: var(--surface);
+}
+
+.qa-recovery-panel {
+  padding: 0.72rem;
+  border: 1px solid rgba(180, 35, 24, 0.28);
+  border-radius: 0.48rem;
+  background: var(--err-soft);
+}
+
+.qa-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.qa-recovery-grid > div {
+  min-width: 0;
+  padding: 0.54rem;
+  border: 1px solid rgba(180, 35, 24, 0.18);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.qa-recovery-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.qa-recovery-actions {
+  margin-top: 0;
 }
 
 .qa-related-partial,
@@ -3433,7 +3466,8 @@ code {
   .analysis-progress-grid,
   .analysis-recovery-grid,
   .analysis-timeline,
-  .analysis-step-card-grid {
+  .analysis-step-card-grid,
+  .qa-recovery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3503,8 +3537,10 @@ code {
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,
+  .analysis-recovery-grid,
   .analysis-timeline,
   .analysis-step-card-grid,
+  .qa-recovery-grid,
   .domain-map-summary-grid {
     grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
   }
@@ -3745,6 +3781,7 @@ code {
   .analysis-recovery-grid,
   .analysis-timeline,
   .analysis-step-card-grid,
+  .qa-recovery-grid,
   .git-diff-layout {
     grid-template-columns: 1fr;
   }
@@ -3769,7 +3806,8 @@ code {
 
   .review-intel-grid,
   .domain-map-summary-grid,
-  .proposal-quality-grid {
+  .proposal-quality-grid,
+  .qa-recovery-grid {
     grid-template-columns: 1fr;
   }
 

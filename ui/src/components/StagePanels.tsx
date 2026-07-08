@@ -2171,7 +2171,7 @@ function ReviewEvidenceWorkbench({
 }) {
   const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
   const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
-  const artifactExplorerMode = reviewQueue.length === 0 ? "empty-queue" : "review-queue";
+  const [artifactExplorerOpen, setArtifactExplorerOpen] = useState(reviewQueue.length === 0);
   const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
   const visibleArtifactCount = visibleArtifactGroups.reduce((sum, group) => sum + group.artifacts.length, 0);
 
@@ -2180,6 +2180,12 @@ function ReviewEvidenceWorkbench({
       onLoadGitDiff({ path: selectedArtifact });
     }
   }, [evidenceView, onLoadGitDiff, selectedArtifact]);
+
+  useEffect(() => {
+    if (reviewQueue.length === 0) {
+      setArtifactExplorerOpen(true);
+    }
+  }, [reviewQueue.length]);
 
   return (
     <div className="review-workbench">
@@ -2193,11 +2199,11 @@ function ReviewEvidenceWorkbench({
       <aside className="review-task-lane" id="review-task-lane" aria-label="Review tasks and supporting artifacts">
         <ReviewQueuePanel queue={reviewQueue} selectedArtifact={selectedArtifact} onOpenArtifact={onOpenArtifact} />
         <details
-          key={artifactExplorerMode}
           className="review-artifact-explorer"
           data-testid="review-artifact-explorer"
           id="review-artifacts"
-          open={reviewQueue.length === 0 ? true : undefined}
+          open={artifactExplorerOpen}
+          onToggle={(event) => setArtifactExplorerOpen(event.currentTarget.open)}
         >
           <summary className="review-artifact-explorer-summary" data-testid="review-artifact-explorer-toggle">
             <span className="review-artifact-summary-copy">
@@ -2214,7 +2220,10 @@ function ReviewEvidenceWorkbench({
               className="artifact-filter-tabs"
               testId="review-artifact-filters"
               value={artifactFilter}
-              onChange={setArtifactFilter}
+              onChange={(filter) => {
+                setArtifactFilter(filter);
+                setArtifactExplorerOpen(true);
+              }}
               options={REVIEW_ARTIFACT_FILTERS}
             />
             {visibleArtifactGroups.length === 0 ? (
@@ -3343,6 +3352,20 @@ export function AskStagePanel({
       setStatus("Question is required.");
       return;
     }
+    await startQARun(trimmed);
+  }
+
+  async function handleRetryQA() {
+    const retryQuestion = (qaRun?.question || question).trim();
+    if (!retryQuestion) {
+      setStatus("Original question is unavailable.");
+      return;
+    }
+    setQuestion(retryQuestion);
+    await startQARun(retryQuestion);
+  }
+
+  async function startQARun(trimmed: string) {
     setBusy(true);
     setQARun(null);
     setSelectedRunID(null);
@@ -3456,6 +3479,8 @@ export function AskStagePanel({
             </div>
           ) : null}
 
+          <QAFailureRecovery qaRun={qaRun} busy={busy || qaRunActive} onRetry={() => void handleRetryQA()} />
+
           {qaRun ? (
             <div className="qa-answer" data-testid="qa-answer">
               <div className="panel-subheader">
@@ -3541,6 +3566,86 @@ export function AskStagePanel({
       </div>
     </section>
   );
+}
+
+function QAFailureRecovery({
+  qaRun,
+  busy,
+  onRetry,
+}: {
+  qaRun: QARunResponse | null;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  if (qaRun?.status !== "failed") {
+    return null;
+  }
+
+  const errorCode = qaRun.error_code || "unclassified";
+  const blockedStep = qaRun.current_step || "qa.ask";
+  const warningCount = qaRun.warnings?.length ?? 0;
+  const auditRefs = `reports/taskruns/${qaRun.run_id}/qa/`;
+  const canRetry = Boolean((qaRun.question || "").trim());
+
+  return (
+    <section className="qa-recovery-panel" data-testid="qa-failure-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Recovery path</h2>
+          <p className="hint">{qaFailureGuidance(errorCode, warningCount)}</p>
+        </div>
+        <StatusBadge tone="error">failed</StatusBadge>
+      </div>
+      <div className="qa-recovery-grid">
+        <div>
+          <span className="metric-label">Classification</span>
+          <strong>{errorCode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Blocked step</span>
+          <strong>{blockedStep}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Audit evidence</span>
+          <strong>{auditRefs}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Warnings</span>
+          <strong>{warningCount}</strong>
+        </div>
+      </div>
+      {qaRun.error ? <p className="status err">{qaRun.error}</p> : null}
+      {warningCount > 0 ? <p className="status warn">Warnings: {(qaRun.warnings ?? []).join(", ")}</p> : null}
+      <div className="actions qa-recovery-actions">
+        <button type="button" data-testid="qa-retry-run-btn" onClick={onRetry} disabled={busy || !canRetry}>
+          Retry question
+        </button>
+        <a className="link-button" href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
+          Open run logs
+        </a>
+      </div>
+      <p className="hint">Retry starts a new Q&A run; the failed answer attempt stays in history for audit.</p>
+    </section>
+  );
+}
+
+function qaFailureGuidance(errorCode: string, warningCount: number): string {
+  if (errorCode === "runtime_permission_required") {
+    return "Resolve the runtime permission request, then retry the question.";
+  }
+  if (errorCode.includes("runner_unavailable")) {
+    return "Provider availability blocked the answer; check runtime logs and provider readiness before retry.";
+  }
+  if (errorCode.includes("runtime_timeout")) {
+    return "The answer run exhausted its time budget; inspect the last progress signal before retry.";
+  }
+  if (errorCode.includes("runtime_contract")) {
+    return "The answer artifact did not pass validation; inspect audit artifacts before retry.";
+  }
+  if (warningCount > 0) {
+    return "Review warnings and audit artifacts, then retry when the issue is understood.";
+  }
+  return "Review logs and audit artifacts, then retry the same question when the cause is clear.";
 }
 
 function qaRunStatusTone(status?: QARunResponse["status"]): "info" | "ok" | "warn" | "error" {

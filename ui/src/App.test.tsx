@@ -1718,13 +1718,17 @@ describe("App", () => {
 
     await renderConsoleApp();
 
+    const explorer = await screen.findByTestId("review-artifact-explorer");
     fireEvent.click(await screen.findByTestId("review-artifact-explorer-toggle"));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
     const filters = await screen.findByTestId("review-artifact-filters");
     const artifactPanel = screen.getByTestId("results-artifacts-panel");
     expect(filters).toHaveAttribute("role", "tablist");
     expect(within(filters).getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(within(filters).getByRole("tab", { name: "Diagrams" }));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
+    expect(screen.getByTestId("run-diagrams-list")).toBeVisible();
     await waitFor(() => expect(artifactPanel).toHaveTextContent("C4 context"));
     expect(artifactPanel).not.toHaveTextContent("As-is overview");
     expect(artifactPanel).not.toHaveTextContent("Payments proposal");
@@ -2259,6 +2263,53 @@ describe("App", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+  });
+
+  it("renders Q&A failure recovery and retries the original question", async () => {
+    const fetchMock = createFetchMock({
+      qaRunID: "qa-failed",
+      qaResponse: {
+        status: "failed",
+        question: "Who owns payments?",
+        current_step: "qa.ask",
+        error_code: "runtime_contract_failed",
+        error: "qa-answer.json failed validation",
+        warnings: ["answer artifact missing citations"],
+        answer: null,
+        citations: null,
+        unresolved: null,
+        confidence: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    const recovery = await screen.findByTestId("qa-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovery path");
+    expect(recovery).toHaveTextContent("runtime_contract_failed");
+    expect(recovery).toHaveTextContent("qa.ask");
+    expect(recovery).toHaveTextContent("reports/taskruns/qa-failed/qa/");
+    expect(recovery).toHaveTextContent("answer artifact missing citations");
+    expect(screen.getByTestId("qa-answer")).toHaveTextContent("No answer returned yet");
+
+    fireEvent.click(screen.getByTestId("qa-retry-run-btn"));
+
+    await waitFor(() => {
+      const starts = fetchMock.mock.calls.filter((call) => call[0] === "/api/qa/runs");
+      expect(starts).toHaveLength(2);
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Who owns payments?" }),
+      }),
+    );
   });
 
   it("routes the inspector Ask primary action to the visible Q&A submit flow", async () => {

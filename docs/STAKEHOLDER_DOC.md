@@ -291,7 +291,7 @@ arch-workspace/
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
-   - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, with deterministic `POST /api/qa/ask` compatibility API
+   - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, с history/citations/safety/audit links, failed-run recovery и deterministic `POST /api/qa/ask` compatibility API
    - `Publish` для Git Review Room: folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action и proposal branch
 
 3) **Orchestrator (локальный сервис, Go)**  
@@ -446,7 +446,7 @@ Wizard из блоков-шаблонов:
   - configured `docs.imports_path` (`docs/imports/*` по умолчанию)
 - Runtime step id: `qa.ask`; agent role: `system-analyst-qa`; prompt pack: `skills/prompt-packs/qa.md`; write scope: только `reports/taskruns/<run_id>/qa/`.
 - QA runs не меняют source repos или canonical workspace outputs; они пишут `context-pack.json`, `qa-answer.json` и `runtime-execution.json` в taskrun scope.
-- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
+- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
 - Compatibility: deterministic `acp qa` + public read-only `POST /api/qa/ask` остаются temporary fallback surfaces.
 - API возвращает `answer`, `citations`, `unresolved`, `confidence`; empty/invalid request идёт через standard API error envelope.
 

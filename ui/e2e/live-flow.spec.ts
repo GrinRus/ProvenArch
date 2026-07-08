@@ -449,6 +449,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
   await expect(page.getByTestId("review-citation-coverage")).toBeVisible();
   const reviewArtifactExplorer = await openReviewArtifactExplorer(page);
+  const diagramsFilter = reviewArtifactExplorer.getByRole("tab", { name: "Diagrams" });
+  await expect(diagramsFilter).toBeVisible();
+  await diagramsFilter.click();
   const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
   await expect(diagramButtons.first()).toBeVisible();
 
@@ -490,6 +493,10 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .toBe(true);
   await expectReadableViewportPanel(page, diagramPanel, "Review Mermaid/C4 preview");
 
+  const reportsFilter = reviewArtifactExplorer.getByRole("tab", { name: "Reports" });
+  await expect(reportsFilter).toBeVisible();
+  await reportsFilter.click();
+  await expect(reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()).toBeVisible();
   const preferredReadableArtifactButton =
     (await reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).count()) > 0
       ? reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()
