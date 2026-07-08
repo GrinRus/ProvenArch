@@ -936,6 +936,7 @@ export function AnalysisStagePanel({
   const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
   const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
   const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
+  const artifactCount = artifacts.length;
 
   const focusBlockerDetails = useCallback(() => {
     blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
@@ -999,6 +1000,17 @@ export function AnalysisStagePanel({
         stepTimeline={stepTimeline}
         issueCount={issueRows.length}
         blockerCount={blockerRows.length}
+        onReviewBlocker={handleReviewBlocker}
+      />
+      <AnalysisFailureRecovery
+        busy={busy}
+        runStatus={runStatus}
+        runtimeLabel={runtimeLabel}
+        warningCount={warningCount}
+        issueCount={issueRows.length}
+        artifactCount={artifactCount}
+        pendingPermissionCount={pendingPermissions.length}
+        onRetry={onRunPipeline}
         onReviewBlocker={handleReviewBlocker}
       />
       <AnalysisRunTimeline steps={stepTimeline} />
@@ -1120,6 +1132,113 @@ function AnalysisRunProgress({
       </button>
     </section>
   );
+}
+
+function AnalysisFailureRecovery({
+  busy,
+  runStatus,
+  runtimeLabel,
+  warningCount,
+  issueCount,
+  artifactCount,
+  pendingPermissionCount,
+  onRetry,
+  onReviewBlocker,
+}: {
+  busy: boolean;
+  runStatus: RunStatusResponse | null;
+  runtimeLabel: string;
+  warningCount: number;
+  issueCount: number;
+  artifactCount: number;
+  pendingPermissionCount: number;
+  onRetry: (pipeline: "init" | "refresh") => void;
+  onReviewBlocker: () => void;
+}) {
+  if (runStatus?.status !== "failed") {
+    return null;
+  }
+
+  const retryPipeline = runStatus.pipeline === "refresh" ? "refresh" : "init";
+  const errorCode = runStatus.error_code || "unclassified";
+  const blockedStep = runStatus.current_step || `${retryPipeline}.unknown`;
+  const evidenceSummary = failureEvidenceSummary(artifactCount, issueCount);
+
+  return (
+    <section className="analysis-recovery-panel" data-testid="analysis-failure-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Recovery path</h2>
+          <p className="hint">{failureRecoveryGuidance(errorCode, pendingPermissionCount)}</p>
+        </div>
+        <StatusBadge tone="error">failed</StatusBadge>
+      </div>
+
+      <div className="analysis-recovery-grid">
+        <div>
+          <span className="metric-label">Classification</span>
+          <strong>{errorCode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Blocked step</span>
+          <strong>{blockedStep}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Evidence kept</span>
+          <strong>{evidenceSummary}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Warnings</span>
+          <strong>{warningCount}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Runtime/provider</span>
+          <strong>{runtimeLabel}</strong>
+        </div>
+      </div>
+
+      {runStatus.error ? <p className="status err">{runStatus.error}</p> : null}
+
+      <div className="actions analysis-recovery-actions">
+        <button type="button" data-testid="analysis-retry-run-btn" onClick={() => onRetry(retryPipeline)} disabled={busy}>
+          Retry {retryPipeline}
+        </button>
+        <button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewBlocker}>
+          Review blocker details
+        </button>
+      </div>
+      <p className="hint">Retry starts a new run; the failed run remains available in History for audit and comparison.</p>
+    </section>
+  );
+}
+
+function failureRecoveryGuidance(errorCode: string, pendingPermissionCount: number): string {
+  if (pendingPermissionCount > 0 || errorCode === "runtime_permission_required") {
+    return "Resolve the pending permission request, then retry the same pipeline.";
+  }
+  if (errorCode.includes("runner_unavailable")) {
+    return "Provider availability blocked artifact creation; check logs and provider readiness before retry.";
+  }
+  if (errorCode.includes("runtime_timeout")) {
+    return "The run exhausted its time budget; inspect the last progress signal before retry.";
+  }
+  if (errorCode.includes("runtime_contract")) {
+    return "Generated artifacts did not pass validation; inspect the rejected step evidence before retry.";
+  }
+  if (errorCode.includes("infra") || errorCode.includes("incomplete")) {
+    return "The cycle ended incomplete; review the last durable evidence before starting another run.";
+  }
+  return "Review the blocker details, then retry the same pipeline when the cause is clear.";
+}
+
+function failureEvidenceSummary(artifactCount: number, issueCount: number): string {
+  if (artifactCount > 0) {
+    return `${artifactCount} artifact refs kept`;
+  }
+  if (issueCount > 0) {
+    return `${issueCount} diagnostic rows`;
+  }
+  return "status and logs only";
 }
 
 function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {

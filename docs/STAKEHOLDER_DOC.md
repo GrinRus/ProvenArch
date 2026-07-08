@@ -287,7 +287,7 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
    - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, shard/log table, warning/error drilldown и pending permissions
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, shard/log table, warning/error drilldown и pending permissions
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`

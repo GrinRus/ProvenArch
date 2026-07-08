@@ -125,7 +125,7 @@ acp serve
 1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state.
 2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; первый analysis остаётся disabled до successful doctor result.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
-4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table и warning/error drilldown.
+4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table, warning/error drilldown и failed-run recovery path.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
 
 При повторном открытии Console V2 выбирает newest active run и открывает `Analysis`; если активных
@@ -266,7 +266,7 @@ UI показывает то же состояние через stage-based cons
 
 - `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist, compact runtime profile summary и collapsed advanced runtime tools;
 - `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
-- `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, cancel и bootstrap resume newest active/newest completed run;
+- `Analysis`: run mission control, canonical `step0..step4` timeline, failed-run recovery path, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, cancel и bootstrap resume newest active/newest completed run;
 - `Review`: primary review queue, selected evidence markdown/Mermaid preview, secondary grouped artifact explorer, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
 - `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
 - `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;

@@ -91,6 +91,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Implement the Review hierarchy slice so the review queue and selected preview are primary while the full artifact explorer is secondary.
 - [x] Add mobile Review section jumps for long first-time review sessions.
 - [x] Simplify first-run Readiness by keeping advanced runtime tools compact and closed during the primary readiness path.
+- [x] Add an explicit Analysis failed-run recovery path with retry and blocker drilldown.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -129,6 +130,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Review makes the queue and selected evidence preview the primary path, while the full artifact explorer is an explicit secondary disclosure.
 - [x] Mobile Review exposes section jumps before the long evidence/queue/artifact/trust stack.
 - [x] Readiness keeps advanced runtime panels out of the first-run visual path while preserving direct operator access to timeouts/execution/permissions/provider overrides.
+- [x] Analysis failed runs show classification, blocked step, retained evidence, warnings and a retry action for the same pipeline.
 - [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
 - [ ] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
 
@@ -145,6 +147,8 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Re-ran the medium `regres long` preflight through `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`. Writable roots and provider binaries were present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`), but `/tmp/provenarch-live-e2e/posthog/posthog` still failed `git rev-parse HEAD` because it is not a Git checkout. Matrix execution remains blocked as `operational_host_preflight_failed`; no canonical matrix or curated repo file was changed.
 - 2026-07-08: Implemented slice 3 Readiness polish: advanced runtime settings now render as a compact operator-tools disclosure, default closed, with live smoke verifying the settings remain reachable but closing them before the readiness screenshot. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_104434_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
 - 2026-07-08: Re-ran the medium `regres long` preflight after slice 3. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; no canonical matrix or curated repo file was changed.
+- 2026-07-08: Implemented slice 4 non-happy-path polish: failed Analysis runs now show a dedicated recovery path with error classification, blocked step, retained evidence, warning count, same-pipeline retry and blocker drilldown. Targeted App tests, full UI Vitest suite, typecheck, build, fake-runtime rendered smoke (`run_20260708_111016_001`) and full DoD (`make contracts test lint build`) passed.
+- 2026-07-08: Re-ran the medium `regres long` preflight after slice 4. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

@@ -517,7 +517,7 @@ function createFetchMock(state: FetchMockState = {}) {
       );
     }
 
-    if (method === "POST" && url === "/api/pipeline/init") {
+    if (method === "POST" && (url === "/api/pipeline/init" || url === "/api/pipeline/refresh")) {
       state.runStarted = true;
       return jsonResponse({ run_id: runID, status: "queued" });
     }
@@ -3239,6 +3239,13 @@ describe("App", () => {
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review blocker");
+
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovery path");
+    expect(recovery).toHaveTextContent("run_partial_failed");
+    expect(recovery).toHaveTextContent("refresh.step3.findings");
+    expect(recovery).toHaveTextContent("2");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Retry refresh");
 
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
     expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
