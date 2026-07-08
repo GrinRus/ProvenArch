@@ -64,6 +64,14 @@ status: blocked
 primary classification: operational_host_preflight_failed
 next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
 
+2026-07-08 slice 6 retry:
+goal: re-check whether the requested medium live E2E can start after the Publish handoff UX slice.
+action: ran fail-fast host checks, generated the direct command with `python3 scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`, checked provider binaries and probed `/tmp/provenarch-live-e2e/posthog/posthog` with `git rev-parse HEAD`.
+observed evidence: `/tmp/provenarch-live-e2e` and `/tmp/provenarch-test_arch_project` are writable directories; generated command still targets `examples/e2e-matrix.regres-long.yaml` with qwen-only baseline and `scripts/full-run-batch-matrix.sh`; binaries report `qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`; PostHog canonical path still returns `fatal: not a git repository`; current worktree is dirty because slice 6 is in progress and not an acceptance run.
+status: blocked
+primary classification: operational_host_preflight_failed
+next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -235,5 +243,32 @@ Observed improvement:
 - Review secondary artifact browsing remains stable while changing filters; diagram preview and markdown preview are now tested as distinct user actions.
 
 Residual UX work after Slice 5:
-- Publish blockers and mobile Publish navigation remain candidates for the next non-happy-path pass.
+- Publish blockers and mobile Publish navigation remain candidates for the next non-happy-path pass. Resolved in Slice 6.
 - Medium live E2E remains blocked by trusted-host repo setup until `/tmp/provenarch-live-e2e/posthog/posthog` is restored as the pinned Git checkout.
+
+## Slice 6 Result
+
+Implemented:
+- `PublishStagePanel` now shows a publication readiness summary above the fold: publication set, gate state, open-question count and Git action state.
+- Publish blocker details in the summary include the gate classification label, so `runtime_contract_failed` and similar blockers remain visible without opening raw logs or scrolling to the gate section.
+- Mobile Publish now has section jumps for `Diff`, `Preview`, `Gate` and `Commit`, reusing the Review jump treatment for long final-handoff screens.
+- Live Playwright now asserts the Publish summary/jumps and captures `frontend-publish-mobile.png`.
+
+Post-change evidence:
+- targeted component test: `npm run --prefix ui test -- App.test.tsx --run` -> `67 passed`
+- UI typecheck: `npm run --prefix ui typecheck` -> passed
+- frontend live E2E contract test: `python3 -m unittest scripts.tests.frontend_live_e2e_contract_test.FrontendLiveE2EContractTest` -> `19 passed`
+- build: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build` -> passed
+- rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:18180 UI_E2E_QA_SMOKE=1 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-publish-nav-results.VBvGYh npm run --prefix ui e2e:live` -> `1 passed`
+- updated init run: `run_20260708_121704_001`
+- updated screenshots: `/tmp/provenarch-ui-publish-nav-results.VBvGYh/frontend-publish-desktop.png`, `/tmp/provenarch-ui-publish-nav-results.VBvGYh/frontend-publish-mobile.png`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed
+
+Observed improvement:
+- First-time operators can see whether Publish is ready, under review or blocked before reading the lower gate/commit panels.
+- Mobile Publish now exposes direct jumps to the review inventory, preview, gate and commit plan instead of forcing a single long scroll.
+- Publish blocker classification is visible in the top summary, not only inside the detailed gate checklist.
+
+Residual UX work after Slice 6:
+- Medium live E2E remains blocked by trusted-host repo setup until `/tmp/provenarch-live-e2e/posthog/posthog` is restored as the pinned Git checkout and the run starts from a clean committed tree.
+- A future full completion audit should re-check onboarding error states and provider permission UI after the trusted-host blocker is resolved.

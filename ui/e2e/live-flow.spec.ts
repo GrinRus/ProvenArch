@@ -552,6 +552,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-publish").click();
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-readiness-summary")).toContainText("Publication set");
+  await expect(page.getByTestId("publish-section-jumps")).toContainText("Preview");
   await expect(page.getByTestId("publish-preview-panel")).toBeVisible();
   await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
   await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
@@ -566,7 +569,20 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expectReadableViewportPanel(page, publishPreviewContent, "Publish selected artifact preview", 120);
   await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
   await expectOperatorInspectorSurfaces(page);
+  await page.locator(".work-area").evaluate((element) => {
+    element.scrollTop = 0;
+  });
   await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+
+  await page.setViewportSize({ width: 390, height: 1200 });
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-section-jumps")).toBeVisible();
+  await expect(page.getByTestId("publish-section-jumps")).toContainText("Gate");
+  await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
+  await expectReadableViewportPanel(page, page.getByTestId("publish-preview-panel"), "Mobile Publish preview panel", 180, 300);
+  await expectReadableViewportPanel(page, publishPreviewContent, "Mobile Publish selected artifact preview", 120, 300);
+  await captureEvidenceScreenshot(page, "frontend-publish-mobile.png");
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await expectAlreadyInitializedWorkspaceNavigation(page);
 

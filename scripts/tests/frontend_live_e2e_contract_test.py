@@ -109,6 +109,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             "frontend-analysis-desktop.png",
             "frontend-review-desktop.png",
             "frontend-publish-desktop.png",
+            "frontend-publish-mobile.png",
             "frontend-review-mobile.png",
         ]:
             self.assertIn(name, body)

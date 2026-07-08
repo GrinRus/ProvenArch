@@ -3752,6 +3752,7 @@ export function PublishStagePanel({
   const openQuestionGateItems = gateItems.filter((item) => item.tone === "warn" && item.label.toLowerCase().includes("open question"));
   const warningGateItems = gateItems.filter((item) => item.tone === "warn" && !openQuestionGateItems.includes(item));
   const readyGateItems = gateItems.filter((item) => item.tone === "ok" || item.tone === "info");
+  const openQuestionCount = countMarkdownItems(openQuestions);
   const gitMutationDisabled = busy || blockingGateItems.length > 0;
   const gitMutationBlockedTitle =
     blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
@@ -3764,6 +3765,17 @@ export function PublishStagePanel({
   const visibleFolderSummaries = realFolderSummaries.length > 0 ? realFolderSummaries : folderSummaries;
   const diffScopeTitle = gitDiffScopeTitle(gitDiff);
   const diffScopeHint = gitDiffScopeHint(gitDiff);
+  const primaryPublishGateItem = blockingGateItems[0] ?? openQuestionGateItems[0] ?? warningGateItems[0];
+  const publishGateTone = blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok";
+  const publishGateLabel = blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready";
+  const publishGateDetail = primaryPublishGateItem ? `${primaryPublishGateItem.label}: ${primaryPublishGateItem.detail}` : "Git actions are allowed after final review.";
+  const gitActionLabel = blockingGateItems.length > 0 ? "blocked" : gitMessage.trim() ? "ready" : "needs message";
+  const gitActionDetail =
+    blockingGateItems.length > 0
+      ? `${blockingGateItems[0].label}: ${blockingGateItems[0].detail}`
+      : gitMessage.trim()
+        ? `Commit message prepared: ${gitMessage}`
+        : "Commit message is empty.";
 
   useEffect(() => {
     if (activePreviewPath && selectedArtifact !== activePreviewPath) {
@@ -3813,10 +3825,39 @@ export function PublishStagePanel({
             {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "review" : publishArtifacts.length > 0 ? "ready" : "partial"}
           </StatusBadge>
         </div>
+        <div className="publish-readiness-summary" data-testid="publish-readiness-summary" aria-label="Publish readiness summary">
+          <div>
+            <span className="metric-label">Publication set</span>
+            <strong>{publishArtifacts.length} refs</strong>
+            <span>{visibleFolderSummaries.length} folders in scope</span>
+          </div>
+          <div>
+            <span className="metric-label">Gate</span>
+            <strong>{publishGateLabel}</strong>
+            <span>{publishGateDetail}</span>
+          </div>
+          <div>
+            <span className="metric-label">Open questions</span>
+            <strong>{openQuestionCount}</strong>
+            <span>{openQuestionCount > 0 ? "Review before commit." : "No loaded open questions."}</span>
+          </div>
+          <div>
+            <span className="metric-label">Git action</span>
+            <strong>{gitActionLabel}</strong>
+            <span>{gitActionDetail}</span>
+          </div>
+        </div>
       </section>
 
+      <nav className="publish-section-jumps" aria-label="Publish sections" data-testid="publish-section-jumps">
+        <a href="#publish-diff-summary">Diff</a>
+        <a href="#publish-preview-panel">Preview</a>
+        <a href="#publish-gate-panel">Gate</a>
+        <a href="#publish-commit-plan">Commit</a>
+      </nav>
+
       <div className="publish-review-room">
-        <section className="publish-diff-summary" data-testid="publish-diff-summary">
+        <section className="publish-diff-summary" id="publish-diff-summary" data-testid="publish-diff-summary">
           <div className="panel-subheader">
             <div>
               <h2>{diffScopeTitle}</h2>
@@ -3905,7 +3946,7 @@ export function PublishStagePanel({
           )}
         </section>
 
-        <section className="publish-preview-panel" data-testid="publish-preview-panel">
+        <section className="publish-preview-panel" id="publish-preview-panel" data-testid="publish-preview-panel">
           <TabNav
             ariaLabel="Publish preview tabs"
             className="publish-preview-tabs"
@@ -3990,15 +4031,13 @@ export function PublishStagePanel({
         </section>
 
         <aside className="publish-side-column">
-          <section className="publish-gate-panel" data-testid="publish-gate-panel">
+          <section className="publish-gate-panel" id="publish-gate-panel" data-testid="publish-gate-panel">
             <div className="panel-subheader">
               <div>
                 <h2>Publish gate</h2>
                 <p className="hint">Checks gate Git commit and proposal branch actions; Git commands stay explicit operator actions.</p>
               </div>
-              <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok"}>
-                {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready"}
-              </StatusBadge>
+              <StatusBadge tone={publishGateTone}>{publishGateLabel}</StatusBadge>
             </div>
             <PublishGateSection testId="publish-hard-blockers" title="Hard blockers" emptyLabel="No hard blockers. Git actions are allowed." items={blockingGateItems} />
             <PublishGateSection testId="publish-review-warnings" title="Review warnings" emptyLabel="No review warnings." items={warningGateItems} />
@@ -4006,7 +4045,7 @@ export function PublishStagePanel({
             <PublishGateSection testId="publish-ready-checks" title="Ready checks" emptyLabel="No ready checks yet." items={readyGateItems} />
           </section>
 
-          <section className="publish-commit-plan" data-testid="publish-commit-plan">
+          <section className="publish-commit-plan" id="publish-commit-plan" data-testid="publish-commit-plan">
             <div className="panel-subheader">
               <div>
                 <h2>Commit plan</h2>

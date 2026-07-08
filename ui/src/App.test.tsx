@@ -1984,6 +1984,17 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step"));
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Diff");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Gate");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Commit");
+    expect(screen.getByTestId("publish-section-jumps").querySelector('a[href="#publish-gate-panel"]')).toBeInTheDocument();
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Publication set");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("4 refs");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("review");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Git action");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("ready");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Selected run Git diff");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
@@ -2152,6 +2163,9 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-publish"));
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("0 refs");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No publishable artifacts");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("No generated workspace artifacts are ready to publish.");
@@ -2196,6 +2210,8 @@ describe("App", () => {
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("runtime_contract_failed");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("runtime_contract_failed");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
     const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
