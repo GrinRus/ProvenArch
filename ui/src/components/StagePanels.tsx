@@ -11,7 +11,7 @@ import { analysisScopeSummary } from "../lib/analysisScope";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
-import { formatTimestamp, parseTimeOrMin } from "../lib/runState";
+import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, parseTimeOrMin } from "../lib/runState";
 import type {
   Artifact,
   Diagnostic,
@@ -1188,15 +1188,26 @@ function AnalysisFailureRecovery({
   const errorCode = runStatus.error_code || "unclassified";
   const blockedStep = runStatus.current_step || `${retryPipeline}.unknown`;
   const evidenceSummary = failureEvidenceSummary(artifactCount, issueCount);
+  const canceled = isRunCanceled(errorCode);
+  const reconciled = isRunReconciledAfterRestart(errorCode);
+  const title = canceled ? "Canceled run" : reconciled ? "Recovered after restart" : "Recovery path";
+  const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
+  const badgeTone = canceled || reconciled ? "warn" : "error";
+  const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
+  const retryLabel = canceled ? `Run ${retryPipeline} again` : `Retry ${retryPipeline}`;
+  const reviewLabel = canceled ? "Review retained evidence" : "Review blocker details";
+  const retentionHint = canceled
+    ? "Starting again creates a new run; the canceled run and its taskrun evidence stay in History."
+    : "Retry starts a new run; the failed run remains available in History for audit and comparison.";
 
   return (
     <section className="analysis-recovery-panel" data-testid="analysis-failure-recovery">
       <div className="section-heading-row">
         <div>
-          <h2>Recovery path</h2>
+          <h2>{title}</h2>
           <p className="hint">{failureRecoveryGuidance(errorCode, pendingPermissionCount)}</p>
         </div>
-        <StatusBadge tone="error">failed</StatusBadge>
+        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
       </div>
 
       <div className="analysis-recovery-grid">
@@ -1205,7 +1216,7 @@ function AnalysisFailureRecovery({
           <strong>{errorCode}</strong>
         </div>
         <div>
-          <span className="metric-label">Blocked step</span>
+          <span className="metric-label">{stepLabel}</span>
           <strong>{blockedStep}</strong>
         </div>
         <div>
@@ -1227,13 +1238,13 @@ function AnalysisFailureRecovery({
 
       <div className="actions analysis-recovery-actions">
         <button type="button" data-testid="analysis-retry-run-btn" onClick={() => onRetry(retryPipeline)} disabled={busy}>
-          Retry {retryPipeline}
+          {retryLabel}
         </button>
         <button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewBlocker}>
-          Review blocker details
+          {reviewLabel}
         </button>
       </div>
-      <p className="hint">Retry starts a new run; the failed run remains available in History for audit and comparison.</p>
+      <p className="hint">{retentionHint}</p>
     </section>
   );
 }
@@ -1275,6 +1286,12 @@ function AnalysisLiveDiagnosticsPanel({ diagnostics }: { diagnostics: AnalysisLi
 }
 
 function failureRecoveryGuidance(errorCode: string, pendingPermissionCount: number): string {
+  if (isRunCanceled(errorCode)) {
+    return "The run stopped by request. Review retained taskrun evidence, then start a new run when ready.";
+  }
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return "ACP reconciled a stale run after restart. Inspect retained evidence, then start a new run if the previous work should continue.";
+  }
   if (pendingPermissionCount > 0 || errorCode === "runtime_permission_required") {
     return "Resolve the pending permission request, then retry the same pipeline.";
   }

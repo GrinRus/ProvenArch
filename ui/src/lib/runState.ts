@@ -105,13 +105,25 @@ export function deriveRunLifecycleState(runStatus: RunStatusLike | null): "activ
   if (activeStatuses.has(runStatus.status)) {
     return "active";
   }
-  const errorCode = String(runStatus.error_code ?? "").trim().toLowerCase();
+  const errorCode = normalizeRunErrorCode(runStatus.error_code);
   const warnings = (runStatus.warnings ?? []).map((warning) => warning.toLowerCase());
-  if (errorCode.includes("run_reconciled_after_restart") || warnings.some((warning) => warning.includes("run_reconciled_after_restart"))) {
+  if (isRunReconciledAfterRestart(errorCode) || warnings.some((warning) => warning.includes("run_reconciled_after_restart"))) {
     return "recovered";
   }
   if (errorCode.includes("incomplete") || warnings.some((warning) => warning.includes("incomplete_cycle"))) {
     return "incomplete";
   }
   return "terminal";
+}
+
+export function normalizeRunErrorCode(errorCode?: string | null): string {
+  return String(errorCode ?? "").trim().toLowerCase();
+}
+
+export function isRunCanceled(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode) === "run_canceled";
+}
+
+export function isRunReconciledAfterRestart(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode).includes("run_reconciled_after_restart");
 }

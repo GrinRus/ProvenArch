@@ -35,6 +35,7 @@ import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
+import { isRunCanceled, isRunReconciledAfterRestart } from "./lib/runState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -577,10 +578,11 @@ export default function App() {
       });
     }
     if (runStatus?.error_code) {
+      const issue = selectedRunIssueCopy(runStatus.error_code, runStatus.error, "inspector");
       items.push({
         severity: "error",
-        label: runStatus.error_code,
-        detail: runStatus.error || "Selected run failed.",
+        label: issue.label,
+        detail: issue.detail,
       });
     }
     if (openQuestions.trim()) {
@@ -709,13 +711,16 @@ export default function App() {
         tone: "error" as const,
       })),
       ...(runStatus?.error_code
-        ? [
-            {
-              label: runStatus.error_code,
-              detail: runStatus.error || "Selected run failed before publication.",
-              tone: "error" as const,
-            },
-          ]
+        ? (() => {
+            const issue = selectedRunIssueCopy(runStatus.error_code, runStatus.error, "publish");
+            return [
+              {
+                label: issue.label,
+                detail: issue.detail,
+                tone: "error" as const,
+              },
+            ];
+          })()
         : []),
     ],
     [doctorFailures, runStatus, validationErrors],
@@ -1098,6 +1103,31 @@ export default function App() {
       {error ? <p className="status err">Error: {error}</p> : null}
     </AppShell>
   );
+}
+
+function selectedRunIssueCopy(errorCode: string, error: string | null | undefined, surface: "inspector" | "publish"): { label: string; detail: string } {
+  if (isRunCanceled(errorCode)) {
+    return {
+      label: "Canceled run",
+      detail:
+        surface === "publish"
+          ? "run_canceled: select a successful run or start a new analysis before publishing."
+          : "run_canceled: selected run was stopped by request; taskrun evidence remains in History.",
+    };
+  }
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return {
+      label: "Run reconciled after restart",
+      detail:
+        surface === "publish"
+          ? "run_reconciled_after_restart: select a completed artifact run or start a new analysis before publishing."
+          : "run_reconciled_after_restart: ACP preserved the stale run evidence in History after service restart.",
+    };
+  }
+  return {
+    label: errorCode,
+    detail: error || (surface === "publish" ? "Selected run failed before publication." : "Selected run failed."),
+  };
 }
 
 function isProposalReviewArtifact(path: string): boolean {

@@ -102,6 +102,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Implement pending permission triage so managed-mode `runtime_permission_required` failures are understandable before raw table inspection.
 - [x] Mirror pending permission step/rule/target/reason detail in the right inspector hard blocker.
 - [x] Add cooperative cancel guidance for active selected runs without changing cancel API behavior.
+- [x] Distinguish terminal canceled/reconciled runs from runtime failures in Analysis recovery and inspector copy.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -125,8 +126,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 12) Improve managed permission recovery UX using existing pending request fields: blocked step, operation, decision/rule, target/reason and safe next actions.
 13) Mirror managed permission blocker context in the right inspector so the global hard-blocker surface stays actionable.
 14) Clarify active-run cancellation as cooperative stop with taskrun evidence/history preserved.
-15) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-16) Commit and use the report to drive the next iteration.
+15) Distinguish terminal `run_canceled` and restart-reconciled runs from runtime/provider failures.
+16) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+17) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -166,6 +168,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Pending permission requests expose a triage summary, target/reason, policy rule, decision and safe next actions before the raw request table.
 - [x] Right inspector hard blockers expose pending permission step, rule, target and reason instead of a generic pending message.
 - [x] Active selected runs explain that cancel is cooperative and preserves taskrun evidence/history.
+- [x] Terminal canceled runs show stopped-step/run-again/History evidence copy instead of generic runtime-failure recovery.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -194,6 +197,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 11 pending permission triage in `Analysis -> Pending permissions` without backend/schema changes. The panel now summarizes blocked step, operation, decision, policy rule, primary target/reason and safe next actions before the raw request table; approve/deny broker remains future scope. Targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 12 right-inspector permission blocker copy without backend/schema changes. Pending permissions now surface as `Permission: <action>` with step, decision/rule, target and reason in the global hard-blocker panel; targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 13 active-run cancellation guidance without backend/API/schema changes. Active selected runs now explain that cancel requests a cooperative stop and keeps taskrun evidence in History; targeted primitive test (`10` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-08: Implemented slice 14 terminal cancellation recovery copy without backend/API/schema changes. Terminal `run_canceled` runs now show canceled/stopped-step/run-again/retained-History evidence wording in Analysis recovery and right-inspector blockers, while restart-reconciled runs use preserved-evidence copy; targeted App test (`68` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

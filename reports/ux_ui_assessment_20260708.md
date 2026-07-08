@@ -452,3 +452,23 @@ Observed improvement:
 
 Residual UX work after Slice 13:
 - Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.
+
+## Slice 14 Result
+
+Implemented:
+- Distinguished terminal `run_canceled` runs from runtime/provider failures in Analysis recovery.
+- Canceled runs now show `Canceled run`, `Stopped step`, `Run <pipeline> again`, retained taskrun History evidence and a secondary `Review retained evidence` action.
+- Right inspector and Publish blockers now use `Canceled run` / restart-reconciled copy instead of generic `Selected run failed` wording.
+- Existing cancel API/runtime behavior remains unchanged; this is UI copy/state classification only.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `68 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `85` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator can understand that a canceled terminal run was stopped intentionally, not that the provider crashed.
+- The post-cancel screen tells the operator where evidence remains and how to start a fresh run.
+
+Residual UX work after Slice 14:
+- Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` has about `3.4GiB` free, below the 5 GiB matrix guard.

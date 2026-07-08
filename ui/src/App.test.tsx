@@ -3407,6 +3407,47 @@ describe("App", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 
+  it("explains terminal canceled runs without presenting them as runtime failures", async () => {
+    const runID = "run-canceled-terminal";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:02:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: "run_canceled",
+            error: "canceled by request",
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+
+    await screen.findByTestId("run-status-panel");
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Canceled run");
+    expect(recovery).toHaveTextContent("run_canceled");
+    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("refresh.step2.asis_docs");
+    expect(recovery).toHaveTextContent("The run stopped by request");
+    expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Canceled run");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("taskrun evidence remains in History");
+  });
+
   it("renders running run status for active live progress state", async () => {
     const runID = "run-live-running";
     vi.stubGlobal(
