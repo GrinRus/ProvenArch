@@ -104,6 +104,7 @@ export function SourceStagePanel({
 }: SourceStageProps) {
   const firstRepo = guidedRepos[0];
   const suggestedWorkspace = `~/arch-workspaces/${slugify(firstRepo?.name || "my-service")}`;
+  const sourceRecovery = buildSourceValidationRecovery(guidedRepos, validateResult, validationDiagnosticsByRepo);
   return (
     <section className="panel stage-panel" data-testid="workspace-panel">
       <div className="stage-header">
@@ -133,6 +134,8 @@ export function SourceStagePanel({
         <strong>Next in Source</strong>
         <span>Keep this screen focused on repository inventory, refs and imports; then save and validate before readiness gates.</span>
       </div>
+
+      {sourceRecovery ? <SourceValidationRecovery issue={sourceRecovery} /> : null}
 
       <SourceRepoTable guidedRepos={guidedRepos} validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
 
@@ -247,6 +250,187 @@ export function SourceStagePanel({
       {doctorResult ? <DoctorChecklist doctorResult={doctorResult} /> : null}
     </section>
   );
+}
+
+type SourceRecoveryIssue = {
+  repoKey: string;
+  diagnosticLabel: string;
+  level: Diagnostic["level"] | "draft";
+  message: string;
+  suggestion: string;
+  sourceType: string;
+  sourceValue: string;
+  refValue: string;
+};
+
+function SourceValidationRecovery({ issue }: { issue: SourceRecoveryIssue }) {
+  return (
+    <section className="source-recovery-panel" data-testid="source-validation-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Source validation recovery</h2>
+          <p className="hint">Resolve the blocking repository/source diagnostic, save the workspace setup, then validate again before Readiness.</p>
+        </div>
+        <StatusBadge tone={issue.level === "warning" ? "warn" : "error"}>{issue.level === "warning" ? "source warning" : "source blocked"}</StatusBadge>
+      </div>
+      <div className="source-recovery-grid">
+        <div>
+          <span className="metric-label">Affected scope</span>
+          <strong>{issue.repoKey}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Diagnostic</span>
+          <strong>{issue.diagnosticLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Source type</span>
+          <strong>{issue.sourceType}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Ref</span>
+          <strong>{issue.refValue}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs source-recovery-detail">
+        <div>
+          <dt>Message</dt>
+          <dd>{issue.message}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{issue.suggestion}</dd>
+        </div>
+        <div>
+          <dt>Current source</dt>
+          <dd>{issue.sourceValue}</dd>
+        </div>
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Fix the highlighted repository name, source URL/path, ref or local authentication.</li>
+        <li>Use Save and validate sources after the edit so `workspace.yaml` and resolved repos update together.</li>
+        <li>Move to Readiness only after Source shows the repository as resolved.</li>
+      </ul>
+    </section>
+  );
+}
+
+function buildSourceValidationRecovery(
+  guidedRepos: GuidedRepo[],
+  validateResult: ValidateResponse | null,
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>,
+): SourceRecoveryIssue | null {
+  const serverIssue = firstSourceDiagnostic(guidedRepos, validateResult, validationDiagnosticsByRepo);
+  if (serverIssue) {
+    return serverIssue;
+  }
+
+  return firstDraftSourceIssue(guidedRepos);
+}
+
+function firstSourceDiagnostic(
+  guidedRepos: GuidedRepo[],
+  validateResult: ValidateResponse | null,
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>,
+): SourceRecoveryIssue | null {
+  if (!validateResult) {
+    return null;
+  }
+
+  const diagnosticEntry =
+    validationDiagnosticsByRepo
+      .flatMap(([repoKey, diagnostics]) => diagnostics.map((diagnostic) => ({ repoKey, diagnostic })))
+      .find(({ diagnostic }) => diagnostic.level === "error") ??
+    (!validateResult.ok
+      ? validationDiagnosticsByRepo.flatMap(([repoKey, diagnostics]) => diagnostics.map((diagnostic) => ({ repoKey, diagnostic })))[0]
+      : undefined);
+
+  if (!diagnosticEntry) {
+    return null;
+  }
+
+  const repo = guidedRepos.find((candidate) => candidate.name === diagnosticEntry.repoKey || candidate.name === diagnosticEntry.diagnostic.repo);
+  return {
+    repoKey: diagnosticEntry.repoKey === "__workspace__" ? "workspace.yaml" : diagnosticEntry.repoKey,
+    diagnosticLabel: diagnosticEntry.diagnostic.code,
+    level: diagnosticEntry.diagnostic.level,
+    message: diagnosticEntry.diagnostic.message,
+    suggestion: diagnosticEntry.diagnostic.suggestion || defaultSourceSuggestion(repo),
+    sourceType: sourceTypeLabel(repo),
+    sourceValue: sourceValueLabel(repo, validateResult.workspace),
+    refValue: repo?.ref || "current/default",
+  };
+}
+
+function firstDraftSourceIssue(guidedRepos: GuidedRepo[]): SourceRecoveryIssue | null {
+  const nameCounts = new Map<string, number>();
+  guidedRepos.forEach((repo) => {
+    const name = repo.name.trim().toLowerCase();
+    if (name) {
+      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    }
+  });
+
+  for (const [index, repo] of guidedRepos.entries()) {
+    const repoKey = repo.name.trim() || `Repo ${index + 1}`;
+    const duplicateName = repo.name.trim() && (nameCounts.get(repo.name.trim().toLowerCase()) ?? 0) > 1;
+    const sourceMissing = repo.mode === "path" ? repo.path.trim() === "" : repo.git_url.trim() === "";
+    const nameMissing = repo.name.trim() === "";
+
+    if (!nameMissing && !duplicateName && !sourceMissing) {
+      continue;
+    }
+
+    const diagnosticLabel = nameMissing ? "Repo name is missing" : duplicateName ? "Repo name is duplicated" : "Repository source is missing";
+    const message = nameMissing
+      ? "This repository needs a stable name before `workspace.yaml` can be saved and validated."
+      : duplicateName
+        ? "Repository names must be unique before Source can resolve each repo."
+        : `${sourceTypeLabel(repo)} is empty, so Source cannot resolve this repository.`;
+    const suggestion = nameMissing
+      ? "Enter a short unique repository name, then save and validate sources."
+      : duplicateName
+        ? "Rename one of the duplicate repositories, then save and validate sources."
+        : repo.mode === "path"
+          ? "Enter the local checkout path, then save and validate sources."
+          : "Enter the GitHub/GitLab URL and make sure local git authentication can reach it.";
+
+    return {
+      repoKey,
+      diagnosticLabel,
+      level: "draft",
+      message,
+      suggestion,
+      sourceType: sourceTypeLabel(repo),
+      sourceValue: sourceValueLabel(repo),
+      refValue: repo.ref || "current/default",
+    };
+  }
+
+  return null;
+}
+
+function sourceTypeLabel(repo?: GuidedRepo) {
+  if (!repo) {
+    return "Workspace manifest";
+  }
+  return repo.mode === "path" ? "Local folder" : "Git URL";
+}
+
+function sourceValueLabel(repo?: GuidedRepo, workspace?: string) {
+  if (!repo) {
+    return workspace || "workspace.yaml";
+  }
+  const sourceValue = repo.mode === "path" ? repo.path : repo.git_url;
+  return sourceValue.trim() || `${sourceTypeLabel(repo)} missing`;
+}
+
+function defaultSourceSuggestion(repo?: GuidedRepo) {
+  if (!repo) {
+    return "Fix the workspace manifest entry, then save and validate sources again.";
+  }
+  return repo.mode === "path"
+    ? "Check the local checkout path and filesystem access, then save and validate sources again."
+    : "Check the repository URL and your local git authentication, then save and validate sources again.";
 }
 
 export type ReadinessStageProps = {

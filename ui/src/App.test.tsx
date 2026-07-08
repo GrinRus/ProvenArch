@@ -2600,6 +2600,44 @@ describe("App", () => {
     expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
   });
 
+  it("shows Source validation recovery above raw diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        validateStatus: 400,
+        validateResponse: {
+          ok: false,
+          workspace: "/tmp/workspace",
+          warnings: [],
+          errors: [
+            {
+              level: "error",
+              code: "workspace.repo.git_url.fetch_failed",
+              message: "git cannot clone this repo",
+              suggestion: "Check the repository URL and your local git authentication.",
+              repo: "my-service",
+            },
+          ],
+          resolved_repos: [],
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+
+    const recovery = await screen.findByTestId("source-validation-recovery");
+    expect(recovery).toHaveTextContent("Source validation recovery");
+    expect(recovery).toHaveTextContent("my-service");
+    expect(recovery).toHaveTextContent("workspace.repo.git_url.fetch_failed");
+    expect(recovery).toHaveTextContent("Git URL");
+    expect(recovery).toHaveTextContent("https://github.com/org/my-service.git");
+    expect(recovery).toHaveTextContent("Check the repository URL and your local git authentication.");
+    expect(recovery).toHaveTextContent("Save and validate sources");
+    expect(screen.getByTestId("source-repo-table")).toHaveTextContent("blocked");
+  });
+
   it("requires revalidation after first-run setup changes", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 

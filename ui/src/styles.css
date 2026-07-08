@@ -1054,6 +1054,7 @@ code {
 
 .readiness-card,
 .runtime-profile-summary,
+.source-recovery-panel,
 .provider-recovery-panel {
   min-width: 0;
   padding: 0.72rem;
@@ -1082,6 +1083,14 @@ code {
   background: var(--surface);
 }
 
+.source-recovery-panel {
+  display: grid;
+  gap: 0.62rem;
+  margin-bottom: 0.8rem;
+  border-color: rgba(180, 35, 24, 0.22);
+  background: var(--err-soft);
+}
+
 .provider-recovery-panel {
   display: grid;
   gap: 0.62rem;
@@ -1101,6 +1110,31 @@ code {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.62rem;
+}
+
+.source-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
+.source-recovery-grid > div {
+  min-width: 0;
+  padding: 0.54rem;
+  border: 1px solid rgba(180, 35, 24, 0.16);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.source-recovery-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.source-recovery-detail {
+  margin: 0;
 }
 
 .provider-recovery-grid > div {
@@ -3820,6 +3854,7 @@ code {
 
   .readiness-card-grid,
   .runtime-summary-grid,
+  .source-recovery-grid,
   .provider-recovery-grid,
   .onboarding-runner-recovery-grid,
   .charter-summary-grid,
@@ -3899,6 +3934,7 @@ code {
   .readiness-card-grid,
   .onboarding-progress-steps,
   .runtime-summary-grid,
+  .source-recovery-grid,
   .provider-recovery-grid,
   .onboarding-runner-recovery-grid,
   .charter-summary-grid,
@@ -4153,6 +4189,7 @@ code {
   .repo-field-grid,
   .readiness-card-grid,
   .runtime-summary-grid,
+  .source-recovery-grid,
   .provider-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,

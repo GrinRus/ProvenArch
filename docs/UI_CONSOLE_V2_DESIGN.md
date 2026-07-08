@@ -79,6 +79,7 @@ Must show:
 - Git URL/local path source mode;
 - docs imports path;
 - advanced `workspace.yaml` surface;
+- source validation recovery for blocking repo/workspace diagnostics before raw validation details;
 - source diagnostics and Git publication path.
 
 ### 2. Readiness
@@ -238,6 +239,7 @@ empty/partial state rather than changing backend contracts implicitly.
 - Source:
   - workspace manifest editor state from existing workspace setup hooks;
   - `POST /api/workspace/validate` for resolved repos and diagnostics;
+  - source validation recovery derived from existing `ValidateResponse.errors/warnings` and guided repo draft state;
   - `GET /api/workspace/manifest` / manifest save flow for `workspace.yaml`.
 - Readiness:
   - `GET /api/system/doctor`;

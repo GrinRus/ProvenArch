@@ -628,3 +628,31 @@ Live medium status:
 Residual UX work after Slice 21:
 - Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
 - Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
+
+## Slice 22 Result
+
+Implemented:
+- Added a dedicated `Source validation recovery` panel above the Source repo table and raw validation result.
+- The panel shows affected repo/workspace scope, diagnostic, source type, current source, ref, message, suggested fix and save-then-validate next actions.
+- Draft source errors such as missing repo name, duplicate repo name or missing Git URL/local path now surface immediately before saving; server-side `ValidateResponse` diagnostics remain the source of truth after validation.
+- Existing Source repo form state, `ValidateResponse` and diagnostics remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `71 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- rendered Source recovery check: Playwright opened direct fake Console, cleared `Local checkout path`, asserted `source-validation-recovery` copy and no horizontal overflow on `1440x980` and `390x900`; screenshots: `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-source-recovery-manual.Z9MEYk/source-recovery-desktop.png`, `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-source-recovery-manual.Z9MEYk/source-recovery-mobile.png`
+- fake-runtime rendered smoke: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin UI_E2E_BASE_URL=http://127.0.0.1:51848 UI_E2E_QA_SMOKE=0 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-source-recovery-results.sAner5at ./scripts/run-npm.sh run --prefix ui e2e:live` -> `1 passed` (`run_20260708_201043_001`)
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `88` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who breaks a repo source now sees the exact Source recovery path before scrolling to raw `workspace.yaml` diagnostics.
+- The Source stage now matches Readiness/Analysis/Ask recovery quality: blocking state, affected scope and next action are visible in the first workbench viewport.
+- Git URL/local folder problems are no longer presented as only a table badge plus low-level validation text.
+
+Live medium status:
+- Current preflight remains `operational_host_preflight_failed`: `/tmp/provenarch-live-e2e/posthog/posthog` and `/tmp/provenarch-live-e2e/ftgo/ftgo-application` are absent, and `/tmp` has about `3.09GiB` free, below the 5 GiB matrix guard.
+- No canonical matrix, curated repos file or wrapper script was changed.
+
+Residual UX work after Slice 22:
+- Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
+- Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
