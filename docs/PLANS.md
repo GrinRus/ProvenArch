@@ -109,6 +109,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Make Analysis recovery and global next action use retained-evidence actions for terminal canceled/reconciled runs.
 - [x] Route provider-unavailable Analysis, Publish and Ask recovery copy to Readiness provider checks instead of generic failed-shard retry guidance.
 - [x] Add a Readiness provider recovery surface so provider-unavailable reroutes land on command/auth/quota guidance before retry.
+- [x] Add onboarding runner recovery guidance so first-time headless setup shows expected command/env override before first analysis.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -138,8 +139,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 18) Extend terminal outcome labels into the shared Activity drawer summary/empty-log state so stopped/reconciled runs do not read as generic failures.
 19) Extend retained-evidence action copy into Analysis recovery and global next action for terminal stopped/reconciled runs.
 20) Make Readiness the actionable landing surface for provider outages by showing selected provider, doctor status, command override and binary/auth/quota recovery actions.
-21) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-22) Commit and use the report to drive the next iteration.
+21) Make onboarding Runner actionable for headless provider setup by showing expected command, env override, doctor status and fake fallback before first analysis.
+22) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+23) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -185,6 +187,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Activity drawer empty-log states show canceled/recovered recovery copy with retained History evidence instead of `Run failed before log entries`.
 - [x] Analysis recovery and right-inspector next action say run again/review retained evidence for terminal canceled/reconciled runs instead of generic retry/blocker wording.
 - [x] Readiness provider recovery shows selected provider, doctor status/message, command override and last `runner_unavailable` blocker before retry.
+- [x] Onboarding Runner shows selected provider, expected command, command override, doctor status/message and fake fallback before first live analysis.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -219,6 +222,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 18 retained-evidence action polish without backend/API/schema changes. Analysis recovery and the global next-action inspector now use `Run <pipeline> again`, `Review retained evidence` and retained-History copy for terminal canceled/restart-reconciled runs, while generic failures still use retry/blocker wording. Targeted App test (`69` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 19 provider-unavailable recovery polish without backend/API/schema changes. `runner_unavailable` now shows `Provider unavailable`, routes the global next action to Readiness provider checks, explains binary/auth/quota before retry, updates Analysis live diagnostics away from generic failed-shard guidance, and uses the same Readiness guidance in Ask and Publish blockers. Targeted App test (`70` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 20 Readiness provider recovery without backend/API/schema changes. Readiness now shows selected provider, doctor status/message/suggested fix, command override and last run blocker for headless/provider-unavailable/doctor-fail states; the inspector route lands there without starting a retry. Targeted App test (`70` tests), UI typecheck, fake-runtime rendered smoke (`run_20260708_194304_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-08: Implemented slice 21 onboarding runner recovery without backend/API/schema changes. Runner onboarding now shows selected provider, expected executable, `ACP_*_CMD` override, runtime-provider doctor status/message and fake-baseline fallback before first live analysis. Targeted App test (`70` tests), UI typecheck, rendered onboarding desktop/mobile check (`/tmp/provenarch-ui-onboarding-runner-manual.laqv2_2p`), fake-runtime rendered smoke (`run_20260708_195749_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

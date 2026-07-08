@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
+import { providerCommandEnv, providerCommandHint } from "../lib/providerGuidance";
+import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 
@@ -76,6 +78,8 @@ export function OnboardingShell({
   const canRunFirstAnalysis = canEnterConsole && localReady;
   const sourceBlockingDiagnostic = findSourceBlockingDiagnostic(repoDiagnosticsByID, validateResult);
   const doctorFailures = doctorResult?.checks.filter((check) => check.status === "fail") ?? [];
+  const runtimeProviderCheck = doctorResult?.checks.find((check) => check.id === "runtime_provider");
+  const showRunnerRecovery = setupRuntime === "headless" || runtimeProviderCheck?.status === "fail";
   const progressSummary = buildOnboardingProgressSummary({
     workspaceReady,
     sourcesReady,
@@ -275,6 +279,13 @@ export function OnboardingShell({
               </button>
             </div>
             {doctorResult ? <p className={doctorResult.ok ? "status" : "error-text"}>{doctorResult.ok ? "Runner and local readiness passed." : "Readiness has blockers."}</p> : null}
+            {showRunnerRecovery ? (
+              <OnboardingRunnerRecovery
+                setupRuntime={setupRuntime}
+                setupRuntimeProvider={setupRuntimeProvider}
+                runtimeProviderCheck={runtimeProviderCheck}
+              />
+            ) : null}
             {doctorResult ? <OnboardingDoctorChecklist doctorResult={doctorResult} /> : null}
           </section>
 
@@ -468,6 +479,74 @@ function OnboardingDoctorChecklist({ doctorResult }: { doctorResult: DoctorRespo
             {check.suggestion ? <span> Next: {check.suggestion}</span> : null}
           </li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+function OnboardingRunnerRecovery({
+  setupRuntime,
+  setupRuntimeProvider,
+  runtimeProviderCheck,
+}: {
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  runtimeProviderCheck?: DoctorResponse["checks"][number];
+}) {
+  const providerCommand = providerCommandHint(setupRuntimeProvider);
+  const envOverride = providerCommandEnv(setupRuntimeProvider);
+  const doctorStatus = runtimeProviderCheck ? `${runtimeProviderCheck.label}: ${runtimeProviderCheck.status}` : "not checked";
+  const isPassing = runtimeProviderCheck?.status === "pass";
+  const isFailing = runtimeProviderCheck?.status === "fail";
+  const summary = isPassing
+    ? "Headless provider is ready for first analysis after the other setup gates pass."
+    : isFailing
+      ? "Fix the provider command, authentication or quota before running the first live analysis."
+      : "Headless provider is selected. Check the command and auth/quota before the first live analysis.";
+
+  return (
+    <div className="onboarding-runner-recovery" data-testid="onboarding-runner-recovery">
+      <div className="section-heading-row">
+        <div>
+          <strong>Provider setup for first analysis</strong>
+          <p className="hint">{summary}</p>
+        </div>
+        <StatusBadge tone={isPassing ? "ok" : isFailing ? "error" : "warn"}>{isPassing ? "provider ready" : "provider check"}</StatusBadge>
+      </div>
+      <div className="onboarding-runner-recovery-grid">
+        <div>
+          <span className="metric-label">Selected runner</span>
+          <strong>{setupRuntime === "headless" ? setupRuntimeProvider : `${setupRuntime} baseline`}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Expected command</span>
+          <strong>{setupRuntime === "headless" ? providerCommand : "none required"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Command override</span>
+          <strong>{setupRuntime === "headless" ? envOverride : "not needed"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Readiness check</span>
+          <strong>{doctorStatus}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs onboarding-runner-recovery-detail">
+        <div>
+          <dt>Doctor message</dt>
+          <dd>{runtimeProviderCheck?.message ?? "Run Check readiness after selecting the runner."}</dd>
+        </div>
+        {runtimeProviderCheck?.suggestion ? (
+          <div>
+            <dt>Suggested fix</dt>
+            <dd>{runtimeProviderCheck.suggestion}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Use fake baseline for a deterministic first walkthrough when live provider setup is not ready.</li>
+        <li>For headless, install/login to {providerCommand} or set {envOverride} to a working command.</li>
+        <li>Run Check readiness again before Run first analysis.</li>
       </ul>
     </div>
   );

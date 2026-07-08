@@ -111,11 +111,11 @@ acp serve
 
 В onboarding UI:
 
-Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает.
+Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает. Для headless runner onboarding дополнительно показывает expected command, env override и provider readiness guidance до первого live analysis.
 
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
-3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
+3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, runner recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
 4. `Ready`: проверьте summary, откройте Console V2 после validation или запустите первый `init` analysis после successful local readiness check.
 
 Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.

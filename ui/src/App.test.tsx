@@ -1011,6 +1011,14 @@ describe("App", () => {
     expect(doctorPanel).toHaveTextContent("Provider ID: claude-code");
     expect(doctorPanel).toHaveTextContent("checked: claude, claude-code");
     expect(doctorPanel).toHaveTextContent("ACP_CLAUDE_CMD");
+    const runnerRecovery = screen.getByTestId("onboarding-runner-recovery");
+    expect(runnerRecovery).toHaveTextContent("Provider setup for first analysis");
+    expect(runnerRecovery).toHaveTextContent("claude-code");
+    expect(runnerRecovery).toHaveTextContent("claude or claude-code");
+    expect(runnerRecovery).toHaveTextContent("ACP_CLAUDE_CMD");
+    expect(runnerRecovery).toHaveTextContent("Runtime provider: fail");
+    expect(runnerRecovery).toHaveTextContent("Use fake baseline for a deterministic first walkthrough");
+    expect(runnerRecovery).toHaveTextContent("Run Check readiness again before Run first analysis.");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix local readiness blockers");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Provider ID: claude-code");
   });

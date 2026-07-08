@@ -1122,6 +1122,41 @@ code {
   margin: 0;
 }
 
+.onboarding-runner-recovery {
+  display: grid;
+  gap: 0.58rem;
+  margin-top: 0.66rem;
+  padding: 0.66rem;
+  border: 1px solid rgba(161, 98, 7, 0.24);
+  border-radius: 0.48rem;
+  background: var(--warn-soft);
+}
+
+.onboarding-runner-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.onboarding-runner-recovery-grid > div {
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid rgba(161, 98, 7, 0.18);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.onboarding-runner-recovery-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.84rem;
+}
+
+.onboarding-runner-recovery-detail {
+  margin: 0;
+}
+
 .runtime-summary-grid > div {
   min-width: 0;
   padding: 0.6rem;
@@ -3786,6 +3821,7 @@ code {
   .readiness-card-grid,
   .runtime-summary-grid,
   .provider-recovery-grid,
+  .onboarding-runner-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,
@@ -3845,6 +3881,7 @@ code {
 @media (min-width: 901px) and (max-width: 1100px) {
   .repo-field-grid,
   .onboarding-repo-row .repo-field-grid,
+  .onboarding-runner-recovery-grid,
   .workspace-source-section,
   .onboarding-progress-summary,
   .columns.compact,
@@ -3863,6 +3900,7 @@ code {
   .onboarding-progress-steps,
   .runtime-summary-grid,
   .provider-recovery-grid,
+  .onboarding-runner-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,
   .analysis-progress-grid,

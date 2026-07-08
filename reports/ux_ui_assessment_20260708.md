@@ -600,3 +600,31 @@ Observed improvement:
 Residual UX work after Slice 20:
 - Medium live rerun remains blocked on this host: `/tmp/provenarch-live-e2e` is absent and `/tmp` remains below the 5 GiB matrix guard.
 - Continue deterministic polish on first-run provider selection and remaining retry/error states while waiting for a trusted host that can run the medium live matrix.
+
+## Slice 21 Result
+
+Implemented:
+- Added an onboarding `Provider setup for first analysis` recovery block for headless runner setup and runtime-provider doctor failures.
+- The block shows selected provider, expected executable, `ACP_*_CMD` command override, readiness check status, doctor message/suggestion and a safe fallback to `fake` for the deterministic first walkthrough.
+- Reused the same provider command/env guidance as Readiness so onboarding and Console V2 do not drift.
+- Existing onboarding status, selected runtime/provider state and doctor response remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `70 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- rendered onboarding check: Playwright opened launcher mode, switched Runner to `headless`, asserted `onboarding-runner-recovery` content and no horizontal overflow on `1440x980` and `390x900`; screenshots: `/tmp/provenarch-ui-onboarding-runner-manual.laqv2_2p/onboarding-runner-recovery-desktop.png`, `/tmp/provenarch-ui-onboarding-runner-manual.laqv2_2p/onboarding-runner-recovery-mobile.png`
+- fake-runtime rendered smoke: `UI_E2E_BASE_URL=http://127.0.0.1:51846 UI_E2E_QA_SMOKE=0 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-onboarding-runner-results.hi5mptcr ./scripts/run-npm.sh run --prefix ui e2e:live` -> `1 passed` (`run_20260708_195749_001`)
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `87` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator opting into a live provider no longer has to infer `claude`, `qwen`, `codex` or `ACP_*_CMD` from raw doctor text before the first analysis.
+- The Runner step now makes the safe fallback explicit: use `fake` for the first deterministic walkthrough if live auth/quota/binary setup is not ready.
+- The first-run path now has provider recovery in both places a new user can encounter it: onboarding before Console V2 and Readiness after a provider-unavailable run.
+
+Live medium status:
+- Current preflight remains `operational_host_preflight_failed`: `/tmp/provenarch-live-e2e` is absent, canonical PostHog/FTGO path inputs are absent, and `/tmp` has about `2.95GiB` free, below the 5 GiB matrix guard.
+- No canonical matrix, curated repos file or wrapper script was changed.
+
+Residual UX work after Slice 21:
+- Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
+- Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.

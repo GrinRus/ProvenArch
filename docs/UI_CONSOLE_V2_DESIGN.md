@@ -42,7 +42,8 @@ Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publ
 
 Pre-console onboarding (`Workspace -> Sources -> Runner -> Ready`) должен показывать setup summary
 с current step, next action, current blocker и причинами disabled actions для `Open console` /
-`Run first analysis`, чтобы первый запуск не требовал читать raw diagnostics.
+`Run first analysis`, а также runner recovery block для headless provider command/auth/quota
+blockers, чтобы первый запуск не требовал читать raw diagnostics.
 
 ## Shell contract
 
@@ -244,6 +245,10 @@ empty/partial state rather than changing backend contracts implicitly.
   - selected run `error_code` for provider recovery context;
   - `GET/PUT /api/runtime/timeouts`, `GET/PUT /api/runtime/execution`,
     `GET/PUT /api/runtime/permissions`, `GET /api/runtime/profile`.
+- Pre-console onboarding:
+  - `GET /api/onboarding/status` for workspace/source/runtime gates;
+  - `GET /api/system/doctor` runtime-provider check for runner recovery details;
+  - local selected runtime/provider state for expected command and `ACP_*_CMD` override guidance.
 - Charter:
   - baseline bundle/editor artifacts from existing workspace setup/baseline hooks;
   - `charter/*`, `skills/*`, `skills/subagents.yaml`, prompt packs;
