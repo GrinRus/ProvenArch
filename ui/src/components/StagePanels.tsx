@@ -11,7 +11,7 @@ import { analysisScopeSummary } from "../lib/analysisScope";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
-import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
+import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 import type {
   Artifact,
   Diagnostic,
@@ -1294,8 +1294,8 @@ function failureRecoveryGuidance(errorCode: string, pendingPermissionCount: numb
   if (pendingPermissionCount > 0 || errorCode === "runtime_permission_required") {
     return "Resolve the pending permission request, then retry the same pipeline.";
   }
-  if (errorCode.includes("runner_unavailable")) {
-    return "Provider availability blocked artifact creation; check logs and provider readiness before retry.";
+  if (isRunnerUnavailable(errorCode)) {
+    return "Provider/tool availability blocked artifact creation; check Readiness provider setup, binary/auth/quota, then retry the same pipeline.";
   }
   if (errorCode.includes("runtime_timeout")) {
     return "The run exhausted its time budget; inspect the last progress signal before retry.";
@@ -1439,17 +1439,25 @@ function buildAnalysisLiveDiagnostics(
   const providerList = Array.from(providerRefs).slice(0, 3);
   const terminalExcerpt = firstNonEmpty([lastString(validationExcerpts), runStatus?.error ?? "", warnings[0] ?? ""]);
   const hasTelemetry = runLogs.length > 0 || artifacts.length > 0 || warnings.length > 0;
-  const status = failedCount > 0 || repairExhausted > 0 ? "action needed" : hasTelemetry ? "review" : "logs missing";
-  const tone = failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
-  const summary = hasTelemetry
-    ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
-    : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
+  const providerUnavailable = isRunnerUnavailable(runStatus?.error_code);
+  const status = providerUnavailable ? "provider check" : failedCount > 0 || repairExhausted > 0 ? "action needed" : hasTelemetry ? "review" : "logs missing";
+  const tone = providerUnavailable || failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
+  const summary = providerUnavailable
+    ? "Provider/tool availability blocked execution; fix Readiness provider setup before retrying the same pipeline."
+    : hasTelemetry
+      ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
+      : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
 
   const metrics: AnalysisLiveMetric[] = [
     {
       label: "Shard state",
       value: formatShardMetric(plannedShards, observedCount, succeededCount, failedCount),
-      detail: failedShards.size > 0 ? `failed: ${Array.from(failedShards).slice(0, 3).join(", ")}` : "no failed shard ids in loaded logs",
+      detail:
+        failedShards.size > 0
+          ? `failed: ${Array.from(failedShards).slice(0, 3).join(", ")}`
+          : providerUnavailable
+            ? "provider unavailable before shard ids were emitted"
+            : "no failed shard ids in loaded logs",
     },
     {
       label: "Focused repair",
@@ -1478,12 +1486,26 @@ function buildAnalysisLiveDiagnostics(
     summary,
     metrics,
     traces,
-    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry),
+    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry, providerUnavailable),
     hasTelemetry,
   };
 }
 
-function buildAnalysisLiveActions(failedCount: number, repairExhausted: number, stallCount: number, rawRefCount: number, hasTelemetry: boolean): string[] {
+function buildAnalysisLiveActions(
+  failedCount: number,
+  repairExhausted: number,
+  stallCount: number,
+  rawRefCount: number,
+  hasTelemetry: boolean,
+  providerUnavailable: boolean,
+): string[] {
+  if (providerUnavailable) {
+    const actions = ["Check Readiness provider setup, binary/auth/quota before retrying the same pipeline."];
+    if (hasTelemetry) {
+      actions.push("Use terminal excerpt/provider rows only to confirm the outage, not as a shard-quality failure.");
+    }
+    return actions;
+  }
   if (!hasTelemetry) {
     return ["Load run logs or open persisted artifacts before retrying the same pipeline."];
   }
@@ -4058,8 +4080,8 @@ function qaFailureGuidance(errorCode: string, warningCount: number): string {
   if (errorCode === "runtime_permission_required") {
     return "Resolve the runtime permission request, then retry the question.";
   }
-  if (errorCode.includes("runner_unavailable")) {
-    return "Provider availability blocked the answer; check runtime logs and provider readiness before retry.";
+  if (isRunnerUnavailable(errorCode)) {
+    return "Provider/tool availability blocked the answer; check Readiness provider setup, binary/auth/quota, then ask again.";
   }
   if (errorCode.includes("runtime_timeout")) {
     return "The answer run exhausted its time budget; inspect the last progress signal before retry.";

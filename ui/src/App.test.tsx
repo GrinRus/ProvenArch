@@ -3420,6 +3420,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -3441,6 +3442,65 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
     expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
+  });
+
+  it("routes runner unavailable analysis blockers to provider readiness before retry", async () => {
+    const runID = "run-provider-unavailable";
+    const fetchMock = createFetchMock({
+      runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:01:00Z",
+          current_step: "refresh.step1.collect",
+          warnings: [],
+          error_code: "runner_unavailable",
+          error: "provider quota exhausted",
+        },
+      },
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Check provider readiness");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("verify binary/auth/quota in Readiness before retrying the same pipeline");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Provider unavailable");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("check Readiness provider setup, binary/auth/quota");
+
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Provider/tool availability blocked artifact creation");
+    expect(recovery).toHaveTextContent("refresh.step1.collect");
+    const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("provider check");
+    expect(liveDiagnostics).toHaveTextContent("provider unavailable before shard ids were emitted");
+    expect(liveDiagnostics).toHaveTextContent("Check Readiness provider setup, binary/auth/quota before retrying the same pipeline");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Provider unavailable");
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("run a successful analysis before publishing");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    const startCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh").length;
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    expect(screen.getByTestId("stage-readiness")).toHaveClass("is-selected");
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh")).toHaveLength(startCallsBefore);
   });
 
   it("explains terminal canceled runs without presenting them as runtime failures", async () => {

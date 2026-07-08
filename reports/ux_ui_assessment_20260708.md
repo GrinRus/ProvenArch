@@ -555,3 +555,25 @@ Observed improvement:
 Residual UX work after Slice 18:
 - Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
 - Continue deterministic polish on remaining publish/onboarding/provider-unavailable recovery states while waiting for a trusted host that can run the medium live matrix.
+
+## Slice 19 Result
+
+Implemented:
+- Distinguished `runner_unavailable` from generic runtime failures in global blocker copy, Analysis recovery, live diagnostics, Ask recovery guidance and Publish gate copy.
+- The global right-inspector next action now says `Check provider readiness` and opens `Readiness` without starting a new analysis, so quota/auth/binary outages are checked before retry.
+- Analysis live diagnostics now labels provider outages as `provider check` and tells operators to verify Readiness provider setup, binary/auth/quota instead of treating the outage as a shard-quality failure.
+- Existing run status, logs, artifacts and error codes remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `70 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `87` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who hits provider quota/auth/toolchain outage now sees the correct recovery path: check provider readiness first, then retry the same pipeline.
+- Publish no longer presents a provider outage as an opaque failed run before publication.
+- Ask uses the same provider-readiness language as Analysis, reducing cross-stage terminology drift.
+
+Residual UX work after Slice 19:
+- Medium live rerun remains blocked on this host: canonical checkout root is absent and `/tmp` remains below the 5 GiB matrix guard.
+- Continue deterministic polish on onboarding/provider-selection and any remaining retry states while waiting for a trusted host that can run the medium live matrix.

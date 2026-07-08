@@ -35,7 +35,7 @@ import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
-import { isRunCanceled, isRunReconciledAfterRestart } from "./lib/runState";
+import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -794,6 +794,10 @@ export default function App() {
         void handleSetupSaveGuidedWorkspaceSetup();
         break;
       case "readiness":
+        if (nextAction.intent === "open-readiness") {
+          setActiveStage("readiness");
+          break;
+        }
         if (!validateResult?.ok) {
           void handleValidateWorkspace();
         } else if (!setupDoctorResult?.ok) {
@@ -1126,6 +1130,15 @@ function selectedRunIssueCopy(errorCode: string, error: string | null | undefine
           : "run_reconciled_after_restart: ACP preserved the stale run evidence in History after service restart.",
     };
   }
+  if (isRunnerUnavailable(errorCode)) {
+    return {
+      label: "Provider unavailable",
+      detail:
+        surface === "publish"
+          ? "runner_unavailable: check Readiness provider setup, binary/auth/quota, then run a successful analysis before publishing."
+          : "runner_unavailable: check Readiness provider setup, binary/auth/quota, then retry the same analysis pipeline.",
+    };
+  }
   return {
     label: errorCode,
     detail: error || (surface === "publish" ? "Selected run failed before publication." : "Selected run failed."),
@@ -1190,6 +1203,14 @@ function deriveNextAction(
         description: "The selected run was recovered after restart; inspect retained History evidence or start a new analysis when ready.",
         primaryActionId: "analysis",
         intent: "focus-analysis-blocker",
+      };
+    }
+    if (isRunnerUnavailable(state.runErrorCode)) {
+      return {
+        label: "Check provider readiness",
+        description: "Provider/tool availability blocked the selected run; verify binary/auth/quota in Readiness before retrying the same pipeline.",
+        primaryActionId: "readiness",
+        intent: "open-readiness",
       };
     }
     return {

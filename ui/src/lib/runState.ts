@@ -157,3 +157,7 @@ export function isRunCanceled(errorCode?: string | null): boolean {
 export function isRunReconciledAfterRestart(errorCode?: string | null): boolean {
   return normalizeRunErrorCode(errorCode).includes("run_reconciled_after_restart");
 }
+
+export function isRunnerUnavailable(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode).includes("runner_unavailable");
+}

@@ -288,7 +288,7 @@ arch-workspace/
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
    - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
    - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
@@ -447,7 +447,7 @@ Wizard из блоков-шаблонов:
   - configured `docs.imports_path` (`docs/imports/*` по умолчанию)
 - Runtime step id: `qa.ask`; agent role: `system-analyst-qa`; prompt pack: `skills/prompt-packs/qa.md`; write scope: только `reports/taskruns/<run_id>/qa/`.
 - QA runs не меняют source repos или canonical workspace outputs; они пишут `context-pack.json`, `qa-answer.json` и `runtime-execution.json` в taskrun scope.
-- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance, terminal canceled/restart-reconciled answer copy и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
+- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance, provider-unavailable Readiness guidance, terminal canceled/restart-reconciled answer copy и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
 - Compatibility: deterministic `acp qa` + public read-only `POST /api/qa/ask` остаются temporary fallback surfaces.
 - API возвращает `answer`, `citations`, `unresolved`, `confidence`; empty/invalid request идёт через standard API error envelope.
 

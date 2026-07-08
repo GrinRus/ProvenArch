@@ -107,6 +107,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Show terminal canceled/reconciled Analysis runs as `canceled`/`recovered` across status, mission control, active run summary and history.
 - [x] Make the shared Activity drawer distinguish terminal canceled/reconciled runs from generic failures when log entries are absent.
 - [x] Make Analysis recovery and global next action use retained-evidence actions for terminal canceled/reconciled runs.
+- [x] Route provider-unavailable Analysis, Publish and Ask recovery copy to Readiness provider checks instead of generic failed-shard retry guidance.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -213,6 +214,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 16 Analysis outcome-label polish without backend/API/schema changes. Terminal `run_canceled` and restart-reconciled failed runs now display as `canceled`/`recovered` in Analysis header, mission control, status panel, active run strip and History counts/table; generic runtime/provider failures remain `failed`. Targeted App/primitive tests (`79` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 17 Activity drawer outcome-label polish without backend/API/schema changes. Terminal canceled/recovered selected runs now show `canceled run`/`recovered run` summaries and empty-log recovery copy with retained History guidance; generic failures still say `Run failed before log entries`. Targeted App/primitive tests (`79` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 18 retained-evidence action polish without backend/API/schema changes. Analysis recovery and the global next-action inspector now use `Run <pipeline> again`, `Review retained evidence` and retained-History copy for terminal canceled/restart-reconciled runs, while generic failures still use retry/blocker wording. Targeted App test (`69` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-08: Implemented slice 19 provider-unavailable recovery polish without backend/API/schema changes. `runner_unavailable` now shows `Provider unavailable`, routes the global next action to Readiness provider checks, explains binary/auth/quota before retry, updates Analysis live diagnostics away from generic failed-shard guidance, and uses the same Readiness guidance in Ask and Publish blockers. Targeted App test (`70` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
