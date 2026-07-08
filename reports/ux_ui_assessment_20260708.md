@@ -98,6 +98,14 @@ goal: make the failed Analysis screen explain live shard collection, focused rep
 action: added a derived `analysis-live-diagnostics` panel inside Analysis failed-run recovery, using existing `RunLogEntry.fields`, selected artifacts and run warnings; no backend API, schema or runtime contract changed.
 status: implemented; full DoD passed; next medium rerun remains the follow-up.
 
+2026-07-08 slice 10 live rerun preflight:
+goal: rerun the requested medium live E2E after committing Slice 9 diagnostics.
+action: verified clean tree, provider binaries (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`), writable reports root and generated direct `regres long` qwen-only command. `/tmp/provenarch-live-e2e` was missing, so the canonical PostHog path checkout had to be restored per runbook `2.2`. A partial clone/refetch of `posthog/posthog` to pinned `14d29a548d63665d60b506cf13bd5cfb2de7c743` failed with `fatal: write error: No space left on device` after the object store reached about `3.3G`; `/tmp` had only `116MiB` free at failure. The temporary partial checkout was removed, restoring `/tmp` to about `3.4GiB` free.
+observed evidence: direct selector output still targets `examples/e2e-matrix.regres-long.yaml` with qwen-only baseline and `scripts/full-run-batch-matrix.sh`; no matrix id was started; no canonical matrix or curated repo file was changed.
+status: blocked
+primary classification: operational_host_preflight_failed
+next decision: stop before matrix execution; rerun only on a trusted host or volume with enough free space for the canonical PostHog checkout pinned to the runbook SHA.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -369,3 +377,19 @@ Observed improvement:
 Residual UX work after Slice 9:
 - Re-run the medium live matrix from a clean committed tree and inspect whether the new failed-run diagnostics explain the qwen collect failures well enough.
 - Provider permission approval/denial UI remains a separate future non-happy-path slice when live evidence produces representative pending permission requests.
+
+## Slice 10 Live Rerun Attempt
+
+Implemented:
+- No product/UI change. This was a live-gate preflight attempt after Slice 9.
+- Confirmed the repo worktree was clean and provider binaries were available.
+- Confirmed the canonical direct command remained `regres long` qwen-only baseline through `scripts/full-run-batch-matrix.sh`.
+
+Observed evidence:
+- Host root `/tmp/provenarch-live-e2e` was absent, so the run required restoring canonical PostHog path input.
+- PostHog restore could not complete on this machine: Git refetch failed with `No space left on device`; `/tmp` was at `100%` with `116MiB` free at failure.
+- The temporary partial checkout was removed; `/tmp/provenarch-live-e2e` is absent again and matrix execution did not start.
+
+UX conclusion:
+- Slice 9 is ready for the next medium run, but this host cannot currently satisfy the canonical PostHog path prerequisite.
+- This is an operational trusted-host blocker, not evidence against the new `analysis-live-diagnostics` UI.
