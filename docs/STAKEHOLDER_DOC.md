@@ -447,7 +447,7 @@ Wizard из блоков-шаблонов:
   - configured `docs.imports_path` (`docs/imports/*` по умолчанию)
 - Runtime step id: `qa.ask`; agent role: `system-analyst-qa`; prompt pack: `skills/prompt-packs/qa.md`; write scope: только `reports/taskruns/<run_id>/qa/`.
 - QA runs не меняют source repos или canonical workspace outputs; они пишут `context-pack.json`, `qa-answer.json` и `runtime-execution.json` в taskrun scope.
-- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
+- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance, terminal canceled/restart-reconciled answer copy и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
 - Compatibility: deterministic `acp qa` + public read-only `POST /api/qa/ask` остаются temporary fallback surfaces.
 - API возвращает `answer`, `citations`, `unresolved`, `confidence`; empty/invalid request идёт через standard API error envelope.
 

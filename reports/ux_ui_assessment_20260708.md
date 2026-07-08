@@ -472,3 +472,22 @@ Observed improvement:
 
 Residual UX work after Slice 14:
 - Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` has about `3.4GiB` free, below the 5 GiB matrix guard.
+
+## Slice 15 Result
+
+Implemented:
+- Extended terminal `run_canceled` / restart-reconciled semantics to Ask/Q&A recovery without changing the async QA API or runtime contracts.
+- Ask run history and selected run status now display `canceled` / `recovered` outcomes for terminal failed QA runs with those classifications instead of raw generic `failed`.
+- The Ask recovery panel now shows `Canceled answer run` / `Recovered answer run`, `Stopped step` / `Recovered step`, retained `reports/taskruns/<run_id>/qa/` audit evidence and an `Ask again` action.
+- Generic answer validation/runtime failure guidance remains unchanged for `runtime_contract_failed`, `runner_unavailable`, `runtime_timeout` and permission blockers.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `69 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+
+Observed improvement:
+- A first-time operator who cancels an Ask run can distinguish an intentional stop from a provider crash or invalid `qa-answer.json`.
+- The recovery surface keeps the audit trail visible and makes the next action explicit: ask again when ready.
+
+Residual UX work after Slice 15:
+- Medium live rerun remains blocked on the current host: `/tmp/provenarch-live-e2e` is absent and `/tmp` has about `3.3GiB` free, below the 5 GiB matrix guard.

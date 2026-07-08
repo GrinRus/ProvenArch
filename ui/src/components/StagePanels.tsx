@@ -3796,7 +3796,7 @@ export function AskStagePanel({
           <h1>Ask</h1>
           <p className="hint">Ask agent-backed questions over existing workspace artifacts. Source repos and canonical outputs stay unchanged.</p>
         </div>
-        <StatusBadge tone={qaRunStatusTone(qaRun?.status)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
+        <StatusBadge tone={qaRunStatusTone(qaRun)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
       </div>
 
       <div className="qa-workbench">
@@ -3825,7 +3825,7 @@ export function AskStagePanel({
                   >
                     <span className="qa-history-question">{run.question || run.run_id}</span>
                     <span className="qa-history-meta">
-                      <StatusBadge tone={qaRunStatusTone(run.status)}>{run.status}</StatusBadge>
+                      <StatusBadge tone={qaRunStatusTone(run)}>{qaRunOutcomeLabel(run)}</StatusBadge>
                       <span>{qaRunProviderLabel(run)}</span>
                     </span>
                     <span className="qa-history-time">{formatTimestamp(run.finished_at || run.started_at)}</span>
@@ -3857,7 +3857,7 @@ export function AskStagePanel({
             <div className="run-summary qa-run-summary" data-testid="qa-run-status">
               <div>
                 <p>
-                  Run <code>{qaRun.run_id}</code> status: <strong>{qaRun.status}</strong>
+                  Run <code>{qaRun.run_id}</code> status: <strong>{qaRunOutcomeLabel(qaRun)}</strong>
                 </p>
                 <p>Runtime provider: {qaRunProviderLabel(qaRun)}</p>
               </div>
@@ -3976,15 +3976,27 @@ function QAFailureRecovery({
   const warningCount = qaRun.warnings?.length ?? 0;
   const auditRefs = `reports/taskruns/${qaRun.run_id}/qa/`;
   const canRetry = Boolean((qaRun.question || "").trim());
+  const canceled = isRunCanceled(errorCode);
+  const reconciled = isRunReconciledAfterRestart(errorCode);
+  const title = canceled ? "Canceled answer run" : reconciled ? "Recovered answer run" : "Recovery path";
+  const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
+  const badgeTone = canceled || reconciled ? "warn" : "error";
+  const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
+  const retryLabel = canceled || reconciled ? "Ask again" : "Retry question";
+  const retentionHint = canceled
+    ? "Asking again creates a new Q&A run; the canceled attempt and QA audit artifacts stay in history."
+    : reconciled
+      ? "Asking again creates a new Q&A run; the reconciled attempt and QA audit artifacts stay in history."
+      : "Retry starts a new Q&A run; the failed answer attempt stays in history for audit.";
 
   return (
     <section className="qa-recovery-panel" data-testid="qa-failure-recovery">
       <div className="section-heading-row">
         <div>
-          <h2>Recovery path</h2>
+          <h2>{title}</h2>
           <p className="hint">{qaFailureGuidance(errorCode, warningCount)}</p>
         </div>
-        <StatusBadge tone="error">failed</StatusBadge>
+        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
       </div>
       <div className="qa-recovery-grid">
         <div>
@@ -3992,7 +4004,7 @@ function QAFailureRecovery({
           <strong>{errorCode}</strong>
         </div>
         <div>
-          <span className="metric-label">Blocked step</span>
+          <span className="metric-label">{stepLabel}</span>
           <strong>{blockedStep}</strong>
         </div>
         <div>
@@ -4008,18 +4020,24 @@ function QAFailureRecovery({
       {warningCount > 0 ? <p className="status warn">Warnings: {(qaRun.warnings ?? []).join(", ")}</p> : null}
       <div className="actions qa-recovery-actions">
         <button type="button" data-testid="qa-retry-run-btn" onClick={onRetry} disabled={busy || !canRetry}>
-          Retry question
+          {retryLabel}
         </button>
         <a className="link-button" href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
           Open run logs
         </a>
       </div>
-      <p className="hint">Retry starts a new Q&A run; the failed answer attempt stays in history for audit.</p>
+      <p className="hint">{retentionHint}</p>
     </section>
   );
 }
 
 function qaFailureGuidance(errorCode: string, warningCount: number): string {
+  if (isRunCanceled(errorCode)) {
+    return "The answer run stopped by request. Review QA audit artifacts, then ask again when ready.";
+  }
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return "ACP reconciled a stale answer run after restart. Review QA audit artifacts, then ask again if the question still matters.";
+  }
   if (errorCode === "runtime_permission_required") {
     return "Resolve the runtime permission request, then retry the question.";
   }
@@ -4038,14 +4056,31 @@ function qaFailureGuidance(errorCode: string, warningCount: number): string {
   return "Review logs and audit artifacts, then retry the same question when the cause is clear.";
 }
 
-function qaRunStatusTone(status?: QARunResponse["status"]): "info" | "ok" | "warn" | "error" {
-  if (status === "succeeded") {
+function qaRunOutcomeLabel(run: Pick<QARunResponse, "status" | "error_code"> | null | undefined): string {
+  if (!run?.status) {
+    return "unknown";
+  }
+  const errorCode = run.error_code || "";
+  if (run.status === "failed" && isRunCanceled(errorCode)) {
+    return "canceled";
+  }
+  if (run.status === "failed" && isRunReconciledAfterRestart(errorCode)) {
+    return "recovered";
+  }
+  return run.status;
+}
+
+function qaRunStatusTone(run: Pick<QARunResponse, "status" | "error_code"> | null | undefined): "info" | "ok" | "warn" | "error" {
+  if (run?.status === "succeeded") {
     return "ok";
   }
-  if (status === "failed") {
+  if (run?.status === "failed" && (isRunCanceled(run.error_code || "") || isRunReconciledAfterRestart(run.error_code || ""))) {
+    return "warn";
+  }
+  if (run?.status === "failed") {
     return "error";
   }
-  if (status === "queued" || status === "running") {
+  if (run?.status === "queued" || run?.status === "running") {
     return "warn";
   }
   return "info";

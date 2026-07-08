@@ -2347,6 +2347,42 @@ describe("App", () => {
     );
   });
 
+  it("explains canceled Q&A runs without presenting them as answer validation failures", async () => {
+    const fetchMock = createFetchMock({
+      qaRunID: "qa-canceled",
+      qaResponse: {
+        status: "failed",
+        question: "Who owns payments?",
+        current_step: "qa.ask",
+        error_code: "run_canceled",
+        error: "canceled by request",
+        warnings: [],
+        answer: null,
+        citations: null,
+        unresolved: null,
+        confidence: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    const recovery = await screen.findByTestId("qa-failure-recovery");
+    expect(screen.getByTestId("qa-run-status")).toHaveTextContent("status: canceled");
+    expect(recovery).toHaveTextContent("Canceled answer run");
+    expect(recovery).toHaveTextContent("run_canceled");
+    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("qa.ask");
+    expect(recovery).toHaveTextContent("The answer run stopped by request");
+    expect(recovery).toHaveTextContent("the canceled attempt and QA audit artifacts stay in history");
+    expect(screen.getByTestId("qa-retry-run-btn")).toHaveTextContent("Ask again");
+    expect(recovery).not.toHaveTextContent("The answer artifact did not pass validation");
+  });
+
   it("routes the inspector Ask primary action to the visible Q&A submit flow", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);

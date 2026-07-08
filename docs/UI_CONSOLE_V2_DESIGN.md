@@ -170,6 +170,7 @@ Must show:
 - Q&A run history;
 - answer with confidence, citations, unresolved assumptions and related entities/edges;
 - explicit read-only runtime safety;
+- canceled/restart-reconciled answer recovery with retained QA audit evidence and Ask-again action;
 - note that Q&A does not mutate canonical artifacts.
 
 ### 9. Publish

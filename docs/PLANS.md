@@ -103,6 +103,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Mirror pending permission step/rule/target/reason detail in the right inspector hard blocker.
 - [x] Add cooperative cancel guidance for active selected runs without changing cancel API behavior.
 - [x] Distinguish terminal canceled/reconciled runs from runtime failures in Analysis recovery and inspector copy.
+- [x] Distinguish terminal canceled/reconciled Q&A runs from answer validation/runtime failures in Ask recovery.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -127,8 +128,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 13) Mirror managed permission blocker context in the right inspector so the global hard-blocker surface stays actionable.
 14) Clarify active-run cancellation as cooperative stop with taskrun evidence/history preserved.
 15) Distinguish terminal `run_canceled` and restart-reconciled runs from runtime/provider failures.
-16) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-17) Commit and use the report to drive the next iteration.
+16) Extend the same terminal canceled/reconciled language to Ask/Q&A answer runs without changing the async QA API.
+17) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+18) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -157,6 +159,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Readiness keeps advanced runtime panels out of the first-run visual path while preserving direct operator access to timeouts/execution/permissions/provider overrides.
 - [x] Analysis failed runs show classification, blocked step, retained evidence, warnings and a retry action for the same pipeline.
 - [x] Ask failed runs show classification, blocked step, QA audit refs, warnings and a retry action for the same question.
+- [x] Ask terminal canceled/reconciled runs show canceled/recovered outcome, stopped/recovered step, retained QA audit evidence and an Ask-again action instead of answer-validation failure wording.
 - [x] Review artifact explorer stays open and keeps filtered artifact lists visible while switching between diagram/report/proposal/runtime groups.
 - [x] Publish shows publication set, gate, open-question and Git-action state above the fold and exposes mobile jumps for `Diff`, `Preview`, `Gate` and `Commit`.
 - [x] Onboarding shows the current setup step, current blocker, next action and disabled-action reason before the user enters Console V2.
