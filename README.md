@@ -249,7 +249,7 @@ runtime:
 auto-approves reads under `read_context_roots` и writes under `write_root`/`draft_final_root`.
 Shell/network/package-install/unknown requests не auto-approve-ятся; pending requests видны
 в `Analysis -> Pending permissions` с triage summary, policy rule, target/reason и next actions,
-а также в правом inspector.
+а также в правом inspector hard blockers с step, rule, target и reason.
 
 ## Артефакты и логи
 

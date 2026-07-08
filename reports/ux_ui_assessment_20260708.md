@@ -401,7 +401,7 @@ Implemented:
 - The panel summarizes blocked step, operation, decision, policy rule, primary target/reason and safe next actions before the raw request table.
 - Existing pending permission request data remains the only input; there is no backend/API/schema change and no new approve/deny broker.
 
-Post-change evidence so far:
+Post-change evidence:
 - targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `67 passed`
 - UI typecheck: `npm --prefix ui run typecheck` -> passed
 - full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `83` UI tests, Vite build and Go build)
@@ -413,3 +413,23 @@ Observed improvement:
 Residual UX work after Slice 11:
 - Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.
 - Approve/deny broker remains future scope; the current UI makes the stop understandable but does not resolve requests in-place.
+
+## Slice 12 Result
+
+Implemented:
+- Updated the right inspector hard-blocker copy for pending runtime permissions.
+- Pending permission blockers now show `Permission: <action>` plus blocked step, decision/rule, target and reason.
+- Existing pending permission request data remains the only input; there is no backend/API/schema change.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `67 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `83` UI tests, Vite build and Go build)
+
+Observed improvement:
+- The global hard-blocker surface now matches the dedicated `Permission triage` panel instead of reducing the issue to a generic pending message.
+- A first-time operator can understand the permission stop from the right inspector even before scrolling to the pending permissions table.
+
+Residual UX work after Slice 12:
+- Medium live rerun remains blocked on the current host until the canonical PostHog checkout can be restored with enough `/tmp` space.
+- Approve/deny broker remains future scope.

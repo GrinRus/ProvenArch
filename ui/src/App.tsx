@@ -27,6 +27,7 @@ import {
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
+  type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
   type SystemVersionResponse,
 } from "./lib/appContracts";
@@ -571,8 +572,8 @@ export default function App() {
     for (const request of runStatus?.pending_permissions ?? []) {
       items.push({
         severity: "error",
-        label: request.action || "runtime permission",
-        detail: "Runtime permission request is pending.",
+        label: request.action ? `Permission: ${request.action}` : "Runtime permission",
+        detail: formatPermissionBlockerDetail(request),
       });
     }
     if (runStatus?.error_code) {
@@ -1101,6 +1102,16 @@ export default function App() {
 
 function isProposalReviewArtifact(path: string): boolean {
   return path.startsWith("proposals/") || path.startsWith("reports/changelog/");
+}
+
+function formatPermissionBlockerDetail(request: RuntimePermissionRequest): string {
+  const step = request.step_id || "runtime step";
+  const decision = request.decision?.decision || "pending";
+  const rule = request.decision?.rule_id ? ` via ${request.decision.rule_id}` : "";
+  const target = request.path_or_command ? ` Target: ${request.path_or_command}.` : "";
+  const reason = request.reason || request.decision?.message;
+  const reasonDetail = reason ? ` Reason: ${reason}` : "";
+  return `${step} paused for ${decision}${rule}.${target}${reasonDetail}`;
 }
 
 function deriveNextAction(

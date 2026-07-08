@@ -560,7 +560,7 @@ flowchart TD
 - MVP использует только artifact-only runtime contract.
 - Runtime пишет required step artifacts в `write_root` / `draft_final_root` и завершает процесс без semantic JSON на stdout.
 - Orchestrator принимает шаг только после read-only validation artifacts и persisted runtime execution metadata.
-- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`. UI показывает такие pending requests в `Analysis` как triage summary с target/reason, rule/decision и next actions; approve/deny broker остаётся future scope.
+- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`. UI показывает такие pending requests в `Analysis` как triage summary с target/reason, rule/decision и next actions; правый inspector mirrors step/rule/target/reason в hard blocker; approve/deny broker остаётся future scope.
 - Observation без evidence запрещён policy и examples.
 
 ### 13.3. Skills/prompts editing через UI

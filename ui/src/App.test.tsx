@@ -2732,6 +2732,11 @@ describe("App", () => {
     expect(screen.getAllByText("ask_unsafe_operation").length).toBeGreaterThan(0);
     expect(screen.getAllByText("npm install").length).toBeGreaterThan(0);
     expect(screen.getAllByText("package install requires review").length).toBeGreaterThan(0);
+    const blockersPanel = screen.getByTestId("blockers-panel");
+    expect(blockersPanel).toHaveTextContent("Permission: shell");
+    expect(blockersPanel).toHaveTextContent("init.step1.collect paused for needs_user via ask_unsafe_operation");
+    expect(blockersPanel).toHaveTextContent("Target: npm install.");
+    expect(blockersPanel).toHaveTextContent("Reason: package install requires review");
   });
 
   it("renders Analysis V2 run progress, timeline, and shard drilldown", async () => {

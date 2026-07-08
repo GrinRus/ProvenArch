@@ -117,7 +117,7 @@ Must show:
 - shard table with repo/path/provider/status/artifacts/duration;
 - failed-run live diagnostics for shard counters, focused repair, stall pressure, terminal excerpt and raw-output refs;
 - pending permission triage with blocked step, operation, decision, policy rule, target/reason and safe next actions;
-- blocker, evidence refs and runtime safety in inspector;
+- blocker, evidence refs and runtime safety in inspector, including permission blocker step/rule/target/reason detail;
 - live logs with highlighted error/warning rows.
 
 ### 5. Review - Evidence

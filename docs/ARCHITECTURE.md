@@ -51,7 +51,7 @@
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions и artifacts, а также compact runtime profile summary и collapsed advanced runtime tools disclosure для timeout/execution/permission/provider overrides
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - `Charter` показывает wizard summary, domain/team card overview, baseline prompt bundle status, explicit partial state для missing card artifacts и editor для baseline bundle artifacts (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
-   - `Analysis` показывает run mission control, canonical `step0..step4` timeline, failed-run recovery path, derived live diagnostics for shard progress/focused repair/stall/raw-output signals, shard/log-derived table, warning/error drilldown, pending permission triage/run history controls without adding backend contracts
+   - `Analysis` показывает run mission control, canonical `step0..step4` timeline, failed-run recovery path, derived live diagnostics for shard progress/focused repair/stall/raw-output signals, shard/log-derived table, warning/error drilldown, pending permission triage/run history controls and right-inspector permission blocker detail without adding backend contracts
    - `App.tsx` остаётся route shell, а крупные sections вынесены в dedicated stage panels (`SourceStagePanel`, `ReadinessStagePanel`, `CharterStagePanel`, `AnalysisStagePanel`, `ReviewStagePanel`, `ProposalsStagePanel`, `AskStagePanel`, `PublishStagePanel`); shell components отвечают за top bar, rail, inspector и activity drawer
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
    - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage
@@ -74,7 +74,7 @@
    - Runtime Permissions settings panel:
      - load/save/reset через `GET/PUT /api/runtime/permissions`
      - показывает persisted/effective/source для `trusted_full_access|managed` и `fail_fast|ui`
-   - `Analysis` показывает pending runtime permission requests выбранного run вместе с triage summary, target/reason, `decision/rule_id` и next actions; approve/deny broker остаётся отдельным будущим slice
+   - `Analysis` показывает pending runtime permission requests выбранного run вместе с triage summary, target/reason, `decision/rule_id` и next actions; right inspector mirrors the actionable blocker detail with step, rule, target and reason; approve/deny broker остаётся отдельным будущим slice
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
