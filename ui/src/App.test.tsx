@@ -1962,10 +1962,12 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await renderConsoleApp();
+    await screen.findByTestId("review-panel");
 
     fireEvent.click(screen.getByTestId("stage-publish"));
 
-    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step"));
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Selected run Git diff");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
