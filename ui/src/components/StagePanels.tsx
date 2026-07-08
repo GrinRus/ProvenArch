@@ -933,6 +933,7 @@ export function AnalysisStagePanel({
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
+  const liveDiagnostics = buildAnalysisLiveDiagnostics(runStatus, runLogs, shardRows, artifacts, selectedRunWarnings);
   const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
   const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
   const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
@@ -1010,6 +1011,7 @@ export function AnalysisStagePanel({
         issueCount={issueRows.length}
         artifactCount={artifactCount}
         pendingPermissionCount={pendingPermissions.length}
+        liveDiagnostics={liveDiagnostics}
         onRetry={onRunPipeline}
         onReviewBlocker={handleReviewBlocker}
       />
@@ -1059,6 +1061,27 @@ type AnalysisShardRow = {
   artifactRef: string;
   duration: string;
   lastMessage: string;
+};
+
+type AnalysisLiveMetric = {
+  label: string;
+  value: string;
+  detail: string;
+};
+
+type AnalysisLiveTrace = {
+  label: string;
+  value: string;
+};
+
+type AnalysisLiveDiagnostics = {
+  status: string;
+  tone: "info" | "ok" | "warn" | "error";
+  summary: string;
+  metrics: AnalysisLiveMetric[];
+  traces: AnalysisLiveTrace[];
+  actions: string[];
+  hasTelemetry: boolean;
 };
 
 const canonicalAnalysisSteps = [
@@ -1142,6 +1165,7 @@ function AnalysisFailureRecovery({
   issueCount,
   artifactCount,
   pendingPermissionCount,
+  liveDiagnostics,
   onRetry,
   onReviewBlocker,
 }: {
@@ -1152,6 +1176,7 @@ function AnalysisFailureRecovery({
   issueCount: number;
   artifactCount: number;
   pendingPermissionCount: number;
+  liveDiagnostics: AnalysisLiveDiagnostics;
   onRetry: (pipeline: "init" | "refresh") => void;
   onReviewBlocker: () => void;
 }) {
@@ -1198,6 +1223,7 @@ function AnalysisFailureRecovery({
       </div>
 
       {runStatus.error ? <p className="status err">{runStatus.error}</p> : null}
+      <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} />
 
       <div className="actions analysis-recovery-actions">
         <button type="button" data-testid="analysis-retry-run-btn" onClick={() => onRetry(retryPipeline)} disabled={busy}>
@@ -1208,6 +1234,42 @@ function AnalysisFailureRecovery({
         </button>
       </div>
       <p className="hint">Retry starts a new run; the failed run remains available in History for audit and comparison.</p>
+    </section>
+  );
+}
+
+function AnalysisLiveDiagnosticsPanel({ diagnostics }: { diagnostics: AnalysisLiveDiagnostics }) {
+  return (
+    <section className="analysis-live-diagnostics" data-testid="analysis-live-diagnostics">
+      <div className="section-heading-row">
+        <div>
+          <h3>Live diagnostics</h3>
+          <p className="hint">{diagnostics.summary}</p>
+        </div>
+        <StatusBadge tone={diagnostics.tone}>{diagnostics.status}</StatusBadge>
+      </div>
+      <div className="analysis-live-grid">
+        {diagnostics.metrics.map((metric) => (
+          <div key={metric.label}>
+            <span className="metric-label">{metric.label}</span>
+            <strong>{metric.value}</strong>
+            <span>{metric.detail}</span>
+          </div>
+        ))}
+      </div>
+      <dl className="compact-defs analysis-live-traces">
+        {diagnostics.traces.map((trace) => (
+          <div key={trace.label}>
+            <dt>{trace.label}</dt>
+            <dd>{trace.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="analysis-next-actions">
+        {diagnostics.actions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -1239,6 +1301,209 @@ function failureEvidenceSummary(artifactCount: number, issueCount: number): stri
     return `${issueCount} diagnostic rows`;
   }
   return "status and logs only";
+}
+
+function buildAnalysisLiveDiagnostics(
+  runStatus: RunStatusResponse | null,
+  runLogs: RunLogEntry[],
+  shardRows: AnalysisShardRow[],
+  artifacts: Artifact[],
+  warnings: string[],
+): AnalysisLiveDiagnostics {
+  const observedShards = new Set<string>();
+  const failedShards = new Set<string>();
+  const recoveryModes = new Set<string>();
+  const rawRefs = new Set<string>();
+  const validationExcerpts: string[] = [];
+  const providerRefs = new Set<string>();
+  let plannedShards: number | undefined;
+  let succeededShards: number | undefined;
+  let failedShardCount: number | undefined;
+  let partialFailureCount: number | undefined;
+  let repairScheduled = 0;
+  let repairCompleted = 0;
+  let repairExhausted = 0;
+  let stallCount = 0;
+  let preArtifactStalls = 0;
+  let validArtifactControlledStops = 0;
+  let zeroOutputPreArtifactStalls = 0;
+
+  for (const entry of runLogs) {
+    const fields = entry.fields;
+    const message = entry.message || "";
+    const normalizedMessage = message.toLowerCase();
+    const shardID = fieldString(fields, "shard_id");
+    if (shardID) {
+      observedShards.add(shardID);
+      if (entry.level === "error" || normalizedMessage.includes("failed") || normalizedMessage.includes("exhausted")) {
+        failedShards.add(shardID);
+      }
+    }
+
+    plannedShards = maxDefined(plannedShards, firstNumericField(fields, ["shards_total", "planned_shards", "planned", "total_shards", "total"]));
+    succeededShards = maxDefined(succeededShards, firstNumericField(fields, ["succeeded_shards", "succeeded", "completed_shards", "completed"]));
+    failedShardCount = maxDefined(failedShardCount, firstNumericField(fields, ["failed_shards", "failed"]));
+    partialFailureCount = maxDefined(partialFailureCount, numericField(fields, "partial_failure_count"));
+
+    const parsedCounters = parseShardCounters(message);
+    if (parsedCounters) {
+      plannedShards = maxDefined(plannedShards, parsedCounters.planned);
+      succeededShards = maxDefined(succeededShards, parsedCounters.succeeded);
+      failedShardCount = maxDefined(failedShardCount, parsedCounters.failed);
+    }
+
+    const provider = fieldString(fields, "provider") || fieldString(fields, "selected_provider");
+    if (provider) {
+      providerRefs.add(provider);
+    }
+    const recoveryMode = fieldString(fields, "recovery_mode");
+    if (recoveryMode) {
+      recoveryModes.add(recoveryMode);
+    }
+
+    if (normalizedMessage.includes("focused artifact repair scheduled") || normalizedMessage.includes("focused artifact repair retry scheduled")) {
+      repairScheduled += 1;
+    }
+    if (normalizedMessage.includes("focused artifact repair completed")) {
+      repairCompleted += 1;
+    }
+    if (
+      normalizedMessage.includes("focused artifact repair exhausted") ||
+      normalizedMessage.includes("collect manifest repair exhausted") ||
+      normalizedMessage.includes("repair exhausted")
+    ) {
+      repairExhausted += 1;
+    }
+
+    const validationError = fieldString(fields, "validation_error") || fieldString(fields, "error");
+    if (validationError) {
+      validationExcerpts.push(validationError);
+    }
+
+    if (boolField(fields, "zero_output_pre_artifact_stall")) {
+      zeroOutputPreArtifactStalls += 1;
+    }
+    const stallPhase = fieldString(fields, "stall_phase");
+    const isStall =
+      fieldString(fields, "exit_reason") === "stall" ||
+      validationError.includes("runtime_stalled") ||
+      normalizedMessage.includes("runtime_stalled") ||
+      normalizedMessage.includes("stalled");
+    const artifactIsValid = boolField(fields, "artifact_valid") || fieldString(fields, "artifact_state") === "valid";
+    if (isStall && artifactIsValid && validationError === "") {
+      validArtifactControlledStops += 1;
+    } else if (isStall) {
+      stallCount += 1;
+      if (stallPhase.includes("pre") || validationError.includes("before_artifacts")) {
+        preArtifactStalls += 1;
+      }
+    }
+
+    for (const ref of rawOutputRefsFromEntry(entry)) {
+      rawRefs.add(ref);
+    }
+  }
+
+  for (const row of shardRows) {
+    if (row.scope && row.scope !== "workspace") {
+      observedShards.add(row.scope);
+    }
+    if (row.status === "failed" && row.scope && row.scope !== "workspace") {
+      failedShards.add(row.scope);
+    }
+  }
+
+  const failedRowsFallback = failedShards.size === 0 ? shardRows.filter((row) => row.status === "failed").length : 0;
+  const failedCount = Math.max(failedShardCount ?? 0, partialFailureCount ?? 0, failedShards.size, failedRowsFallback);
+  const observedCount = Math.max(plannedShards ?? 0, observedShards.size, shardRows.length > 1 ? shardRows.length : 0);
+  const succeededCount =
+    succeededShards ?? (plannedShards !== undefined ? Math.max(plannedShards - failedCount, 0) : Math.max(observedCount - failedCount, 0));
+  const rawRefList = Array.from(rawRefs).slice(0, 3);
+  const recoveryModeList = Array.from(recoveryModes).slice(0, 3);
+  const providerList = Array.from(providerRefs).slice(0, 3);
+  const terminalExcerpt = firstNonEmpty([lastString(validationExcerpts), runStatus?.error ?? "", warnings[0] ?? ""]);
+  const hasTelemetry = runLogs.length > 0 || artifacts.length > 0 || warnings.length > 0;
+  const status = failedCount > 0 || repairExhausted > 0 ? "action needed" : hasTelemetry ? "review" : "logs missing";
+  const tone = failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
+  const summary = hasTelemetry
+    ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
+    : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
+
+  const metrics: AnalysisLiveMetric[] = [
+    {
+      label: "Shard state",
+      value: formatShardMetric(plannedShards, observedCount, succeededCount, failedCount),
+      detail: failedShards.size > 0 ? `failed: ${Array.from(failedShards).slice(0, 3).join(", ")}` : "no failed shard ids in loaded logs",
+    },
+    {
+      label: "Focused repair",
+      value: `${repairScheduled} scheduled / ${repairCompleted} completed / ${repairExhausted} exhausted`,
+      detail: recoveryModeList.length > 0 ? recoveryModeList.join(", ") : "no recovery mode logged",
+    },
+    {
+      label: "Stall pressure",
+      value: `${stallCount} actual / ${validArtifactControlledStops} valid-stop`,
+      detail: `${preArtifactStalls} pre-artifact · ${zeroOutputPreArtifactStalls} zero-output`,
+    },
+    {
+      label: "Raw refs",
+      value: rawRefs.size > 0 ? `${rawRefs.size} refs` : "none loaded",
+      detail: rawRefList.length > 0 ? rawRefList.join(", ") : `${artifacts.length} selected-run artifacts`,
+    },
+  ];
+  const traces: AnalysisLiveTrace[] = [
+    { label: "Provider", value: providerList.length > 0 ? providerList.join(", ") : "not exposed in loaded logs" },
+    { label: "Terminal excerpt", value: terminalExcerpt || "No terminal validation excerpt loaded." },
+  ];
+
+  return {
+    status,
+    tone,
+    summary,
+    metrics,
+    traces,
+    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry),
+    hasTelemetry,
+  };
+}
+
+function buildAnalysisLiveActions(failedCount: number, repairExhausted: number, stallCount: number, rawRefCount: number, hasTelemetry: boolean): string[] {
+  if (!hasTelemetry) {
+    return ["Load run logs or open persisted artifacts before retrying the same pipeline."];
+  }
+  const actions = ["Inspect failed shard rows and terminal excerpts before starting a retry."];
+  if (failedCount > 0) {
+    actions.push("Retry only after the failed shard/provider cause is understood.");
+  }
+  if (repairExhausted > 0 || stallCount > 0) {
+    actions.push("Confirm the provider can write valid artifacts without relying on focused repair.");
+  }
+  if (rawRefCount > 0) {
+    actions.push("Use raw-output metadata to compare stdout/stderr against the failed shard evidence.");
+  }
+  return actions;
+}
+
+function formatShardMetric(plannedShards: number | undefined, observedCount: number, succeededCount: number, failedCount: number): string {
+  if (plannedShards !== undefined && plannedShards > 0) {
+    return `${succeededCount}/${plannedShards} ok · ${failedCount} failed`;
+  }
+  if (observedCount > 0) {
+    return `${failedCount} failed / ${observedCount} observed`;
+  }
+  return "no shard counters";
+}
+
+function parseShardCounters(message: string): { planned: number; succeeded: number; failed: number } | null {
+  const match = message.match(/shards_total=(\d+)\s+succeeded=(\d+)\s+failed=(\d+)/i) ?? message.match(/planned=(\d+)\s+succeeded=(\d+)\s+failed=(\d+)/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    planned: Number(match[1]),
+    succeeded: Number(match[2]),
+    failed: Number(match[3]),
+  };
 }
 
 function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {
@@ -1695,6 +1960,55 @@ function numericField(fields: Record<string, unknown> | undefined, key: string):
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function firstNumericField(fields: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = numericField(fields, key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function maxDefined(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) {
+    return current;
+  }
+  return current === undefined ? next : Math.max(current, next);
+}
+
+function boolField(fields: Record<string, unknown> | undefined, key: string): boolean {
+  const value = fields?.[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return typeof value === "string" && value.trim().toLowerCase() === "true";
+}
+
+function rawOutputRefsFromEntry(entry: RunLogEntry): string[] {
+  const refs = new Set<string>();
+  const rawOutput = fieldString(entry.fields, "raw_output");
+  if (rawOutput) {
+    refs.add(rawOutput);
+  }
+  const rawOutputMetadata = fieldString(entry.fields, "raw_output_metadata");
+  if (rawOutputMetadata) {
+    refs.add(rawOutputMetadata);
+  }
+  for (const match of entry.message.matchAll(/raw_output=([^\s)]+)/gi)) {
+    refs.add(match[1]);
+  }
+  return Array.from(refs);
+}
+
+function firstNonEmpty(values: string[]): string {
+  return values.map((value) => value.trim()).find((value) => value.length > 0) ?? "";
+}
+
+function lastString(values: string[]): string {
+  return values.length > 0 ? values[values.length - 1] : "";
 }
 
 function formatDurationMillis(milliseconds: number): string {

@@ -115,6 +115,7 @@ Must show:
 - run id, runtime/provider and progress;
 - step timeline for `init.step0.constitution` through `init.step4.proposals`;
 - shard table with repo/path/provider/status/artifacts/duration;
+- failed-run live diagnostics for shard counters, focused repair, stall pressure, terminal excerpt and raw-output refs;
 - blocker, evidence refs and runtime safety in inspector;
 - live logs with highlighted error/warning rows.
 
@@ -243,7 +244,7 @@ empty/partial state rather than changing backend contracts implicitly.
 - Analysis:
   - `POST /api/pipeline/init`, `POST /api/pipeline/refresh`;
   - `GET /api/pipeline/runs`, `GET /api/pipeline/runs/<run_id>`;
-  - `GET /api/pipeline/runs/<run_id>/logs`;
+  - `GET /api/pipeline/runs/<run_id>/logs`, including `fields` such as `shard_id`, `provider`, `recovery_mode`, `stall_phase`, `validation_error`, `partial_failure_count` and raw-output metadata when emitted;
   - `GET /api/pipeline/runs/<run_id>/artifacts`;
   - pending permission request data already exposed on selected run status.
 - Review - Evidence:
@@ -298,6 +299,7 @@ V2 selectors should be stable and explicit:
 - shared surfaces: `next-action-panel`, `blockers-panel`, `evidence-refs-panel`,
   `runtime-safety-panel`, `git-publication-panel`;
 - Analysis: `analysis-run-timeline`, `analysis-shard-table`, `analysis-run-progress`,
+  `analysis-live-diagnostics`,
   `analysis-review-blocker-btn`;
 - Review: `review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`,
   `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`;

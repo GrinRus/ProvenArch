@@ -93,6 +93,11 @@ primary classification: live_runtime_provider_artifact_handoff_failed
 UX classification: the live product UI screens beyond backend/API baseline were not reached because headless qwen failed during `init.step1.collect`; the actionable UX gap is live diagnostics clarity for long shard collection, focused repair, partial shard failures and raw-output handoff, not visual polish of Review/Ask/Publish screens.
 next decision: implement a focused live-diagnostics UX slice before another medium run: show shard-plan progress, succeeded/failed/repairing counts, current repair reason, terminal validation excerpt, raw-output refs and concrete rerun/triage actions in the console and reports.
 
+2026-07-08 slice 9 diagnostics UX implementation:
+goal: make the failed Analysis screen explain live shard collection, focused repair, partial failures, stall pressure and raw-output refs before the operator reads raw logs.
+action: added a derived `analysis-live-diagnostics` panel inside Analysis failed-run recovery, using existing `RunLogEntry.fields`, selected artifacts and run warnings; no backend API, schema or runtime contract changed.
+status: implemented; full DoD passed; next medium rerun remains the follow-up.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -343,3 +348,24 @@ Residual UX work after Slice 8:
 - The console still needs a first-class live diagnostics view for long shard collection: current shard, total shards, succeeded/failed/repairing counts, repair attempt count, stall pressure, terminal validation excerpt and raw-output refs.
 - Recovery copy should distinguish "provider still working", "focused repair running", "partial collect can continue best-effort" and "terminal runtime contract failure" before asking the operator to inspect raw logs.
 - A repeat medium run should happen only after the live-diagnostics UX slice, so the next audit can inspect whether a first-time operator understands the failure and retry path.
+
+## Slice 9 Result
+
+Implemented:
+- `AnalysisStagePanel` now renders a compact `Live diagnostics` panel inside failed-run recovery.
+- The panel derives shard state, focused repair schedule/completion/exhaustion, stall pressure, provider refs, terminal validation excerpt and raw-output refs from existing selected-run logs and artifacts.
+- Partial collect failures are deduplicated by `shard_id`, so repeated error/repair/stall rows for one shard do not inflate failed-shard counts.
+- Recovery actions now distinguish failed shard inspection, provider/artifact readiness and raw-output stdout/stderr comparison before retry.
+
+Post-change evidence so far:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `67 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`83` UI tests, `230` Python tests)
+
+Observed improvement:
+- A failed live Analysis run can now show `1/2 ok`, focused repair exhaustion, pre-artifact stall pressure, `collect_pair_repair`, `runtime_stalled_before_artifacts` and raw-output metadata in one recovery block.
+- First-time operators get a triage summary before opening the activity drawer or external execution report.
+
+Residual UX work after Slice 9:
+- Re-run the medium live matrix from a clean committed tree and inspect whether the new failed-run diagnostics explain the qwen collect failures well enough.
+- Provider permission approval/denial UI remains a separate future non-happy-path slice when live evidence produces representative pending permission requests.

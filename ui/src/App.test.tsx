@@ -2767,10 +2767,53 @@ describe("App", () => {
                 step_id: "init.step1.collect",
                 domain_id: "invoices",
                 message: "runtime execution persisted",
-                fields: { provider: "qwen-code", shard_id: "invoices" },
+                fields: { provider: "qwen-code", shard_id: "invoices", shards_total: 2, succeeded: 1, failed: 1 },
+              },
+              {
+                cursor: 3,
+                timestamp: "2026-04-03T12:00:03Z",
+                level: "warning",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "payments",
+                message: "focused artifact repair scheduled",
+                fields: {
+                  provider: "qwen-code",
+                  shard_id: "payments",
+                  recovery_mode: "collect_pair_repair",
+                  validation_error: 'documents[0].path references process-contaminated collect document file "root-overview.md"',
+                },
+              },
+              {
+                cursor: 4,
+                timestamp: "2026-04-03T12:00:04Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "payments",
+                message:
+                  "focused artifact repair exhausted stage=collect_pair_repair (raw_output=reports/taskruns/run-analysis-v2/raw/payments/collect.json stdout_bytes=0 stdout_sha256=abc stderr_bytes=0 stderr_sha256=def)",
+                fields: {
+                  provider: "qwen-code",
+                  shard_id: "payments",
+                  recovery_mode: "collect_pair_repair",
+                  stall_phase: "pre_artifact",
+                  exit_reason: "stall",
+                  artifact_valid: false,
+                  validation_error: "runtime_stalled_before_artifacts",
+                },
+              },
+              {
+                cursor: 5,
+                timestamp: "2026-04-03T12:00:05Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                message: "run failed: partial shard failures detected",
+                fields: { error_code: "run_partial_failed", partial_failure_count: 1 },
               },
             ],
-            next_cursor: 2,
+            next_cursor: 5,
             eof: true,
           },
         },
@@ -2812,6 +2855,17 @@ describe("App", () => {
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
     expect(drilldown).toHaveTextContent("collect manifest missing");
+
+    const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("Live diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("1/2 ok");
+    expect(liveDiagnostics).toHaveTextContent("1 failed");
+    expect(liveDiagnostics).toHaveTextContent("1 scheduled / 0 completed / 1 exhausted");
+    expect(liveDiagnostics).toHaveTextContent("collect_pair_repair");
+    expect(liveDiagnostics).toHaveTextContent("1 actual / 0 valid-stop");
+    expect(liveDiagnostics).toHaveTextContent("1 pre-artifact");
+    expect(liveDiagnostics).toHaveTextContent("reports/taskruns/run-analysis-v2/raw/payments/collect.json");
+    expect(liveDiagnostics).toHaveTextContent("runtime_stalled_before_artifacts");
   });
 
   it("copies run logs using the active line+fields view", async () => {

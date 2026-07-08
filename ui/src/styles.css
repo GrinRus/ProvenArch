@@ -1260,6 +1260,66 @@ code {
   margin-top: 0;
 }
 
+.analysis-live-diagnostics {
+  display: grid;
+  gap: 0.58rem;
+  padding: 0.62rem;
+  border: 1px solid rgba(180, 35, 24, 0.16);
+  border-radius: 0.46rem;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.analysis-live-diagnostics h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.analysis-live-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.analysis-live-grid > div {
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 0.4rem;
+  background: var(--surface);
+}
+
+.analysis-live-grid strong,
+.analysis-live-grid span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.analysis-live-grid strong {
+  margin-top: 0.14rem;
+  font-size: 0.84rem;
+}
+
+.analysis-live-grid span:last-child {
+  margin-top: 0.12rem;
+  color: var(--ink-muted);
+  font-size: 0.73rem;
+  line-height: 1.35;
+}
+
+.analysis-live-traces {
+  margin-top: 0;
+}
+
+.analysis-next-actions {
+  display: grid;
+  gap: 0.28rem;
+  margin: 0;
+  padding-left: 1.05rem;
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
 .analysis-timeline {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3624,6 +3684,7 @@ code {
   .charter-workbench-grid,
   .analysis-progress-grid,
   .analysis-recovery-grid,
+  .analysis-live-grid,
   .analysis-timeline,
   .analysis-step-card-grid,
   .qa-recovery-grid {
@@ -3699,6 +3760,7 @@ code {
   .charter-workbench-grid,
   .analysis-progress-grid,
   .analysis-recovery-grid,
+  .analysis-live-grid,
   .analysis-timeline,
   .analysis-step-card-grid,
   .qa-recovery-grid,
@@ -3951,6 +4013,7 @@ code {
   .charter-card-stats,
   .analysis-progress-grid,
   .analysis-recovery-grid,
+  .analysis-live-grid,
   .analysis-timeline,
   .analysis-step-card-grid,
   .qa-recovery-grid,
