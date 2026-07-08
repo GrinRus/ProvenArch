@@ -80,6 +80,19 @@ status: blocked
 primary classification: operational_host_preflight_failed
 next decision: stop before matrix execution; fix the canonical PostHog checkout/pinned SHA on a trusted host, then rerun from a clean committed tree.
 
+2026-07-08 slice 8 live matrix run:
+goal: run the requested medium live E2E after restoring the canonical PostHog checkout on this trusted host.
+action: moved the non-Git placeholder at `/tmp/provenarch-live-e2e/posthog/posthog` aside, restored a real Git checkout at pinned ref `14d29a548d63665d60b506cf13bd5cfb2de7c743`, then ran the direct harness command without a wrapper:
+`MATRIX_ID=regres-long-posthog-ftgo-20260708T130309Z E2E_MATRIX_FILE=examples/e2e-matrix.regres-long.yaml E2E_MATRIX_RELEASE_MODE=0 RUN_COUNT=1 BATCH_PROVIDER_FILTER=qwen-code ./scripts/full-run-batch-matrix.sh` with exact Node `v22.21.1` and provider binaries `qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`.
+observed evidence: matrix result `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260708T130309Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+profile evidence:
+- PostHog path profile `single-path/baseline` failed with `runtime_contract_failed=1`, `quality_gates_failed=1`, `partial_failure_count=9`, raw output refs `9`, excellent blockers `runtime_quality.partial_failures`, `runtime_quality.repair_exhausted`, `runtime_quality.repair_heavy`, `runtime_quality.stall_pressure`.
+- FTGO git_url profile `single-git_url/baseline` failed with `runtime_contract_failed=1`, `quality_gates_failed=1`, `partial_failure_count=8`, raw output refs `8`, `repair_attempts=11`, `repair_exhausted=8`, `focused_repairs=11`, `stall_count=17`, `pre_artifact_stalls=17`, `valid_artifact_controlled_stops=3`; the first blocker excerpt was `documents[0].path references process-contaminated collect document file "root-overview.md"` and the terminal excerpt was `runtime_stalled_before_artifacts`.
+status: failed
+primary classification: live_runtime_provider_artifact_handoff_failed
+UX classification: the live product UI screens beyond backend/API baseline were not reached because headless qwen failed during `init.step1.collect`; the actionable UX gap is live diagnostics clarity for long shard collection, focused repair, partial shard failures and raw-output handoff, not visual polish of Review/Ask/Publish screens.
+next decision: implement a focused live-diagnostics UX slice before another medium run: show shard-plan progress, succeeded/failed/repairing counts, current repair reason, terminal validation excerpt, raw-output refs and concrete rerun/triage actions in the console and reports.
+
 ## UX Findings
 
 1. Shared shell chrome still competes with the stage task.
@@ -305,5 +318,28 @@ Observed improvement:
 - Recoverable onboarding source errors are visible in three aligned places: top blocker summary, affected repo row and Ready action hint.
 
 Residual UX work after Slice 7:
-- Medium live E2E remains blocked by trusted-host repo setup until `/tmp/provenarch-live-e2e/posthog/posthog` is restored as the pinned Git checkout and the run starts from a clean committed tree.
+- Medium live E2E is no longer blocked by trusted-host repo setup; Slice 8 executed the matrix and found live runtime/provider artifact-handoff failures during `init.step1.collect`.
 - Provider permission approval/denial UI remains a future deeper non-happy-path audit area once a trusted-host live run can produce representative pending-permission evidence.
+
+## Slice 8 Result
+
+Implemented:
+- Restored the local PostHog trusted-host checkout outside the repo so the canonical `regres long` matrix could run through the public harness instead of stopping at host preflight.
+- Ran the qwen-only baseline matrix with `scripts/full-run-batch-matrix.sh` and captured machine evidence for both medium profiles.
+- Classified the result as a live runtime/provider artifact-handoff failure rather than a visual UI regression, because both profiles failed before the live UI could exercise Review, Ask or Publish on provider-authored artifacts.
+
+Post-change evidence:
+- matrix result: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260708T130309Z.json` -> `FAIL`
+- PostHog profile status: `/tmp/provenarch-test_arch_project/matrix/regres-long-posthog-ftgo-20260708T130309Z/profile-status/single-path--baseline.json` -> `failed`, `failure_reason=child_failed`
+- FTGO profile status: `/tmp/provenarch-test_arch_project/matrix/regres-long-posthog-ftgo-20260708T130309Z/profile-status/single-git-url--baseline.json` -> `failed`, `failure_reason=child_failed`
+- FTGO execution report: `/tmp/provenarch-test_arch_project/reports/execution_report_regres-long-posthog-ftgo-20260708T130309Z-single-git-url-baseline.md`
+- FTGO run status: `state=process_failed`, `failure_reason=pipeline command failed for runtime=headless:qwen-code pipeline=init`
+
+Observed improvement:
+- The previous trusted-host blocker is gone; the matrix now reaches real qwen `init.step1.collect` execution on both medium targets.
+- The existing reporting already exposes useful raw refs and quality blocker codes for partial shard failures.
+
+Residual UX work after Slice 8:
+- The console still needs a first-class live diagnostics view for long shard collection: current shard, total shards, succeeded/failed/repairing counts, repair attempt count, stall pressure, terminal validation excerpt and raw-output refs.
+- Recovery copy should distinguish "provider still working", "focused repair running", "partial collect can continue best-effort" and "terminal runtime contract failure" before asking the operator to inspect raw logs.
+- A repeat medium run should happen only after the live-diagnostics UX slice, so the next audit can inspect whether a first-time operator understands the failure and retry path.

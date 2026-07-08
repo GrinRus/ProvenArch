@@ -96,6 +96,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Keep the secondary Review artifact explorer stable while switching filters during evidence review.
 - [x] Add Publish readiness summary and mobile section jumps for the final Git handoff path.
 - [x] Add onboarding setup summary with current blocker, next action and explicit disabled-action reasons.
+- [x] Restore trusted-host PostHog checkout outside the repo and execute the medium qwen-only baseline matrix through `scripts/full-run-batch-matrix.sh`.
+- [x] Classify the live medium result with report/profile/status evidence instead of treating it as a visual UI regression.
+- [ ] Implement a live diagnostics UX slice for shard collection, focused repair and partial failure recovery.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -115,8 +118,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 8) Implement non-happy-path recovery polish for failed Analysis and Ask runs.
 9) Implement Publish handoff polish: publication readiness summary, mobile section jumps and rendered mobile Publish evidence.
 10) Implement onboarding first-run polish: current setup blocker, next action and disabled-action reasons.
-11) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-12) Commit and use the report to drive the next iteration.
+11) Use the medium matrix result to design the next live diagnostics slice: shard-plan progress, succeeded/failed/repairing counts, repair attempt state, terminal validation excerpt, raw-output refs and concrete rerun/triage actions.
+12) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+13) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -146,6 +150,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Onboarding shows the current setup step, current blocker, next action and disabled-action reason before the user enters Console V2.
 - [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
 - [x] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
+- [x] Live medium execution evidence is captured from `matrix_result_regres-long-posthog-ftgo-20260708T130309Z.json`, profile status JSON and execution reports.
+- [ ] Live failed-run diagnostics expose shard progress and recovery state without requiring raw log inspection first.
+- [ ] Live diagnostics distinguish provider activity, focused repair, partial collect continuation and terminal runtime contract failure.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -168,6 +175,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Re-ran the medium `regres long` preflight after slice 6. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
 - 2026-07-08: Implemented slice 7 onboarding blocker-summary polish: the pre-console onboarding screen now shows current setup step, next action, current blocker, per-step status and disabled-action reasons for `Open console` / `Run first analysis`. Targeted App tests, typecheck, full UI Vitest suite, build, rendered onboarding smoke (`/tmp/provenarch-ui-onboarding-summary-results.KbB5En`), fake-runtime rendered smoke (`run_20260708_124024_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
 - 2026-07-08: Re-ran the medium `regres long` preflight after slice 7. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
+- 2026-07-08: Restored the trusted-host PostHog checkout outside the repo at pinned ref `14d29a548d63665d60b506cf13bd5cfb2de7c743` and ran `regres long` qwen-only baseline through direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260708T130309Z`. Matrix result was `FAIL`: both `single-path` PostHog and `single-git_url` FTGO failed in `init.step1.collect` with `runtime_contract_failed`, `quality_gates_failed`, `runtime_flow_failed`, partial shard failures, repair exhaustion and stall pressure. PostHog recorded `partial_failure_count=9`; FTGO recorded `partial_failure_count=8`, `repair_attempts=11`, `repair_exhausted=8`, `focused_repairs=11`, `stall_count=17`, `pre_artifact_stalls=17`, and raw output refs `8`. UX conclusion: the next slice should improve live diagnostics and recovery clarity for shard collection/repair failures before rerunning medium live E2E.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
