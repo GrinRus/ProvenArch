@@ -1776,6 +1776,7 @@ function buildAnalysisLiveDiagnostics(
   let preArtifactStalls = 0;
   let validArtifactControlledStops = 0;
   let zeroOutputPreArtifactStalls = 0;
+  let artifactHandoffStalls = 0;
 
   for (const entry of runLogs) {
     const fields = entry.fields;
@@ -1809,6 +1810,10 @@ function buildAnalysisLiveDiagnostics(
     if (recoveryMode) {
       recoveryModes.add(recoveryMode);
     }
+    const repairStage = fieldString(fields, "stage") || stageFromMessage(message);
+    if (repairStage) {
+      recoveryModes.add(repairStage);
+    }
 
     if (normalizedMessage.includes("focused artifact repair scheduled") || normalizedMessage.includes("focused artifact repair retry scheduled")) {
       repairScheduled += 1;
@@ -1827,6 +1832,9 @@ function buildAnalysisLiveDiagnostics(
     const validationError = fieldString(fields, "validation_error") || fieldString(fields, "error");
     if (validationError) {
       validationExcerpts.push(validationError);
+    }
+    if (artifactHandoffStalled(normalizedMessage, validationError.toLowerCase(), repairStage)) {
+      artifactHandoffStalls += 1;
     }
 
     if (boolField(fields, "zero_output_pre_artifact_stall")) {
@@ -1873,15 +1881,37 @@ function buildAnalysisLiveDiagnostics(
   const terminalExcerpt = firstNonEmpty([lastString(validationExcerpts), runStatus?.error ?? "", warnings[0] ?? ""]);
   const hasTelemetry = runLogs.length > 0 || artifacts.length > 0 || warnings.length > 0;
   const providerUnavailable = isRunnerUnavailable(runStatus?.error_code);
-  const status = providerUnavailable ? "provider check" : failedCount > 0 || repairExhausted > 0 ? "action needed" : hasTelemetry ? "review" : "logs missing";
+  const artifactHandoffBlocked = !providerUnavailable && (artifactHandoffStalls > 0 || (preArtifactStalls > 0 && repairExhausted > 0));
+  const status = providerUnavailable
+    ? "provider check"
+    : artifactHandoffBlocked
+      ? "artifact handoff"
+      : failedCount > 0 || repairExhausted > 0
+        ? "action needed"
+        : hasTelemetry
+          ? "review"
+          : "logs missing";
   const tone = providerUnavailable || failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
   const summary = providerUnavailable
     ? "Provider/tool availability blocked execution; fix Readiness provider setup before retrying the same pipeline."
+    : artifactHandoffBlocked
+      ? "The provider reached collect repair, but valid shard artifacts were not written before the pre-artifact stall."
     : hasTelemetry
       ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
       : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
 
   const metrics: AnalysisLiveMetric[] = [
+    {
+      label: "Failure mode",
+      value: artifactHandoffBlocked ? "Artifact handoff stalled" : providerUnavailable ? "Provider unavailable" : failedCount > 0 ? "Shard failure" : "Telemetry review",
+      detail: artifactHandoffBlocked
+        ? "collect repair did not produce both markdown and shard-pack-manifest before stalling"
+        : providerUnavailable
+          ? "readiness blocked before durable shard artifacts"
+          : failedCount > 0
+            ? "inspect failed shard evidence before retry"
+            : "no terminal artifact handoff blocker detected",
+    },
     {
       label: "Shard state",
       value: formatShardMetric(plannedShards, observedCount, succeededCount, failedCount),
@@ -1910,6 +1940,7 @@ function buildAnalysisLiveDiagnostics(
   ];
   const traces: AnalysisLiveTrace[] = [
     { label: "Provider", value: providerList.length > 0 ? providerList.join(", ") : "not exposed in loaded logs" },
+    { label: "Recovery stage", value: recoveryModeList.length > 0 ? recoveryModeList.join(", ") : "not logged" },
     { label: "Terminal excerpt", value: terminalExcerpt || "No terminal validation excerpt loaded." },
   ];
 
@@ -1919,7 +1950,7 @@ function buildAnalysisLiveDiagnostics(
     summary,
     metrics,
     traces,
-    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry, providerUnavailable),
+    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry, providerUnavailable, artifactHandoffBlocked),
     hasTelemetry,
   };
 }
@@ -1931,6 +1962,7 @@ function buildAnalysisLiveActions(
   rawRefCount: number,
   hasTelemetry: boolean,
   providerUnavailable: boolean,
+  artifactHandoffBlocked: boolean,
 ): string[] {
   if (providerUnavailable) {
     const actions = ["Check Readiness provider setup, binary/auth/quota before retrying the same pipeline."];
@@ -1942,7 +1974,9 @@ function buildAnalysisLiveActions(
   if (!hasTelemetry) {
     return ["Load run logs or open persisted artifacts before retrying the same pipeline."];
   }
-  const actions = ["Inspect failed shard rows and terminal excerpts before starting a retry."];
+  const actions = artifactHandoffBlocked
+    ? ["Open the failed shard row and raw-output ref to confirm whether markdown and shard-pack-manifest were written.", "Retry after the provider artifact write path is fixed or a collect-capable provider is selected."]
+    : ["Inspect failed shard rows and terminal excerpts before starting a retry."];
   if (failedCount > 0) {
     actions.push("Retry only after the failed shard/provider cause is understood.");
   }
@@ -1953,6 +1987,22 @@ function buildAnalysisLiveActions(
     actions.push("Use raw-output metadata to compare stdout/stderr against the failed shard evidence.");
   }
   return actions;
+}
+
+function artifactHandoffStalled(normalizedMessage: string, normalizedValidationError: string, repairStage: string): boolean {
+  const normalizedStage = repairStage.toLowerCase();
+  const hasStallWord = /\bstall(?:ed|s|ing)?\b/.test(normalizedMessage);
+  return (
+    normalizedValidationError.includes("runtime_stalled_before_artifacts") ||
+    normalizedMessage.includes("stalled before valid artifacts") ||
+    normalizedMessage.includes("before valid artifacts were available") ||
+    (normalizedStage.includes("collect_pair_repair") && hasStallWord)
+  );
+}
+
+function stageFromMessage(message: string): string {
+  const match = message.match(/\bstage=([^\s)]+)/i);
+  return match?.[1] ?? "";
 }
 
 function formatShardMetric(plannedShards: number | undefined, observedCount: number, succeededCount: number, failedCount: number): string {

@@ -2996,6 +2996,8 @@ describe("App", () => {
 
     const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
     expect(liveDiagnostics).toHaveTextContent("Live diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("artifact handoff");
+    expect(liveDiagnostics).toHaveTextContent("Artifact handoff stalled");
     expect(liveDiagnostics).toHaveTextContent("1/2 ok");
     expect(liveDiagnostics).toHaveTextContent("1 failed");
     expect(liveDiagnostics).toHaveTextContent("1 scheduled / 0 completed / 1 exhausted");
@@ -3004,6 +3006,8 @@ describe("App", () => {
     expect(liveDiagnostics).toHaveTextContent("1 pre-artifact");
     expect(liveDiagnostics).toHaveTextContent("reports/taskruns/run-analysis-v2/raw/payments/collect.json");
     expect(liveDiagnostics).toHaveTextContent("runtime_stalled_before_artifacts");
+    expect(liveDiagnostics).toHaveTextContent("Open the failed shard row and raw-output ref");
+    expect(liveDiagnostics).toHaveTextContent("Retry after the provider artifact write path is fixed");
   });
 
   it("copies run logs using the active line+fields view", async () => {

@@ -742,3 +742,35 @@ Observed improvement:
 Residual UX work after Slice 25:
 - Medium live rerun remains blocked on this host by provider readiness: `qwen` headless probe timeout before backend/frontend execution.
 - Continue deterministic polish on remaining retry/error states while live medium is operationally blocked by provider readiness.
+
+## Slice 26 Result
+
+Live medium retry:
+- goal: rerun the medium live E2E after Slice 25 clarified qwen readiness timeouts.
+- action: ran direct `scripts/full-run-batch-matrix.sh` from clean commit `3de030e` with matrix id `regres-long-posthog-ftgo-20260709T072237Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T072237Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` reached backend execution and failed in `init.step1.collect`: `partial_failure_count=10`, `repair_attempts=14`, `repair_exhausted=10`, `focused_repairs=14`, `stall_count=27`, `pre_artifact_stalls=24`, `post_artifact_stalls=3`, `valid_artifact_controlled_stops=5`, `raw_output_refs=10`, and shard summary `6 succeeded / 10 failed`.
+- every failed PostHog shard had the same terminal pattern: `stage=collect_pair_repair`, `collect pair recovery stalled before valid artifacts were available`, `runtime_stalled_before_artifacts`.
+- `single-git_url/baseline` failed before backend/frontend as `operational_host_preflight_failed`: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+
+Implemented:
+- Analysis live diagnostics now parse recovery stage from either structured fields or `stage=...` log text.
+- The panel classifies this live pattern as `Artifact handoff stalled` instead of only showing generic failed shard counts.
+- The summary explains that collect repair was reached, but valid shard artifacts were not written before the pre-artifact stall.
+- Next actions now tell the operator to open the failed shard row and raw-output ref, then confirm whether both authored markdown and `shard-pack-manifest.json` were written before retrying or switching provider.
+- Existing run logs, artifacts and selected-run status remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm --prefix ui test -- --run App.test.tsx -t "renders Analysis V2 run progress"` -> `1 passed`
+- full UI suite: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm --prefix ui test -- --run` -> `90 passed`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm --prefix ui run typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `90` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator no longer has to infer from `repair exhausted`, `stall pressure` and raw-output refs that the provider failed to hand off the required artifact pair.
+- The Analysis recovery panel now names the failure mode, the failed recovery stage and the exact artifact pair to verify.
+- Mixed collect outcomes are clearer: successful shards can be understood as durable evidence while failed shards are specifically artifact-handoff failures.
+
+Residual UX work after Slice 26:
+- The execution blocker is still runtime/provider behavior, not a visual UI blocker: qwen produced 10 PostHog collect artifact-handoff failures and later timed out readiness for the FTGO profile.
+- The next iteration should decide whether to improve runtime/provider prompt behavior or add deeper per-shard artifact-pair inspection in the UI.
