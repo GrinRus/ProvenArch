@@ -3167,6 +3167,7 @@ describe("App", () => {
     const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
     expect(liveDiagnostics).toHaveTextContent("provider stream");
     expect(liveDiagnostics).toHaveTextContent("Provider output is streaming, but no authored shard artifact pair is visible yet");
+    expect(liveDiagnostics).toHaveTextContent("Run signal");
     expect(liveDiagnostics).toHaveTextContent("Artifact pair pending");
     expect(liveDiagnostics).toHaveTextContent("runtime stream is active; authored markdown and shard-pack-manifest are not visible yet");
     expect(liveDiagnostics).toHaveTextContent("Provider stream");

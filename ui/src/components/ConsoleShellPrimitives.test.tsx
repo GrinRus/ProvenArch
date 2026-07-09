@@ -343,6 +343,59 @@ describe("console shell primitives", () => {
     expect(handlers.onOpenArtifact).toHaveBeenCalledWith("reports/taskruns/run-1/runtime/runtime-execution.json");
   });
 
+  it("summarizes provider stream chunks without hiding the raw log view", () => {
+    const handlers = activityHandlers();
+    const rawPayload = JSON.stringify({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        delta: { type: "thinking_delta", thinking: "checking repository structure before collect artifact writes" },
+      },
+    });
+    const logs: RunLogEntry[] = [
+      {
+        cursor: 1,
+        timestamp: "2026-04-03T12:00:00Z",
+        level: "info",
+        kind: "event",
+        step_id: "init.step1.collect",
+        message: "runtime task started",
+      },
+      {
+        cursor: 2,
+        timestamp: "2026-04-03T12:00:01Z",
+        level: "info",
+        kind: "runtime_output",
+        stream: "stdout",
+        step_id: "init.step1.collect",
+        message: rawPayload,
+      },
+    ];
+
+    render(
+      <ActivityDrawer
+        {...handlers}
+        selectedRunId="run-stream"
+        selectedRunStatus="running"
+        logs={logs}
+        renderedLogs={`[RAW] ${rawPayload}`}
+        runLogsStatus=""
+        canExport={true}
+        taskrunPaths={[]}
+      />,
+    );
+
+    expect(screen.getByTestId("activity-stream-summary")).toHaveTextContent("1 JSON stream chunk");
+    expect(screen.getByTestId("activity-stream-summary")).toHaveTextContent("thinking_delta");
+    expect(screen.getByTestId("activity-stream-summary")).toHaveTextContent("Full payload remains available below and in exported logs.");
+    expect(screen.getByTestId("activity-events-table")).toHaveTextContent("Provider stream chunk: thinking_delta.");
+    expect(screen.getByTestId("activity-events-table")).not.toHaveTextContent("checking repository structure before collect artifact writes");
+
+    fireEvent.click(screen.getByText("Full selected log view"));
+
+    expect(screen.getByTestId("run-logs-content")).toHaveTextContent("checking repository structure before collect artifact writes");
+  });
+
   it("summarizes succeeded runs around reviewable artifacts instead of stale current step", () => {
     const reviewSummary: RunReviewSummaryResponse = {
       run_id: "run-success",

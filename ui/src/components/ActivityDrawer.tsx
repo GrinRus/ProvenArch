@@ -45,6 +45,7 @@ export function ActivityDrawer({
   const [isOpen, setIsOpen] = useState(shouldOpenForRunState);
   const recentLogs = logs.slice(-6).reverse();
   const lastLog = logs.length > 0 ? logs[logs.length - 1] : undefined;
+  const streamSummary = summarizeActivityStream(logs);
   const hasSelectedRun = Boolean(selectedRunId);
   const selectedRunOutcome = selectedRunStatus ? runOutcomeLabel({ status: selectedRunStatus, error_code: selectedRunErrorCode }, selectedRunStatus) : "";
   const selectedRunDetail = selectedRunErrorCode || selectedRunError;
@@ -58,7 +59,7 @@ export function ActivityDrawer({
           ? `Run failed before log entries were captured${selectedRunDetail ? `: ${selectedRunDetail}` : "."}`
           : "No run logs yet. Logs will appear when the selected run emits events or raw output.";
   const drawerSummary = hasSelectedRun
-    ? `${selectedRunOutcome ? `${selectedRunOutcome} run` : "selected run"} · ${logs.length} log entries${lastLog ? ` · last: ${lastLog.message}` : ` for ${selectedRunId}`}`
+    ? `${selectedRunOutcome ? `${selectedRunOutcome} run` : "selected run"} · ${logs.length} log entries${lastLog ? ` · last: ${activityLogSummary(lastLog)}` : ` for ${selectedRunId}`}`
     : "No selected run";
   const drawerStatus = runLogsStatus || (isOpen ? `${recentLogs.length} recent` : `${recentLogs.length} recent · open logs`);
   const emptyStateTone = selectedRunOutcome === "canceled" || selectedRunOutcome === "recovered" ? " warning" : selectedRunStatus === "failed" ? " failed" : "";
@@ -132,6 +133,12 @@ export function ActivityDrawer({
             </div>
           </details>
         ) : null}
+        {streamSummary ? (
+          <div className="activity-stream-summary" data-testid="activity-stream-summary">
+            <strong>Provider stream summarized</strong>
+            <span>{streamSummary}</span>
+          </div>
+        ) : null}
 
         {recentLogs.length === 0 ? (
           <div className={`activity-empty-state${emptyStateTone}`} data-testid="activity-empty-state">
@@ -157,7 +164,7 @@ export function ActivityDrawer({
                     <td>{entry.level}</td>
                     <td>{entry.step_id || "-"}</td>
                     <td>{entry.kind === "runtime_output" ? "runtime output" : "event"}</td>
-                    <td>{entry.message}</td>
+                    <td>{activityLogSummary(entry)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -171,4 +178,80 @@ export function ActivityDrawer({
       </div>
     </details>
   );
+}
+
+function summarizeActivityStream(logs: RunLogEntry[]): string | null {
+  let rawOutputEntries = 0;
+  let jsonStreamChunks = 0;
+  const signalTypes = new Set<string>();
+  for (const entry of logs) {
+    if ((entry.kind ?? "event") !== "runtime_output") {
+      continue;
+    }
+    rawOutputEntries += 1;
+    const signal = providerStreamSignal(entry.message);
+    if (signal) {
+      jsonStreamChunks += 1;
+      signalTypes.add(signal);
+    }
+  }
+  if (rawOutputEntries === 0) {
+    return null;
+  }
+  if (jsonStreamChunks === 0) {
+    return `${rawOutputEntries} raw output ${rawOutputEntries === 1 ? "entry" : "entries"} loaded. Full payload remains available below and in exported logs.`;
+  }
+  const signalText = signalTypes.size > 0 ? ` (${Array.from(signalTypes).slice(0, 3).join(", ")})` : "";
+  return `${jsonStreamChunks} JSON stream ${jsonStreamChunks === 1 ? "chunk" : "chunks"}${signalText} summarized from ${rawOutputEntries} raw output ${rawOutputEntries === 1 ? "entry" : "entries"}. Full payload remains available below and in exported logs.`;
+}
+
+function activityLogSummary(entry: RunLogEntry): string {
+  const message = entry.message || "";
+  if ((entry.kind ?? "event") === "runtime_output") {
+    const signal = providerStreamSignal(message);
+    if (signal) {
+      return `Provider stream chunk: ${signal}. Full raw payload is in the selected log view.`;
+    }
+  }
+  return truncateActivityMessage(message);
+}
+
+function providerStreamSignal(message: string): string | null {
+  try {
+    const parsed = JSON.parse(message) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    const event = isRecord(record.event) ? record.event : null;
+    const delta = isRecord(event?.delta) ? event.delta : isRecord(record.delta) ? record.delta : null;
+    const signal = firstString([delta?.type, event?.type, record.type]);
+    if (record.type === "stream_event" || event || delta) {
+      return signal || "stream_event";
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function firstString(values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function truncateActivityMessage(message: string): string {
+  const normalized = message.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 220) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 217)}...`;
 }

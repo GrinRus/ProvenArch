@@ -113,6 +113,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add Source validation recovery guidance so repo/source validation errors are actionable before raw diagnostics.
 - [x] Add Charter baseline recovery guidance so prompt/charter bundle warnings are actionable before Analysis.
 - [x] Add Proposals package recovery guidance so incomplete proposal/changelog packages are actionable before Publish.
+- [x] Summarize active provider JSON stream chunks in the Activity drawer and label active Analysis provider stream as a run signal.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -146,8 +147,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 22) Make Source validation actionable by showing the first blocking repo/source diagnostic, current source/ref and save-then-validate recovery actions before raw diagnostics.
 23) Make Charter baseline warnings actionable by showing affected artifact/category/prompt usage, severity, message, suggested fix and save-then-analyze actions before the raw editor warnings.
 24) Make Proposals package blockers actionable by showing proposal/changelog package state, primary blocker, suggested fix and publication path before the review room.
-25) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-26) Commit and use the report to drive the next iteration.
+25) Make active provider stream readable in shared Activity by summarizing JSON stream chunks while preserving full raw log/export access.
+26) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+27) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -200,6 +202,8 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Proposals package recovery shows proposal/changelog package state, primary blocker, suggested fix and publication path before Publish.
 - [x] Analysis live diagnostics classify pre-artifact artifact-handoff stalls, show the recovery stage and tell the operator to confirm both markdown and `shard-pack-manifest.json` before retry.
 - [x] Analysis shard drilldown shows per-shard artifact-pair state, distinguishing runtime-only evidence from authored markdown + `shard-pack-manifest.json`.
+- [x] Activity drawer summarizes provider JSON stream chunks without hiding full raw payload access.
+- [x] Active provider-stream Analysis diagnostics use `Run signal` instead of terminal `Failure mode` wording.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -243,6 +247,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-09: Re-ran the medium `regres long` qwen-only baseline from clean commit `3de030e` through direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T072237Z`. Matrix result was `FAIL`: `single-path/baseline` reached PostHog backend execution and failed in `init.step1.collect` with `runtime_contract_failed`, `quality_gates_failed`, `runtime_flow_failed`, `partial_failure_count=10`, `repair_attempts=14`, `repair_exhausted=10`, `stall_count=27`, `pre_artifact_stalls=24`, `raw_output_refs=10`, and shard summary `6 succeeded / 10 failed`; each failed shard reported `stage=collect_pair_repair` and `runtime_stalled_before_artifacts`. `single-git_url/baseline` failed earlier as `operational_host_preflight_failed` because qwen headless readiness timed out after 30s.
 - 2026-07-09: Implemented slice 26 Analysis artifact-handoff guidance without backend/API/schema changes. Analysis live diagnostics now parse `stage=collect_pair_repair` and `runtime_stalled_before_artifacts` from existing run logs, classify the failure as `Artifact handoff stalled`, show the recovery stage, and put markdown + `shard-pack-manifest.json` verification before blind retry. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
 - 2026-07-09: Implemented slice 27 per-shard artifact-pair inspection without backend/API/schema changes. Analysis shard/log table and blocker drilldown now derive artifact-pair state from existing selected-run artifact refs, distinguishing `Runtime only`, `Markdown only`, `Manifest only`, `Artifact pair present` and missing shard-artifact states. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
+- 2026-07-09: Implemented slice 30 Activity provider-stream readability without backend/API/schema changes. The current medium run `regres-long-posthog-ftgo-20260709T112238Z` reached PostHog qwen collect and repeated `collect_pair_repair -> runtime_stalled_before_artifacts` (`4 failed / 12 pending` by DoD checkpoint), then was diagnostically stopped as `infra_signal_terminated`; the first 4 shard failures are genuine artifact-handoff failures, later `context canceled` rows came from the stop, and no top-level `matrix_result_*` was written. Activity now summarizes JSON stream chunks while preserving full raw log/export access, and active Analysis labels stream telemetry as `Run signal`. Targeted App/primitive tests and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

@@ -1925,7 +1925,7 @@ function buildAnalysisLiveDiagnostics(
 
   const metrics: AnalysisLiveMetric[] = [
     {
-      label: "Failure mode",
+      label: providerStreamAwaitingArtifacts ? "Run signal" : status === "review" ? "Diagnostic signal" : "Failure mode",
       value: artifactHandoffBlocked
         ? "Artifact handoff stalled"
         : providerUnavailable

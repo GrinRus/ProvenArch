@@ -858,3 +858,32 @@ Observed improvement:
 Residual UX work after Slice 29:
 - Add rendered browser visual QA for active provider stream diagnostics once a stable mocked running-run fixture is available.
 - The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.
+
+## Slice 30 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 29 from clean commit `be496a8`.
+- action: confirmed clean tree, `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1`, `qwen 0.17.1`, then started direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T112238Z`.
+- observed evidence: `single-path/baseline` passed bounded precheck, fake init and fake refresh, then reached PostHog qwen init collect. The run produced repeated `collect_pair_repair -> runtime_stalled_before_artifacts` failures; by the DoD checkpoint the public shard summary showed `4 failed / 12 pending`, and the active log contained large JSON provider stream chunks plus focused repair lifecycle events.
+- status: diagnostic stopped after repeated equivalent evidence; profile status is `failed` with `failure_reason=infra_signal_terminated`, and no top-level `matrix_result_*` was written. The first 4 shard failures are genuine artifact-handoff failures; later `context canceled` shard rows came from the manual stop and are not product defects.
+- UX conclusion: Slice 29 made Analysis readable while a provider stream is active, but the shared Activity drawer still made raw JSON chunks look like the primary diagnostic surface. The active Analysis metric also used the terminal label `Failure mode` for a non-terminal stream state.
+
+Implemented:
+- Activity drawer now summarizes provider JSON stream chunks in its summary and event table instead of rendering full raw JSON payloads as the main visible detail.
+- The full raw payload remains available in `Full selected log view`, copy and download actions, preserving diagnostic/export behavior.
+- Analysis live diagnostics now labels an active provider-stream state as `Run signal`, reserving `Failure mode` for terminal or blocked states.
+- Existing run logs, selected-run artifacts and run status remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- ConsoleShellPrimitives.test.tsx App.test.tsx --run` -> `85 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator watching qwen collect no longer sees a table row dominated by tokenized provider JSON as the first diagnostic explanation.
+- The drawer now says how many JSON stream chunks were summarized and where the raw payload lives.
+- The active Analysis panel now distinguishes "provider is still streaming" from an actual terminal failure label.
+
+Residual UX work after Slice 30:
+- Rerun medium live from the new commit when provider/runtime bandwidth is available; this interrupted diagnostic is not release-quality evidence.
+- Add rendered browser visual QA for the Activity drawer stream summary once a stable mocked running-run fixture is available.
+- The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.
