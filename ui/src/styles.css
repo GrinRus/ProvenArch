@@ -2742,6 +2742,12 @@ code {
   font-size: 0.76rem;
 }
 
+.qa-run-history .panel-subheader .link-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .qa-answer-panel,
 .qa-composer,
 .qa-run-summary,
@@ -2800,7 +2806,7 @@ code {
 
 .qa-recovery-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
   gap: 0.55rem;
 }
 

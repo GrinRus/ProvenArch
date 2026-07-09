@@ -985,3 +985,36 @@ Observed improvement:
 Residual UX work after Slice 33:
 - The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
 - Continue rotating through remaining first-time and recovery paths with rendered QA, especially retry/error surfaces that still rely only on component tests.
+
+## Slice 34 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 33 from clean commit `70ed1c5`.
+- action: confirmed clean tree, `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1` via `ACP_NODE_TOOL_CANDIDATES`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T131747Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T131747Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` and `single-git_url/baseline` both stopped before backend/frontend execution as `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced no new product UI/backend execution evidence. The next useful product slice was therefore rendered QA for failed Ask/Q&A recovery, which is a first-time user surface after generated evidence exists.
+
+Implemented:
+- Added `ui/e2e/qa-recovery-mock.spec.ts`, a stable mocked Ask/Q&A Playwright scenario enabled only with `UI_E2E_SCENARIO=qa-recovery-mock`.
+- The fixture models a failed `qa.ask` run with `runtime_contract_failed`, missing answer citations, audit warnings, no answer body, no citations and a retryable original question.
+- The browser test verifies failed answer guidance, exact QA audit refs, retrying the original question into a new successful Q&A run, read-only safety, no-citations state, console-error absence and no horizontal overflow.
+- Visual QA exposed two layout defects and fixed them: desktop Ask recovery cards were too narrow for `runtime_contract_failed` and audit paths, and the Q&A history `Refresh` action could wrap mid-word in narrow columns.
+- Existing QA run data remains the only input; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered Ask recovery QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51865 UI_E2E_SCENARIO=qa-recovery-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-qa-recovery-rendered-20260709T1329Z npm run --prefix ui e2e:live -- qa-recovery-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-qa-recovery-rendered-20260709T1329Z/qa-recovery-desktop.png`, `/tmp/provenarch-ui-qa-recovery-rendered-20260709T1329Z/qa-recovery-mobile.png`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui typecheck` -> passed
+- targeted UI tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- App.test.tsx styles.test.ts --run -t "Q&A failure recovery|styles"` -> `2 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator can diagnose a failed answer run from the Ask stage without treating it as a successful empty answer.
+- The failed answer path now explicitly preserves QA audit evidence and keeps the same-question retry action visible.
+- Desktop and narrow-mobile evidence cover the Ask failure/retry state that previously relied only on component-level coverage.
+
+Residual UX work after Slice 34:
+- The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
+- Continue rotating through remaining first-time and recovery paths with rendered QA, especially Publish/Git mutation edge states and onboarding/source recovery states that only have manual or component-level evidence.
