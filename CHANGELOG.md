@@ -2,6 +2,30 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.9 - 2026-07-09
+
+Beta patch release for Console V2 UX recovery polish and rendered recovery-state QA after `v0.1.8`.
+
+Highlights:
+- Improved Console V2 recovery states across Source, Readiness, Analysis, Review and Publish so first-time operators can distinguish blocked setup, provider readiness failures, canceled/retained runs, failed shards, partial artifacts and publish handoff states.
+- Added clearer provider/runtime guidance for unavailable providers, headless probe timeouts, active provider stream output before durable artifacts, collect artifact handoff failures and repair-heavy/stalled runs.
+- Improved onboarding recovery for duplicate source names, recent workspace availability, runner selection, `qwen-code` readiness failures and disabled first-analysis actions until workspace, sources, runner and local readiness are valid.
+- Added rendered Playwright QA coverage for provider stream, failed shard drilldown, permission recovery, Ask recovery, Publish Git recovery, Source recovery and onboarding recovery, including desktop/mobile layout, disabled-action, console-error and horizontal-overflow checks.
+- Recorded UX/UI assessment evidence from medium `regres long` diagnostics, including the remaining live runtime/provider blockers observed on `qwen` headless probe timeout and FTGO collect artifact handoff stalls.
+- Updated the embedded UI bundle so release binaries serve the polished recovery UI.
+
+Verification notes:
+- PR #123 squash-merged into `main` at `90c2931` after green PR checks: `backend`, `contracts`, `ui`, `golden`, `smoke-api`, `smoke-cli`, `dependency-review` and CodeQL.
+- Local validation for the UX/UI slices passed before merge: rendered Playwright recovery scenarios plus `make contracts`, `make test`, `make lint` and `make build` with exact Node.js `22.21.1`.
+- Release metadata validation passed before tagging: `git diff --check`, release distribution tests, `make contracts`, `make test`, `make lint` and `make build` with exact Node.js `22.21.1`.
+- Medium live diagnostic `regres-long-posthog-ftgo-20260709T162033Z` was intentionally recorded as non-release evidence. It failed strict execution on provider/runtime reliability, not on the newly rendered UI recovery slices.
+
+Known limitations:
+- `v0.1.9` remains a beta/pre-v1 release. Public behavior and artifact contracts can still evolve before `v1.0.0`.
+- This release does not claim canonical `RELEASE READY` status without a fresh trusted-machine `reports/release_verdict_<matrix-id>.json` plus accepted SWE UX and artifact-quality assessments.
+- Live provider reliability still needs follow-up: the latest medium diagnostic showed `qwen` headless readiness timeout and `runtime_stalled_before_artifacts` during collect artifact handoff.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.8 - 2026-07-07
 
 Beta patch release for artifact-quality acceptance hardening and live E2E diagnostics after `v0.1.7`.

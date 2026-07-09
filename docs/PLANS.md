@@ -629,6 +629,12 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
   `init.step2.asis_docs` and `init.step4.proposals` still required focused repair. The release can be
   prepared as beta/RC evidence, but must not claim canonical `RELEASE READY` without a fresh
   `release_verdict_*.json` plus accepted SWE UX/artifact-quality assessments.
+- 2026-07-09: PR #123 squash-merged into `main` at `90c2931` after green PR checks. Started
+  `v0.1.9` beta release metadata branch for Console V2 UX recovery polish, rendered recovery-state
+  QA coverage and recorded medium `regres long` diagnostic evidence. The latest medium diagnostic
+  remains a non-release `FAIL` because of provider/runtime reliability blockers (`qwen` headless
+  readiness timeout and FTGO collect artifact handoff stalls), so this release must not claim
+  canonical `RELEASE READY` without a fresh verified release verdict plus accepted SWE assessments.
 ### Plan ID
 EP-20260508-oss-readiness-hardening
 

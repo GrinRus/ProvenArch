@@ -72,7 +72,7 @@ Go и Node.js нужны только для разработки ProvenArch и�
 
 Release status:
 
-- latest public release: `v0.1.8`;
+- latest public release: `v0.1.9`;
 - license: Apache-2.0;
 - maturity: MVP beta / pre-v1 foundation.
 
