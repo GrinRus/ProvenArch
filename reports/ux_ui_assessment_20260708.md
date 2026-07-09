@@ -919,3 +919,36 @@ Observed improvement:
 Residual UX work after Slice 31:
 - The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
 - Continue the UX/UI loop on the next first-time or non-happy-path surface that is not already covered by rendered QA.
+
+## Slice 32 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 31 from clean commit `bcda6b8`.
+- action: confirmed clean tree, `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1` via `ACP_NODE_TOOL_CANDIDATES`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T123421Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T123421Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` and `single-git_url/baseline` both stopped before backend/frontend execution as `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced no new product UI/backend execution evidence. The next useful product slice was therefore the existing residual rendered QA for live-shaped artifact-handoff failure drilldown.
+
+Implemented:
+- Added `ui/e2e/analysis-failed-shard-mock.spec.ts`, a stable mocked failed-run Playwright scenario enabled only with `UI_E2E_SCENARIO=analysis-failed-shard-mock`.
+- The fixture reproduces the live-shaped `domain_id=ftgo-application` / distinct `fields.shard_id` pattern from Slice 28: one failed shard with only `runtime-execution.json`, one succeeded shard with authored markdown plus `shard-pack-manifest.json`.
+- The browser test verifies Analysis recovery copy, `Artifact handoff stalled` diagnostics, raw-output refs, shard table artifact-pair labels, blocker drilldown, console-error absence and no horizontal overflow.
+- Visual QA exposed two UI issues and fixed them: long recovery metric values such as `runtime_contract_failed` now use wider responsive metric cards, and blocker drilldown focuses on shard-scoped failures instead of showing a run-level `workspace` pseudo-shard when real shard failures exist.
+- Existing logs/artifacts/status remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered failed-shard QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51863 UI_E2E_SCENARIO=analysis-failed-shard-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-analysis-failed-shard-rendered-20260709T1240Z npm run --prefix ui e2e:live -- analysis-failed-shard-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-analysis-failed-shard-rendered-20260709T1240Z/analysis-failed-shard-desktop.png`, `/tmp/provenarch-ui-analysis-failed-shard-rendered-20260709T1240Z/analysis-failed-shard-detail-desktop.png`, `/tmp/provenarch-ui-analysis-failed-shard-rendered-20260709T1240Z/analysis-failed-shard-mobile.png`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui typecheck` -> passed
+- targeted UI tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- App.test.tsx styles.test.ts --run -t "Analysis V2 run progress|styles"` -> `2 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator sees the failed artifact-handoff classification without clipped text in the recovery cards.
+- The blocker drilldown now names the actual failed shard (`payments-root-shard`) and its missing markdown/manifest refs without adding a confusing `workspace` pseudo-shard card.
+- Desktop/detail/mobile evidence now covers the live-shaped failed-run path that previously only had component-level coverage.
+
+Residual UX work after Slice 32:
+- The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
+- Continue rotating through remaining first-time and recovery paths with rendered QA, especially surfaces that still rely only on component tests.

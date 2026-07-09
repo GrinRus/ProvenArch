@@ -2462,14 +2462,16 @@ function GitDiffView({
 }
 
 function AnalysisFailedShardDetails({ rows, detailsRef }: { rows: AnalysisShardRow[]; detailsRef: RefObject<HTMLElement> }) {
+  const shardScopedRows = rows.filter((row) => row.scope !== "workspace");
+  const displayRows = shardScopedRows.length > 0 ? shardScopedRows : rows;
   return (
     <section className="subsection" data-testid="analysis-failed-shard-details" ref={detailsRef} tabIndex={-1}>
       <h2>Blocker drilldown</h2>
-      {rows.length === 0 ? (
+      {displayRows.length === 0 ? (
         <p className="hint">No failed shard or warning log entries for the selected run.</p>
       ) : (
         <ul className="compact-list">
-          {rows.slice(0, 4).map((row) => (
+          {displayRows.slice(0, 4).map((row) => (
             <li key={`${row.key}-detail`}>
               <span>
                 {row.status.toUpperCase()} · {row.stepId} · {row.scope}

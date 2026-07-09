@@ -1411,7 +1411,7 @@ code {
 
 .analysis-recovery-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
   gap: 0.55rem;
 }
 
@@ -1450,7 +1450,7 @@ code {
 
 .analysis-live-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11.5rem, 1fr));
   gap: 0.5rem;
 }
 
