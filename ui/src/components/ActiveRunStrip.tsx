@@ -1,6 +1,7 @@
 import { StatusBadge } from "./ConsolePrimitives";
 import type { RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
+import { isRunCanceled, isRunReconciledAfterRestart, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 
 type ActiveRunStripProps = {
   runStatus: RunStatusResponse | null;
@@ -27,29 +28,39 @@ export function ActiveRunStrip({
   const warningCount = runReviewWarningCount(runStatus, reviewSummary);
   const errorCount = runReviewErrorCount(runStatus, reviewSummary);
   const status = runStatus?.status ?? reviewSummary?.status ?? "idle";
+  const outcomeSource = runStatus ?? reviewSummary;
+  const outcomeLabel = runOutcomeLabel(outcomeSource);
+  const outcomeTone = runOutcomeTone(outcomeSource);
   const runID = runStatus?.run_id ?? reviewSummary?.run_id;
   const currentStep = runStatus?.current_step ?? reviewSummary?.current_step ?? activeStep?.step_id ?? "not running";
+  const artifactCount = steps.reduce((sum, step) => sum + step.artifact_count, 0);
+  const isSucceeded = status === "succeeded";
+  const isCanceled = isRunCanceled(outcomeSource?.error_code);
+  const isRecovered = isRunReconciledAfterRestart(outcomeSource?.error_code);
+  const runContext = reviewSummary?.pipeline ?? runStatus?.pipeline ?? "pipeline";
+  const primaryStatLabel = isSucceeded ? "Review state" : isCanceled ? "Stopped step" : isRecovered ? "Recovered step" : "Current step";
+  const primaryStatValue = isSucceeded ? (artifactCount > 0 ? `${artifactCount} artifacts ready` : "review ready") : currentStep;
   const elapsed = elapsedLabel(runStatus?.started_at ?? reviewSummary?.started_at, runStatus?.finished_at ?? reviewSummary?.finished_at);
+  const showCancelGuidance = selectedRunIsActive && (status === "queued" || status === "running");
 
   return (
     <section className="active-run-strip" data-testid="active-run-strip" aria-label="active run summary">
       <div className="active-run-main">
-        <StatusBadge tone={status === "succeeded" ? "ok" : status === "failed" ? "error" : status === "running" || status === "queued" ? "warn" : "info"}>
-          {status}
-        </StatusBadge>
+        <StatusBadge tone={outcomeTone}>{outcomeLabel}</StatusBadge>
         <div>
           <strong>{runID || "No run selected"}</strong>
           <span>
-            {reviewSummary?.pipeline ?? runStatus?.pipeline ?? "pipeline"} · {runtimeLabel}
+            {runContext} · {runtimeLabel}
+            {isSucceeded ? " · evidence ready for review" : ""}
           </span>
         </div>
       </div>
       <div className="active-run-stat">
-        <span className="metric-label">Current step</span>
-        <strong>{currentStep}</strong>
+        <span className="metric-label">{primaryStatLabel}</span>
+        <strong>{primaryStatValue}</strong>
       </div>
       <div className="active-run-stat">
-        <span className="metric-label">Progress</span>
+        <span className="metric-label">{isSucceeded ? "Steps complete" : "Progress"}</span>
         <strong>
           {steps.length > 0 ? `${doneCount}/${steps.length}` : "0/5"} steps
         </strong>
@@ -65,12 +76,19 @@ export function ActiveRunStrip({
         </strong>
       </div>
       <div className="active-run-actions">
-        <button type="button" className="link-button" onClick={onOpenAnalysis}>
-          Open Analysis
-        </button>
-        <button type="button" onClick={onCancel} disabled={!runID || !selectedRunIsActive || cancelBusy}>
-          {cancelBusy ? "Canceling" : "Cancel"}
-        </button>
+        <div className="active-run-action-buttons">
+          <button type="button" className="link-button" onClick={onOpenAnalysis}>
+            Open Analysis
+          </button>
+          <button type="button" onClick={onCancel} disabled={!runID || !selectedRunIsActive || cancelBusy}>
+            {cancelBusy ? "Canceling" : "Cancel"}
+          </button>
+        </div>
+        {showCancelGuidance ? (
+          <p className="active-run-cancel-note" data-testid="active-run-cancel-guidance">
+            Cancel requests a cooperative stop; taskrun evidence stays in History.
+          </p>
+        ) : null}
       </div>
     </section>
   );

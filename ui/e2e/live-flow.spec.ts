@@ -300,6 +300,19 @@ async function selectRunLogsMode(page: Page, mode: "events" | "raw" | "all"): Pr
   await page.getByTestId("run-logs-mode-select").selectOption(mode, { timeout: 10_000 });
 }
 
+async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
+  const explorer = page.getByTestId("review-artifact-explorer");
+  await expect(explorer).toBeVisible();
+  const isOpen = await explorer.evaluate((node) => ("open" in node ? Boolean(node.open) : true));
+  if (!isOpen) {
+    await page.getByTestId("review-artifact-explorer-toggle").click();
+  }
+  await expect
+    .poll(async () => explorer.evaluate((node) => ("open" in node ? Boolean(node.open) : true)), { timeout: 5_000 })
+    .toBe(true);
+  return explorer;
+}
+
 async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
   await page.reload();
   await expect(page.getByTestId("review-panel")).toBeVisible();
@@ -354,9 +367,14 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
   await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
-  await page.locator("summary").filter({ hasText: /^Advanced runtime settings$/ }).click();
+  const readinessAdvancedSettings = page.getByTestId("readiness-advanced-settings");
+  await expect(readinessAdvancedSettings).toBeVisible();
+  await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
+  await page.getByTestId("readiness-advanced-settings").locator("summary").click();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Timeouts" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
+  await page.getByTestId("readiness-advanced-settings").locator("summary").click();
+  await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
 
   await page.getByTestId("stage-readiness").click();
   await page.getByTestId("workspace-validate-btn").click();
@@ -430,7 +448,10 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
   await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
   await expect(page.getByTestId("review-citation-coverage")).toBeVisible();
-  const reviewArtifactExplorer = page.getByTestId("review-artifact-explorer");
+  const reviewArtifactExplorer = await openReviewArtifactExplorer(page);
+  const diagramsFilter = reviewArtifactExplorer.getByRole("tab", { name: "Diagrams" });
+  await expect(diagramsFilter).toBeVisible();
+  await diagramsFilter.click();
   const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
   await expect(diagramButtons.first()).toBeVisible();
 
@@ -472,6 +493,10 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     .toBe(true);
   await expectReadableViewportPanel(page, diagramPanel, "Review Mermaid/C4 preview");
 
+  const reportsFilter = reviewArtifactExplorer.getByRole("tab", { name: "Reports" });
+  await expect(reportsFilter).toBeVisible();
+  await reportsFilter.click();
+  await expect(reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()).toBeVisible();
   const preferredReadableArtifactButton =
     (await reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).count()) > 0
       ? reviewArtifactExplorer.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first()
@@ -527,6 +552,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.getByTestId("stage-publish").click();
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
+  await expect(page.getByTestId("publish-readiness-summary")).toContainText("Publication set");
+  await expect(page.getByTestId("publish-section-jumps")).toContainText("Preview");
   await expect(page.getByTestId("publish-preview-panel")).toBeVisible();
   await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
   await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
@@ -541,7 +569,20 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expectReadableViewportPanel(page, publishPreviewContent, "Publish selected artifact preview", 120);
   await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
   await expectOperatorInspectorSurfaces(page);
+  await page.locator(".work-area").evaluate((element) => {
+    element.scrollTop = 0;
+  });
   await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+
+  await page.setViewportSize({ width: 390, height: 1200 });
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("publish-section-jumps")).toBeVisible();
+  await expect(page.getByTestId("publish-section-jumps")).toContainText("Gate");
+  await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
+  await expectReadableViewportPanel(page, page.getByTestId("publish-preview-panel"), "Mobile Publish preview panel", 180, 300);
+  await expectReadableViewportPanel(page, publishPreviewContent, "Mobile Publish selected artifact preview", 120, 300);
+  await captureEvidenceScreenshot(page, "frontend-publish-mobile.png");
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await expectAlreadyInitializedWorkspaceNavigation(page);
 

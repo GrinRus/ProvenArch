@@ -111,9 +111,11 @@ acp serve
 
 В onboarding UI:
 
+Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает. Для headless runner onboarding дополнительно показывает expected command, env override и provider readiness guidance до первого live analysis.
+
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
-3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно.
+3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, runner recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
 4. `Ready`: проверьте summary, откройте Console V2 после validation или запустите первый `init` analysis после successful local readiness check.
 
 Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
@@ -122,11 +124,11 @@ acp serve
 
 После onboarding основной UI остаётся прежним:
 
-1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state.
-2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; первый analysis остаётся disabled до successful doctor result.
-3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts.
-4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table и warning/error drilldown.
-5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals, задайте read-only Q&A с run history/citations/safety panel и подготовьте git changes.
+1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state, а source validation recovery panel поднимет blocking repo/source diagnostics выше raw `workspace.yaml` details.
+2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
+3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts; charter baseline recovery panel поднимет prompt/charter bundle warnings до запуска Analysis.
+4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table, warning/error drilldown, failed-run recovery path и live diagnostics для shard/repair/stall/raw-output сигналов; terminal canceled/restart-reconciled runs показываются как `canceled`/`recovered`, а provider-unavailable failures ведут к Readiness checks before retry.
+5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals; proposal package recovery поднимет неполные proposal/changelog packages до Publish; задайте read-only Q&A с run history/citations/safety/recovery panel и подготовьте git changes.
 
 При повторном открытии Console V2 выбирает newest active run и открывает `Analysis`; если активных
 прогонов нет, но есть завершённый run с артефактами, UI открывает `Review`. Empty/stale/no-run
@@ -246,7 +248,8 @@ runtime:
 В UI это настраивается в `Readiness -> Advanced runtime settings -> Runtime Permissions`. В managed mode orchestrator
 auto-approves reads under `read_context_roots` и writes under `write_root`/`draft_final_root`.
 Shell/network/package-install/unknown requests не auto-approve-ятся; pending requests видны
-в `Analysis -> Pending permissions` и правом inspector.
+в `Analysis -> Pending permissions` с triage summary, policy rule, target/reason и next actions,
+а также в правом inspector hard blockers с step, rule, target и reason.
 
 ## Артефакты и логи
 
@@ -264,13 +267,13 @@ model/entities/, model/edges/     # derived entity-per-file model
 
 UI показывает то же состояние через stage-based console:
 
-- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, validation diagnostics, readiness cards, doctor checklist и runtime profile summary;
-- `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status и editor для `charter/*`/`skills/*`;
-- `Analysis`: run mission control, canonical `step0..step4` timeline, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, cancel и bootstrap resume newest active/newest completed run;
-- `Review`: evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
-- `Proposals`: proposal/changelog review room with package list, preview/evidence/changelog/diff tabs, quality blockers and publication path;
-- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
-- `Publish`: Git Review Room with folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action and proposal branch helper.
+- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, source validation recovery, validation diagnostics, readiness cards, provider readiness recovery, doctor checklist, compact runtime profile summary и collapsed advanced runtime tools;
+- `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status, charter baseline recovery и editor для `charter/*`/`skills/*`;
+- `Analysis`: run mission control, canonical `step0..step4` timeline, failed-run recovery path, live diagnostics for shard/repair/stall/raw-output signals, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, provider-unavailable Readiness recovery, cooperative cancel guidance, terminal canceled/recovered outcome labels in status/history/activity, retained-evidence recovery actions и bootstrap resume newest active/newest completed run;
+- `Review`: primary review queue, selected evidence markdown/Mermaid preview, secondary grouped artifact explorer, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
+- `Proposals`: proposal/changelog review room with package list, proposal package recovery for incomplete proposal/changelog artifacts, preview/evidence/changelog/diff tabs, quality blockers and publication path;
+- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved, failed-run recovery guidance, provider-unavailable Readiness guidance, terminal canceled/restart-reconciled answer copy and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
+- `Publish`: Git Review Room with publication readiness summary, mobile section jumps, folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action, failed Git action recovery and proposal branch helper.
 
 Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
 
@@ -286,7 +289,7 @@ curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
 
 Current/compatibility split:
 
-- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` history.
+- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` history, with explicit failed-run recovery and same-question retry.
 - `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed compatibility surfaces.
 - QA runs do not mutate source repos or canonical `charter/`, `model/`, `reports/*`, or `proposals/*`; they write only taskrun/audit artifacts under `reports/taskruns/<run_id>/qa/`.
 

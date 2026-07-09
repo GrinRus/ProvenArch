@@ -8,10 +8,11 @@ import { RunStatusPanel } from "./RunStatusPanel";
 import { TabNav } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
+import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
-import { formatTimestamp, parseTimeOrMin } from "../lib/runState";
+import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 import type {
   Artifact,
   Diagnostic,
@@ -103,6 +104,7 @@ export function SourceStagePanel({
 }: SourceStageProps) {
   const firstRepo = guidedRepos[0];
   const suggestedWorkspace = `~/arch-workspaces/${slugify(firstRepo?.name || "my-service")}`;
+  const sourceRecovery = buildSourceValidationRecovery(guidedRepos, validateResult, validationDiagnosticsByRepo);
   return (
     <section className="panel stage-panel" data-testid="workspace-panel">
       <div className="stage-header">
@@ -132,6 +134,8 @@ export function SourceStagePanel({
         <strong>Next in Source</strong>
         <span>Keep this screen focused on repository inventory, refs and imports; then save and validate before readiness gates.</span>
       </div>
+
+      {sourceRecovery ? <SourceValidationRecovery issue={sourceRecovery} /> : null}
 
       <SourceRepoTable guidedRepos={guidedRepos} validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
 
@@ -248,6 +252,187 @@ export function SourceStagePanel({
   );
 }
 
+type SourceRecoveryIssue = {
+  repoKey: string;
+  diagnosticLabel: string;
+  level: Diagnostic["level"] | "draft";
+  message: string;
+  suggestion: string;
+  sourceType: string;
+  sourceValue: string;
+  refValue: string;
+};
+
+function SourceValidationRecovery({ issue }: { issue: SourceRecoveryIssue }) {
+  return (
+    <section className="source-recovery-panel" data-testid="source-validation-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Source validation recovery</h2>
+          <p className="hint">Resolve the blocking repository/source diagnostic, save the workspace setup, then validate again before Readiness.</p>
+        </div>
+        <StatusBadge tone={issue.level === "warning" ? "warn" : "error"}>{issue.level === "warning" ? "source warning" : "source blocked"}</StatusBadge>
+      </div>
+      <div className="source-recovery-grid">
+        <div>
+          <span className="metric-label">Affected scope</span>
+          <strong>{issue.repoKey}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Diagnostic</span>
+          <strong>{issue.diagnosticLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Source type</span>
+          <strong>{issue.sourceType}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Ref</span>
+          <strong>{issue.refValue}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs source-recovery-detail">
+        <div>
+          <dt>Message</dt>
+          <dd>{issue.message}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{issue.suggestion}</dd>
+        </div>
+        <div>
+          <dt>Current source</dt>
+          <dd>{issue.sourceValue}</dd>
+        </div>
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Fix the highlighted repository name, source URL/path, ref or local authentication.</li>
+        <li>Use Save and validate sources after the edit so `workspace.yaml` and resolved repos update together.</li>
+        <li>Move to Readiness only after Source shows the repository as resolved.</li>
+      </ul>
+    </section>
+  );
+}
+
+function buildSourceValidationRecovery(
+  guidedRepos: GuidedRepo[],
+  validateResult: ValidateResponse | null,
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>,
+): SourceRecoveryIssue | null {
+  const serverIssue = firstSourceDiagnostic(guidedRepos, validateResult, validationDiagnosticsByRepo);
+  if (serverIssue) {
+    return serverIssue;
+  }
+
+  return firstDraftSourceIssue(guidedRepos);
+}
+
+function firstSourceDiagnostic(
+  guidedRepos: GuidedRepo[],
+  validateResult: ValidateResponse | null,
+  validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>,
+): SourceRecoveryIssue | null {
+  if (!validateResult) {
+    return null;
+  }
+
+  const diagnosticEntry =
+    validationDiagnosticsByRepo
+      .flatMap(([repoKey, diagnostics]) => diagnostics.map((diagnostic) => ({ repoKey, diagnostic })))
+      .find(({ diagnostic }) => diagnostic.level === "error") ??
+    (!validateResult.ok
+      ? validationDiagnosticsByRepo.flatMap(([repoKey, diagnostics]) => diagnostics.map((diagnostic) => ({ repoKey, diagnostic })))[0]
+      : undefined);
+
+  if (!diagnosticEntry) {
+    return null;
+  }
+
+  const repo = guidedRepos.find((candidate) => candidate.name === diagnosticEntry.repoKey || candidate.name === diagnosticEntry.diagnostic.repo);
+  return {
+    repoKey: diagnosticEntry.repoKey === "__workspace__" ? "workspace.yaml" : diagnosticEntry.repoKey,
+    diagnosticLabel: diagnosticEntry.diagnostic.code,
+    level: diagnosticEntry.diagnostic.level,
+    message: diagnosticEntry.diagnostic.message,
+    suggestion: diagnosticEntry.diagnostic.suggestion || defaultSourceSuggestion(repo),
+    sourceType: sourceTypeLabel(repo),
+    sourceValue: sourceValueLabel(repo, validateResult.workspace),
+    refValue: repo?.ref || "current/default",
+  };
+}
+
+function firstDraftSourceIssue(guidedRepos: GuidedRepo[]): SourceRecoveryIssue | null {
+  const nameCounts = new Map<string, number>();
+  guidedRepos.forEach((repo) => {
+    const name = repo.name.trim().toLowerCase();
+    if (name) {
+      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    }
+  });
+
+  for (const [index, repo] of guidedRepos.entries()) {
+    const repoKey = repo.name.trim() || `Repo ${index + 1}`;
+    const duplicateName = repo.name.trim() && (nameCounts.get(repo.name.trim().toLowerCase()) ?? 0) > 1;
+    const sourceMissing = repo.mode === "path" ? repo.path.trim() === "" : repo.git_url.trim() === "";
+    const nameMissing = repo.name.trim() === "";
+
+    if (!nameMissing && !duplicateName && !sourceMissing) {
+      continue;
+    }
+
+    const diagnosticLabel = nameMissing ? "Repo name is missing" : duplicateName ? "Repo name is duplicated" : "Repository source is missing";
+    const message = nameMissing
+      ? "This repository needs a stable name before `workspace.yaml` can be saved and validated."
+      : duplicateName
+        ? "Repository names must be unique before Source can resolve each repo."
+        : `${sourceTypeLabel(repo)} is empty, so Source cannot resolve this repository.`;
+    const suggestion = nameMissing
+      ? "Enter a short unique repository name, then save and validate sources."
+      : duplicateName
+        ? "Rename one of the duplicate repositories, then save and validate sources."
+        : repo.mode === "path"
+          ? "Enter the local checkout path, then save and validate sources."
+          : "Enter the GitHub/GitLab URL and make sure local git authentication can reach it.";
+
+    return {
+      repoKey,
+      diagnosticLabel,
+      level: "draft",
+      message,
+      suggestion,
+      sourceType: sourceTypeLabel(repo),
+      sourceValue: sourceValueLabel(repo),
+      refValue: repo.ref || "current/default",
+    };
+  }
+
+  return null;
+}
+
+function sourceTypeLabel(repo?: GuidedRepo) {
+  if (!repo) {
+    return "Workspace manifest";
+  }
+  return repo.mode === "path" ? "Local folder" : "Git URL";
+}
+
+function sourceValueLabel(repo?: GuidedRepo, workspace?: string) {
+  if (!repo) {
+    return workspace || "workspace.yaml";
+  }
+  const sourceValue = repo.mode === "path" ? repo.path : repo.git_url;
+  return sourceValue.trim() || `${sourceTypeLabel(repo)} missing`;
+}
+
+function defaultSourceSuggestion(repo?: GuidedRepo) {
+  if (!repo) {
+    return "Fix the workspace manifest entry, then save and validate sources again.";
+  }
+  return repo.mode === "path"
+    ? "Check the local checkout path and filesystem access, then save and validate sources again."
+    : "Check the repository URL and your local git authentication, then save and validate sources again.";
+}
+
 export type ReadinessStageProps = {
   busy: boolean;
   validateResult: ValidateResponse | null;
@@ -257,6 +442,8 @@ export type ReadinessStageProps = {
   firstRunStatus: string;
   setupRuntime: string;
   setupRuntimeProvider: string;
+  selectedRunErrorCode?: string | null;
+  selectedRunError?: string | null;
   onSetupRuntimeChange: (value: string) => void;
   onSetupRuntimeProviderChange: (value: string) => void;
   onValidateWorkspace: () => void;
@@ -279,6 +466,8 @@ export function ReadinessStagePanel({
   firstRunStatus,
   setupRuntime,
   setupRuntimeProvider,
+  selectedRunErrorCode,
+  selectedRunError,
   onSetupRuntimeChange,
   onSetupRuntimeProviderChange,
   onValidateWorkspace,
@@ -293,6 +482,8 @@ export function ReadinessStagePanel({
 }: ReadinessStageProps) {
   const validated = validateResult?.ok === true;
   const localReady = doctorResult?.ok === true;
+  const runtimeCheck = doctorResult?.checks.find((check) => check.id === "runtime_provider");
+  const showProviderRecovery = isRunnerUnavailable(selectedRunErrorCode) || setupRuntime === "headless" || runtimeCheck?.status === "fail";
   return (
     <section className="panel stage-panel" data-testid="readiness-panel">
       <div className="stage-header">
@@ -331,6 +522,16 @@ export function ReadinessStagePanel({
         runtimePermissionEffective={runtimePermissionEffective}
         runtimeStepProviderEffective={runtimeStepProviderEffective}
       />
+
+      {showProviderRecovery ? (
+        <ProviderReadinessRecovery
+          setupRuntime={setupRuntime}
+          setupRuntimeProvider={setupRuntimeProvider}
+          runtimeCheck={runtimeCheck}
+          selectedRunErrorCode={selectedRunErrorCode}
+          selectedRunError={selectedRunError}
+        />
+      ) : null}
 
       <div className="columns compact">
         <div>
@@ -384,10 +585,106 @@ export function ReadinessStagePanel({
       {doctorResult ? <DoctorChecklist doctorResult={doctorResult} /> : null}
       {firstRunStatus ? <p className="status ok">{firstRunStatus}</p> : null}
 
-      <details className="advanced-block">
-        <summary>Advanced runtime settings</summary>
+      <details className="advanced-block readiness-advanced-settings" data-testid="readiness-advanced-settings">
+        <summary>
+          <span className="advanced-summary-copy">
+            <strong>Advanced runtime settings</strong>
+            <span>Timeouts, execution policy, permissions, and per-step provider overrides.</span>
+          </span>
+          <StatusBadge tone="info">operator tools</StatusBadge>
+        </summary>
         {runtimeSettingsPanel}
       </details>
+    </section>
+  );
+}
+
+function ProviderReadinessRecovery({
+  setupRuntime,
+  setupRuntimeProvider,
+  runtimeCheck,
+  selectedRunErrorCode,
+  selectedRunError,
+}: {
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  runtimeCheck?: DoctorResponse["checks"][number];
+  selectedRunErrorCode?: string | null;
+  selectedRunError?: string | null;
+}) {
+  const providerLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
+  const providerCommand = providerCommandHint(setupRuntimeProvider);
+  const envOverride = providerCommandEnv(setupRuntimeProvider);
+  const doctorStatus = runtimeCheck ? `${runtimeCheck.label}: ${runtimeCheck.status}` : "not checked";
+  const lastRunBlocker = isRunnerUnavailable(selectedRunErrorCode) ? "runner_unavailable" : "none selected";
+  const readinessMessage = runtimeCheck?.message || selectedRunError || selectedRunErrorCode || "";
+  const guidance = providerReadinessGuidance(setupRuntimeProvider, readinessMessage);
+  const summary = isRunnerUnavailable(selectedRunErrorCode)
+    ? "The selected run stopped because provider/tool availability failed. Confirm the provider command, auth/quota and runtime mode before retrying."
+    : runtimeCheck?.status === "fail"
+      ? "The runtime provider doctor check is failing. Fix the provider command, auth or quota before starting analysis."
+      : "Headless provider mode is selected. Run local readiness after provider changes before starting analysis.";
+
+  return (
+    <section className="provider-recovery-panel" data-testid="provider-readiness-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Provider readiness recovery</h2>
+          <p className="hint">{summary}</p>
+        </div>
+        <StatusBadge tone={runtimeCheck?.status === "pass" ? "ok" : "warn"}>{runtimeCheck?.status === "pass" ? "provider ready" : "provider check"}</StatusBadge>
+      </div>
+      <div className="provider-recovery-grid">
+        <div>
+          <span className="metric-label">Selected provider</span>
+          <strong>{providerLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Doctor check</span>
+          <strong>{doctorStatus}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Command override</span>
+          <strong>{envOverride}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Failure mode</span>
+          <strong>{guidance.failureMode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Probe stage</span>
+          <strong>{guidance.probeStage}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Last run blocker</span>
+          <strong>{lastRunBlocker}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs provider-recovery-detail">
+        <div>
+          <dt>Expected command</dt>
+          <dd>{providerCommand}</dd>
+        </div>
+        <div>
+          <dt>Doctor message</dt>
+          <dd>{readinessMessage || "Run local readiness to check provider availability."}</dd>
+        </div>
+        <div>
+          <dt>Operator focus</dt>
+          <dd>{guidance.operatorFocus}</dd>
+        </div>
+        {runtimeCheck?.suggestion ? (
+          <div>
+            <dt>Suggested fix</dt>
+            <dd>{runtimeCheck.suggestion}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <ul className="analysis-next-actions">
+        {guidance.nextActions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -681,6 +978,7 @@ export function CharterStagePanel({
   const livePromptPacks = promptPacks.filter((artifact) => artifact.prompt_usage === "live-consumed");
   const referenceOnlyPrompts = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.prompt_usage === "reference-only");
   const wizardReady = Boolean(wizardProjectName.trim() && wizardScope.trim());
+  const charterRecovery = buildCharterBaselineRecovery(baselineProps.baselineBundleWarnings, baselineProps.baselineEditorArtifacts, baselineProps.selectedEditorPath);
 
   return (
     <div className="stage-stack" data-testid="charter-panel">
@@ -694,6 +992,8 @@ export function CharterStagePanel({
         </div>
         <CharterWizardSummary wizardProjectName={wizardProjectName} wizardScope={wizardScope} wizardNfr={wizardNfr} wizardRules={wizardRules} />
       </section>
+
+      {charterRecovery ? <CharterBaselineRecovery issue={charterRecovery} /> : null}
 
       <section className="charter-workbench-grid" data-testid="charter-workbench">
         <CharterCardOverview domainCards={domainCards} teamCards={teamCards} charterArtifacts={charterArtifacts} />
@@ -713,6 +1013,145 @@ export function CharterStagePanel({
       {gitPanel}
     </div>
   );
+}
+
+type CharterRecoveryIssue = {
+  artifactPath: string;
+  artifactLabel: string;
+  category: string;
+  promptUsage: string;
+  severity: Diagnostic["level"];
+  diagnosticCode: string;
+  message: string;
+  suggestion: string;
+};
+
+function CharterBaselineRecovery({ issue }: { issue: CharterRecoveryIssue }) {
+  const badgeTone = issue.severity === "error" ? "error" : "warn";
+  return (
+    <section className="charter-recovery-panel" data-testid="charter-baseline-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Charter baseline recovery</h2>
+          <p className="hint">Resolve prompt or charter bundle diagnostics before using the baseline as live analysis context.</p>
+        </div>
+        <StatusBadge tone={badgeTone}>{issue.severity === "error" ? "baseline blocked" : "baseline warning"}</StatusBadge>
+      </div>
+      <div className="charter-recovery-grid">
+        <div>
+          <span className="metric-label">Affected artifact</span>
+          <strong>{issue.artifactLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Category</span>
+          <strong>{issue.category}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Runtime use</span>
+          <strong>{issue.promptUsage}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Diagnostic</span>
+          <strong>{issue.diagnosticCode}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs charter-recovery-detail">
+        <div>
+          <dt>Message</dt>
+          <dd>{issue.message}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{issue.suggestion}</dd>
+        </div>
+        <div>
+          <dt>Artifact path</dt>
+          <dd>{issue.artifactPath}</dd>
+        </div>
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Select the affected artifact in Baseline: Editors, update the charter or prompt content, then use Save selected baseline artifact.</li>
+        <li>Keep live-consumed prompt packs aligned before running Analysis; reference-only prompts can be fixed after the primary charter path is clear.</li>
+        <li>Use Git status below Charter to review the workspace diff before publication.</li>
+      </ul>
+    </section>
+  );
+}
+
+function buildCharterBaselineRecovery(
+  baselineBundleWarnings: Diagnostic[],
+  baselineEditorArtifacts: EditableArtifactOption[],
+  selectedEditorPath: string,
+): CharterRecoveryIssue | null {
+  const diagnostic = baselineBundleWarnings.find((warning) => warning.level === "error") ?? baselineBundleWarnings[0];
+  if (!diagnostic) {
+    return null;
+  }
+
+  const artifact = findCharterDiagnosticArtifact(diagnostic, baselineEditorArtifacts, selectedEditorPath);
+  const artifactPath = artifact?.path ?? diagnostic.path ?? selectedEditorPath ?? "baseline bundle";
+  return {
+    artifactPath,
+    artifactLabel: artifact?.label ?? artifactPath,
+    category: artifact?.category ?? (artifactPath.startsWith("charter/") ? "charter" : artifactPath.startsWith("skills/") ? "skills" : "bundle"),
+    promptUsage: promptUsageLabel(artifact),
+    severity: diagnostic.level,
+    diagnosticCode: diagnostic.code,
+    message: diagnostic.message,
+    suggestion: diagnostic.suggestion || defaultCharterSuggestion(artifactPath),
+  };
+}
+
+function findCharterDiagnosticArtifact(
+  diagnostic: Diagnostic,
+  baselineEditorArtifacts: EditableArtifactOption[],
+  selectedEditorPath: string,
+): EditableArtifactOption | undefined {
+  const directPath = diagnostic.path?.trim();
+  if (directPath) {
+    const direct = baselineEditorArtifacts.find((artifact) => artifact.path === directPath);
+    if (direct) {
+      return direct;
+    }
+    const suffix = baselineEditorArtifacts.find((artifact) => directPath.endsWith(artifact.path) || artifact.path.endsWith(directPath));
+    if (suffix) {
+      return suffix;
+    }
+  }
+
+  const messageMatch = baselineEditorArtifacts.find((artifact) => diagnostic.message.includes(artifact.path) || diagnostic.message.includes(artifact.label));
+  if (messageMatch) {
+    return messageMatch;
+  }
+
+  if (selectedEditorPath) {
+    return baselineEditorArtifacts.find((artifact) => artifact.path === selectedEditorPath);
+  }
+
+  return undefined;
+}
+
+function promptUsageLabel(artifact?: EditableArtifactOption) {
+  if (!artifact) {
+    return "bundle diagnostic";
+  }
+  if (artifact.prompt_usage === "live-consumed") {
+    return "live consumed";
+  }
+  if (artifact.prompt_usage === "reference-only") {
+    return "reference only";
+  }
+  return artifact.path.startsWith("charter/") ? "charter context" : "editable baseline";
+}
+
+function defaultCharterSuggestion(artifactPath: string) {
+  if (artifactPath.startsWith("skills/prompt-packs/")) {
+    return "Open the live-consumed prompt pack, fix the diagnostic, then save the selected baseline artifact.";
+  }
+  if (artifactPath.startsWith("charter/")) {
+    return "Open the charter artifact, fix the project context, then save the selected baseline artifact.";
+  }
+  return "Open the affected baseline artifact, fix the diagnostic, then save it before running Analysis.";
 }
 
 function CharterWizardSummary({
@@ -927,9 +1366,12 @@ export function AnalysisStagePanel({
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
   const blockerRows = shardRows.filter((row) => row.status === "failed");
+  const liveDiagnostics = buildAnalysisLiveDiagnostics(runStatus, runLogs, shardRows, artifacts, selectedRunWarnings);
   const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
   const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
   const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
+  const artifactCount = artifacts.length;
+  const showActiveLiveDiagnostics = selectedRunIsActive && runStatus?.status !== "failed" && liveDiagnostics.hasTelemetry;
 
   const focusBlockerDetails = useCallback(() => {
     blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
@@ -966,9 +1408,7 @@ export function AnalysisStagePanel({
           <h1>Analysis</h1>
           <p className="hint">Run init or refresh, monitor active steps, inspect pending permissions, and select history.</p>
         </div>
-        <StatusBadge tone={selectedRunIsActive ? "warn" : runStatus?.status === "succeeded" ? "ok" : runStatus?.status === "failed" ? "error" : "info"}>
-          {runStatus?.status ?? "idle"}
-        </StatusBadge>
+        <StatusBadge tone={selectedRunIsActive ? "warn" : runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
 
       <div className="actions">
@@ -993,6 +1433,19 @@ export function AnalysisStagePanel({
         stepTimeline={stepTimeline}
         issueCount={issueRows.length}
         blockerCount={blockerRows.length}
+        onReviewBlocker={handleReviewBlocker}
+      />
+      {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
+      <AnalysisFailureRecovery
+        busy={busy}
+        runStatus={runStatus}
+        runtimeLabel={runtimeLabel}
+        warningCount={warningCount}
+        issueCount={issueRows.length}
+        artifactCount={artifactCount}
+        pendingPermissionCount={pendingPermissions.length}
+        liveDiagnostics={liveDiagnostics}
+        onRetry={onRunPipeline}
         onReviewBlocker={handleReviewBlocker}
       />
       <AnalysisRunTimeline steps={stepTimeline} />
@@ -1039,8 +1492,39 @@ type AnalysisShardRow = {
   provider: string;
   status: "succeeded" | "active" | "failed" | "warning" | "observed";
   artifactRef: string;
+  artifactPair: AnalysisArtifactPairState;
   duration: string;
   lastMessage: string;
+};
+
+type AnalysisArtifactPairState = {
+  label: string;
+  detail: string;
+  tone: "info" | "ok" | "warn" | "error";
+  runtimeRefs: string[];
+  markdownRefs: string[];
+  manifestRefs: string[];
+};
+
+type AnalysisLiveMetric = {
+  label: string;
+  value: string;
+  detail: string;
+};
+
+type AnalysisLiveTrace = {
+  label: string;
+  value: string;
+};
+
+type AnalysisLiveDiagnostics = {
+  status: string;
+  tone: "info" | "ok" | "warn" | "error";
+  summary: string;
+  metrics: AnalysisLiveMetric[];
+  traces: AnalysisLiveTrace[];
+  actions: string[];
+  hasTelemetry: boolean;
 };
 
 const canonicalAnalysisSteps = [
@@ -1079,9 +1563,7 @@ function AnalysisRunProgress({
     <section className="analysis-progress" data-testid="analysis-run-progress">
       <div className="section-heading-row">
         <h2>Run mission control</h2>
-        <StatusBadge tone={runStatus?.status === "succeeded" ? "ok" : runStatus?.status === "failed" ? "error" : runStatus ? "warn" : "info"}>
-          {runStatus?.status ?? "idle"}
-        </StatusBadge>
+        <StatusBadge tone={runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
       <div className="analysis-progress-grid">
         <div>
@@ -1114,6 +1596,582 @@ function AnalysisRunProgress({
       </button>
     </section>
   );
+}
+
+function AnalysisFailureRecovery({
+  busy,
+  runStatus,
+  runtimeLabel,
+  warningCount,
+  issueCount,
+  artifactCount,
+  pendingPermissionCount,
+  liveDiagnostics,
+  onRetry,
+  onReviewBlocker,
+}: {
+  busy: boolean;
+  runStatus: RunStatusResponse | null;
+  runtimeLabel: string;
+  warningCount: number;
+  issueCount: number;
+  artifactCount: number;
+  pendingPermissionCount: number;
+  liveDiagnostics: AnalysisLiveDiagnostics;
+  onRetry: (pipeline: "init" | "refresh") => void;
+  onReviewBlocker: () => void;
+}) {
+  if (runStatus?.status !== "failed") {
+    return null;
+  }
+
+  const retryPipeline = runStatus.pipeline === "refresh" ? "refresh" : "init";
+  const errorCode = runStatus.error_code || "unclassified";
+  const blockedStep = runStatus.current_step || `${retryPipeline}.unknown`;
+  const evidenceSummary = failureEvidenceSummary(artifactCount, issueCount);
+  const canceled = isRunCanceled(errorCode);
+  const reconciled = isRunReconciledAfterRestart(errorCode);
+  const title = canceled ? "Canceled run" : reconciled ? "Recovered after restart" : "Recovery path";
+  const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
+  const badgeTone = canceled || reconciled ? "warn" : "error";
+  const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
+  const retainedRun = canceled || reconciled;
+  const retryLabel = retainedRun ? `Run ${retryPipeline} again` : `Retry ${retryPipeline}`;
+  const reviewLabel = retainedRun ? "Review retained evidence" : "Review blocker details";
+  const retentionHint = canceled
+    ? "Starting again creates a new run; the canceled run and its taskrun evidence stay in History."
+    : reconciled
+      ? "Starting again creates a new run; the reconciled run and its taskrun evidence stay in History."
+      : "Retry starts a new run; the failed run remains available in History for audit and comparison.";
+
+  return (
+    <section className="analysis-recovery-panel" data-testid="analysis-failure-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>{title}</h2>
+          <p className="hint">{failureRecoveryGuidance(errorCode, pendingPermissionCount)}</p>
+        </div>
+        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
+      </div>
+
+      <div className="analysis-recovery-grid">
+        <div>
+          <span className="metric-label">Classification</span>
+          <strong>{errorCode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">{stepLabel}</span>
+          <strong>{blockedStep}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Evidence kept</span>
+          <strong>{evidenceSummary}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Warnings</span>
+          <strong>{warningCount}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Runtime/provider</span>
+          <strong>{runtimeLabel}</strong>
+        </div>
+      </div>
+
+      {runStatus.error ? <p className="status err">{runStatus.error}</p> : null}
+      <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} />
+
+      <div className="actions analysis-recovery-actions">
+        <button type="button" data-testid="analysis-retry-run-btn" onClick={() => onRetry(retryPipeline)} disabled={busy}>
+          {retryLabel}
+        </button>
+        <button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewBlocker}>
+          {reviewLabel}
+        </button>
+      </div>
+      <p className="hint">{retentionHint}</p>
+    </section>
+  );
+}
+
+function AnalysisLiveDiagnosticsPanel({ diagnostics }: { diagnostics: AnalysisLiveDiagnostics }) {
+  return (
+    <section className="analysis-live-diagnostics" data-testid="analysis-live-diagnostics">
+      <div className="section-heading-row">
+        <div>
+          <h3>Live diagnostics</h3>
+          <p className="hint">{diagnostics.summary}</p>
+        </div>
+        <StatusBadge tone={diagnostics.tone}>{diagnostics.status}</StatusBadge>
+      </div>
+      <div className="analysis-live-grid">
+        {diagnostics.metrics.map((metric) => (
+          <div key={metric.label}>
+            <span className="metric-label">{metric.label}</span>
+            <strong>{metric.value}</strong>
+            <span>{metric.detail}</span>
+          </div>
+        ))}
+      </div>
+      <dl className="compact-defs analysis-live-traces">
+        {diagnostics.traces.map((trace) => (
+          <div key={trace.label}>
+            <dt>{trace.label}</dt>
+            <dd>{trace.value}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="analysis-next-actions">
+        {diagnostics.actions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function failureRecoveryGuidance(errorCode: string, pendingPermissionCount: number): string {
+  if (isRunCanceled(errorCode)) {
+    return "The run stopped by request. Review retained taskrun evidence, then start a new run when ready.";
+  }
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return "ACP reconciled a stale run after restart. Inspect retained evidence, then start a new run if the previous work should continue.";
+  }
+  if (pendingPermissionCount > 0 || errorCode === "runtime_permission_required") {
+    return "Resolve the pending permission request, then retry the same pipeline.";
+  }
+  if (isRunnerUnavailable(errorCode)) {
+    return "Provider/tool availability blocked artifact creation; check Readiness provider setup, binary/auth/quota, then retry the same pipeline.";
+  }
+  if (errorCode.includes("runtime_timeout")) {
+    return "The run exhausted its time budget; inspect the last progress signal before retry.";
+  }
+  if (errorCode.includes("runtime_contract")) {
+    return "Generated artifacts did not pass validation; inspect the rejected step evidence before retry.";
+  }
+  if (errorCode.includes("infra") || errorCode.includes("incomplete")) {
+    return "The cycle ended incomplete; review the last durable evidence before starting another run.";
+  }
+  return "Review the blocker details, then retry the same pipeline when the cause is clear.";
+}
+
+function failureEvidenceSummary(artifactCount: number, issueCount: number): string {
+  if (artifactCount > 0) {
+    return `${artifactCount} artifact refs kept`;
+  }
+  if (issueCount > 0) {
+    return `${issueCount} diagnostic rows`;
+  }
+  return "status and logs only";
+}
+
+function buildAnalysisLiveDiagnostics(
+  runStatus: RunStatusResponse | null,
+  runLogs: RunLogEntry[],
+  shardRows: AnalysisShardRow[],
+  artifacts: Artifact[],
+  warnings: string[],
+): AnalysisLiveDiagnostics {
+  const observedShards = new Set<string>();
+  const failedShards = new Set<string>();
+  const recoveryModes = new Set<string>();
+  const rawRefs = new Set<string>();
+  const validationExcerpts: string[] = [];
+  const providerRefs = new Set<string>();
+  let plannedShards: number | undefined;
+  let succeededShards: number | undefined;
+  let failedShardCount: number | undefined;
+  let partialFailureCount: number | undefined;
+  let repairScheduled = 0;
+  let repairCompleted = 0;
+  let repairExhausted = 0;
+  let stallCount = 0;
+  let preArtifactStalls = 0;
+  let validArtifactControlledStops = 0;
+  let zeroOutputPreArtifactStalls = 0;
+  let artifactHandoffStalls = 0;
+  const providerStream = summarizeProviderStream(runLogs);
+
+  for (const entry of runLogs) {
+    const fields = entry.fields;
+    const message = entry.message || "";
+    const normalizedMessage = message.toLowerCase();
+    const shardID = fieldString(fields, "shard_id");
+    if (shardID) {
+      observedShards.add(shardID);
+      if (entry.level === "error" || normalizedMessage.includes("failed") || normalizedMessage.includes("exhausted")) {
+        failedShards.add(shardID);
+      }
+    }
+
+    plannedShards = maxDefined(plannedShards, firstNumericField(fields, ["shards_total", "planned_shards", "planned", "total_shards", "total"]));
+    succeededShards = maxDefined(succeededShards, firstNumericField(fields, ["succeeded_shards", "succeeded", "completed_shards", "completed"]));
+    failedShardCount = maxDefined(failedShardCount, firstNumericField(fields, ["failed_shards", "failed"]));
+    partialFailureCount = maxDefined(partialFailureCount, numericField(fields, "partial_failure_count"));
+
+    const parsedCounters = parseShardCounters(message);
+    if (parsedCounters) {
+      plannedShards = maxDefined(plannedShards, parsedCounters.planned);
+      succeededShards = maxDefined(succeededShards, parsedCounters.succeeded);
+      failedShardCount = maxDefined(failedShardCount, parsedCounters.failed);
+    }
+
+    const provider = fieldString(fields, "provider") || fieldString(fields, "selected_provider");
+    if (provider) {
+      providerRefs.add(provider);
+    }
+    const recoveryMode = fieldString(fields, "recovery_mode");
+    if (recoveryMode) {
+      recoveryModes.add(recoveryMode);
+    }
+    const repairStage = fieldString(fields, "stage") || stageFromMessage(message);
+    if (repairStage) {
+      recoveryModes.add(repairStage);
+    }
+
+    if (normalizedMessage.includes("focused artifact repair scheduled") || normalizedMessage.includes("focused artifact repair retry scheduled")) {
+      repairScheduled += 1;
+    }
+    if (normalizedMessage.includes("focused artifact repair completed")) {
+      repairCompleted += 1;
+    }
+    if (
+      normalizedMessage.includes("focused artifact repair exhausted") ||
+      normalizedMessage.includes("collect manifest repair exhausted") ||
+      normalizedMessage.includes("repair exhausted")
+    ) {
+      repairExhausted += 1;
+    }
+
+    const validationError = fieldString(fields, "validation_error") || fieldString(fields, "error");
+    if (validationError) {
+      validationExcerpts.push(validationError);
+    }
+    if (artifactHandoffStalled(normalizedMessage, validationError.toLowerCase(), repairStage)) {
+      artifactHandoffStalls += 1;
+    }
+
+    if (boolField(fields, "zero_output_pre_artifact_stall")) {
+      zeroOutputPreArtifactStalls += 1;
+    }
+    const stallPhase = fieldString(fields, "stall_phase");
+    const isStall =
+      fieldString(fields, "exit_reason") === "stall" ||
+      validationError.includes("runtime_stalled") ||
+      normalizedMessage.includes("runtime_stalled") ||
+      normalizedMessage.includes("stalled");
+    const artifactIsValid = boolField(fields, "artifact_valid") || fieldString(fields, "artifact_state") === "valid";
+    if (isStall && artifactIsValid && validationError === "") {
+      validArtifactControlledStops += 1;
+    } else if (isStall) {
+      stallCount += 1;
+      if (stallPhase.includes("pre") || validationError.includes("before_artifacts")) {
+        preArtifactStalls += 1;
+      }
+    }
+
+    for (const ref of rawOutputRefsFromEntry(entry)) {
+      rawRefs.add(ref);
+    }
+  }
+
+  for (const row of shardRows) {
+    if (row.scope && row.scope !== "workspace") {
+      observedShards.add(row.scope);
+    }
+    if (row.status === "failed" && row.scope && row.scope !== "workspace") {
+      failedShards.add(row.scope);
+    }
+  }
+
+  const failedRowsFallback = failedShards.size === 0 ? shardRows.filter((row) => row.status === "failed").length : 0;
+  const failedCount = Math.max(failedShardCount ?? 0, partialFailureCount ?? 0, failedShards.size, failedRowsFallback);
+  const observedCount = Math.max(plannedShards ?? 0, observedShards.size, shardRows.length > 1 ? shardRows.length : 0);
+  const succeededCount =
+    succeededShards ?? (plannedShards !== undefined ? Math.max(plannedShards - failedCount, 0) : Math.max(observedCount - failedCount, 0));
+  const rawRefList = Array.from(rawRefs).slice(0, 3);
+  const recoveryModeList = Array.from(recoveryModes).slice(0, 3);
+  const providerList = Array.from(providerRefs).slice(0, 3);
+  const terminalExcerpt = firstNonEmpty([lastString(validationExcerpts), runStatus?.error ?? "", warnings[0] ?? ""]);
+  const hasTelemetry = runLogs.length > 0 || artifacts.length > 0 || warnings.length > 0;
+  const providerUnavailable = isRunnerUnavailable(runStatus?.error_code);
+  const artifactHandoffBlocked = !providerUnavailable && (artifactHandoffStalls > 0 || (preArtifactStalls > 0 && repairExhausted > 0));
+  const authoredShardArtifactCount = shardRows.reduce(
+    (count, row) => count + row.artifactPair.markdownRefs.length + row.artifactPair.manifestRefs.length,
+    0,
+  );
+  const providerStreamAwaitingArtifacts =
+    runStatus?.status === "running" && providerStream.chunks > 0 && authoredShardArtifactCount === 0 && !artifactHandoffBlocked && !providerUnavailable;
+  const status = providerUnavailable
+    ? "provider check"
+    : artifactHandoffBlocked
+      ? "artifact handoff"
+      : providerStreamAwaitingArtifacts
+        ? "provider stream"
+        : failedCount > 0 || repairExhausted > 0
+          ? "action needed"
+          : hasTelemetry
+            ? "review"
+            : "logs missing";
+  const tone = providerUnavailable || failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
+  const summary = providerUnavailable
+    ? "Provider/tool availability blocked execution; fix Readiness provider setup before retrying the same pipeline."
+    : artifactHandoffBlocked
+      ? "The provider reached collect repair, but valid shard artifacts were not written before the pre-artifact stall."
+      : providerStreamAwaitingArtifacts
+        ? "Provider output is streaming, but no authored shard artifact pair is visible yet; wait for markdown plus shard-pack-manifest before treating collect as complete."
+        : hasTelemetry
+          ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
+          : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
+
+  const metrics: AnalysisLiveMetric[] = [
+    {
+      label: providerStreamAwaitingArtifacts ? "Run signal" : status === "review" ? "Diagnostic signal" : "Failure mode",
+      value: artifactHandoffBlocked
+        ? "Artifact handoff stalled"
+        : providerUnavailable
+          ? "Provider unavailable"
+          : providerStreamAwaitingArtifacts
+            ? "Artifact pair pending"
+            : failedCount > 0
+              ? "Shard failure"
+              : "Telemetry review",
+      detail: artifactHandoffBlocked
+        ? "collect repair did not produce both markdown and shard-pack-manifest before stalling"
+        : providerUnavailable
+          ? "readiness blocked before durable shard artifacts"
+          : providerStreamAwaitingArtifacts
+            ? "runtime stream is active; authored markdown and shard-pack-manifest are not visible yet"
+            : failedCount > 0
+              ? "inspect failed shard evidence before retry"
+              : "no terminal artifact handoff blocker detected",
+    },
+    ...(providerStream.chunks > 0
+      ? [
+          {
+            label: "Provider stream",
+            value: `${providerStream.chunks} ${providerStream.chunks === 1 ? "chunk" : "chunks"}`,
+            detail:
+              providerStream.streamEvents > 0
+                ? `${providerStream.streamEvents} JSON stream ${providerStream.streamEvents === 1 ? "event" : "events"} · ${providerStream.stdout} stdout / ${providerStream.stderr} stderr`
+                : `${providerStream.stdout} stdout / ${providerStream.stderr} stderr · ${formatCompactCount(providerStream.characters)} chars`,
+          },
+        ]
+      : []),
+    {
+      label: "Shard state",
+      value: formatShardMetric(plannedShards, observedCount, succeededCount, failedCount),
+      detail:
+        failedShards.size > 0
+          ? `failed: ${Array.from(failedShards).slice(0, 3).join(", ")}`
+          : providerUnavailable
+            ? "provider unavailable before shard ids were emitted"
+            : "no failed shard ids in loaded logs",
+    },
+    {
+      label: "Focused repair",
+      value: `${repairScheduled} scheduled / ${repairCompleted} completed / ${repairExhausted} exhausted`,
+      detail: recoveryModeList.length > 0 ? recoveryModeList.join(", ") : "no recovery mode logged",
+    },
+    {
+      label: "Stall pressure",
+      value: `${stallCount} actual / ${validArtifactControlledStops} valid-stop`,
+      detail: `${preArtifactStalls} pre-artifact · ${zeroOutputPreArtifactStalls} zero-output`,
+    },
+    {
+      label: "Raw refs",
+      value: rawRefs.size > 0 ? `${rawRefs.size} refs` : "none loaded",
+      detail: rawRefList.length > 0 ? rawRefList.join(", ") : `${artifacts.length} selected-run artifacts`,
+    },
+  ];
+  const traces: AnalysisLiveTrace[] = [
+    { label: "Provider", value: providerList.length > 0 ? providerList.join(", ") : "not exposed in loaded logs" },
+    ...(providerStream.chunks > 0
+      ? [{ label: "Stream signal", value: providerStream.signalTypes.length > 0 ? providerStream.signalTypes.join(", ") : "plain runtime output" }]
+      : []),
+    { label: "Recovery stage", value: recoveryModeList.length > 0 ? recoveryModeList.join(", ") : "not logged" },
+    { label: "Terminal excerpt", value: terminalExcerpt || "No terminal validation excerpt loaded." },
+  ];
+
+  return {
+    status,
+    tone,
+    summary,
+    metrics,
+    traces,
+    actions: buildAnalysisLiveActions(
+      failedCount,
+      repairExhausted,
+      stallCount,
+      rawRefs.size,
+      hasTelemetry,
+      providerUnavailable,
+      artifactHandoffBlocked,
+      providerStreamAwaitingArtifacts,
+    ),
+    hasTelemetry,
+  };
+}
+
+function buildAnalysisLiveActions(
+  failedCount: number,
+  repairExhausted: number,
+  stallCount: number,
+  rawRefCount: number,
+  hasTelemetry: boolean,
+  providerUnavailable: boolean,
+  artifactHandoffBlocked: boolean,
+  providerStreamAwaitingArtifacts: boolean,
+): string[] {
+  if (providerUnavailable) {
+    const actions = ["Check Readiness provider setup, binary/auth/quota before retrying the same pipeline."];
+    if (hasTelemetry) {
+      actions.push("Use terminal excerpt/provider rows only to confirm the outage, not as a shard-quality failure.");
+    }
+    return actions;
+  }
+  if (!hasTelemetry) {
+    return ["Load run logs or open persisted artifacts before retrying the same pipeline."];
+  }
+  if (providerStreamAwaitingArtifacts) {
+    return [
+      "Watch for authored markdown plus shard-pack-manifest before treating provider output as collect progress.",
+      "If collect stalls or repair starts, use raw-output metadata instead of reading the full provider stream.",
+    ];
+  }
+  const actions = artifactHandoffBlocked
+    ? ["Open the failed shard row and raw-output ref to confirm whether markdown and shard-pack-manifest were written.", "Retry after the provider artifact write path is fixed or a collect-capable provider is selected."]
+    : ["Inspect failed shard rows and terminal excerpts before starting a retry."];
+  if (failedCount > 0) {
+    actions.push("Retry only after the failed shard/provider cause is understood.");
+  }
+  if (repairExhausted > 0 || stallCount > 0) {
+    actions.push("Confirm the provider can write valid artifacts without relying on focused repair.");
+  }
+  if (rawRefCount > 0) {
+    actions.push("Use raw-output metadata to compare stdout/stderr against the failed shard evidence.");
+  }
+  return actions;
+}
+
+type ProviderStreamSummary = {
+  chunks: number;
+  streamEvents: number;
+  stdout: number;
+  stderr: number;
+  characters: number;
+  signalTypes: string[];
+};
+
+function summarizeProviderStream(runLogs: RunLogEntry[]): ProviderStreamSummary {
+  const signalTypes = new Set<string>();
+  let chunks = 0;
+  let streamEvents = 0;
+  let stdout = 0;
+  let stderr = 0;
+  let characters = 0;
+
+  for (const entry of runLogs) {
+    if (entry.kind !== "runtime_output") {
+      continue;
+    }
+    chunks += 1;
+    characters += entry.message.length;
+    if (entry.stream === "stderr") {
+      stderr += 1;
+    } else {
+      stdout += 1;
+    }
+    const parsed = parseRuntimeOutputJSON(entry.message);
+    if (!parsed) {
+      continue;
+    }
+    const topType = objectString(parsed, "type");
+    const event = objectField(parsed, "event");
+    const eventType = objectString(event, "type");
+    const delta = objectField(event, "delta") ?? objectField(parsed, "delta");
+    const deltaType = objectString(delta, "type");
+    if (topType === "stream_event" || eventType || deltaType) {
+      streamEvents += 1;
+    }
+    const signal = firstNonEmpty([deltaType, eventType, topType]);
+    if (signal) {
+      signalTypes.add(signal);
+    }
+  }
+
+  return {
+    chunks,
+    streamEvents,
+    stdout,
+    stderr,
+    characters,
+    signalTypes: Array.from(signalTypes).slice(0, 3),
+  };
+}
+
+function parseRuntimeOutputJSON(message: string): Record<string, unknown> | null {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function objectField(record: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  const value = record?.[key];
+  return isRecord(value) ? value : null;
+}
+
+function objectString(record: Record<string, unknown> | null, key: string): string {
+  const value = record?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function artifactHandoffStalled(normalizedMessage: string, normalizedValidationError: string, repairStage: string): boolean {
+  const normalizedStage = repairStage.toLowerCase();
+  const hasStallWord = /\bstall(?:ed|s|ing)?\b/.test(normalizedMessage);
+  return (
+    normalizedValidationError.includes("runtime_stalled_before_artifacts") ||
+    normalizedMessage.includes("stalled before valid artifacts") ||
+    normalizedMessage.includes("before valid artifacts were available") ||
+    (normalizedStage.includes("collect_pair_repair") && hasStallWord)
+  );
+}
+
+function stageFromMessage(message: string): string {
+  const match = message.match(/\bstage=([^\s)]+)/i);
+  return match?.[1] ?? "";
+}
+
+function formatShardMetric(plannedShards: number | undefined, observedCount: number, succeededCount: number, failedCount: number): string {
+  if (plannedShards !== undefined && plannedShards > 0) {
+    return `${succeededCount}/${plannedShards} ok · ${failedCount} failed`;
+  }
+  if (observedCount > 0) {
+    return `${failedCount} failed / ${observedCount} observed`;
+  }
+  return "no shard counters";
+}
+
+function parseShardCounters(message: string): { planned: number; succeeded: number; failed: number } | null {
+  const match = message.match(/shards_total=(\d+)\s+succeeded=(\d+)\s+failed=(\d+)/i) ?? message.match(/planned=(\d+)\s+succeeded=(\d+)\s+failed=(\d+)/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    planned: Number(match[1]),
+    succeeded: Number(match[2]),
+    failed: Number(match[3]),
+  };
 }
 
 function AnalysisRunTimeline({ steps }: { steps: AnalysisStep[] }) {
@@ -1286,6 +2344,7 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                 <th>Provider</th>
                 <th>Status</th>
                 <th>Artifact/log ref</th>
+                <th>Artifact pair</th>
                 <th>Duration</th>
                 <th>Last message</th>
               </tr>
@@ -1298,6 +2357,12 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                   <td data-label="Provider">{row.provider}</td>
                   <td data-label="Status">{row.status}</td>
                   <td data-label="Artifact/log ref">{row.artifactRef}</td>
+                  <td data-label="Artifact pair">
+                    <span className={`artifact-pair-state ${row.artifactPair.tone}`}>
+                      <strong>{row.artifactPair.label}</strong>
+                      <span>{row.artifactPair.detail}</span>
+                    </span>
+                  </td>
                   <td data-label="Duration">{row.duration}</td>
                   <td data-label="Last message">{row.lastMessage}</td>
                 </tr>
@@ -1397,18 +2462,38 @@ function GitDiffView({
 }
 
 function AnalysisFailedShardDetails({ rows, detailsRef }: { rows: AnalysisShardRow[]; detailsRef: RefObject<HTMLElement> }) {
+  const shardScopedRows = rows.filter((row) => row.scope !== "workspace");
+  const displayRows = shardScopedRows.length > 0 ? shardScopedRows : rows;
   return (
     <section className="subsection" data-testid="analysis-failed-shard-details" ref={detailsRef} tabIndex={-1}>
       <h2>Blocker drilldown</h2>
-      {rows.length === 0 ? (
+      {displayRows.length === 0 ? (
         <p className="hint">No failed shard or warning log entries for the selected run.</p>
       ) : (
         <ul className="compact-list">
-          {rows.slice(0, 4).map((row) => (
+          {displayRows.slice(0, 4).map((row) => (
             <li key={`${row.key}-detail`}>
               <span>
                 {row.status.toUpperCase()} · {row.stepId} · {row.scope}
               </span>
+              <span className={`artifact-pair-state ${row.artifactPair.tone}`}>
+                <strong>{row.artifactPair.label}</strong>
+                <span>{row.artifactPair.detail}</span>
+              </span>
+              <dl className="compact-defs artifact-pair-refs">
+                <div>
+                  <dt>Runtime record</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.runtimeRefs)}</dd>
+                </div>
+                <div>
+                  <dt>Authored markdown</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.markdownRefs)}</dd>
+                </div>
+                <div>
+                  <dt>Manifest</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.manifestRefs)}</dd>
+                </div>
+              </dl>
               <code>{row.lastMessage}</code>
             </li>
           ))}
@@ -1448,7 +2533,8 @@ function buildAnalysisShardRows(
 ): AnalysisShardRow[] {
   const grouped = new Map<string, RunLogEntry[]>();
   for (const entry of runLogs) {
-    const key = entry.taskrun_path || `${entry.step_id || "run"}/${entry.domain_id || "workspace"}`;
+    const shardScope = fieldString(entry.fields, "shard_id") || shardScopeFromPath(entry.taskrun_path ?? "");
+    const key = shardScope ? `${entry.step_id || "run"}/shard/${shardScope}` : entry.taskrun_path || `${entry.step_id || "run"}/${entry.domain_id || "workspace"}`;
     grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   }
   const provider = setupRuntime === "fake" ? "fake" : setupRuntimeProvider;
@@ -1458,14 +2544,18 @@ function buildAnalysisShardRows(
     const stepId = last?.step_id || entries.find((entry) => entry.step_id)?.step_id || runStatus?.current_step || "-";
     const hasError = entries.some((entry) => entry.level === "error");
     const hasWarning = entries.some((entry) => entry.level === "warning");
+    const shardScope = fieldString(last?.fields, "shard_id") || shardScopeFromPath(last?.taskrun_path ?? "");
+    const scope = shardScope || last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || "workspace";
+    const artifactRef = [...entries].reverse().find((entry) => entry.taskrun_path)?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only");
     rows.push({
       key,
       stepId,
-      scope: last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace",
+      scope,
       provider: setupRuntime === "fake" ? "fake" : fieldString(last?.fields, "provider") || provider,
       status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
-      artifactRef: last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only"),
-      duration: durationFromLogFields(last?.fields),
+      artifactRef,
+      artifactPair: buildAnalysisArtifactPairState(scope, artifactRef, artifacts),
+      duration: durationFromEntries(entries),
       lastMessage: last?.message || "-",
     });
   }
@@ -1477,11 +2567,104 @@ function buildAnalysisShardRows(
       provider,
       status: runStatus.status === "failed" ? "failed" : runStatus.status === "succeeded" ? "succeeded" : runStatus.status === "running" ? "active" : "observed",
       artifactRef: artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only",
+      artifactPair: buildAnalysisArtifactPairState("workspace", artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only", artifacts),
       duration: "Duration unavailable",
       lastMessage: runStatus.error || runStatus.error_code || "No shard logs loaded yet.",
     });
   }
   return rows;
+}
+
+function buildAnalysisArtifactPairState(scope: string, artifactRef: string, artifacts: Artifact[]): AnalysisArtifactPairState {
+  const shardScoped = scope !== "workspace" && scope.trim().length > 0;
+  const normalizedScope = scope.trim();
+  const selectedPaths = artifacts.map((artifact) => artifact.path).filter((path) => pathMatchesShardScope(path, normalizedScope));
+  const refPaths = pathMatchesShardScope(artifactRef, normalizedScope) ? [artifactRef] : [];
+  const paths = Array.from(new Set([...selectedPaths, ...refPaths]));
+  const runtimeRefs = paths.filter((path) => path.endsWith("/runtime-execution.json"));
+  const markdownRefs = paths.filter((path) => /\.(md|markdown)$/i.test(path) && !path.endsWith("/shard-pack-manifest.md"));
+  const manifestRefs = paths.filter((path) => path.endsWith("/shard-pack-manifest.json"));
+
+  if (!shardScoped) {
+    return {
+      label: "Run-level evidence",
+      detail: artifacts.length > 0 ? "selected-run artifacts are available, but this row is not shard-scoped" : "artifact list not loaded for this run",
+      tone: artifacts.length > 0 ? "info" : "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (markdownRefs.length > 0 && manifestRefs.length > 0) {
+    return {
+      label: "Artifact pair present",
+      detail: "authored markdown and shard-pack-manifest are both visible",
+      tone: "ok",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (markdownRefs.length > 0) {
+    return {
+      label: "Markdown only",
+      detail: "authored markdown is visible, but shard-pack-manifest is missing",
+      tone: "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (manifestRefs.length > 0) {
+    return {
+      label: "Manifest only",
+      detail: "shard-pack-manifest is visible, but authored markdown is missing",
+      tone: "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (runtimeRefs.length > 0) {
+    return {
+      label: "Runtime only",
+      detail: "runtime-execution exists; authored markdown and shard-pack-manifest are missing",
+      tone: "error",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  return {
+    label: artifacts.length > 0 ? "No shard artifacts" : "Artifact list not loaded",
+    detail: artifacts.length > 0 ? "selected-run artifacts do not include this shard" : "load selected-run artifacts before retry triage",
+    tone: artifacts.length > 0 ? "warn" : "info",
+    runtimeRefs,
+    markdownRefs,
+    manifestRefs,
+  };
+}
+
+function pathMatchesShardScope(path: string, scope: string): boolean {
+  if (!scope) {
+    return false;
+  }
+  const shardSegment = `staging/shards/${scope}/`;
+  return path.includes(`/${shardSegment}`) || path.startsWith(shardSegment);
+}
+
+function shardScopeFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const match = normalized.match(/(?:^|\/)staging\/shards\/([^/]+)\//);
+  return match?.[1] ?? "";
+}
+
+function formatArtifactPairRefs(paths: string[]): string {
+  if (paths.length === 0) {
+    return "missing";
+  }
+  const visible = paths.slice(0, 2).join(", ");
+  return paths.length > 2 ? `${visible} +${paths.length - 2} more` : visible;
 }
 
 function findStepIndex(stepId?: string): number {
@@ -1560,6 +2743,16 @@ function durationFromLogFields(fields: Record<string, unknown> | undefined): str
   return "Duration unavailable";
 }
 
+function durationFromEntries(entries: RunLogEntry[]): string {
+  for (const entry of [...entries].reverse()) {
+    const duration = durationFromLogFields(entry.fields);
+    if (duration !== "Duration unavailable") {
+      return duration;
+    }
+  }
+  return "Duration unavailable";
+}
+
 function numericField(fields: Record<string, unknown> | undefined, key: string): number | undefined {
   const value = fields?.[key];
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -1570,6 +2763,55 @@ function numericField(fields: Record<string, unknown> | undefined, key: string):
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function firstNumericField(fields: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = numericField(fields, key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function maxDefined(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) {
+    return current;
+  }
+  return current === undefined ? next : Math.max(current, next);
+}
+
+function boolField(fields: Record<string, unknown> | undefined, key: string): boolean {
+  const value = fields?.[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return typeof value === "string" && value.trim().toLowerCase() === "true";
+}
+
+function rawOutputRefsFromEntry(entry: RunLogEntry): string[] {
+  const refs = new Set<string>();
+  const rawOutput = fieldString(entry.fields, "raw_output");
+  if (rawOutput) {
+    refs.add(rawOutput);
+  }
+  const rawOutputMetadata = fieldString(entry.fields, "raw_output_metadata");
+  if (rawOutputMetadata) {
+    refs.add(rawOutputMetadata);
+  }
+  for (const match of entry.message.matchAll(/raw_output=([^\s)]+)/gi)) {
+    refs.add(match[1]);
+  }
+  return Array.from(refs);
+}
+
+function firstNonEmpty(values: string[]): string {
+  return values.map((value) => value.trim()).find((value) => value.length > 0) ?? "";
+}
+
+function lastString(values: string[]): string {
+  return values.length > 0 ? values[values.length - 1] : "";
 }
 
 function formatDurationMillis(milliseconds: number): string {
@@ -1585,46 +2827,154 @@ function formatDurationMillis(milliseconds: number): string {
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
+function formatCompactCount(value: number): string {
+  if (value < 1000) {
+    return `${value}`;
+  }
+  if (value < 1_000_000) {
+    return `${Math.round(value / 100) / 10}k`;
+  }
+  return `${Math.round(value / 100_000) / 10}m`;
+}
+
 function PendingPermissionsTable({ pendingPermissions }: { pendingPermissions: RuntimePermissionRequest[] }) {
+  const primaryRequest = pendingPermissions[0] ?? null;
+  const requestCountLabel = `${pendingPermissions.length} pending ${pendingPermissions.length === 1 ? "request" : "requests"}`;
+  const blockedStep = compactUniqueValues(pendingPermissions.map((request) => request.step_id)).join(", ") || "-";
+  const actions = compactUniqueValues(pendingPermissions.map((request) => request.action)).join(", ") || "-";
+  const decisions = compactUniqueValues(pendingPermissions.map((request) => request.decision?.decision)).join(", ") || "-";
+  const rules = compactUniqueValues(pendingPermissions.map((request) => request.decision?.rule_id)).join(", ") || "-";
+
   return (
     <section className="subsection" data-testid="runs-pending-permissions-panel">
       <h2>Pending permissions</h2>
       {pendingPermissions.length === 0 ? (
         <p>No pending runtime permission requests.</p>
       ) : (
-        <div className="run-table-wrap">
-          <table className="run-table" data-testid="runs-pending-permissions-table">
-            <thead>
-              <tr>
-                <th>Request ID</th>
-                <th>Provider</th>
-                <th>Step</th>
-                <th>Action</th>
-                <th>Decision</th>
-                <th>Rule</th>
-                <th>Path or command</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendingPermissions.map((request) => (
-                <tr key={request.request_id || `${request.step_id}-${request.action}-${request.path_or_command}`}>
-                  <td>{request.request_id || "-"}</td>
-                  <td>{request.provider || "-"}</td>
-                  <td>{request.step_id || "-"}</td>
-                  <td>{request.action || "-"}</td>
-                  <td>{request.decision?.decision || "-"}</td>
-                  <td>{request.decision?.rule_id || "-"}</td>
-                  <td>{request.path_or_command || "-"}</td>
-                  <td>{request.reason || "-"}</td>
+        <>
+          <section className="permission-recovery-panel" data-testid="runtime-permission-recovery">
+            <div className="section-heading-row">
+              <div>
+                <h3>Permission triage</h3>
+                <p className="hint">
+                  Managed runtime paused before approving an operation outside the step envelope. Review the target and rule before retrying.
+                </p>
+              </div>
+              <StatusBadge tone="warn">{requestCountLabel}</StatusBadge>
+            </div>
+            <div className="permission-recovery-grid">
+              <div>
+                <span className="metric-label">Blocked step</span>
+                <strong>{blockedStep}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Operation</span>
+                <strong>{actions}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Decision</span>
+                <strong>{decisions}</strong>
+              </div>
+              <div>
+                <span className="metric-label">Policy rule</span>
+                <strong>{rules}</strong>
+              </div>
+            </div>
+            {primaryRequest ? (
+              <dl className="compact-defs permission-request-summary">
+                <div>
+                  <dt>Primary target</dt>
+                  <dd>{primaryRequest.path_or_command || "-"}</dd>
+                </div>
+                <div>
+                  <dt>Reason</dt>
+                  <dd>{primaryRequest.reason || primaryRequest.decision?.message || "No reason recorded."}</dd>
+                </div>
+              </dl>
+            ) : null}
+            <ul className="analysis-next-actions">
+              <li>Inspect the path or command and reason before rerun.</li>
+              <li>Use Readiness - Advanced runtime settings - Runtime Permissions to choose the intended mode/channel.</li>
+              <li>If the request is unexpected, adjust source scope or runtime profile before retrying the failed pipeline.</li>
+            </ul>
+          </section>
+          <div className="permission-request-cards" data-testid="runs-pending-permissions-cards">
+            {pendingPermissions.map((request) => (
+              <article className="permission-request-card" key={request.request_id || `${request.step_id}-${request.action}-${request.path_or_command}-card`}>
+                <div className="section-heading-row">
+                  <div>
+                    <span className="metric-label">Permission request</span>
+                    <strong className="permission-request-card-title">{request.action || "runtime permission"}</strong>
+                  </div>
+                  <StatusBadge tone="warn">{request.decision?.decision || "pending"}</StatusBadge>
+                </div>
+                <dl className="compact-defs permission-request-summary">
+                  <div>
+                    <dt>Request ID</dt>
+                    <dd>{request.request_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{request.provider || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Step</dt>
+                    <dd>{request.step_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Rule</dt>
+                    <dd>{request.decision?.rule_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Target</dt>
+                    <dd>{request.path_or_command || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{request.reason || request.decision?.message || "-"}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="run-table-wrap permission-request-table-wrap">
+            <table className="run-table" data-testid="runs-pending-permissions-table">
+              <thead>
+                <tr>
+                  <th>Request ID</th>
+                  <th>Provider</th>
+                  <th>Step</th>
+                  <th>Action</th>
+                  <th>Decision</th>
+                  <th>Rule</th>
+                  <th>Path or command</th>
+                  <th>Reason</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pendingPermissions.map((request) => (
+                  <tr key={request.request_id || `${request.step_id}-${request.action}-${request.path_or_command}`}>
+                    <td>{request.request_id || "-"}</td>
+                    <td>{request.provider || "-"}</td>
+                    <td>{request.step_id || "-"}</td>
+                    <td>{request.action || "-"}</td>
+                    <td>{request.decision?.decision || "-"}</td>
+                    <td>{request.decision?.rule_id || "-"}</td>
+                    <td>{request.path_or_command || "-"}</td>
+                    <td>{request.reason || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </section>
   );
+}
+
+function compactUniqueValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
 }
 
 function RunHistoryTable({
@@ -1638,11 +2988,27 @@ function RunHistoryTable({
   runCounters: { running: number; succeeded: number; failed: number };
   onSelectRun: (runId: string) => void;
 }) {
+  const terminalOutcomeCounts = runList.reduce(
+    (counts, run) => {
+      const label = runOutcomeLabel(run);
+      if (label === "failed") {
+        counts.failed += 1;
+      } else if (label === "canceled") {
+        counts.canceled += 1;
+      } else if (label === "recovered") {
+        counts.recovered += 1;
+      }
+      return counts;
+    },
+    { failed: 0, canceled: 0, recovered: 0 },
+  );
+
   return (
     <section className="subsection" data-testid="runs-history-panel">
       <h2>History</h2>
       <p className="hint">
-        Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {runCounters.failed}
+        Running: {runCounters.running} | Succeeded: {runCounters.succeeded} | Failed: {terminalOutcomeCounts.failed} | Canceled: {terminalOutcomeCounts.canceled} |
+        Recovered: {terminalOutcomeCounts.recovered}
       </p>
       {runList.length === 0 ? (
         <p>No runs yet.</p>
@@ -1675,7 +3041,9 @@ function RunHistoryTable({
                       {run.run_id}
                     </button>
                   </td>
-                  <td>{run.status}</td>
+                  <td>
+                    <StatusBadge tone={runOutcomeTone(run)}>{runOutcomeLabel(run)}</StatusBadge>
+                  </td>
                   <td>{run.pipeline}</td>
                   <td>{formatTimestamp(run.started_at)}</td>
                   <td>{formatTimestamp(run.finished_at)}</td>
@@ -2046,6 +3414,7 @@ function ReviewEvidenceWorkbench({
 }) {
   const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
   const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
+  const [artifactExplorerOpen, setArtifactExplorerOpen] = useState(reviewQueue.length === 0);
   const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
   const visibleArtifactCount = visibleArtifactGroups.reduce((sum, group) => sum + group.artifacts.length, 0);
 
@@ -2055,58 +3424,87 @@ function ReviewEvidenceWorkbench({
     }
   }, [evidenceView, onLoadGitDiff, selectedArtifact]);
 
+  useEffect(() => {
+    if (reviewQueue.length === 0) {
+      setArtifactExplorerOpen(true);
+    }
+  }, [reviewQueue.length]);
+
   return (
     <div className="review-workbench">
-      <aside className="review-artifact-explorer" data-testid="review-artifact-explorer">
-        <ReviewQueuePanel queue={reviewQueue} onOpenArtifact={onOpenArtifact} />
-        <div className="section-heading-row">
-          <h2>Artifact explorer</h2>
-          <StatusBadge tone={visibleArtifactGroups.length > 0 ? "ok" : "info"}>
-            {artifactFilter === "all" ? `${artifactGroups.length} groups` : `${visibleArtifactCount} refs`}
-          </StatusBadge>
-        </div>
-        <TabNav
-          ariaLabel="Review artifact filters"
-          className="artifact-filter-tabs"
-          testId="review-artifact-filters"
-          value={artifactFilter}
-          onChange={setArtifactFilter}
-          options={REVIEW_ARTIFACT_FILTERS}
-        />
-        {visibleArtifactGroups.length === 0 ? (
-          <p className="hint">
-            {artifactGroups.length === 0
-              ? "No selected-run artifacts yet. Run Analysis before evidence review."
-              : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
-          </p>
-        ) : (
-          <div className="artifact-group-list" data-testid="results-artifacts-panel">
-            {visibleArtifactGroups.map((group) => (
-              <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
-                <div className="artifact-group-heading">
-                  <h3>{group.name}</h3>
-                  <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
-                </div>
-                <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
-                  {group.artifacts.map((artifact) => (
-                    <li key={`${artifact.kind}-${artifact.path}`}>
-                      <ArtifactPathButton
-                        path={artifact.path}
-                        label={artifact.label}
-                        kind={artifact.kind}
-                        selected={artifact.path === selectedArtifact}
-                        onOpenArtifact={onOpenArtifact}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
+      <nav className="review-section-jumps" aria-label="Review sections" data-testid="review-section-jumps">
+        <a href="#review-evidence-preview">Preview</a>
+        <a href="#review-queue">Queue</a>
+        <a href="#review-artifacts">Artifacts</a>
+        <a href="#review-trust">Trust</a>
+      </nav>
+
+      <aside className="review-task-lane" id="review-task-lane" aria-label="Review tasks and supporting artifacts">
+        <ReviewQueuePanel queue={reviewQueue} selectedArtifact={selectedArtifact} onOpenArtifact={onOpenArtifact} />
+        <details
+          className="review-artifact-explorer"
+          data-testid="review-artifact-explorer"
+          id="review-artifacts"
+          open={artifactExplorerOpen}
+          onToggle={(event) => setArtifactExplorerOpen(event.currentTarget.open)}
+        >
+          <summary className="review-artifact-explorer-summary" data-testid="review-artifact-explorer-toggle">
+            <span className="review-artifact-summary-copy">
+              <strong>Artifact explorer</strong>
+              <span>Secondary browser for all generated files.</span>
+            </span>
+            <StatusBadge tone={visibleArtifactGroups.length > 0 ? "ok" : "info"}>
+              {artifactFilter === "all" ? `${artifactGroups.length} groups` : `${visibleArtifactCount} refs`}
+            </StatusBadge>
+          </summary>
+          <div className="review-artifact-explorer-body">
+            <TabNav
+              ariaLabel="Review artifact filters"
+              className="artifact-filter-tabs"
+              testId="review-artifact-filters"
+              value={artifactFilter}
+              onChange={(filter) => {
+                setArtifactFilter(filter);
+                setArtifactExplorerOpen(true);
+              }}
+              options={REVIEW_ARTIFACT_FILTERS}
+            />
+            {visibleArtifactGroups.length === 0 ? (
+              <p className="hint">
+                {artifactGroups.length === 0
+                  ? "No selected-run artifacts yet. Run Analysis before evidence review."
+                  : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
+              </p>
+            ) : (
+              <div className="artifact-group-list" data-testid="results-artifacts-panel">
+                {visibleArtifactGroups.map((group) => (
+                  <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
+                    <div className="artifact-group-heading">
+                      <h3>{group.name}</h3>
+                      <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
+                    </div>
+                    <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
+                      {group.artifacts.map((artifact) => (
+                        <li key={`${artifact.kind}-${artifact.path}`}>
+                          <ArtifactPathButton
+                            path={artifact.path}
+                            label={artifact.label}
+                            kind={artifact.kind}
+                            selected={artifact.path === selectedArtifact}
+                            onOpenArtifact={onOpenArtifact}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </details>
       </aside>
 
-      <section className="review-evidence-preview" data-testid="review-evidence-preview">
+      <section className="review-evidence-preview" id="review-evidence-preview" data-testid="review-evidence-preview">
         <div className="section-heading-row">
           <div>
             <h2>Evidence preview</h2>
@@ -2185,7 +3583,7 @@ function ReviewEvidenceWorkbench({
         ) : null}
       </section>
 
-      <aside className="review-intel" data-testid="review-citation-coverage">
+      <aside className="review-intel" id="review-trust" data-testid="review-citation-coverage">
         <div className="section-heading-row">
           <h2>Citations / coverage</h2>
           <StatusBadge tone={trustStatus.tone}>{trustStatus.label}</StatusBadge>
@@ -2233,9 +3631,17 @@ function ReviewEvidenceWorkbench({
   );
 }
 
-function ReviewQueuePanel({ queue, onOpenArtifact }: { queue: ReviewQueueItem[]; onOpenArtifact: (path: string) => void }) {
+function ReviewQueuePanel({
+  queue,
+  selectedArtifact,
+  onOpenArtifact,
+}: {
+  queue: ReviewQueueItem[];
+  selectedArtifact: string;
+  onOpenArtifact: (path: string) => void;
+}) {
   return (
-    <section className="review-queue" data-testid="review-queue">
+    <section className="review-queue" id="review-queue" data-testid="review-queue">
       <div className="section-heading-row">
         <h2>Review Queue</h2>
         <StatusBadge tone={queue.length > 0 ? "warn" : "ok"}>{queue.length}</StatusBadge>
@@ -2248,7 +3654,8 @@ function ReviewQueuePanel({ queue, onOpenArtifact }: { queue: ReviewQueueItem[];
             <li key={item.id}>
               <button
                 type="button"
-                className="review-queue-item"
+                className={`review-queue-item${item.path === selectedArtifact ? " is-selected" : ""}`}
+                aria-current={item.path === selectedArtifact ? "true" : undefined}
                 aria-label={`Review queue item: ${item.title}`}
                 onClick={() => onOpenArtifact(item.path)}
               >
@@ -2775,6 +4182,16 @@ export function ProposalsStagePanel({
         </div>
         <StatusBadge tone={proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalReview.proposalArtifacts.length} refs</StatusBadge>
       </div>
+      {proposalReview.blockers.length > 0 ? (
+        <ProposalPackageRecoveryPanel
+          proposalReview={proposalReview}
+          preferredArtifact={preferredProposalArtifact}
+          proposalBranch={proposalBranch}
+          gitStatus={gitStatus}
+          onOpenArtifact={onOpenArtifact}
+          onGoPublish={onGoPublish}
+        />
+      ) : null}
       <div className="proposals-review-room" data-testid="proposals-review-room">
         <aside className="proposals-artifact-list" data-testid="proposals-artifact-list">
           <div className="section-heading-row">
@@ -2948,6 +4365,93 @@ export function ProposalsStagePanel({
   );
 }
 
+function ProposalPackageRecoveryPanel({
+  proposalReview,
+  preferredArtifact,
+  proposalBranch,
+  gitStatus,
+  onOpenArtifact,
+  onGoPublish,
+}: {
+  proposalReview: ProposalReviewModel;
+  preferredArtifact: Artifact | undefined;
+  proposalBranch: string;
+  gitStatus: string;
+  onOpenArtifact: (path: string) => void;
+  onGoPublish: () => void;
+}) {
+  const primaryBlocker = proposalReview.blockers[0] ?? "No proposal package blocker detected.";
+  const suggestedFix = proposalPackageSuggestedFix(primaryBlocker);
+  const packageState = proposalReview.proposalDocumentArtifacts.length > 0 ? `${proposalReview.packages.length} artifact groups` : "proposal missing";
+  const publicationPath =
+    proposalReview.blockers.length > 0
+      ? "Keep Publish as review-only until proposal, changelog and evidence blockers are resolved."
+      : proposalBranch
+        ? `Ready for Publish review on ${proposalBranch}.`
+        : "Ready for Publish review; prepare a proposal branch before handoff.";
+
+  return (
+    <section className="proposal-recovery-panel" data-testid="proposal-package-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Proposal package recovery</h2>
+          <p className="hint">Resolve proposal/changelog gaps before treating this run as publication-ready.</p>
+        </div>
+        <StatusBadge tone="warn">proposal blocked</StatusBadge>
+      </div>
+      <div className="proposal-recovery-grid">
+        <div>
+          <span className="meta-label">Package state</span>
+          <strong>{packageState}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Proposal docs</span>
+          <strong>{proposalReview.proposalDocumentCount}</strong>
+        </div>
+        <div>
+          <span className="meta-label">ADR/RFC</span>
+          <strong>{proposalReview.adrRfcCount}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Changelog</span>
+          <strong>{proposalReview.changelogArtifacts.length}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Evidence refs</span>
+          <strong>{proposalReview.evidenceArtifacts.length}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs proposal-recovery-detail">
+        <div>
+          <dt>Primary blocker</dt>
+          <dd>{primaryBlocker}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{suggestedFix}</dd>
+        </div>
+        <div>
+          <dt>Publication path</dt>
+          <dd>
+            {publicationPath}
+            {gitStatus ? ` ${gitStatus}` : ""}
+          </dd>
+        </div>
+      </dl>
+      <div className="actions proposal-recovery-actions">
+        {preferredArtifact ? (
+          <button type="button" className="secondary" onClick={() => onOpenArtifact(preferredArtifact.path)}>
+            Open available artifact
+          </button>
+        ) : null}
+        <button type="button" className="secondary" onClick={onGoPublish}>
+          Check Publish gate
+        </button>
+      </div>
+    </section>
+  );
+}
+
 type ProposalReviewPackage = {
   name: string;
   artifacts: Artifact[];
@@ -2955,6 +4459,7 @@ type ProposalReviewPackage = {
 
 type ProposalReviewModel = {
   proposalArtifacts: Artifact[];
+  proposalDocumentArtifacts: Artifact[];
   changelogArtifacts: Artifact[];
   evidenceArtifacts: Artifact[];
   packages: ProposalReviewPackage[];
@@ -2997,6 +4502,7 @@ function deriveProposalReviewModel({
   }
   return {
     proposalArtifacts,
+    proposalDocumentArtifacts,
     changelogArtifacts,
     evidenceArtifacts,
     packages,
@@ -3004,6 +4510,22 @@ function deriveProposalReviewModel({
     adrRfcCount,
     blockers,
   };
+}
+
+function proposalPackageSuggestedFix(blocker: string): string {
+  if (blocker.includes("No proposal package")) {
+    return "Retry or rerun Analysis step4.proposals, then confirm a generated proposals/* artifact appears before Publish.";
+  }
+  if (blocker.includes("ADR or RFC")) {
+    return "Generate or add an ADR/RFC draft under proposals/* so reviewers can see the decision record or implementation plan.";
+  }
+  if (blocker.includes("No changelog")) {
+    return "Regenerate proposals so reports/changelog/* records the iteration changes linked to the package.";
+  }
+  if (blocker.includes("open questions")) {
+    return "Resolve the Review open questions or record an explicit accepted gap before publication handoff.";
+  }
+  return "Inspect the proposal package artifacts, resolve blockers, and use Publish only after the package is complete.";
 }
 
 function groupProposalArtifacts(artifacts: Artifact[]): ProposalReviewPackage[] {
@@ -3188,6 +4710,20 @@ export function AskStagePanel({
       setStatus("Question is required.");
       return;
     }
+    await startQARun(trimmed);
+  }
+
+  async function handleRetryQA() {
+    const retryQuestion = (qaRun?.question || question).trim();
+    if (!retryQuestion) {
+      setStatus("Original question is unavailable.");
+      return;
+    }
+    setQuestion(retryQuestion);
+    await startQARun(retryQuestion);
+  }
+
+  async function startQARun(trimmed: string) {
     setBusy(true);
     setQARun(null);
     setSelectedRunID(null);
@@ -3228,7 +4764,7 @@ export function AskStagePanel({
           <h1>Ask</h1>
           <p className="hint">Ask agent-backed questions over existing workspace artifacts. Source repos and canonical outputs stay unchanged.</p>
         </div>
-        <StatusBadge tone={qaRunStatusTone(qaRun?.status)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
+        <StatusBadge tone={runOutcomeTone(qaRun)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
       </div>
 
       <div className="qa-workbench">
@@ -3257,7 +4793,7 @@ export function AskStagePanel({
                   >
                     <span className="qa-history-question">{run.question || run.run_id}</span>
                     <span className="qa-history-meta">
-                      <StatusBadge tone={qaRunStatusTone(run.status)}>{run.status}</StatusBadge>
+                      <StatusBadge tone={runOutcomeTone(run)}>{runOutcomeLabel(run, "unknown")}</StatusBadge>
                       <span>{qaRunProviderLabel(run)}</span>
                     </span>
                     <span className="qa-history-time">{formatTimestamp(run.finished_at || run.started_at)}</span>
@@ -3289,7 +4825,7 @@ export function AskStagePanel({
             <div className="run-summary qa-run-summary" data-testid="qa-run-status">
               <div>
                 <p>
-                  Run <code>{qaRun.run_id}</code> status: <strong>{qaRun.status}</strong>
+                  Run <code>{qaRun.run_id}</code> status: <strong>{runOutcomeLabel(qaRun, "unknown")}</strong>
                 </p>
                 <p>Runtime provider: {qaRunProviderLabel(qaRun)}</p>
               </div>
@@ -3300,6 +4836,8 @@ export function AskStagePanel({
               {(qaRun.warnings ?? []).length > 0 ? <p className="status warn">Warnings: {(qaRun.warnings ?? []).join(", ")}</p> : null}
             </div>
           ) : null}
+
+          <QAFailureRecovery qaRun={qaRun} busy={busy || qaRunActive} onRetry={() => void handleRetryQA()} />
 
           {qaRun ? (
             <div className="qa-answer" data-testid="qa-answer">
@@ -3388,17 +4926,102 @@ export function AskStagePanel({
   );
 }
 
-function qaRunStatusTone(status?: QARunResponse["status"]): "info" | "ok" | "warn" | "error" {
-  if (status === "succeeded") {
-    return "ok";
+function QAFailureRecovery({
+  qaRun,
+  busy,
+  onRetry,
+}: {
+  qaRun: QARunResponse | null;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  if (qaRun?.status !== "failed") {
+    return null;
   }
-  if (status === "failed") {
-    return "error";
+
+  const errorCode = qaRun.error_code || "unclassified";
+  const blockedStep = qaRun.current_step || "qa.ask";
+  const warningCount = qaRun.warnings?.length ?? 0;
+  const auditRefs = `reports/taskruns/${qaRun.run_id}/qa/`;
+  const canRetry = Boolean((qaRun.question || "").trim());
+  const canceled = isRunCanceled(errorCode);
+  const reconciled = isRunReconciledAfterRestart(errorCode);
+  const title = canceled ? "Canceled answer run" : reconciled ? "Recovered answer run" : "Recovery path";
+  const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
+  const badgeTone = canceled || reconciled ? "warn" : "error";
+  const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
+  const retryLabel = canceled || reconciled ? "Ask again" : "Retry question";
+  const retentionHint = canceled
+    ? "Asking again creates a new Q&A run; the canceled attempt and QA audit artifacts stay in history."
+    : reconciled
+      ? "Asking again creates a new Q&A run; the reconciled attempt and QA audit artifacts stay in history."
+      : "Retry starts a new Q&A run; the failed answer attempt stays in history for audit.";
+
+  return (
+    <section className="qa-recovery-panel" data-testid="qa-failure-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>{title}</h2>
+          <p className="hint">{qaFailureGuidance(errorCode, warningCount)}</p>
+        </div>
+        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
+      </div>
+      <div className="qa-recovery-grid">
+        <div>
+          <span className="metric-label">Classification</span>
+          <strong>{errorCode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">{stepLabel}</span>
+          <strong>{blockedStep}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Audit evidence</span>
+          <strong>{auditRefs}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Warnings</span>
+          <strong>{warningCount}</strong>
+        </div>
+      </div>
+      {qaRun.error ? <p className="status err">{qaRun.error}</p> : null}
+      {warningCount > 0 ? <p className="status warn">Warnings: {(qaRun.warnings ?? []).join(", ")}</p> : null}
+      <div className="actions qa-recovery-actions">
+        <button type="button" data-testid="qa-retry-run-btn" onClick={onRetry} disabled={busy || !canRetry}>
+          {retryLabel}
+        </button>
+        <a className="link-button" href={`/api/pipeline/runs/${encodeURIComponent(qaRun.run_id)}/logs`} target="_blank" rel="noreferrer">
+          Open run logs
+        </a>
+      </div>
+      <p className="hint">{retentionHint}</p>
+    </section>
+  );
+}
+
+function qaFailureGuidance(errorCode: string, warningCount: number): string {
+  if (isRunCanceled(errorCode)) {
+    return "The answer run stopped by request. Review QA audit artifacts, then ask again when ready.";
   }
-  if (status === "queued" || status === "running") {
-    return "warn";
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return "ACP reconciled a stale answer run after restart. Review QA audit artifacts, then ask again if the question still matters.";
   }
-  return "info";
+  if (errorCode === "runtime_permission_required") {
+    return "Resolve the runtime permission request, then retry the question.";
+  }
+  if (isRunnerUnavailable(errorCode)) {
+    return "Provider/tool availability blocked the answer; check Readiness provider setup, binary/auth/quota, then ask again.";
+  }
+  if (errorCode.includes("runtime_timeout")) {
+    return "The answer run exhausted its time budget; inspect the last progress signal before retry.";
+  }
+  if (errorCode.includes("runtime_contract")) {
+    return "The answer artifact did not pass validation; inspect audit artifacts before retry.";
+  }
+  if (warningCount > 0) {
+    return "Review warnings and audit artifacts, then retry when the issue is understood.";
+  }
+  return "Review logs and audit artifacts, then retry the same question when the cause is clear.";
 }
 
 function qaRunProviderLabel(run: QARunResponse | null): string {
@@ -3438,6 +5061,7 @@ export function PublishStagePanel({
   gitMessage,
   proposalBranch,
   gitStatus,
+  gitError,
   artifacts,
   selectedArtifact,
   selectedArtifactContent,
@@ -3492,6 +5116,7 @@ export function PublishStagePanel({
   const openQuestionGateItems = gateItems.filter((item) => item.tone === "warn" && item.label.toLowerCase().includes("open question"));
   const warningGateItems = gateItems.filter((item) => item.tone === "warn" && !openQuestionGateItems.includes(item));
   const readyGateItems = gateItems.filter((item) => item.tone === "ok" || item.tone === "info");
+  const openQuestionCount = countMarkdownItems(openQuestions);
   const gitMutationDisabled = busy || blockingGateItems.length > 0;
   const gitMutationBlockedTitle =
     blockingGateItems.length > 0 ? "Resolve publish gate blockers before changing Git publication state." : undefined;
@@ -3504,6 +5129,19 @@ export function PublishStagePanel({
   const visibleFolderSummaries = realFolderSummaries.length > 0 ? realFolderSummaries : folderSummaries;
   const diffScopeTitle = gitDiffScopeTitle(gitDiff);
   const diffScopeHint = gitDiffScopeHint(gitDiff);
+  const primaryPublishGateItem = blockingGateItems[0] ?? openQuestionGateItems[0] ?? warningGateItems[0];
+  const publishGateTone = blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok";
+  const publishGateLabel = blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready";
+  const publishGateDetail = primaryPublishGateItem ? `${primaryPublishGateItem.label}: ${primaryPublishGateItem.detail}` : "Git actions are allowed after final review.";
+  const gitActionLabel = gitError ? "failed" : blockingGateItems.length > 0 ? "blocked" : gitMessage.trim() ? "ready" : "needs message";
+  const gitActionDetail =
+    gitError
+      ? gitError
+      : blockingGateItems.length > 0
+      ? `${blockingGateItems[0].label}: ${blockingGateItems[0].detail}`
+      : gitMessage.trim()
+        ? `Commit message prepared: ${gitMessage}`
+        : "Commit message is empty.";
 
   useEffect(() => {
     if (activePreviewPath && selectedArtifact !== activePreviewPath) {
@@ -3553,10 +5191,39 @@ export function PublishStagePanel({
             {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 ? "review" : publishArtifacts.length > 0 ? "ready" : "partial"}
           </StatusBadge>
         </div>
+        <div className="publish-readiness-summary" data-testid="publish-readiness-summary" aria-label="Publish readiness summary">
+          <div>
+            <span className="metric-label">Publication set</span>
+            <strong>{publishArtifacts.length} refs</strong>
+            <span>{visibleFolderSummaries.length} folders in scope</span>
+          </div>
+          <div>
+            <span className="metric-label">Gate</span>
+            <strong>{publishGateLabel}</strong>
+            <span>{publishGateDetail}</span>
+          </div>
+          <div>
+            <span className="metric-label">Open questions</span>
+            <strong>{openQuestionCount}</strong>
+            <span>{openQuestionCount > 0 ? "Review before commit." : "No loaded open questions."}</span>
+          </div>
+          <div>
+            <span className="metric-label">Git action</span>
+            <strong>{gitActionLabel}</strong>
+            <span>{gitActionDetail}</span>
+          </div>
+        </div>
       </section>
 
+      <nav className="publish-section-jumps" aria-label="Publish sections" data-testid="publish-section-jumps">
+        <a href="#publish-diff-summary">Diff</a>
+        <a href="#publish-preview-panel">Preview</a>
+        <a href="#publish-gate-panel">Gate</a>
+        <a href="#publish-commit-plan">Commit</a>
+      </nav>
+
       <div className="publish-review-room">
-        <section className="publish-diff-summary" data-testid="publish-diff-summary">
+        <section className="publish-diff-summary" id="publish-diff-summary" data-testid="publish-diff-summary">
           <div className="panel-subheader">
             <div>
               <h2>{diffScopeTitle}</h2>
@@ -3645,7 +5312,7 @@ export function PublishStagePanel({
           )}
         </section>
 
-        <section className="publish-preview-panel" data-testid="publish-preview-panel">
+        <section className="publish-preview-panel" id="publish-preview-panel" data-testid="publish-preview-panel">
           <TabNav
             ariaLabel="Publish preview tabs"
             className="publish-preview-tabs"
@@ -3730,15 +5397,13 @@ export function PublishStagePanel({
         </section>
 
         <aside className="publish-side-column">
-          <section className="publish-gate-panel" data-testid="publish-gate-panel">
+          <section className="publish-gate-panel" id="publish-gate-panel" data-testid="publish-gate-panel">
             <div className="panel-subheader">
               <div>
                 <h2>Publish gate</h2>
                 <p className="hint">Checks gate Git commit and proposal branch actions; Git commands stay explicit operator actions.</p>
               </div>
-              <StatusBadge tone={blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok"}>
-                {blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready"}
-              </StatusBadge>
+              <StatusBadge tone={publishGateTone}>{publishGateLabel}</StatusBadge>
             </div>
             <PublishGateSection testId="publish-hard-blockers" title="Hard blockers" emptyLabel="No hard blockers. Git actions are allowed." items={blockingGateItems} />
             <PublishGateSection testId="publish-review-warnings" title="Review warnings" emptyLabel="No review warnings." items={warningGateItems} />
@@ -3746,13 +5411,13 @@ export function PublishStagePanel({
             <PublishGateSection testId="publish-ready-checks" title="Ready checks" emptyLabel="No ready checks yet." items={readyGateItems} />
           </section>
 
-          <section className="publish-commit-plan" data-testid="publish-commit-plan">
+          <section className="publish-commit-plan" id="publish-commit-plan" data-testid="publish-commit-plan">
             <div className="panel-subheader">
               <div>
                 <h2>Commit plan</h2>
                 <p className="hint">Prepared commit/proposal branch actions use the existing Git API.</p>
               </div>
-              <StatusBadge tone={gitStatus ? "ok" : "info"}>{gitStatus ? "updated" : "pending"}</StatusBadge>
+              <StatusBadge tone={gitError ? "error" : gitStatus ? "ok" : "info"}>{gitError ? "failed" : gitStatus ? "updated" : "pending"}</StatusBadge>
             </div>
             <dl className="compact-defs">
               <div>
@@ -3766,6 +5431,13 @@ export function PublishStagePanel({
             </dl>
             <label htmlFor="publishGitMessage">Commit message</label>
             <input id="publishGitMessage" value={gitMessage} onChange={(event) => onGitMessageChange(event.target.value)} />
+            {gitError ? (
+              <div className="publish-git-recovery" data-testid="publish-git-action-recovery" role="alert">
+                <strong>Git action failed</strong>
+                <span>{gitError}</span>
+                <p>Workspace Git state was not changed by this action. Review the message or branch name, check local Git permissions/status, then retry.</p>
+              </div>
+            ) : null}
             <div className="actions publish-actions">
               <button
                 type="button"

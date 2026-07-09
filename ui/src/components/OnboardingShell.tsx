@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
+import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
+import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 
@@ -74,6 +76,43 @@ export function OnboardingShell({
   const localReady = doctorResult?.ok === true;
   const canEnterConsole = status?.can_enter_console === true && sourcesReady && runtimeReady;
   const canRunFirstAnalysis = canEnterConsole && localReady;
+  const sourceBlockingDiagnostic = findSourceBlockingDiagnostic(repoDiagnosticsByID, validateResult);
+  const doctorFailures = doctorResult?.checks.filter((check) => check.status === "fail") ?? [];
+  const runtimeProviderCheck = doctorResult?.checks.find((check) => check.id === "runtime_provider");
+  const showRunnerRecovery = setupRuntime === "headless" || runtimeProviderCheck?.status === "fail";
+  const progressSummary = buildOnboardingProgressSummary({
+    workspaceReady,
+    sourcesReady,
+    runtimeReady,
+    localReady,
+    canEnterConsole,
+    canRunFirstAnalysis,
+    workspacePath: status?.workspace ?? "",
+    guidedRepoCount: guidedRepos.length,
+    setupRuntime,
+    setupRuntimeProvider,
+    sourceBlockingDiagnostic,
+    doctorResult,
+    firstRunStatus,
+  });
+  const openConsoleDisabledReason = canEnterConsole
+    ? ""
+    : getOpenConsoleDisabledReason({
+        workspaceReady,
+        sourcesReady,
+        runtimeReady,
+        sourceBlockingDiagnostic,
+        validateResult,
+      });
+  const firstAnalysisDisabledReason = canRunFirstAnalysis
+    ? ""
+    : getFirstAnalysisDisabledReason({
+        canEnterConsole,
+        localReady,
+        openConsoleDisabledReason,
+        doctorFailures,
+        doctorResult,
+      });
 
   return (
     <main className="onboarding-shell" data-testid="onboarding-shell">
@@ -92,6 +131,8 @@ export function OnboardingShell({
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
+
+        <OnboardingProgressSummaryPanel summary={progressSummary} />
 
         <div className="onboarding-grid">
           <section className="onboarding-card" data-testid="onboarding-workspace-step">
@@ -238,6 +279,13 @@ export function OnboardingShell({
               </button>
             </div>
             {doctorResult ? <p className={doctorResult.ok ? "status" : "error-text"}>{doctorResult.ok ? "Runner and local readiness passed." : "Readiness has blockers."}</p> : null}
+            {showRunnerRecovery ? (
+              <OnboardingRunnerRecovery
+                setupRuntime={setupRuntime}
+                setupRuntimeProvider={setupRuntimeProvider}
+                runtimeProviderCheck={runtimeProviderCheck}
+              />
+            ) : null}
             {doctorResult ? <OnboardingDoctorChecklist doctorResult={doctorResult} /> : null}
           </section>
 
@@ -256,13 +304,35 @@ export function OnboardingShell({
               <li className={localReady ? "is-ready" : ""}>Local readiness checked</li>
             </ul>
             <div className="actions">
-              <button type="button" onClick={onEnterConsole} disabled={busy || !canEnterConsole} data-testid="onboarding-enter-console">
+              <button
+                type="button"
+                onClick={onEnterConsole}
+                disabled={busy || !canEnterConsole}
+                title={!canEnterConsole ? openConsoleDisabledReason : undefined}
+                data-testid="onboarding-enter-console"
+              >
                 Open console
               </button>
-              <button type="button" onClick={onRunFirstAnalysis} disabled={busy || !canRunFirstAnalysis} title={canEnterConsole && !localReady ? "Check local readiness before first analysis." : undefined} data-testid="onboarding-run-first-analysis">
+              <button
+                type="button"
+                onClick={onRunFirstAnalysis}
+                disabled={busy || !canRunFirstAnalysis}
+                title={!canRunFirstAnalysis ? firstAnalysisDisabledReason : undefined}
+                data-testid="onboarding-run-first-analysis"
+              >
                 Run first analysis
               </button>
             </div>
+            {!canEnterConsole || !canRunFirstAnalysis ? (
+              <div className="ready-action-hint" data-testid="onboarding-ready-action-hint">
+                {!canEnterConsole ? <p>Open console waits for: {openConsoleDisabledReason}</p> : null}
+                {!canRunFirstAnalysis ? <p>First analysis waits for: {firstAnalysisDisabledReason}</p> : null}
+              </div>
+            ) : (
+              <p className="status" data-testid="onboarding-ready-action-hint">
+                Ready to run the first analysis.
+              </p>
+            )}
             {canEnterConsole && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
             {firstRunStatus ? <p className="status">{firstRunStatus}</p> : null}
           </section>
@@ -335,6 +405,48 @@ function StatusPill({ label, ready }: { label: string; ready: boolean }) {
   return <span className={ready ? "status-pill is-ready" : "status-pill"}>{label}</span>;
 }
 
+type OnboardingProgressItem = {
+  label: string;
+  detail: string;
+  ready: boolean;
+};
+
+type OnboardingProgressSummary = {
+  action: string;
+  blocker: string;
+  detail: string;
+  items: OnboardingProgressItem[];
+  step: string;
+  tone: "blocked" | "ready" | "waiting";
+};
+
+function OnboardingProgressSummaryPanel({ summary }: { summary: OnboardingProgressSummary }) {
+  return (
+    <section className={`onboarding-progress-summary is-${summary.tone}`} data-testid="onboarding-progress-summary" aria-label="Onboarding setup progress">
+      <div className="onboarding-progress-primary">
+        <p className="eyebrow">{summary.step}</p>
+        <h2>{summary.action}</h2>
+        <p>{summary.detail}</p>
+      </div>
+      <div className="onboarding-progress-blocker">
+        <span>{summary.tone === "ready" ? "Ready state" : "Current blocker"}</span>
+        <strong>{summary.blocker}</strong>
+      </div>
+      <ol className="onboarding-progress-steps">
+        {summary.items.map((item, index) => (
+          <li className={item.ready ? "is-ready" : ""} key={item.label}>
+            <span>{index + 1}</span>
+            <div>
+              <strong>{item.label}</strong>
+              <p>{item.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function repoNameFromPath(pathValue: string): string {
   const normalized = pathValue.trim().replace(/\\/g, "/").replace(/\/+$/, "");
   const parts = normalized.split("/");
@@ -366,6 +478,88 @@ function OnboardingDoctorChecklist({ doctorResult }: { doctorResult: DoctorRespo
             <strong>{check.label}:</strong> {check.message}
             {check.suggestion ? <span> Next: {check.suggestion}</span> : null}
           </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function OnboardingRunnerRecovery({
+  setupRuntime,
+  setupRuntimeProvider,
+  runtimeProviderCheck,
+}: {
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  runtimeProviderCheck?: DoctorResponse["checks"][number];
+}) {
+  const providerCommand = providerCommandHint(setupRuntimeProvider);
+  const envOverride = providerCommandEnv(setupRuntimeProvider);
+  const doctorStatus = runtimeProviderCheck ? `${runtimeProviderCheck.label}: ${runtimeProviderCheck.status}` : "not checked";
+  const isPassing = runtimeProviderCheck?.status === "pass";
+  const isFailing = runtimeProviderCheck?.status === "fail";
+  const guidance = providerReadinessGuidance(setupRuntimeProvider, runtimeProviderCheck?.message || runtimeProviderCheck?.suggestion);
+  const summary = isPassing
+    ? "Headless provider is ready for first analysis after the other setup gates pass."
+    : isFailing
+      ? "Fix the provider command, authentication or quota before running the first live analysis."
+      : "Headless provider is selected. Check the command and auth/quota before the first live analysis.";
+
+  return (
+    <div className="onboarding-runner-recovery" data-testid="onboarding-runner-recovery">
+      <div className="section-heading-row">
+        <div>
+          <strong>Provider setup for first analysis</strong>
+          <p className="hint">{summary}</p>
+        </div>
+        <StatusBadge tone={isPassing ? "ok" : isFailing ? "error" : "warn"}>{isPassing ? "provider ready" : "provider check"}</StatusBadge>
+      </div>
+      <div className="onboarding-runner-recovery-grid">
+        <div>
+          <span className="metric-label">Selected runner</span>
+          <strong>{setupRuntime === "headless" ? setupRuntimeProvider : `${setupRuntime} baseline`}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Expected command</span>
+          <strong>{setupRuntime === "headless" ? providerCommand : "none required"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Command override</span>
+          <strong>{setupRuntime === "headless" ? envOverride : "not needed"}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Readiness check</span>
+          <strong>{doctorStatus}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Failure mode</span>
+          <strong>{isPassing ? "Provider ready" : guidance.failureMode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Probe stage</span>
+          <strong>{isPassing ? "Ready" : guidance.probeStage}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs onboarding-runner-recovery-detail">
+        <div>
+          <dt>Doctor message</dt>
+          <dd>{runtimeProviderCheck?.message ?? "Run Check readiness after selecting the runner."}</dd>
+        </div>
+        <div>
+          <dt>Operator focus</dt>
+          <dd>{isPassing ? "Provider readiness passed; continue with workspace and source readiness gates." : guidance.operatorFocus}</dd>
+        </div>
+        {runtimeProviderCheck?.suggestion ? (
+          <div>
+            <dt>Suggested fix</dt>
+            <dd>{runtimeProviderCheck.suggestion}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Use fake baseline for a deterministic first walkthrough when live provider setup is not ready.</li>
+        {(isPassing ? [`For headless, keep ${providerCommand} available to the ACP service before live analysis.`, "Run first analysis after the remaining setup gates pass."] : guidance.nextActions).map((action) => (
+          <li key={action}>{action}</li>
         ))}
       </ul>
     </div>
@@ -430,4 +624,220 @@ function buildRepoDiagnostics(guidedRepos: GuidedRepo[], validateResult: Validat
   }
 
   return diagnosticsByID;
+}
+
+function findSourceBlockingDiagnostic(repoDiagnosticsByID: Map<string, Diagnostic[]>, validateResult: ValidateResponse | null): Diagnostic | null {
+  const repoError = Array.from(repoDiagnosticsByID.values())
+    .flat()
+    .find((diagnostic) => diagnostic.level === "error");
+  return repoError ?? validateResult?.errors?.[0] ?? null;
+}
+
+function buildOnboardingProgressSummary({
+  workspaceReady,
+  sourcesReady,
+  runtimeReady,
+  localReady,
+  canEnterConsole,
+  canRunFirstAnalysis,
+  workspacePath,
+  guidedRepoCount,
+  setupRuntime,
+  setupRuntimeProvider,
+  sourceBlockingDiagnostic,
+  doctorResult,
+  firstRunStatus,
+}: {
+  workspaceReady: boolean;
+  sourcesReady: boolean;
+  runtimeReady: boolean;
+  localReady: boolean;
+  canEnterConsole: boolean;
+  canRunFirstAnalysis: boolean;
+  workspacePath: string;
+  guidedRepoCount: number;
+  setupRuntime: string;
+  setupRuntimeProvider: string;
+  sourceBlockingDiagnostic: Diagnostic | null;
+  doctorResult: DoctorResponse | null;
+  firstRunStatus: string;
+}): OnboardingProgressSummary {
+  const firstDoctorFailure = doctorResult?.checks.find((check) => check.status === "fail") ?? null;
+  const items: OnboardingProgressItem[] = [
+    {
+      label: "Workspace",
+      ready: workspaceReady,
+      detail: workspaceReady ? compactPathLabel(workspacePath) : "Choose or create the Git-tracked ACP workspace.",
+    },
+    {
+      label: "Sources",
+      ready: sourcesReady,
+      detail: sourcesReady
+        ? `${guidedRepoCount} ${guidedRepoCount === 1 ? "repo" : "repos"} validated`
+        : sourceBlockingDiagnostic
+          ? `${sourceBlockingDiagnostic.code}: ${sourceBlockingDiagnostic.message}`
+          : workspaceReady
+            ? "Save and validate the repo inventory."
+            : "Available after workspace selection.",
+    },
+    {
+      label: "Runner",
+      ready: runtimeReady,
+      detail: runtimeReady ? runnerLabel(setupRuntime, setupRuntimeProvider) : "Select fake baseline or opt in to a headless provider.",
+    },
+    {
+      label: "Ready",
+      ready: localReady,
+      detail: localReady
+        ? "Local readiness passed"
+        : firstDoctorFailure
+          ? `${firstDoctorFailure.label}: ${firstDoctorFailure.message}`
+          : "Run local readiness before the first analysis.",
+    },
+  ];
+
+  if (!workspaceReady) {
+    return {
+      step: "Step 1 of 4",
+      action: "Create or open a workspace",
+      blocker: "Workspace path is not selected.",
+      detail: "ACP needs a Git-tracked architecture workspace before it can save sources or runner settings.",
+      items,
+      tone: "blocked",
+    };
+  }
+  if (!sourcesReady) {
+    return {
+      step: "Step 2 of 4",
+      action: sourceBlockingDiagnostic ? "Fix source fields" : "Save and validate sources",
+      blocker: sourceBlockingDiagnostic ? `${sourceBlockingDiagnostic.code}: ${sourceBlockingDiagnostic.message}` : "Sources have not passed validation yet.",
+      detail: "Connect at least one repository, then validate the manifest before selecting the final console action.",
+      items,
+      tone: "blocked",
+    };
+  }
+  if (!runtimeReady) {
+    return {
+      step: "Step 3 of 4",
+      action: "Select the runner",
+      blocker: "Runner is not selected.",
+      detail: "Use fake for the first deterministic walkthrough. Headless providers remain explicit opt-in.",
+      items,
+      tone: "blocked",
+    };
+  }
+  if (doctorResult && !localReady) {
+    return {
+      step: "Step 4 of 4",
+      action: "Fix local readiness blockers",
+      blocker: firstDoctorFailure ? `${firstDoctorFailure.label}: ${firstDoctorFailure.message}` : "Readiness has warnings or failed checks.",
+      detail: canEnterConsole ? "The console can open, but first analysis should wait until readiness passes." : "Readiness is blocking first analysis.",
+      items,
+      tone: "blocked",
+    };
+  }
+  if (!localReady) {
+    return {
+      step: "Step 4 of 4",
+      action: "Check local readiness",
+      blocker: "First analysis needs a passing readiness check.",
+      detail: canEnterConsole ? "You can open the console now; run the readiness check before starting analysis." : "Run the doctor check before the first analysis.",
+      items,
+      tone: "waiting",
+    };
+  }
+  if (canRunFirstAnalysis) {
+    return {
+      step: "Step 4 of 4",
+      action: firstRunStatus ? "First analysis is starting" : "Run first analysis",
+      blocker: "No setup blockers.",
+      detail: firstRunStatus || "Workspace, sources, runner and local readiness are ready.",
+      items,
+      tone: "ready",
+    };
+  }
+  return {
+    step: "Step 4 of 4",
+    action: "Open the console",
+    blocker: "Setup is ready for Console V2.",
+    detail: "Console review can start from the selected workspace.",
+    items,
+    tone: "ready",
+  };
+}
+
+function getOpenConsoleDisabledReason({
+  workspaceReady,
+  sourcesReady,
+  runtimeReady,
+  sourceBlockingDiagnostic,
+  validateResult,
+}: {
+  workspaceReady: boolean;
+  sourcesReady: boolean;
+  runtimeReady: boolean;
+  sourceBlockingDiagnostic: Diagnostic | null;
+  validateResult: ValidateResponse | null;
+}): string {
+  if (!workspaceReady) {
+    return "select or create a workspace";
+  }
+  if (!sourcesReady) {
+    if (sourceBlockingDiagnostic) {
+      return `fix source diagnostic ${sourceBlockingDiagnostic.code}`;
+    }
+    return validateResult ? "fix source validation errors" : "save and validate sources";
+  }
+  if (!runtimeReady) {
+    return "select a runner";
+  }
+  return "complete setup";
+}
+
+function getFirstAnalysisDisabledReason({
+  canEnterConsole,
+  localReady,
+  openConsoleDisabledReason,
+  doctorFailures,
+  doctorResult,
+}: {
+  canEnterConsole: boolean;
+  localReady: boolean;
+  openConsoleDisabledReason: string;
+  doctorFailures: DoctorResponse["checks"];
+  doctorResult: DoctorResponse | null;
+}): string {
+  if (!canEnterConsole) {
+    return openConsoleDisabledReason;
+  }
+  if (!localReady) {
+    if (doctorFailures.length > 0) {
+      return `fix ${doctorFailures[0].label}: ${doctorFailures[0].message}`;
+    }
+    return doctorResult ? "fix readiness checks" : "run local readiness check";
+  }
+  return "ready";
+}
+
+function compactPathLabel(pathValue: string): string {
+  const value = pathValue.trim();
+  if (!value) {
+    return "Workspace selected";
+  }
+  const parts = value.replace(/\\/g, "/").split("/").filter(Boolean);
+  const tail = parts.slice(-2).join("/");
+  if (parts.length > 2 && tail) {
+    return `Selected .../${tail}`;
+  }
+  if (tail && value.startsWith("/")) {
+    return `Selected /${tail}`;
+  }
+  return tail ? `Selected ${tail}` : `Selected ${value}`;
+}
+
+function runnerLabel(runtime: string, provider: string): string {
+  if (runtime === "headless") {
+    return `headless provider ${provider}`;
+  }
+  return `${runtime} baseline`;
 }

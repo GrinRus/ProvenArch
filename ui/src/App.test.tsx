@@ -29,6 +29,8 @@ type FetchMockState = {
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
   systemVersion?: MockJSON;
+  gitCommitResponse?: { status: number; body: MockJSON };
+  proposalBranchResponse?: { status: number; body: MockJSON };
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -517,7 +519,7 @@ function createFetchMock(state: FetchMockState = {}) {
       );
     }
 
-    if (method === "POST" && url === "/api/pipeline/init") {
+    if (method === "POST" && (url === "/api/pipeline/init" || url === "/api/pipeline/refresh")) {
       state.runStarted = true;
       return jsonResponse({ run_id: runID, status: "queued" });
     }
@@ -661,6 +663,9 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/git/commit") {
+      if (state.gitCommitResponse) {
+        return jsonResponse(state.gitCommitResponse.body, state.gitCommitResponse.status);
+      }
       const payload = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
       return jsonResponse({
         status: "ok",
@@ -669,6 +674,9 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/git/proposal-branch") {
+      if (state.proposalBranchResponse) {
+        return jsonResponse(state.proposalBranchResponse.body, state.proposalBranchResponse.status);
+      }
       const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
       return jsonResponse({
         branch: payload.name ?? "proposal/beta-refresh",
@@ -864,25 +872,34 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByTestId("onboarding-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Create or open a workspace");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Workspace path is not selected.");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("select or create a workspace");
     fireEvent.change(screen.getByLabelText("Architecture workspace path"), {
       target: { value: "/tmp/onboarding-workspace" },
     });
     fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
 
     await screen.findByText("Selected: /tmp/onboarding-workspace");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Save and validate sources");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/bundle")).toBe(false);
     fireEvent.click(screen.getByTestId("onboarding-sources-save"));
 
     expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Select the runner");
     fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
 
     await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Check local readiness");
     expect(screen.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
     expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Local readiness checked");
     expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Check local readiness before first analysis.");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("First analysis waits for: run local readiness check");
 
     fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
     await screen.findByTestId("onboarding-doctor-result");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Run first analysis");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("Ready to run the first analysis.");
     expect(screen.getByTestId("onboarding-run-first-analysis")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("onboarding-enter-console"));
@@ -992,12 +1009,28 @@ describe("App", () => {
     await screen.findByText("Selected: /tmp/onboarding-workspace");
 
     fireEvent.change(screen.getByLabelText("Runtime"), { target: { value: "headless" } });
+    fireEvent.click(screen.getByTestId("onboarding-sources-save"));
+    expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
+    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
     fireEvent.click(screen.getByText("Check readiness"));
 
     const doctorPanel = await screen.findByTestId("onboarding-doctor-result");
     expect(doctorPanel).toHaveTextContent("Provider ID: claude-code");
     expect(doctorPanel).toHaveTextContent("checked: claude, claude-code");
     expect(doctorPanel).toHaveTextContent("ACP_CLAUDE_CMD");
+    const runnerRecovery = screen.getByTestId("onboarding-runner-recovery");
+    expect(runnerRecovery).toHaveTextContent("Provider setup for first analysis");
+    expect(runnerRecovery).toHaveTextContent("claude-code");
+    expect(runnerRecovery).toHaveTextContent("claude or claude-code");
+    expect(runnerRecovery).toHaveTextContent("ACP_CLAUDE_CMD");
+    expect(runnerRecovery).toHaveTextContent("Runtime provider: fail");
+    expect(runnerRecovery).toHaveTextContent("Command unavailable");
+    expect(runnerRecovery).toHaveTextContent("Binary discovery");
+    expect(runnerRecovery).toHaveTextContent("Use fake baseline for a deterministic first walkthrough");
+    expect(runnerRecovery).toHaveTextContent("Run Check local readiness before starting the first live analysis.");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix local readiness blockers");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Provider ID: claude-code");
   });
 
   it("reopens an existing workspace and enters console after validation without rewriting sources", async () => {
@@ -1271,7 +1304,11 @@ describe("App", () => {
     const nameInputs = screen.getAllByLabelText("Name");
     fireEvent.change(nameInputs[1], { target: { value: "my-service" } });
 
-    await waitFor(() => expect(screen.getAllByText(/repo_name_duplicate/i)).toHaveLength(2));
+    await waitFor(() => expect(screen.getByTestId("onboarding-sources-save")).toBeDisabled());
+    expect(screen.getAllByText(/repo_name_duplicate/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix source fields");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("repo_name_duplicate");
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("fix source diagnostic repo_name_duplicate");
     expect(screen.getByTestId("onboarding-sources-save")).toBeDisabled();
   });
 
@@ -1411,6 +1448,10 @@ describe("App", () => {
     expect(runtimeSummary).toHaveTextContent("best_effort");
     expect(runtimeSummary).toHaveTextContent("fake");
     expect(runtimeSummary).toHaveTextContent("Advanced runtime settings remain available below");
+    const advancedSettings = screen.getByTestId("readiness-advanced-settings");
+    expect(advancedSettings).toHaveTextContent("Timeouts, execution policy, permissions, and per-step provider overrides.");
+    expect(advancedSettings).toHaveTextContent("operator tools");
+    expect(advancedSettings).not.toHaveAttribute("open");
   });
 
   it("renders Charter V2 workbench summary, card overview, and prompt bundle status", async () => {
@@ -1439,6 +1480,37 @@ describe("App", () => {
     expect(promptStatus).toHaveTextContent("proposal/beta-refresh");
 
     expect(screen.getByTestId("charter-artifact-editor")).toHaveTextContent("Baseline: Editors");
+  });
+
+  it("shows Charter baseline recovery for prompt bundle diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        baselineBundleWarnings: [
+          {
+            level: "warning",
+            code: "baseline.prompt_pack.missing_policy",
+            message: "skills/prompt-packs/qa.md is missing the artifact-only policy reminder.",
+            suggestion: "Add the artifact-only policy reminder before live Q&A runs.",
+            path: "skills/prompt-packs/qa.md",
+          },
+        ],
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const recovery = await screen.findByTestId("charter-baseline-recovery");
+    expect(recovery).toHaveTextContent("Charter baseline recovery");
+    expect(recovery).toHaveTextContent("skills/prompt-packs/qa.md");
+    expect(recovery).toHaveTextContent("prompt-pack");
+    expect(recovery).toHaveTextContent("live consumed");
+    expect(recovery).toHaveTextContent("baseline.prompt_pack.missing_policy");
+    expect(recovery).toHaveTextContent("Add the artifact-only policy reminder before live Q&A runs.");
+    expect(recovery).toHaveTextContent("Save selected baseline artifact");
+    expect(screen.getByTestId("charter-prompt-bundle-status")).toHaveTextContent("1 warnings");
   });
 
   it("supports keyboard navigation across the V2 stage rail", async () => {
@@ -1636,6 +1708,11 @@ describe("App", () => {
     await renderConsoleApp();
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
+    expect(screen.getByTestId("review-section-jumps")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("review-artifact-explorer-toggle")).toHaveTextContent("Secondary browser");
+    expect(explorer).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByTestId("review-artifact-explorer-toggle"));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
     expect(explorer).toHaveTextContent("reports/as-is");
     expect(explorer).toHaveTextContent("report");
     expect(explorer).toHaveTextContent("diagram");
@@ -1709,12 +1786,17 @@ describe("App", () => {
 
     await renderConsoleApp();
 
+    const explorer = await screen.findByTestId("review-artifact-explorer");
+    fireEvent.click(await screen.findByTestId("review-artifact-explorer-toggle"));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
     const filters = await screen.findByTestId("review-artifact-filters");
     const artifactPanel = screen.getByTestId("results-artifacts-panel");
     expect(filters).toHaveAttribute("role", "tablist");
     expect(within(filters).getByRole("tab", { name: "All" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(within(filters).getByRole("tab", { name: "Diagrams" }));
+    await waitFor(() => expect(explorer).toHaveAttribute("open"));
+    expect(screen.getByTestId("run-diagrams-list")).toBeVisible();
     await waitFor(() => expect(artifactPanel).toHaveTextContent("C4 context"));
     expect(artifactPanel).not.toHaveTextContent("As-is overview");
     expect(artifactPanel).not.toHaveTextContent("Payments proposal");
@@ -1842,6 +1924,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-proposals"));
 
     expect(await screen.findByTestId("proposals-review-room")).toBeInTheDocument();
+    expect(screen.queryByTestId("proposal-package-recovery")).not.toBeInTheDocument();
     const artifactList = screen.getByTestId("proposals-artifact-list");
     expect(artifactList).toHaveTextContent("proposals/proposal-payments");
     expect(artifactList).toHaveTextContent("reports/changelog");
@@ -1895,6 +1978,13 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-proposals"));
 
     const artifactList = await screen.findByTestId("proposals-artifact-list");
+    const recovery = screen.getByTestId("proposal-package-recovery");
+    expect(recovery).toHaveTextContent("Proposal package recovery");
+    expect(recovery).toHaveTextContent("No proposal package artifacts are available.");
+    expect(recovery).toHaveTextContent("Proposal docs");
+    expect(recovery).toHaveTextContent("0");
+    expect(recovery).toHaveTextContent("Retry or rerun Analysis step4.proposals");
+    expect(recovery).toHaveTextContent("Keep Publish as review-only");
     await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Run changelog"));
     expect(within(artifactList).getByRole("button", { name: /reports\/changelog\/2026-05-31-run-1\.md/i })).toHaveClass("is-selected");
   });
@@ -1934,6 +2024,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-review"));
     await waitFor(() => expect(screen.getByTestId("run-artifact-selected-path")).toHaveTextContent("reports/as-is/overview.md"));
     expect(screen.getByTestId("run-artifact-content")).toHaveTextContent("# System overview");
+    fireEvent.click(screen.getByTestId("review-artifact-explorer-toggle"));
     expect(within(screen.getByTestId("review-artifact-explorer")).getByRole("button", { name: /reports\/as-is\/overview\.md/i })).toHaveClass("is-selected");
   });
 
@@ -1969,6 +2060,17 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step"));
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Diff");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Gate");
+    expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Commit");
+    expect(screen.getByTestId("publish-section-jumps").querySelector('a[href="#publish-gate-panel"]')).toBeInTheDocument();
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Publication set");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("4 refs");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("review");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Confirm owner sign-off");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Git action");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("ready");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Selected run Git diff");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
@@ -2137,6 +2239,9 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-publish"));
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("0 refs");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
     expect(screen.getByTestId("blockers-panel")).toHaveTextContent("No publishable artifacts");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("No generated workspace artifacts are ready to publish.");
@@ -2181,6 +2286,8 @@ describe("App", () => {
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("runtime_contract_failed");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("runtime_contract_failed");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
     const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
@@ -2190,6 +2297,49 @@ describe("App", () => {
     fireEvent.click(proposalBranchButton);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
+  });
+
+  it("surfaces failed Publish Git actions in the commit plan and inspector", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+      artifactText: {
+        "reports/coverage/summary.md": "Coverage ready for publication.\n",
+        "reports/coverage/open-questions.md": "",
+      },
+      gitCommitResponse: {
+        status: 409,
+        body: { error: { code: "git_commit_failed", message: "workspace has unresolved merge conflicts" } },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+
+    const recovery = await screen.findByTestId("publish-git-action-recovery");
+    expect(recovery).toHaveTextContent("Git action failed");
+    expect(recovery).toHaveTextContent("Git commit failed: workspace has unresolved merge conflicts");
+    expect(recovery).toHaveTextContent("Workspace Git state was not changed");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("failed");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Git commit failed");
+    expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("failed");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Resolve Git action failure");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review the Git action failure in Commit plan before retrying.");
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("Git action failed");
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("workspace has unresolved merge conflicts");
+    expect(screen.getByTestId("publish-commit-selected-btn")).not.toBeDisabled();
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {
@@ -2248,6 +2398,89 @@ describe("App", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+  });
+
+  it("renders Q&A failure recovery and retries the original question", async () => {
+    const fetchMock = createFetchMock({
+      qaRunID: "qa-failed",
+      qaResponse: {
+        status: "failed",
+        question: "Who owns payments?",
+        current_step: "qa.ask",
+        error_code: "runtime_contract_failed",
+        error: "qa-answer.json failed validation",
+        warnings: ["answer artifact missing citations"],
+        answer: null,
+        citations: null,
+        unresolved: null,
+        confidence: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    const recovery = await screen.findByTestId("qa-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovery path");
+    expect(recovery).toHaveTextContent("runtime_contract_failed");
+    expect(recovery).toHaveTextContent("qa.ask");
+    expect(recovery).toHaveTextContent("reports/taskruns/qa-failed/qa/");
+    expect(recovery).toHaveTextContent("answer artifact missing citations");
+    expect(screen.getByTestId("qa-answer")).toHaveTextContent("No answer returned yet");
+
+    fireEvent.click(screen.getByTestId("qa-retry-run-btn"));
+
+    await waitFor(() => {
+      const starts = fetchMock.mock.calls.filter((call) => call[0] === "/api/qa/runs");
+      expect(starts).toHaveLength(2);
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/runs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "Who owns payments?" }),
+      }),
+    );
+  });
+
+  it("explains canceled Q&A runs without presenting them as answer validation failures", async () => {
+    const fetchMock = createFetchMock({
+      qaRunID: "qa-canceled",
+      qaResponse: {
+        status: "failed",
+        question: "Who owns payments?",
+        current_step: "qa.ask",
+        error_code: "run_canceled",
+        error: "canceled by request",
+        warnings: [],
+        answer: null,
+        citations: null,
+        unresolved: null,
+        confidence: null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    const recovery = await screen.findByTestId("qa-failure-recovery");
+    expect(screen.getByTestId("qa-run-status")).toHaveTextContent("status: canceled");
+    expect(recovery).toHaveTextContent("Canceled answer run");
+    expect(recovery).toHaveTextContent("run_canceled");
+    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("qa.ask");
+    expect(recovery).toHaveTextContent("The answer run stopped by request");
+    expect(recovery).toHaveTextContent("the canceled attempt and QA audit artifacts stay in history");
+    expect(screen.getByTestId("qa-retry-run-btn")).toHaveTextContent("Ask again");
+    expect(recovery).not.toHaveTextContent("The answer artifact did not pass validation");
   });
 
   it("routes the inspector Ask primary action to the visible Q&A submit flow", async () => {
@@ -2459,6 +2692,44 @@ describe("App", () => {
     expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
   });
 
+  it("shows Source validation recovery above raw diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        validateStatus: 400,
+        validateResponse: {
+          ok: false,
+          workspace: "/tmp/workspace",
+          warnings: [],
+          errors: [
+            {
+              level: "error",
+              code: "workspace.repo.git_url.fetch_failed",
+              message: "git cannot clone this repo",
+              suggestion: "Check the repository URL and your local git authentication.",
+              repo: "my-service",
+            },
+          ],
+          resolved_repos: [],
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("workspace-save-btn"));
+
+    const recovery = await screen.findByTestId("source-validation-recovery");
+    expect(recovery).toHaveTextContent("Source validation recovery");
+    expect(recovery).toHaveTextContent("my-service");
+    expect(recovery).toHaveTextContent("workspace.repo.git_url.fetch_failed");
+    expect(recovery).toHaveTextContent("Git URL");
+    expect(recovery).toHaveTextContent("https://github.com/org/my-service.git");
+    expect(recovery).toHaveTextContent("Check the repository URL and your local git authentication.");
+    expect(recovery).toHaveTextContent("Save and validate sources");
+    expect(screen.getByTestId("source-repo-table")).toHaveTextContent("blocked");
+  });
+
   it("requires revalidation after first-run setup changes", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
@@ -2619,12 +2890,30 @@ describe("App", () => {
     await renderConsoleApp();
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
+    const permissionRecovery = await screen.findByTestId("runtime-permission-recovery");
+    expect(permissionRecovery).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Permission triage")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("1 pending request")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Blocked step")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("init.step1.collect")).toBeInTheDocument();
+    expect(within(permissionRecovery).getByText("Policy rule")).toBeInTheDocument();
+    expect(
+      within(permissionRecovery).getByText("Use Readiness - Advanced runtime settings - Runtime Permissions to choose the intended mode/channel."),
+    ).toBeInTheDocument();
+    const permissionCards = screen.getByTestId("runs-pending-permissions-cards");
+    expect(permissionCards).toHaveTextContent("perm-1");
+    expect(permissionCards).toHaveTextContent("npm install");
     expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
-    expect(screen.getByText("perm-1")).toBeInTheDocument();
-    expect(screen.getByText("needs_user")).toBeInTheDocument();
-    expect(screen.getByText("ask_unsafe_operation")).toBeInTheDocument();
-    expect(screen.getByText("npm install")).toBeInTheDocument();
-    expect(screen.getByText("package install requires review")).toBeInTheDocument();
+    expect(screen.getAllByText("perm-1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("needs_user").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("ask_unsafe_operation").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("npm install").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("package install requires review").length).toBeGreaterThan(0);
+    const blockersPanel = screen.getByTestId("blockers-panel");
+    expect(blockersPanel).toHaveTextContent("Permission: shell");
+    expect(blockersPanel).toHaveTextContent("init.step1.collect paused for needs_user via ask_unsafe_operation");
+    expect(blockersPanel).toHaveTextContent("Target: npm install.");
+    expect(blockersPanel).toHaveTextContent("Reason: package install requires review");
   });
 
   it("renders Analysis V2 run progress, timeline, and shard drilldown", async () => {
@@ -2657,10 +2946,10 @@ describe("App", () => {
                 level: "error",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "payments",
+                domain_id: "ftgo-application",
                 message: "collect manifest missing",
-                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
-                fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
+                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json",
+                fields: { provider: "qwen-code", shard_id: "payments-root-shard", duration_ms: 2140 },
               },
               {
                 cursor: 2,
@@ -2668,19 +2957,67 @@ describe("App", () => {
                 level: "info",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "invoices",
+                domain_id: "ftgo-application",
                 message: "runtime execution persisted",
-                fields: { provider: "qwen-code", shard_id: "invoices" },
+                fields: { provider: "qwen-code", shard_id: "invoices-module-shard", shards_total: 2, succeeded: 1, failed: 1 },
+              },
+              {
+                cursor: 3,
+                timestamp: "2026-04-03T12:00:03Z",
+                level: "warning",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "ftgo-application",
+                message: "focused artifact repair scheduled",
+                fields: {
+                  provider: "qwen-code",
+                  shard_id: "payments-root-shard",
+                  recovery_mode: "collect_pair_repair",
+                  validation_error: 'documents[0].path references process-contaminated collect document file "root-overview.md"',
+                },
+              },
+              {
+                cursor: 4,
+                timestamp: "2026-04-03T12:00:04Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "ftgo-application",
+                message:
+                  "focused artifact repair exhausted stage=collect_pair_repair (raw_output=reports/taskruns/run-analysis-v2/raw/payments/collect.json stdout_bytes=0 stdout_sha256=abc stderr_bytes=0 stderr_sha256=def)",
+                fields: {
+                  provider: "qwen-code",
+                  shard_id: "payments-root-shard",
+                  recovery_mode: "collect_pair_repair",
+                  stall_phase: "pre_artifact",
+                  exit_reason: "stall",
+                  artifact_valid: false,
+                  validation_error: "runtime_stalled_before_artifacts",
+                },
+              },
+              {
+                cursor: 5,
+                timestamp: "2026-04-03T12:00:05Z",
+                level: "error",
+                kind: "event",
+                step_id: "init.step1.collect",
+                message: "run failed: partial shard failures detected",
+                fields: { error_code: "run_partial_failed", partial_failure_count: 1 },
               },
             ],
-            next_cursor: 2,
+            next_cursor: 5,
             eof: true,
           },
         },
         runArtifacts: {
           [runID]: {
             run_id: runID,
-            artifacts: [{ path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" }],
+            artifacts: [
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/invoices-overview.md", kind: "report", label: "invoices overview" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/shard-pack-manifest.json", kind: "manifest", label: "shard manifest" },
+            ],
           },
         },
       }),
@@ -2705,16 +3042,194 @@ describe("App", () => {
     expect(timeline).toHaveTextContent("blocked");
 
     const shardTable = await screen.findByTestId("analysis-shard-table");
-    expect(shardTable).toHaveTextContent("payments");
+    expect(shardTable).toHaveTextContent("payments-root-shard");
+    expect(shardTable).toHaveTextContent("invoices-module-shard");
     expect(shardTable).toHaveTextContent("fake");
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
+    expect(shardTable).toHaveTextContent("Runtime only");
+    expect(shardTable).toHaveTextContent("authored markdown and shard-pack-manifest are missing");
+    expect(shardTable).toHaveTextContent("Artifact pair present");
     expect(shardTable).toHaveTextContent("2s");
     expect(shardTable).toHaveTextContent("Duration unavailable");
     expect(shardTable).not.toHaveTextContent("not exposed");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
-    expect(drilldown).toHaveTextContent("collect manifest missing");
+    expect(drilldown).toHaveTextContent("focused artifact repair exhausted");
+    expect(drilldown).toHaveTextContent("Runtime record");
+    expect(drilldown).toHaveTextContent("Authored markdown");
+    expect(drilldown).toHaveTextContent("Manifest");
+    expect(drilldown).toHaveTextContent("reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json");
+    expect(drilldown).toHaveTextContent("missing");
+
+    const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("Live diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("artifact handoff");
+    expect(liveDiagnostics).toHaveTextContent("Artifact handoff stalled");
+    expect(liveDiagnostics).toHaveTextContent("1/2 ok");
+    expect(liveDiagnostics).toHaveTextContent("1 failed");
+    expect(liveDiagnostics).toHaveTextContent("1 scheduled / 0 completed / 1 exhausted");
+    expect(liveDiagnostics).toHaveTextContent("collect_pair_repair");
+    expect(liveDiagnostics).toHaveTextContent("1 actual / 0 valid-stop");
+    expect(liveDiagnostics).toHaveTextContent("1 pre-artifact");
+    expect(liveDiagnostics).toHaveTextContent("reports/taskruns/run-analysis-v2/raw/payments/collect.json");
+    expect(liveDiagnostics).toHaveTextContent("runtime_stalled_before_artifacts");
+    expect(liveDiagnostics).toHaveTextContent("Open the failed shard row and raw-output ref");
+    expect(liveDiagnostics).toHaveTextContent("Retry after the provider artifact write path is fixed");
+  });
+
+  it("surfaces active provider stream when collect has no authored shard artifacts yet", async () => {
+    const runID = "run-provider-stream";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        onboardingStatus: {
+          ok: true,
+          launcher_mode: false,
+          workspace_selected: true,
+          workspace_ready: true,
+          workspace: "/tmp/workspace",
+          manifest_present: true,
+          runtime: {
+            selected: true,
+            runtime: "headless",
+            runtime_provider: "qwen-code",
+            provider_source: "override",
+          },
+          can_enter_console: true,
+          recent_workspaces: [],
+        },
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            current_step: "init.step1.collect",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: null,
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        },
+        runLogs: {
+          [runID]: {
+            run_id: runID,
+            items: [
+              {
+                cursor: 1,
+                timestamp: "2026-04-03T12:00:01Z",
+                level: "info",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "ftgo-application",
+                message: "runtime task started",
+                fields: { provider: "qwen-code", shard_id: "ftgo-root-shard", shards_total: 16 },
+              },
+              {
+                cursor: 2,
+                timestamp: "2026-04-03T12:00:02Z",
+                level: "info",
+                kind: "runtime_output",
+                stream: "stdout",
+                step_id: "init.step1.collect",
+                message: JSON.stringify({
+                  type: "stream_event",
+                  event: {
+                    type: "content_block_delta",
+                    delta: { type: "thinking_delta", thinking: "checking repository structure" },
+                  },
+                }),
+              },
+              {
+                cursor: 3,
+                timestamp: "2026-04-03T12:00:03Z",
+                level: "info",
+                kind: "runtime_output",
+                stream: "stdout",
+                step_id: "init.step1.collect",
+                message: JSON.stringify({
+                  type: "stream_event",
+                  event: {
+                    type: "content_block_delta",
+                    delta: { type: "text_delta", text: "drafting collect artifacts" },
+                  },
+                }),
+              },
+            ],
+            next_cursor: 3,
+            eof: false,
+          },
+        },
+        runArtifacts: {
+          [runID]: {
+            run_id: runID,
+            artifacts: [],
+          },
+        },
+        runReviewSummary: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: null,
+            current_step: "init.step1.collect",
+            warnings: [],
+            error_code: null,
+            error: null,
+            steps: [
+              {
+                step_id: "step0_constitution",
+                label: "Charter",
+                state: "done",
+                provider: "qwen-code",
+                artifact_count: 1,
+                artifact_paths: ["charter/overview.md"],
+                taskrun_paths: [],
+                warnings_count: 0,
+                errors_count: 0,
+                last_message: "charter ready",
+              },
+              {
+                step_id: "step1_collect",
+                label: "Collect",
+                state: "active",
+                provider: "qwen-code",
+                artifact_count: 0,
+                artifact_paths: [],
+                taskrun_paths: [],
+                warnings_count: 0,
+                errors_count: 0,
+                last_message: "runtime stream active",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+    await screen.findByTestId("console-shell");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
+
+    expect(screen.queryByTestId("analysis-failure-recovery")).not.toBeInTheDocument();
+    const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("provider stream");
+    expect(liveDiagnostics).toHaveTextContent("Provider output is streaming, but no authored shard artifact pair is visible yet");
+    expect(liveDiagnostics).toHaveTextContent("Run signal");
+    expect(liveDiagnostics).toHaveTextContent("Artifact pair pending");
+    expect(liveDiagnostics).toHaveTextContent("runtime stream is active; authored markdown and shard-pack-manifest are not visible yet");
+    expect(liveDiagnostics).toHaveTextContent("Provider stream");
+    expect(liveDiagnostics).toHaveTextContent("2 chunks");
+    expect(liveDiagnostics).toHaveTextContent("2 JSON stream events");
+    expect(liveDiagnostics).toHaveTextContent("thinking_delta, text_delta");
+    expect(liveDiagnostics).toHaveTextContent("Watch for authored markdown plus shard-pack-manifest before treating provider output as collect progress.");
+    expect(liveDiagnostics).toHaveTextContent("If collect stalls or repair starts, use raw-output metadata instead of reading the full provider stream.");
   });
 
   it("copies run logs using the active line+fields view", async () => {
@@ -3218,6 +3733,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -3229,9 +3745,253 @@ describe("App", () => {
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("draft promotion skipped");
     expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review blocker");
 
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovery path");
+    expect(recovery).toHaveTextContent("run_partial_failed");
+    expect(recovery).toHaveTextContent("refresh.step3.findings");
+    expect(recovery).toHaveTextContent("2");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Retry refresh");
+
     fireEvent.click(screen.getByTestId("inspector-primary-action"));
     expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
+  });
+
+  it("routes runner unavailable analysis blockers to provider readiness before retry", async () => {
+    const runID = "run-provider-unavailable";
+    const fetchMock = createFetchMock({
+      runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:01:00Z",
+          current_step: "refresh.step1.collect",
+          warnings: [],
+          error_code: "runner_unavailable",
+          error: "provider quota exhausted",
+        },
+      },
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: false,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/workspace",
+        manifest_present: true,
+        runtime: {
+          selected: true,
+          runtime: "headless",
+          runtime_provider: "codex-code",
+          provider_source: "override",
+        },
+        can_enter_console: true,
+        recent_workspaces: [],
+      },
+      doctorResponse: {
+        ok: false,
+        summary: "needs attention",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          {
+            id: "runtime_provider",
+            label: "Runtime provider",
+            status: "fail",
+            message: "Provider ID: codex-code; usage limit reached",
+            suggestion: "Run codex login, confirm quota, or set ACP_CODEX_CMD to a working provider command.",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Check provider readiness");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("verify binary/auth/quota in Readiness before retrying the same pipeline");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Provider unavailable");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("check Readiness provider setup, binary/auth/quota");
+
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Provider/tool availability blocked artifact creation");
+    expect(recovery).toHaveTextContent("refresh.step1.collect");
+    const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("provider check");
+    expect(liveDiagnostics).toHaveTextContent("provider unavailable before shard ids were emitted");
+    expect(liveDiagnostics).toHaveTextContent("Check Readiness provider setup, binary/auth/quota before retrying the same pipeline");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Provider unavailable");
+    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("run a successful analysis before publishing");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    const startCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh").length;
+    fireEvent.click(screen.getByTestId("inspector-primary-action"));
+    expect(screen.getByTestId("stage-readiness")).toHaveClass("is-selected");
+    const providerRecovery = screen.getByTestId("provider-readiness-recovery");
+    expect(providerRecovery).toHaveTextContent("Provider readiness recovery");
+    expect(providerRecovery).toHaveTextContent("codex-code");
+    expect(providerRecovery).toHaveTextContent("ACP_CODEX_CMD");
+    expect(providerRecovery).toHaveTextContent("runner_unavailable");
+    expect(providerRecovery).toHaveTextContent("provider quota exhausted");
+
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("Runtime provider: fail");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("usage limit reached");
+    expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("confirm quota");
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh")).toHaveLength(startCallsBefore);
+  });
+
+  it("explains headless provider probe timeouts before retrying analysis", async () => {
+    const runID = "run-qwen-probe-timeout";
+    const timeoutMessage = "qwen: headless_probe_timeout: qwen headless probe timed out after 30s";
+    const fetchMock = createFetchMock({
+      runID,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "init",
+          status: "failed",
+          started_at: "2026-07-09T06:56:00Z",
+          finished_at: "2026-07-09T06:57:00Z",
+          current_step: "init.step1.collect",
+          warnings: [],
+          error_code: "runner_unavailable",
+          error: timeoutMessage,
+        },
+      },
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: false,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/workspace",
+        manifest_present: true,
+        runtime: {
+          selected: true,
+          runtime: "headless",
+          runtime_provider: "qwen-code",
+          provider_source: "override",
+        },
+        can_enter_console: true,
+        recent_workspaces: [],
+      },
+      doctorResponse: {
+        ok: false,
+        summary: "needs attention",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          {
+            id: "runtime_provider",
+            label: "Runtime provider",
+            status: "fail",
+            message: timeoutMessage,
+            suggestion: "Confirm qwen login/quota and rerun readiness.",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("stage-readiness");
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+    await waitFor(() => expect(screen.getByTestId("stage-readiness")).toHaveClass("is-selected"));
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+
+    const providerRecovery = await screen.findByTestId("provider-readiness-recovery");
+    expect(providerRecovery).toHaveTextContent("qwen-code");
+    expect(providerRecovery).toHaveTextContent("ACP_QWEN_CMD");
+    expect(providerRecovery).toHaveTextContent("Headless probe timeout");
+    expect(providerRecovery).toHaveTextContent("Text readiness probe");
+    expect(providerRecovery).toHaveTextContent("qwen did not return the readiness response");
+    expect(providerRecovery).toHaveTextContent("short headless prompt outside ACP");
+    expect(providerRecovery).toHaveTextContent("retry Analysis only after Runtime provider passes");
+  });
+
+  it("explains terminal canceled runs without presenting them as runtime failures", async () => {
+    const runID = "run-canceled-terminal";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        runList: [
+          {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:02:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: "run_canceled",
+            error: "canceled by request",
+          },
+        ],
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:02:00Z",
+            current_step: "refresh.step2.asis_docs",
+            warnings: [],
+            error_code: "run_canceled",
+            error: "canceled by request",
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+
+    await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("canceled");
+    expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("canceled");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
+    expect(screen.getByTestId("runs-history-table")).toHaveTextContent("canceled");
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent("canceled");
+    expect(activeRunStrip).toHaveTextContent("Stopped step");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("canceled run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was canceled before log entries were captured: run_canceled");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Taskrun evidence remains in History.");
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Canceled run");
+    expect(recovery).toHaveTextContent("run_canceled");
+    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("refresh.step2.asis_docs");
+    expect(recovery).toHaveTextContent("The run stopped by request");
+    expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("Review retained run evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("The selected run was canceled; inspect retained History evidence");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("Canceled run");
+    expect(screen.getByTestId("blockers-panel")).toHaveTextContent("taskrun evidence remains in History");
   });
 
   it("renders running run status for active live progress state", async () => {
@@ -3305,6 +4065,19 @@ describe("App", () => {
       createFetchMock({
         runID,
         runStarted: true,
+        runList: [
+          {
+            run_id: runID,
+            pipeline: "refresh",
+            status: "failed",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: "2026-04-03T12:05:00Z",
+            current_step: "refresh.step1.collect",
+            warnings: [],
+            error_code: "run_reconciled_after_restart",
+            error: "orphaned run reconciled after restart",
+          },
+        ],
         runStatus: {
           [runID]: {
             run_id: runID,
@@ -3326,7 +4099,25 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-analysis"));
 
     await screen.findByTestId("run-status-panel");
+    expect(screen.getByTestId("run-status-value").textContent).toBe("recovered");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
+    expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("recovered");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
+    const activeRunStrip = await screen.findByTestId("active-run-strip");
+    expect(activeRunStrip).toHaveTextContent("recovered");
+    expect(activeRunStrip).toHaveTextContent("Recovered step");
+    expect(screen.getByTestId("activity-drawer-toggle")).toHaveTextContent("recovered run");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("Run was reconciled after restart before log entries were captured: run_reconciled_after_restart");
+    expect(screen.getByTestId("activity-empty-state")).toHaveTextContent("History retains the run; start a new run if analysis still matters.");
+    const recovery = screen.getByTestId("analysis-failure-recovery");
+    expect(recovery).toHaveTextContent("Recovered after restart");
+    expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
+    expect(recovery).toHaveTextContent("the reconciled run and its taskrun evidence stay in History");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("Review retained run evidence");
+    expect(screen.getByTestId("right-inspector")).toHaveTextContent("The selected run was recovered after restart; inspect retained History evidence");
   });
 
   it("switches to the next available run when the selected run disappears during refresh", async () => {

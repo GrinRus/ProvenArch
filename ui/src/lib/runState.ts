@@ -8,6 +8,8 @@ export type RunStatusLike = {
   warnings?: string[] | null;
 };
 
+export type RunOutcomeTone = "info" | "ok" | "warn" | "error";
+
 export function dedupeArtifactsByPath<T extends { path: string }>(items: T[]): T[] {
   const deduped = new Map<string, T>();
   for (const artifact of items) {
@@ -105,13 +107,57 @@ export function deriveRunLifecycleState(runStatus: RunStatusLike | null): "activ
   if (activeStatuses.has(runStatus.status)) {
     return "active";
   }
-  const errorCode = String(runStatus.error_code ?? "").trim().toLowerCase();
+  const errorCode = normalizeRunErrorCode(runStatus.error_code);
   const warnings = (runStatus.warnings ?? []).map((warning) => warning.toLowerCase());
-  if (errorCode.includes("run_reconciled_after_restart") || warnings.some((warning) => warning.includes("run_reconciled_after_restart"))) {
+  if (isRunReconciledAfterRestart(errorCode) || warnings.some((warning) => warning.includes("run_reconciled_after_restart"))) {
     return "recovered";
   }
   if (errorCode.includes("incomplete") || warnings.some((warning) => warning.includes("incomplete_cycle"))) {
     return "incomplete";
   }
   return "terminal";
+}
+
+export function normalizeRunErrorCode(errorCode?: string | null): string {
+  return String(errorCode ?? "").trim().toLowerCase();
+}
+
+export function runOutcomeLabel(runStatus: Pick<RunStatusLike, "status" | "error_code"> | null | undefined, fallback = "idle"): string {
+  if (!runStatus?.status) {
+    return fallback;
+  }
+  const errorCode = normalizeRunErrorCode(runStatus.error_code);
+  if (runStatus.status === "failed" && isRunCanceled(errorCode)) {
+    return "canceled";
+  }
+  if (runStatus.status === "failed" && isRunReconciledAfterRestart(errorCode)) {
+    return "recovered";
+  }
+  return runStatus.status;
+}
+
+export function runOutcomeTone(runStatus: Pick<RunStatusLike, "status" | "error_code"> | null | undefined): RunOutcomeTone {
+  const outcome = runOutcomeLabel(runStatus);
+  if (outcome === "succeeded") {
+    return "ok";
+  }
+  if (outcome === "failed") {
+    return "error";
+  }
+  if (outcome === "queued" || outcome === "running" || outcome === "canceled" || outcome === "recovered") {
+    return "warn";
+  }
+  return "info";
+}
+
+export function isRunCanceled(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode) === "run_canceled";
+}
+
+export function isRunReconciledAfterRestart(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode).includes("run_reconciled_after_restart");
+}
+
+export function isRunnerUnavailable(errorCode?: string | null): boolean {
+  return normalizeRunErrorCode(errorCode).includes("runner_unavailable");
 }

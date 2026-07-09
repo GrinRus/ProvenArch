@@ -1,4 +1,4 @@
-import { deriveRunLifecycleState } from "../lib/runState";
+import { deriveRunLifecycleState, runOutcomeLabel } from "../lib/runState";
 
 type RunStatus = {
   run_id: string;
@@ -23,11 +23,12 @@ export function RunStatusPanel({ runStatus, warnings }: RunStatusPanelProps) {
     error_code: runStatus.error_code,
     warnings,
   });
+  const outcomeLabel = runOutcomeLabel(runStatus);
 
   return (
     <div className="status-block" data-testid="run-status-panel">
       <p>
-        Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status: <strong data-testid="run-status-value">{runStatus.status}</strong>
+        Run <code data-testid="run-status-run-id">{runStatus.run_id}</code> status: <strong data-testid="run-status-value">{outcomeLabel}</strong>
       </p>
       <p>Pipeline: {runStatus.pipeline}</p>
       {lifecycleState ? (

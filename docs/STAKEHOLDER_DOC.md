@@ -25,7 +25,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Q&A capability with UI + CLI + public API surface | target upgraded | UI uses async `/api/qa/runs`; deterministic `internal/qa` + `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
-| Onboarding-first workspace/source/runner setup | done (Epic 17 baseline) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice and then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
+| Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 17
@@ -58,9 +58,10 @@ Epic matrix:
 - пользователь поднимает сервис одной командой `acp serve`; default runtime остаётся `fake`;
 - UI открывает onboarding: выбирает или создаёт `arch-workspace`, либо открывает Recent workspace; ACP готовит fixed layout и `git init` для workspace root;
 - в шаге `Sources` пользователь добавляет один или несколько target repos через local checkout path или Git URL; sources сохраняются в существующий `workspace.yaml.repos[]`;
+- onboarding summary показывает текущий шаг, главный blocker и next action, а `Ready` объясняет, почему `Open console` или `Run first analysis` ещё disabled;
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
 - ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
-- в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider.
+- в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:
@@ -77,9 +78,9 @@ Epic matrix:
 - в `reports/coverage/` появляется coverage report и список открытых вопросов по недостающей информации;
 - в `reports/findings/` — список провалов/анти‑паттернов с evidence;
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
-- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые;
+- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые; terminal `run_canceled` и restart-reconciled failed states показываются пользователю как `canceled`/`recovered`;
 - при повторном открытии UI выбирает newest active run и ведёт в `Analysis`, иначе newest completed artifact run и ведёт в `Review`;
-- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run.
+- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run с пояснением cooperative stop, terminal canceled/restart-reconciled status/history/activity labels, retained-evidence recovery actions/copy и сохранения taskrun evidence/history.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;
@@ -283,16 +284,16 @@ arch-workspace/
 
 2) **UI (локальный web-интерфейс)**  
    - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
-   - wizard summary, domain/team card overview и baseline prompt bundle status для “Конституции” в `Charter`
-   - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state
-   - readiness validation, summary cards, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
+   - wizard summary, domain/team card overview, baseline prompt bundle status и charter baseline recovery для “Конституции” в `Charter`
+   - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state и source validation recovery для blocking repo/source diagnostics
+   - readiness validation, summary cards, provider readiness recovery, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, shard/log table, warning/error drilldown и pending permissions
-   - logs activity drawer с dual-view (`event timeline` + `raw agent stream`)
+   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
+   - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
-   - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
-   - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, with deterministic `POST /api/qa/ask` compatibility API
-   - `Publish` для Git Review Room: folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action и proposal branch
+   - `Proposals` для review room по proposal/changelog packages: proposal package recovery для incomplete proposal/changelog packages, preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
+   - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, с history/citations/safety/audit links, failed-run recovery и deterministic `POST /api/qa/ask` compatibility API
+   - `Publish` для Git Review Room: publication readiness summary, mobile section jumps, folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action, failed Git action recovery и proposal branch
 
 3) **Orchestrator (локальный сервис, Go)**  
    - управляет шагами pipeline  
@@ -446,7 +447,7 @@ Wizard из блоков-шаблонов:
   - configured `docs.imports_path` (`docs/imports/*` по умолчанию)
 - Runtime step id: `qa.ask`; agent role: `system-analyst-qa`; prompt pack: `skills/prompt-packs/qa.md`; write scope: только `reports/taskruns/<run_id>/qa/`.
 - QA runs не меняют source repos или canonical workspace outputs; они пишут `context-pack.json`, `qa-answer.json` и `runtime-execution.json` в taskrun scope.
-- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
+- UI `Ask` показывает async run history, selected answer, confidence, citations, unresolved assumptions, explicit related-entity partial state, failed-run recovery/retry guidance, provider-unavailable Readiness guidance, terminal canceled/restart-reconciled answer copy и read-only safety/audit artifact links; отсутствующие structured related entities/edges не домысливаются поверх текущего API.
 - Compatibility: deterministic `acp qa` + public read-only `POST /api/qa/ask` остаются temporary fallback surfaces.
 - API возвращает `answer`, `citations`, `unresolved`, `confidence`; empty/invalid request идёт через standard API error envelope.
 
@@ -559,7 +560,7 @@ flowchart TD
 - MVP использует только artifact-only runtime contract.
 - Runtime пишет required step artifacts в `write_root` / `draft_final_root` и завершает процесс без semantic JSON на stdout.
 - Orchestrator принимает шаг только после read-only validation artifacts и persisted runtime execution metadata.
-- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`.
+- В `managed` permission mode orchestrator auto-approves только reads под `read_context_roots` и writes под `write_root`/`draft_final_root`; shell/network/package install/unknown requests не auto-approved и в non-interactive режиме завершаются `runtime_permission_required`. UI показывает такие pending requests в `Analysis` как triage summary с target/reason, rule/decision и next actions; правый inspector mirrors step/rule/target/reason в hard blocker; approve/deny broker остаётся future scope.
 - Observation без evidence запрещён policy и examples.
 
 ### 13.3. Skills/prompts editing через UI

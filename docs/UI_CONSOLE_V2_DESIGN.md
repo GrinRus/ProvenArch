@@ -35,9 +35,15 @@ Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publ
 
 Ключевые вопросы первого экрана:
 - готов ли workspace;
+- что следующий пользовательский шаг;
 - что сейчас делает pipeline;
 - где блокер;
 - какие artifacts/evidence можно ревьюить или публиковать.
+
+Pre-console onboarding (`Workspace -> Sources -> Runner -> Ready`) должен показывать setup summary
+с current step, next action, current blocker и причинами disabled actions для `Open console` /
+`Run first analysis`, а также runner recovery block для headless provider command/auth/quota
+blockers, чтобы первый запуск не требовал читать raw diagnostics.
 
 ## Shell contract
 
@@ -50,7 +56,7 @@ Source -> Readiness -> Charter -> Analysis -> Review -> Proposals -> Ask -> Publ
 - **Central workbench**: stage-specific dense operator surface, без landing/hero layout.
 - **Right inspector**: `Next action`, blockers/warnings, evidence refs, runtime safety, Git path
   в зависимости от stage.
-- **Bottom activity drawer**: `Event timeline`, `Raw agent stream`, `All`, copy/download/filter
+- **Bottom activity drawer**: `Event timeline`, `Raw agent stream`, `All`, copy/download/filter and outcome-aware empty-log recovery copy
   actions where applicable.
 
 Visual direction:
@@ -73,6 +79,7 @@ Must show:
 - Git URL/local path source mode;
 - docs imports path;
 - advanced `workspace.yaml` surface;
+- source validation recovery for blocking repo/workspace diagnostics before raw validation details;
 - source diagnostics and Git publication path.
 
 ### 2. Readiness
@@ -83,6 +90,7 @@ Primary action: `Run readiness check`.
 
 Must show:
 - grouped checks for workspace, repositories, runtime provider, permissions and artifacts;
+- provider readiness recovery for headless provider, `runner_unavailable`, or runtime-provider doctor failure states;
 - runtime profile summary: timeouts, execution, permissions, step providers;
 - blocking vs warning distinction;
 - runtime safety status.
@@ -98,6 +106,7 @@ Must show:
 - domain/team cards;
 - markdown artifact preview/editor for `charter/*`;
 - baseline prompt bundle status;
+- charter baseline recovery for prompt/charter bundle diagnostics before raw editor warnings;
 - charter readiness and Git path.
 
 ### 4. Analysis
@@ -110,7 +119,10 @@ Must show:
 - run id, runtime/provider and progress;
 - step timeline for `init.step0.constitution` through `init.step4.proposals`;
 - shard table with repo/path/provider/status/artifacts/duration;
-- blocker, evidence refs and runtime safety in inspector;
+- failed-run live diagnostics for shard counters, focused repair, stall pressure, terminal excerpt and raw-output refs;
+- canceled/restart-reconciled terminal runs labeled as `canceled`/`recovered` across status, mission control, active run summary and history;
+- pending permission triage with blocked step, operation, decision, policy rule, target/reason and safe next actions;
+- blocker, evidence refs and runtime safety in inspector, including permission blocker step/rule/target/reason detail;
 - live logs with highlighted error/warning rows.
 
 ### 5. Review - Evidence
@@ -148,6 +160,7 @@ Primary action: `Approve proposal`.
 
 Must show:
 - proposal/changelog list;
+- proposal package recovery for missing proposal docs, missing ADR/RFC drafts, missing changelog artifacts or unresolved review questions;
 - formatted proposal preview with diff/evidence/changelog tabs;
 - linked findings and evidence coverage;
 - unresolved owner/questions blockers;
@@ -163,6 +176,7 @@ Must show:
 - Q&A run history;
 - answer with confidence, citations, unresolved assumptions and related entities/edges;
 - explicit read-only runtime safety;
+- canceled/restart-reconciled answer recovery with retained QA audit evidence and Ask-again action;
 - note that Q&A does not mutate canonical artifacts.
 
 ### 9. Publish
@@ -175,7 +189,8 @@ Must show:
 - diff summary by workspace folder;
 - selected artifact preview with `Preview`, `Diff`, `Evidence`, `Changelog`;
 - publish gate, checklist, blockers, commit plan and proposal branch;
-- prepared commit message actions.
+- prepared commit message actions;
+- failed Git mutation recovery next to the commit/proposal branch controls.
 
 ## State model
 
@@ -184,6 +199,8 @@ Every stage must have explicit surfaces for:
 - empty workspace / no run / no artifacts;
 - warning vs blocking issue;
 - active run, cancelled run, failed run and succeeded run;
+- cooperative cancellation guidance for active selected runs, including preserved taskrun evidence/history;
+- terminal canceled and restart-reconciled runs must show `canceled`/`recovered` outcome labels in shared shell surfaces, explain retained History evidence and use run-again/review-retained-evidence actions separately from runtime failures;
 - managed runtime permission mode and pending permission requests;
 - read-only Ask runs;
 - Git dirty/clean/ready-after-review states;
@@ -225,20 +242,27 @@ empty/partial state rather than changing backend contracts implicitly.
 - Source:
   - workspace manifest editor state from existing workspace setup hooks;
   - `POST /api/workspace/validate` for resolved repos and diagnostics;
+  - source validation recovery derived from existing `ValidateResponse.errors/warnings` and guided repo draft state;
   - `GET /api/workspace/manifest` / manifest save flow for `workspace.yaml`.
 - Readiness:
   - `GET /api/system/doctor`;
   - `POST /api/workspace/validate`;
+  - selected run `error_code` for provider recovery context;
   - `GET/PUT /api/runtime/timeouts`, `GET/PUT /api/runtime/execution`,
     `GET/PUT /api/runtime/permissions`, `GET /api/runtime/profile`.
+- Pre-console onboarding:
+  - `GET /api/onboarding/status` for workspace/source/runtime gates;
+  - `GET /api/system/doctor` runtime-provider check for runner recovery details;
+  - local selected runtime/provider state for expected command and `ACP_*_CMD` override guidance.
 - Charter:
   - baseline bundle/editor artifacts from existing workspace setup/baseline hooks;
+  - charter baseline recovery derived from existing baseline bundle diagnostics and editable artifact metadata;
   - `charter/*`, `skills/*`, `skills/subagents.yaml`, prompt packs;
   - step0 wizard contract under `charter/wizard/step0-contract.json`.
 - Analysis:
   - `POST /api/pipeline/init`, `POST /api/pipeline/refresh`;
   - `GET /api/pipeline/runs`, `GET /api/pipeline/runs/<run_id>`;
-  - `GET /api/pipeline/runs/<run_id>/logs`;
+  - `GET /api/pipeline/runs/<run_id>/logs`, including `fields` such as `shard_id`, `provider`, `recovery_mode`, `stall_phase`, `validation_error`, `partial_failure_count` and raw-output metadata when emitted;
   - `GET /api/pipeline/runs/<run_id>/artifacts`;
   - pending permission request data already exposed on selected run status.
 - Review - Evidence:
@@ -255,13 +279,15 @@ empty/partial state rather than changing backend contracts implicitly.
   - if model artifacts are missing or sparse, render an explicit partial/empty map state.
 - Proposals:
   - proposal/changelog artifacts under `proposals/*` and `reports/changelog/*`;
-  - linked findings/evidence from artifact content and current run artifact index.
+  - linked findings/evidence from artifact content and current run artifact index;
+  - proposal recovery state derived from artifact refs and open questions, without a separate backend contract.
 - Ask:
   - async QA APIs `POST /api/qa/runs`, `GET /api/qa/runs/<run_id>`,
     `GET /api/qa/runs?limit=...`;
   - legacy `POST /api/qa/ask` remains compatibility-only, not the target UI path.
 - Publish:
   - existing Git helper flows for commit and proposal branch;
+  - failed Git helper mutations remain visible in the Commit plan and Git publication inspector until retried;
   - workspace artifact list/diff summary should be derived from current Git helper surfaces where
     possible, otherwise rendered as partial state until a separate backend slice is approved.
 
@@ -293,6 +319,8 @@ V2 selectors should be stable and explicit:
 - shared surfaces: `next-action-panel`, `blockers-panel`, `evidence-refs-panel`,
   `runtime-safety-panel`, `git-publication-panel`;
 - Analysis: `analysis-run-timeline`, `analysis-shard-table`, `analysis-run-progress`,
+  `analysis-live-diagnostics`,
+  `runtime-permission-recovery`,
   `analysis-review-blocker-btn`;
 - Review: `review-view-evidence-tab`, `review-view-domain-map-tab`, `review-artifact-explorer`,
   `review-evidence-preview`, `review-domain-map`, `review-citation-coverage`;

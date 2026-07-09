@@ -27,6 +27,7 @@ import {
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
+  type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
   type SystemVersionResponse,
 } from "./lib/appContracts";
@@ -34,6 +35,7 @@ import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { buildStageOptions } from "./lib/stageModel";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
+import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -172,6 +174,7 @@ export default function App() {
     gitMessage,
     proposalBranch,
     gitStatus,
+    gitError,
     bootstrapWorkspaceSetup,
     setManifestContent,
     setGuidedDocsImportsPath,
@@ -571,15 +574,16 @@ export default function App() {
     for (const request of runStatus?.pending_permissions ?? []) {
       items.push({
         severity: "error",
-        label: request.action || "runtime permission",
-        detail: "Runtime permission request is pending.",
+        label: request.action ? `Permission: ${request.action}` : "Runtime permission",
+        detail: formatPermissionBlockerDetail(request),
       });
     }
     if (runStatus?.error_code) {
+      const issue = selectedRunIssueCopy(runStatus.error_code, runStatus.error, "inspector");
       items.push({
         severity: "error",
-        label: runStatus.error_code,
-        detail: runStatus.error || "Selected run failed.",
+        label: issue.label,
+        detail: issue.detail,
       });
     }
     if (openQuestions.trim()) {
@@ -672,9 +676,9 @@ export default function App() {
   const gitPublication = useMemo<InspectorItem[]>(
     () => [
       {
-        severity: gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
-        label: gitStatus ? "Last Git action" : "Publication state",
-        detail: gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
+        severity: gitError ? "error" : gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
+        label: gitError ? "Git action failed" : gitStatus ? "Last Git action" : "Publication state",
+        detail: gitError || gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
       },
       {
         severity: "info",
@@ -687,7 +691,7 @@ export default function App() {
         detail: proposalBranch || "not prepared",
       },
     ],
-    [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
+    [artifactCount, gitError, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
 
   const publishExternalGateItems = useMemo(
@@ -708,13 +712,16 @@ export default function App() {
         tone: "error" as const,
       })),
       ...(runStatus?.error_code
-        ? [
-            {
-              label: runStatus.error_code,
-              detail: runStatus.error || "Selected run failed before publication.",
-              tone: "error" as const,
-            },
-          ]
+        ? (() => {
+            const issue = selectedRunIssueCopy(runStatus.error_code, runStatus.error, "publish");
+            return [
+              {
+                label: issue.label,
+                detail: issue.detail,
+                tone: "error" as const,
+              },
+            ];
+          })()
         : []),
     ],
     [doctorFailures, runStatus, validationErrors],
@@ -734,9 +741,11 @@ export default function App() {
       (runStatus?.error_code ? 1 : 0) +
       (activeStage === "publish" && artifactCount === 0 ? 1 : 0),
     runBlockersCount: (runStatus?.pending_permissions?.length ?? 0) + (runStatus?.error_code ? 1 : 0) + (runStatus?.status === "failed" ? 1 : 0),
+    runErrorCode: runStatus?.error_code ?? undefined,
     reviewFindingsCount: openQuestions.trim() ? 1 : 0,
     releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
-  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
+    gitActionFailed: Boolean(gitError),
+  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, gitError, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -787,6 +796,10 @@ export default function App() {
         void handleSetupSaveGuidedWorkspaceSetup();
         break;
       case "readiness":
+        if (nextAction.intent === "open-readiness") {
+          setActiveStage("readiness");
+          break;
+        }
         if (!validateResult?.ok) {
           void handleValidateWorkspace();
         } else if (!setupDoctorResult?.ok) {
@@ -890,7 +903,8 @@ export default function App() {
       selectedRunIsActive={selectedRunIsActive}
       selectedRunId={runStatus?.run_id}
       selectedRunStatus={runStatus?.status}
-      selectedRunError={runStatus?.error_code ?? runStatus?.error ?? undefined}
+      selectedRunErrorCode={runStatus?.error_code ?? undefined}
+      selectedRunError={runStatus?.error ?? undefined}
       logs={filteredRunLogs}
       renderedLogs={runLogsRendered}
       runLogsStatus={runLogsStatus}
@@ -941,6 +955,8 @@ export default function App() {
           firstRunStatus={firstRunStatus}
           setupRuntime={setupRuntime}
           setupRuntimeProvider={setupRuntimeProvider}
+          selectedRunErrorCode={runStatus?.error_code}
+          selectedRunError={runStatus?.error}
           onSetupRuntimeChange={handleSetupRuntimeChange}
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
           onValidateWorkspace={() => void handleValidateWorkspace()}
@@ -984,6 +1000,7 @@ export default function App() {
               gitMessage={gitMessage}
               proposalBranch={proposalBranch}
               gitStatus={gitStatus}
+              gitError={gitError}
               onGitMessageChange={setGitMessage}
               onProposalBranchChange={setProposalBranch}
               onCommit={() => void handleGitCommit()}
@@ -1078,6 +1095,7 @@ export default function App() {
           gitMessage={gitMessage}
           proposalBranch={proposalBranch}
           gitStatus={gitStatus}
+          gitError={gitError}
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
@@ -1099,8 +1117,52 @@ export default function App() {
   );
 }
 
+function selectedRunIssueCopy(errorCode: string, error: string | null | undefined, surface: "inspector" | "publish"): { label: string; detail: string } {
+  if (isRunCanceled(errorCode)) {
+    return {
+      label: "Canceled run",
+      detail:
+        surface === "publish"
+          ? "run_canceled: select a successful run or start a new analysis before publishing."
+          : "run_canceled: selected run was stopped by request; taskrun evidence remains in History.",
+    };
+  }
+  if (isRunReconciledAfterRestart(errorCode)) {
+    return {
+      label: "Run reconciled after restart",
+      detail:
+        surface === "publish"
+          ? "run_reconciled_after_restart: select a completed artifact run or start a new analysis before publishing."
+          : "run_reconciled_after_restart: ACP preserved the stale run evidence in History after service restart.",
+    };
+  }
+  if (isRunnerUnavailable(errorCode)) {
+    return {
+      label: "Provider unavailable",
+      detail:
+        surface === "publish"
+          ? "runner_unavailable: check Readiness provider setup, binary/auth/quota, then run a successful analysis before publishing."
+          : "runner_unavailable: check Readiness provider setup, binary/auth/quota, then retry the same analysis pipeline.",
+    };
+  }
+  return {
+    label: errorCode,
+    detail: error || (surface === "publish" ? "Selected run failed before publication." : "Selected run failed."),
+  };
+}
+
 function isProposalReviewArtifact(path: string): boolean {
   return path.startsWith("proposals/") || path.startsWith("reports/changelog/");
+}
+
+function formatPermissionBlockerDetail(request: RuntimePermissionRequest): string {
+  const step = request.step_id || "runtime step";
+  const decision = request.decision?.decision || "pending";
+  const rule = request.decision?.rule_id ? ` via ${request.decision.rule_id}` : "";
+  const target = request.path_or_command ? ` Target: ${request.path_or_command}.` : "";
+  const reason = request.reason || request.decision?.message;
+  const reasonDetail = reason ? ` Reason: ${reason}` : "";
+  return `${step} paused for ${decision}${rule}.${target}${reasonDetail}`;
 }
 
 function deriveNextAction(
@@ -1114,24 +1176,56 @@ function deriveNextAction(
     blockersCount: number;
     hardBlockersCount: number;
     runBlockersCount: number;
+    runErrorCode?: string | null;
     reviewFindingsCount: number;
     releaseBlockersCount: number;
+    gitActionFailed: boolean;
   },
 ): NextAction {
   if (activeStage === "publish") {
     const disabledReason = !state.hasArtifacts
       ? "No generated workspace artifacts are ready to publish."
+      : state.gitActionFailed
+        ? "Review the Git action failure in Commit plan before retrying."
       : state.hardBlockersCount > 0
         ? "Resolve hard blockers before committing workspace artifacts."
         : undefined;
     return {
-      label: "Commit selected artifacts",
-      description: disabledReason ? "Resolve publish blockers before creating a Git commit." : "Create a Git commit for reviewed architecture workspace updates.",
+      label: state.gitActionFailed ? "Resolve Git action failure" : "Commit selected artifacts",
+      description: state.gitActionFailed
+        ? "Use the Commit plan recovery details, local Git status and prepared message before retrying the Git action."
+        : disabledReason
+          ? "Resolve publish blockers before creating a Git commit."
+          : "Create a Git commit for reviewed architecture workspace updates.",
       primaryActionId: "publish",
       disabledReason,
     };
   }
   if (activeStage === "analysis" && state.runBlockersCount > 0) {
+    if (isRunCanceled(state.runErrorCode)) {
+      return {
+        label: "Review retained run evidence",
+        description: "The selected run was canceled; inspect retained History evidence or start a new analysis when ready.",
+        primaryActionId: "analysis",
+        intent: "focus-analysis-blocker",
+      };
+    }
+    if (isRunReconciledAfterRestart(state.runErrorCode)) {
+      return {
+        label: "Review retained run evidence",
+        description: "The selected run was recovered after restart; inspect retained History evidence or start a new analysis when ready.",
+        primaryActionId: "analysis",
+        intent: "focus-analysis-blocker",
+      };
+    }
+    if (isRunnerUnavailable(state.runErrorCode)) {
+      return {
+        label: "Check provider readiness",
+        description: "Provider/tool availability blocked the selected run; verify binary/auth/quota in Readiness before retrying the same pipeline.",
+        primaryActionId: "readiness",
+        intent: "open-readiness",
+      };
+    }
     return {
       label: "Review blocker",
       description: "Focus the failed shard, pending permission or runtime error before retrying analysis.",

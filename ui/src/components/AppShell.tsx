@@ -35,6 +35,7 @@ type AppShellProps = {
   selectedRunIsActive: boolean;
   selectedRunId?: string;
   selectedRunStatus?: string;
+  selectedRunErrorCode?: string;
   selectedRunError?: string;
   logs: RunLogEntry[];
   renderedLogs: string;
@@ -82,6 +83,7 @@ export function AppShell({
   selectedRunIsActive,
   selectedRunId,
   selectedRunStatus,
+  selectedRunErrorCode,
   selectedRunError,
   logs,
   renderedLogs,
@@ -145,6 +147,7 @@ export function AppShell({
       <ActivityDrawer
         selectedRunId={selectedRunId}
         selectedRunStatus={selectedRunStatus}
+        selectedRunErrorCode={selectedRunErrorCode}
         selectedRunError={selectedRunError}
         logs={logs}
         renderedLogs={renderedLogs}

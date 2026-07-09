@@ -11,16 +11,20 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
   const [gitMessage, setGitMessage] = useState("chore: update ACP workspace artifacts");
   const [proposalBranch, setProposalBranch] = useState("proposal/beta-refresh");
   const [gitStatus, setGitStatus] = useState<string>("");
+  const [gitError, setGitError] = useState<string>("");
 
   async function handleGitCommit() {
     setBusy(true);
     setError(null);
     setGitStatus("");
+    setGitError("");
     try {
       const payload = await commitWorkspaceArtifacts(gitMessage);
       setGitStatus(payload.output ?? payload.message ?? payload.status);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "git commit failed");
+      const message = requestError instanceof Error ? requestError.message : "git commit failed";
+      setGitError(`Git commit failed: ${message}`);
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -30,11 +34,14 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
     setBusy(true);
     setError(null);
     setGitStatus("");
+    setGitError("");
     try {
       const payload = await createProposalBranch(proposalBranch);
       setGitStatus(`checked out ${payload.branch}`);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to create proposal branch");
+      const message = requestError instanceof Error ? requestError.message : "failed to create proposal branch";
+      setGitError(`Proposal branch failed: ${message}`);
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -44,6 +51,7 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
     gitMessage,
     proposalBranch,
     gitStatus,
+    gitError,
     setGitMessage,
     setProposalBranch,
     handleGitCommit,
