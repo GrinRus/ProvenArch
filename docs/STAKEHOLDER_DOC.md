@@ -291,7 +291,7 @@ arch-workspace/
    - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
    - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
-   - `Proposals` для review room по proposal/changelog packages: preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
+   - `Proposals` для review room по proposal/changelog packages: proposal package recovery для incomplete proposal/changelog packages, preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
    - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, с history/citations/safety/audit links, failed-run recovery и deterministic `POST /api/qa/ask` compatibility API
    - `Publish` для Git Review Room: publication readiness summary, mobile section jumps, folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action и proposal branch
 

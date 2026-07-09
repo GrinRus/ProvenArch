@@ -1914,6 +1914,7 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-proposals"));
 
     expect(await screen.findByTestId("proposals-review-room")).toBeInTheDocument();
+    expect(screen.queryByTestId("proposal-package-recovery")).not.toBeInTheDocument();
     const artifactList = screen.getByTestId("proposals-artifact-list");
     expect(artifactList).toHaveTextContent("proposals/proposal-payments");
     expect(artifactList).toHaveTextContent("reports/changelog");
@@ -1967,6 +1968,13 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("stage-proposals"));
 
     const artifactList = await screen.findByTestId("proposals-artifact-list");
+    const recovery = screen.getByTestId("proposal-package-recovery");
+    expect(recovery).toHaveTextContent("Proposal package recovery");
+    expect(recovery).toHaveTextContent("No proposal package artifacts are available.");
+    expect(recovery).toHaveTextContent("Proposal docs");
+    expect(recovery).toHaveTextContent("0");
+    expect(recovery).toHaveTextContent("Retry or rerun Analysis step4.proposals");
+    expect(recovery).toHaveTextContent("Keep Publish as review-only");
     await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("# Run changelog"));
     expect(within(artifactList).getByRole("button", { name: /reports\/changelog\/2026-05-31-run-1\.md/i })).toHaveClass("is-selected");
   });

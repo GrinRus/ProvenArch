@@ -684,3 +684,31 @@ Live medium status:
 Residual UX work after Slice 23:
 - Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
 - Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
+
+## Slice 24 Result
+
+Implemented:
+- Added a dedicated `Proposal package recovery` panel above the Proposals review room when proposal/changelog package blockers are present.
+- The panel shows package state, proposal doc count, ADR/RFC count, changelog count, evidence refs, primary blocker, suggested fix and publication path before the operator reaches Publish.
+- Changelog-only runs keep the changelog preview selected, but now clearly explain that `proposals/*` artifacts are missing before publication review.
+- Existing selected run artifact refs and open questions remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin ./scripts/run-npm.sh --prefix ui test -- --run App.test.tsx` -> `72 passed`
+- UI typecheck: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin ./scripts/run-npm.sh --prefix ui run typecheck` -> passed
+- rendered Proposals recovery check: Playwright opened the Vite UI with mocked `/api/*`, asserted `proposal-package-recovery` content and no horizontal overflow on `1440x980` and `390x900`; screenshots: `/tmp/provenarch-ui-proposals-recovery-manual.TNgFwb/proposal-recovery-desktop.png`, `/tmp/provenarch-ui-proposals-recovery-manual.TNgFwb/proposal-recovery-mobile.png`
+- fake-runtime rendered smoke: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin UI_E2E_BASE_URL=http://127.0.0.1:51852 UI_E2E_QA_SMOKE=0 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-proposals-smoke-results.eUZV5i ./scripts/run-npm.sh run --prefix ui e2e:live` -> `1 passed` (`run_20260709_064232_001`)
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `89` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who lands on Proposals with only a changelog or partial package no longer has to infer publication risk from the side blocker list.
+- The Proposals stage now matches Source/Readiness/Charter recovery quality: the first viewport names the blocker, counts missing package pieces and states the safe path before Publish.
+- The existing changelog preview remains useful evidence while the missing proposal package is explicit.
+
+Live medium status:
+- Current preflight remains `operational_host_preflight_failed`: `/tmp/provenarch-live-e2e` is absent and canonical PostHog/FTGO path inputs are absent. `/tmp` currently has more than the 5 GiB guard available, but the required checkouts are not prepared.
+- No canonical matrix, curated repos file or wrapper script was changed.
+
+Residual UX work after Slice 24:
+- Medium live rerun requires the canonical `/tmp/provenarch-live-e2e/posthog/posthog` and `/tmp/provenarch-live-e2e/ftgo/ftgo-application` checkouts on a trusted host.
+- Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.

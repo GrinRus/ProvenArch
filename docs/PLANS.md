@@ -112,6 +112,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add onboarding runner recovery guidance so first-time headless setup shows expected command/env override before first analysis.
 - [x] Add Source validation recovery guidance so repo/source validation errors are actionable before raw diagnostics.
 - [x] Add Charter baseline recovery guidance so prompt/charter bundle warnings are actionable before Analysis.
+- [x] Add Proposals package recovery guidance so incomplete proposal/changelog packages are actionable before Publish.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -144,8 +145,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 21) Make onboarding Runner actionable for headless provider setup by showing expected command, env override, doctor status and fake fallback before first analysis.
 22) Make Source validation actionable by showing the first blocking repo/source diagnostic, current source/ref and save-then-validate recovery actions before raw diagnostics.
 23) Make Charter baseline warnings actionable by showing affected artifact/category/prompt usage, severity, message, suggested fix and save-then-analyze actions before the raw editor warnings.
-24) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-25) Commit and use the report to drive the next iteration.
+24) Make Proposals package blockers actionable by showing proposal/changelog package state, primary blocker, suggested fix and publication path before the review room.
+25) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+26) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -194,6 +196,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Onboarding Runner shows selected provider, expected command, command override, doctor status/message and fake fallback before first live analysis.
 - [x] Source validation recovery shows affected repo/workspace, diagnostic, source type, current source/ref and save-then-validate actions before raw validation details.
 - [x] Charter baseline recovery shows affected artifact, category, runtime use, diagnostic, suggested fix and save-selected-artifact actions before raw editor warnings.
+- [x] Proposals package recovery shows proposal/changelog package state, primary blocker, suggested fix and publication path before Publish.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -231,6 +234,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-08: Implemented slice 21 onboarding runner recovery without backend/API/schema changes. Runner onboarding now shows selected provider, expected executable, `ACP_*_CMD` override, runtime-provider doctor status/message and fake-baseline fallback before first live analysis. Targeted App test (`70` tests), UI typecheck, rendered onboarding desktop/mobile check (`/tmp/provenarch-ui-onboarding-runner-manual.laqv2_2p`), fake-runtime rendered smoke (`run_20260708_195749_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-08: Implemented slice 22 Source validation recovery without backend/API/schema changes. Source now shows affected repo/workspace, diagnostic, source type, current source/ref, suggested fix and save-then-validate actions before raw validation details. Targeted App test (`71` tests), UI typecheck, rendered Source recovery desktop/mobile check (`/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-source-recovery-manual.Z9MEYk`), fake-runtime rendered smoke (`run_20260708_201043_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 - 2026-07-09: Implemented slice 23 Charter baseline recovery without backend/API/schema changes. Charter now shows affected artifact, category, runtime use, diagnostic, suggested fix and exact `Save selected baseline artifact` action before raw editor warnings. Targeted App test (`72` tests), UI typecheck, rendered Charter recovery desktop/mobile check (`/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-charter-recovery-manual.zN6vmE`), fake-runtime rendered smoke (`run_20260709_062422_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
+- 2026-07-09: Implemented slice 24 Proposals package recovery without backend/API/schema changes. Proposals now shows proposal/changelog package state, primary blocker, suggested fix and publication path before the review room when generated proposal packages are partial, while changelog-only runs keep the changelog preview selected. Targeted App test (`72` tests), UI typecheck, rendered Proposals recovery desktop/mobile check (`/tmp/provenarch-ui-proposals-recovery-manual.TNgFwb`), fake-runtime rendered smoke (`run_20260709_064232_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

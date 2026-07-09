@@ -1056,6 +1056,7 @@ code {
 .runtime-profile-summary,
 .source-recovery-panel,
 .charter-recovery-panel,
+.proposal-recovery-panel,
 .provider-recovery-panel {
   min-width: 0;
   padding: 0.72rem;
@@ -1107,6 +1108,14 @@ code {
   background: var(--warn-soft);
 }
 
+.proposal-recovery-panel {
+  display: grid;
+  gap: 0.62rem;
+  margin-bottom: 0.8rem;
+  border-color: rgba(161, 98, 7, 0.24);
+  background: var(--warn-soft);
+}
+
 .runtime-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1132,6 +1141,12 @@ code {
   gap: 0.62rem;
 }
 
+.proposal-recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
 .charter-recovery-grid > div {
   min-width: 0;
   padding: 0.54rem;
@@ -1149,6 +1164,29 @@ code {
 
 .charter-recovery-detail {
   margin: 0;
+}
+
+.proposal-recovery-grid > div {
+  min-width: 0;
+  padding: 0.54rem;
+  border: 1px solid rgba(161, 98, 7, 0.18);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.proposal-recovery-grid strong {
+  display: block;
+  margin-top: 0.16rem;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+}
+
+.proposal-recovery-detail {
+  margin: 0;
+}
+
+.proposal-recovery-actions {
+  margin-top: -0.15rem;
 }
 
 .source-recovery-grid > div {
@@ -3889,6 +3927,7 @@ code {
   .runtime-summary-grid,
   .source-recovery-grid,
   .charter-recovery-grid,
+  .proposal-recovery-grid,
   .provider-recovery-grid,
   .onboarding-runner-recovery-grid,
   .charter-summary-grid,
@@ -3970,6 +4009,7 @@ code {
   .runtime-summary-grid,
   .source-recovery-grid,
   .charter-recovery-grid,
+  .proposal-recovery-grid,
   .provider-recovery-grid,
   .onboarding-runner-recovery-grid,
   .charter-summary-grid,
@@ -4226,6 +4266,7 @@ code {
   .runtime-summary-grid,
   .source-recovery-grid,
   .charter-recovery-grid,
+  .proposal-recovery-grid,
   .provider-recovery-grid,
   .charter-summary-grid,
   .charter-workbench-grid,

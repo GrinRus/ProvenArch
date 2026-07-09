@@ -3789,6 +3789,16 @@ export function ProposalsStagePanel({
         </div>
         <StatusBadge tone={proposalReview.proposalArtifacts.length > 0 ? "ok" : "info"}>{proposalReview.proposalArtifacts.length} refs</StatusBadge>
       </div>
+      {proposalReview.blockers.length > 0 ? (
+        <ProposalPackageRecoveryPanel
+          proposalReview={proposalReview}
+          preferredArtifact={preferredProposalArtifact}
+          proposalBranch={proposalBranch}
+          gitStatus={gitStatus}
+          onOpenArtifact={onOpenArtifact}
+          onGoPublish={onGoPublish}
+        />
+      ) : null}
       <div className="proposals-review-room" data-testid="proposals-review-room">
         <aside className="proposals-artifact-list" data-testid="proposals-artifact-list">
           <div className="section-heading-row">
@@ -3962,6 +3972,93 @@ export function ProposalsStagePanel({
   );
 }
 
+function ProposalPackageRecoveryPanel({
+  proposalReview,
+  preferredArtifact,
+  proposalBranch,
+  gitStatus,
+  onOpenArtifact,
+  onGoPublish,
+}: {
+  proposalReview: ProposalReviewModel;
+  preferredArtifact: Artifact | undefined;
+  proposalBranch: string;
+  gitStatus: string;
+  onOpenArtifact: (path: string) => void;
+  onGoPublish: () => void;
+}) {
+  const primaryBlocker = proposalReview.blockers[0] ?? "No proposal package blocker detected.";
+  const suggestedFix = proposalPackageSuggestedFix(primaryBlocker);
+  const packageState = proposalReview.proposalDocumentArtifacts.length > 0 ? `${proposalReview.packages.length} artifact groups` : "proposal missing";
+  const publicationPath =
+    proposalReview.blockers.length > 0
+      ? "Keep Publish as review-only until proposal, changelog and evidence blockers are resolved."
+      : proposalBranch
+        ? `Ready for Publish review on ${proposalBranch}.`
+        : "Ready for Publish review; prepare a proposal branch before handoff.";
+
+  return (
+    <section className="proposal-recovery-panel" data-testid="proposal-package-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Proposal package recovery</h2>
+          <p className="hint">Resolve proposal/changelog gaps before treating this run as publication-ready.</p>
+        </div>
+        <StatusBadge tone="warn">proposal blocked</StatusBadge>
+      </div>
+      <div className="proposal-recovery-grid">
+        <div>
+          <span className="meta-label">Package state</span>
+          <strong>{packageState}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Proposal docs</span>
+          <strong>{proposalReview.proposalDocumentCount}</strong>
+        </div>
+        <div>
+          <span className="meta-label">ADR/RFC</span>
+          <strong>{proposalReview.adrRfcCount}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Changelog</span>
+          <strong>{proposalReview.changelogArtifacts.length}</strong>
+        </div>
+        <div>
+          <span className="meta-label">Evidence refs</span>
+          <strong>{proposalReview.evidenceArtifacts.length}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs proposal-recovery-detail">
+        <div>
+          <dt>Primary blocker</dt>
+          <dd>{primaryBlocker}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{suggestedFix}</dd>
+        </div>
+        <div>
+          <dt>Publication path</dt>
+          <dd>
+            {publicationPath}
+            {gitStatus ? ` ${gitStatus}` : ""}
+          </dd>
+        </div>
+      </dl>
+      <div className="actions proposal-recovery-actions">
+        {preferredArtifact ? (
+          <button type="button" className="secondary" onClick={() => onOpenArtifact(preferredArtifact.path)}>
+            Open available artifact
+          </button>
+        ) : null}
+        <button type="button" className="secondary" onClick={onGoPublish}>
+          Check Publish gate
+        </button>
+      </div>
+    </section>
+  );
+}
+
 type ProposalReviewPackage = {
   name: string;
   artifacts: Artifact[];
@@ -3969,6 +4066,7 @@ type ProposalReviewPackage = {
 
 type ProposalReviewModel = {
   proposalArtifacts: Artifact[];
+  proposalDocumentArtifacts: Artifact[];
   changelogArtifacts: Artifact[];
   evidenceArtifacts: Artifact[];
   packages: ProposalReviewPackage[];
@@ -4011,6 +4109,7 @@ function deriveProposalReviewModel({
   }
   return {
     proposalArtifacts,
+    proposalDocumentArtifacts,
     changelogArtifacts,
     evidenceArtifacts,
     packages,
@@ -4018,6 +4117,22 @@ function deriveProposalReviewModel({
     adrRfcCount,
     blockers,
   };
+}
+
+function proposalPackageSuggestedFix(blocker: string): string {
+  if (blocker.includes("No proposal package")) {
+    return "Retry or rerun Analysis step4.proposals, then confirm a generated proposals/* artifact appears before Publish.";
+  }
+  if (blocker.includes("ADR or RFC")) {
+    return "Generate or add an ADR/RFC draft under proposals/* so reviewers can see the decision record or implementation plan.";
+  }
+  if (blocker.includes("No changelog")) {
+    return "Regenerate proposals so reports/changelog/* records the iteration changes linked to the package.";
+  }
+  if (blocker.includes("open questions")) {
+    return "Resolve the Review open questions or record an explicit accepted gap before publication handoff.";
+  }
+  return "Inspect the proposal package artifacts, resolve blockers, and use Publish only after the package is complete.";
 }
 
 function groupProposalArtifacts(artifacts: Artifact[]): ProposalReviewPackage[] {

@@ -160,6 +160,7 @@ Primary action: `Approve proposal`.
 
 Must show:
 - proposal/changelog list;
+- proposal package recovery for missing proposal docs, missing ADR/RFC drafts, missing changelog artifacts or unresolved review questions;
 - formatted proposal preview with diff/evidence/changelog tabs;
 - linked findings and evidence coverage;
 - unresolved owner/questions blockers;
@@ -277,7 +278,8 @@ empty/partial state rather than changing backend contracts implicitly.
   - if model artifacts are missing or sparse, render an explicit partial/empty map state.
 - Proposals:
   - proposal/changelog artifacts under `proposals/*` and `reports/changelog/*`;
-  - linked findings/evidence from artifact content and current run artifact index.
+  - linked findings/evidence from artifact content and current run artifact index;
+  - proposal recovery state derived from artifact refs and open questions, without a separate backend contract.
 - Ask:
   - async QA APIs `POST /api/qa/runs`, `GET /api/qa/runs/<run_id>`,
     `GET /api/qa/runs?limit=...`;
