@@ -106,6 +106,7 @@ Must show:
 - domain/team cards;
 - markdown artifact preview/editor for `charter/*`;
 - baseline prompt bundle status;
+- charter baseline recovery for prompt/charter bundle diagnostics before raw editor warnings;
 - charter readiness and Git path.
 
 ### 4. Analysis
@@ -253,6 +254,7 @@ empty/partial state rather than changing backend contracts implicitly.
   - local selected runtime/provider state for expected command and `ACP_*_CMD` override guidance.
 - Charter:
   - baseline bundle/editor artifacts from existing workspace setup/baseline hooks;
+  - charter baseline recovery derived from existing baseline bundle diagnostics and editable artifact metadata;
   - `charter/*`, `skills/*`, `skills/subagents.yaml`, prompt packs;
   - step0 wizard contract under `charter/wizard/step0-contract.json`.
 - Analysis:

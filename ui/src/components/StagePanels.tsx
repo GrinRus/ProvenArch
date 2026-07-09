@@ -966,6 +966,7 @@ export function CharterStagePanel({
   const livePromptPacks = promptPacks.filter((artifact) => artifact.prompt_usage === "live-consumed");
   const referenceOnlyPrompts = baselineProps.baselineEditorArtifacts.filter((artifact) => artifact.prompt_usage === "reference-only");
   const wizardReady = Boolean(wizardProjectName.trim() && wizardScope.trim());
+  const charterRecovery = buildCharterBaselineRecovery(baselineProps.baselineBundleWarnings, baselineProps.baselineEditorArtifacts, baselineProps.selectedEditorPath);
 
   return (
     <div className="stage-stack" data-testid="charter-panel">
@@ -979,6 +980,8 @@ export function CharterStagePanel({
         </div>
         <CharterWizardSummary wizardProjectName={wizardProjectName} wizardScope={wizardScope} wizardNfr={wizardNfr} wizardRules={wizardRules} />
       </section>
+
+      {charterRecovery ? <CharterBaselineRecovery issue={charterRecovery} /> : null}
 
       <section className="charter-workbench-grid" data-testid="charter-workbench">
         <CharterCardOverview domainCards={domainCards} teamCards={teamCards} charterArtifacts={charterArtifacts} />
@@ -998,6 +1001,145 @@ export function CharterStagePanel({
       {gitPanel}
     </div>
   );
+}
+
+type CharterRecoveryIssue = {
+  artifactPath: string;
+  artifactLabel: string;
+  category: string;
+  promptUsage: string;
+  severity: Diagnostic["level"];
+  diagnosticCode: string;
+  message: string;
+  suggestion: string;
+};
+
+function CharterBaselineRecovery({ issue }: { issue: CharterRecoveryIssue }) {
+  const badgeTone = issue.severity === "error" ? "error" : "warn";
+  return (
+    <section className="charter-recovery-panel" data-testid="charter-baseline-recovery">
+      <div className="section-heading-row">
+        <div>
+          <h2>Charter baseline recovery</h2>
+          <p className="hint">Resolve prompt or charter bundle diagnostics before using the baseline as live analysis context.</p>
+        </div>
+        <StatusBadge tone={badgeTone}>{issue.severity === "error" ? "baseline blocked" : "baseline warning"}</StatusBadge>
+      </div>
+      <div className="charter-recovery-grid">
+        <div>
+          <span className="metric-label">Affected artifact</span>
+          <strong>{issue.artifactLabel}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Category</span>
+          <strong>{issue.category}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Runtime use</span>
+          <strong>{issue.promptUsage}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Diagnostic</span>
+          <strong>{issue.diagnosticCode}</strong>
+        </div>
+      </div>
+      <dl className="compact-defs charter-recovery-detail">
+        <div>
+          <dt>Message</dt>
+          <dd>{issue.message}</dd>
+        </div>
+        <div>
+          <dt>Suggested fix</dt>
+          <dd>{issue.suggestion}</dd>
+        </div>
+        <div>
+          <dt>Artifact path</dt>
+          <dd>{issue.artifactPath}</dd>
+        </div>
+      </dl>
+      <ul className="analysis-next-actions">
+        <li>Select the affected artifact in Baseline: Editors, update the charter or prompt content, then use Save selected baseline artifact.</li>
+        <li>Keep live-consumed prompt packs aligned before running Analysis; reference-only prompts can be fixed after the primary charter path is clear.</li>
+        <li>Use Git status below Charter to review the workspace diff before publication.</li>
+      </ul>
+    </section>
+  );
+}
+
+function buildCharterBaselineRecovery(
+  baselineBundleWarnings: Diagnostic[],
+  baselineEditorArtifacts: EditableArtifactOption[],
+  selectedEditorPath: string,
+): CharterRecoveryIssue | null {
+  const diagnostic = baselineBundleWarnings.find((warning) => warning.level === "error") ?? baselineBundleWarnings[0];
+  if (!diagnostic) {
+    return null;
+  }
+
+  const artifact = findCharterDiagnosticArtifact(diagnostic, baselineEditorArtifacts, selectedEditorPath);
+  const artifactPath = artifact?.path ?? diagnostic.path ?? selectedEditorPath ?? "baseline bundle";
+  return {
+    artifactPath,
+    artifactLabel: artifact?.label ?? artifactPath,
+    category: artifact?.category ?? (artifactPath.startsWith("charter/") ? "charter" : artifactPath.startsWith("skills/") ? "skills" : "bundle"),
+    promptUsage: promptUsageLabel(artifact),
+    severity: diagnostic.level,
+    diagnosticCode: diagnostic.code,
+    message: diagnostic.message,
+    suggestion: diagnostic.suggestion || defaultCharterSuggestion(artifactPath),
+  };
+}
+
+function findCharterDiagnosticArtifact(
+  diagnostic: Diagnostic,
+  baselineEditorArtifacts: EditableArtifactOption[],
+  selectedEditorPath: string,
+): EditableArtifactOption | undefined {
+  const directPath = diagnostic.path?.trim();
+  if (directPath) {
+    const direct = baselineEditorArtifacts.find((artifact) => artifact.path === directPath);
+    if (direct) {
+      return direct;
+    }
+    const suffix = baselineEditorArtifacts.find((artifact) => directPath.endsWith(artifact.path) || artifact.path.endsWith(directPath));
+    if (suffix) {
+      return suffix;
+    }
+  }
+
+  const messageMatch = baselineEditorArtifacts.find((artifact) => diagnostic.message.includes(artifact.path) || diagnostic.message.includes(artifact.label));
+  if (messageMatch) {
+    return messageMatch;
+  }
+
+  if (selectedEditorPath) {
+    return baselineEditorArtifacts.find((artifact) => artifact.path === selectedEditorPath);
+  }
+
+  return undefined;
+}
+
+function promptUsageLabel(artifact?: EditableArtifactOption) {
+  if (!artifact) {
+    return "bundle diagnostic";
+  }
+  if (artifact.prompt_usage === "live-consumed") {
+    return "live consumed";
+  }
+  if (artifact.prompt_usage === "reference-only") {
+    return "reference only";
+  }
+  return artifact.path.startsWith("charter/") ? "charter context" : "editable baseline";
+}
+
+function defaultCharterSuggestion(artifactPath: string) {
+  if (artifactPath.startsWith("skills/prompt-packs/")) {
+    return "Open the live-consumed prompt pack, fix the diagnostic, then save the selected baseline artifact.";
+  }
+  if (artifactPath.startsWith("charter/")) {
+    return "Open the charter artifact, fix the project context, then save the selected baseline artifact.";
+  }
+  return "Open the affected baseline artifact, fix the diagnostic, then save it before running Analysis.";
 }
 
 function CharterWizardSummary({

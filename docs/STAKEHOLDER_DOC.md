@@ -284,7 +284,7 @@ arch-workspace/
 
 2) **UI (локальный web-интерфейс)**  
    - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
-   - wizard summary, domain/team card overview и baseline prompt bundle status для “Конституции” в `Charter`
+   - wizard summary, domain/team card overview, baseline prompt bundle status и charter baseline recovery для “Конституции” в `Charter`
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state и source validation recovery для blocking repo/source diagnostics
    - readiness validation, summary cards, provider readiness recovery, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  

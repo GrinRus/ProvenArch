@@ -1472,6 +1472,37 @@ describe("App", () => {
     expect(screen.getByTestId("charter-artifact-editor")).toHaveTextContent("Baseline: Editors");
   });
 
+  it("shows Charter baseline recovery for prompt bundle diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        baselineBundleWarnings: [
+          {
+            level: "warning",
+            code: "baseline.prompt_pack.missing_policy",
+            message: "skills/prompt-packs/qa.md is missing the artifact-only policy reminder.",
+            suggestion: "Add the artifact-only policy reminder before live Q&A runs.",
+            path: "skills/prompt-packs/qa.md",
+          },
+        ],
+      }),
+    );
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const recovery = await screen.findByTestId("charter-baseline-recovery");
+    expect(recovery).toHaveTextContent("Charter baseline recovery");
+    expect(recovery).toHaveTextContent("skills/prompt-packs/qa.md");
+    expect(recovery).toHaveTextContent("prompt-pack");
+    expect(recovery).toHaveTextContent("live consumed");
+    expect(recovery).toHaveTextContent("baseline.prompt_pack.missing_policy");
+    expect(recovery).toHaveTextContent("Add the artifact-only policy reminder before live Q&A runs.");
+    expect(recovery).toHaveTextContent("Save selected baseline artifact");
+    expect(screen.getByTestId("charter-prompt-bundle-status")).toHaveTextContent("1 warnings");
+  });
+
   it("supports keyboard navigation across the V2 stage rail", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 

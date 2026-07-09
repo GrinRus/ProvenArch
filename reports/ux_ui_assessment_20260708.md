@@ -656,3 +656,31 @@ Live medium status:
 Residual UX work after Slice 22:
 - Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
 - Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
+
+## Slice 23 Result
+
+Implemented:
+- Added a dedicated `Charter baseline recovery` panel above the Charter workbench when baseline bundle diagnostics are present.
+- The panel shows affected artifact, category, runtime use (`live consumed`, `reference only`, `charter context`), diagnostic code, severity, message, suggested fix and exact `Save selected baseline artifact` next action.
+- The panel maps diagnostics to editable artifact metadata using existing `BaselineBundleResponse.warnings` and `editable_artifacts`; raw warning lines remain in the editor for detailed inspection.
+- Existing baseline bundle diagnostics and editor artifact metadata remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `npm --prefix ui test -- --run App.test.tsx` -> `72 passed`
+- UI typecheck: `npm --prefix ui run typecheck` -> passed
+- rendered Charter recovery check: Playwright opened the Vite UI with mocked `/api/*`, asserted `charter-baseline-recovery` content and no horizontal overflow on `1440x980` and `390x900`; screenshots: `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-charter-recovery-manual.zN6vmE/charter-recovery-desktop.png`, `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-charter-recovery-manual.zN6vmE/charter-recovery-mobile.png`
+- fake-runtime rendered smoke: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin UI_E2E_BASE_URL=http://127.0.0.1:51850 UI_E2E_QA_SMOKE=0 UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-charter-recovery-results.dNBmXDjg ./scripts/run-npm.sh run --prefix ui e2e:live` -> `1 passed` (`run_20260709_062422_001`)
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `89` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who lands on Charter with prompt/charter bundle diagnostics no longer has to infer impact from raw warning lines below the fold.
+- The Charter stage now explains whether the affected file is live-consumed runtime context or reference-only seed content before Analysis.
+- Recovery copy names the exact editor action and keeps Git review in the same stage.
+
+Live medium status:
+- Current preflight remains `operational_host_preflight_failed`: `/tmp/provenarch-live-e2e` is absent, canonical PostHog/FTGO path inputs are absent, and `/tmp` has about `3.19GiB` free, below the 5 GiB matrix guard.
+- No canonical matrix, curated repos file or wrapper script was changed.
+
+Residual UX work after Slice 23:
+- Medium live rerun requires a trusted host or volume with enough space for canonical PostHog/FTGO checkouts.
+- Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
