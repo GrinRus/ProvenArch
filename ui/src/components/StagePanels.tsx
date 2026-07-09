@@ -2394,7 +2394,8 @@ function buildAnalysisShardRows(
 ): AnalysisShardRow[] {
   const grouped = new Map<string, RunLogEntry[]>();
   for (const entry of runLogs) {
-    const key = entry.taskrun_path || `${entry.step_id || "run"}/${entry.domain_id || "workspace"}`;
+    const shardScope = fieldString(entry.fields, "shard_id") || shardScopeFromPath(entry.taskrun_path ?? "");
+    const key = shardScope ? `${entry.step_id || "run"}/shard/${shardScope}` : entry.taskrun_path || `${entry.step_id || "run"}/${entry.domain_id || "workspace"}`;
     grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   }
   const provider = setupRuntime === "fake" ? "fake" : setupRuntimeProvider;
@@ -2404,8 +2405,9 @@ function buildAnalysisShardRows(
     const stepId = last?.step_id || entries.find((entry) => entry.step_id)?.step_id || runStatus?.current_step || "-";
     const hasError = entries.some((entry) => entry.level === "error");
     const hasWarning = entries.some((entry) => entry.level === "warning");
-    const scope = last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace";
-    const artifactRef = last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only");
+    const shardScope = fieldString(last?.fields, "shard_id") || shardScopeFromPath(last?.taskrun_path ?? "");
+    const scope = shardScope || last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || "workspace";
+    const artifactRef = [...entries].reverse().find((entry) => entry.taskrun_path)?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only");
     rows.push({
       key,
       stepId,
@@ -2414,7 +2416,7 @@ function buildAnalysisShardRows(
       status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
       artifactRef,
       artifactPair: buildAnalysisArtifactPairState(scope, artifactRef, artifacts),
-      duration: durationFromLogFields(last?.fields),
+      duration: durationFromEntries(entries),
       lastMessage: last?.message || "-",
     });
   }
@@ -2512,6 +2514,12 @@ function pathMatchesShardScope(path: string, scope: string): boolean {
   return path.includes(`/${shardSegment}`) || path.startsWith(shardSegment);
 }
 
+function shardScopeFromPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const match = normalized.match(/(?:^|\/)staging\/shards\/([^/]+)\//);
+  return match?.[1] ?? "";
+}
+
 function formatArtifactPairRefs(paths: string[]): string {
   if (paths.length === 0) {
     return "missing";
@@ -2592,6 +2600,16 @@ function durationFromLogFields(fields: Record<string, unknown> | undefined): str
   const seconds = numericField(fields, "duration_sec") ?? numericField(fields, "elapsed_sec") ?? numericField(fields, "runtime_duration_sec");
   if (seconds !== undefined) {
     return formatDurationMillis(seconds * 1000);
+  }
+  return "Duration unavailable";
+}
+
+function durationFromEntries(entries: RunLogEntry[]): string {
+  for (const entry of [...entries].reverse()) {
+    const duration = durationFromLogFields(entry.fields);
+    if (duration !== "Duration unavailable") {
+      return duration;
+    }
   }
   return "Duration unavailable";
 }

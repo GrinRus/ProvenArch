@@ -797,3 +797,34 @@ Observed improvement:
 Residual UX work after Slice 27:
 - Rendered failed-run visual QA should be added when a stable mocked failed-run browser fixture is available; current verification is component-level plus DoD.
 - The execution blocker remains runtime/provider behavior: qwen must reliably write the collect artifact pair before the medium live matrix can pass.
+
+## Slice 28 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 27 from a clean committed tree.
+- action: confirmed `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T094207Z`.
+- observed evidence: `single-path/baseline` stopped before backend/frontend as `operational_host_preflight_failed` because `qwen headless probe timed out after 30s`; reports exist under `/tmp/provenarch-test_arch_project/reports/*regres-long-posthog-ftgo-20260709T094207Z-single-path-baseline*`.
+- observed evidence: `single-git_url/baseline` reached FTGO headless init collect; after repeated artifact-handoff stalls the diagnostic run was manually interrupted and classified as `infra_signal_terminated`, not a release verdict. Public shard summary at `/tmp/provenarch-test_arch_project/runs/regres-long-posthog-ftgo-20260709T094207Z-single-git-url-baseline/qwen-code/run1/headless/arch-workspace/reports/taskruns/run_20260709_094918_001-init-step1-collect-shard-summary-ftgo-application.json` ended `15 failed / 1 succeeded`.
+- observed evidence: first four FTGO failures were genuine `stage=collect_pair_repair` / `runtime_stalled_before_artifacts`; the only succeeded shard had authored markdown + `shard-pack-manifest.json` + runtime metadata. Later `context canceled` failures came from the deliberate stop and are not counted as product defects.
+- status: failed diagnostic / interrupted after repeated evidence.
+- primary classification: runtime_contract_failed for repeated qwen collect artifact handoff, plus operational_host_preflight_failed for PostHog provider readiness; final FTGO profile status is `infra_signal_terminated` because of the manual stop.
+- next decision: fix the UI mapping bug exposed by the live evidence, then rerun deterministic UI verification and full DoD.
+
+Implemented:
+- Fixed Analysis shard/log grouping to prefer `fields.shard_id` or `staging/shards/<shard_id>` path segments over `domain_id` when matching selected-run artifacts.
+- Grouped same-shard runtime, repair and terminal log rows together even when later repair rows do not carry `taskrun_path`.
+- Preserved shard duration from the latest grouped log entry that actually contains duration fields, so terminal repair messages do not erase useful timing.
+- Added a live-shaped regression fixture where `domain_id=ftgo-application` but artifacts are scoped by distinct shard IDs.
+
+Post-change evidence:
+- targeted component test: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui test -- App.test.tsx --run -t "renders Analysis V2 run progress"` -> `1 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `90` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- Real medium-run rows like `ftgo-application-gitattributes-...` now map to `Runtime only` instead of losing artifact-pair state under the broader `ftgo-application` domain.
+- The one successful FTGO shard maps to `Artifact pair present`, making mixed collect outcomes visible without reading raw output.
+- The blocker drilldown now keeps the terminal repair message while retaining the earlier runtime record and duration for the same shard.
+
+Residual UX work after Slice 28:
+- Add rendered failed-run visual QA around this exact `domain_id != shard_id` fixture.
+- The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.

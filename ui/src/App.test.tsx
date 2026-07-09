@@ -2892,10 +2892,10 @@ describe("App", () => {
                 level: "error",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "payments",
+                domain_id: "ftgo-application",
                 message: "collect manifest missing",
-                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json",
-                fields: { provider: "qwen-code", shard_id: "payments", duration_ms: 2140 },
+                taskrun_path: "reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json",
+                fields: { provider: "qwen-code", shard_id: "payments-root-shard", duration_ms: 2140 },
               },
               {
                 cursor: 2,
@@ -2903,9 +2903,9 @@ describe("App", () => {
                 level: "info",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "invoices",
+                domain_id: "ftgo-application",
                 message: "runtime execution persisted",
-                fields: { provider: "qwen-code", shard_id: "invoices", shards_total: 2, succeeded: 1, failed: 1 },
+                fields: { provider: "qwen-code", shard_id: "invoices-module-shard", shards_total: 2, succeeded: 1, failed: 1 },
               },
               {
                 cursor: 3,
@@ -2913,11 +2913,11 @@ describe("App", () => {
                 level: "warning",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "payments",
+                domain_id: "ftgo-application",
                 message: "focused artifact repair scheduled",
                 fields: {
                   provider: "qwen-code",
-                  shard_id: "payments",
+                  shard_id: "payments-root-shard",
                   recovery_mode: "collect_pair_repair",
                   validation_error: 'documents[0].path references process-contaminated collect document file "root-overview.md"',
                 },
@@ -2928,12 +2928,12 @@ describe("App", () => {
                 level: "error",
                 kind: "event",
                 step_id: "init.step1.collect",
-                domain_id: "payments",
+                domain_id: "ftgo-application",
                 message:
                   "focused artifact repair exhausted stage=collect_pair_repair (raw_output=reports/taskruns/run-analysis-v2/raw/payments/collect.json stdout_bytes=0 stdout_sha256=abc stderr_bytes=0 stderr_sha256=def)",
                 fields: {
                   provider: "qwen-code",
-                  shard_id: "payments",
+                  shard_id: "payments-root-shard",
                   recovery_mode: "collect_pair_repair",
                   stall_phase: "pre_artifact",
                   exit_reason: "stall",
@@ -2959,10 +2959,10 @@ describe("App", () => {
           [runID]: {
             run_id: runID,
             artifacts: [
-              { path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" },
-              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/runtime-execution.json", kind: "runtime", label: "runtime execution" },
-              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/invoices-overview.md", kind: "report", label: "invoices overview" },
-              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/shard-pack-manifest.json", kind: "manifest", label: "shard manifest" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/invoices-overview.md", kind: "report", label: "invoices overview" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices-module-shard/shard-pack-manifest.json", kind: "manifest", label: "shard manifest" },
             ],
           },
         },
@@ -2988,7 +2988,8 @@ describe("App", () => {
     expect(timeline).toHaveTextContent("blocked");
 
     const shardTable = await screen.findByTestId("analysis-shard-table");
-    expect(shardTable).toHaveTextContent("payments");
+    expect(shardTable).toHaveTextContent("payments-root-shard");
+    expect(shardTable).toHaveTextContent("invoices-module-shard");
     expect(shardTable).toHaveTextContent("fake");
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
@@ -3000,11 +3001,11 @@ describe("App", () => {
     expect(shardTable).not.toHaveTextContent("not exposed");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
-    expect(drilldown).toHaveTextContent("collect manifest missing");
+    expect(drilldown).toHaveTextContent("focused artifact repair exhausted");
     expect(drilldown).toHaveTextContent("Runtime record");
     expect(drilldown).toHaveTextContent("Authored markdown");
     expect(drilldown).toHaveTextContent("Manifest");
-    expect(drilldown).toHaveTextContent("reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json");
+    expect(drilldown).toHaveTextContent("reports/taskruns/run-analysis-v2/staging/shards/payments-root-shard/runtime-execution.json");
     expect(drilldown).toHaveTextContent("missing");
 
     const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");

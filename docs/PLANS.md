@@ -1379,6 +1379,29 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 
 ---
 
+## UX/UI Iteration: Live Shard Scope Mapping
+
+### Context
+- 2026-07-09 medium `regres long` diagnostic `regres-long-posthog-ftgo-20260709T094207Z` exposed a UI mapping gap after Slice 27.
+- Real FTGO collect logs use `domain_id=ftgo-application` while selected-run artifacts are stored under `staging/shards/<shard_id>/...`.
+- Analysis shard/log rows previously preferred `domain_id` for scope matching, so live rows could miss `Runtime only` / `Artifact pair present` state even when the artifact files were present.
+
+### Plan
+- [x] Prefer `fields.shard_id` and `staging/shards/<shard_id>` path segments for Analysis shard grouping and artifact-pair matching.
+- [x] Keep same-shard runtime, repair and terminal log rows grouped even when later rows do not carry `taskrun_path`.
+- [x] Preserve duration from the latest grouped row with duration fields.
+- [x] Add a live-shaped UI regression where `domain_id` differs from `shard_id`.
+- [x] Run full DoD with exact Node toolchain.
+- [x] Commit the slice.
+
+### Acceptance
+- [x] A failed live-shaped shard with only `runtime-execution.json` renders as `Runtime only`.
+- [x] A neighboring live-shaped shard with markdown + manifest renders as `Artifact pair present`.
+- [x] The blocker drilldown keeps terminal repair copy while retaining the shard runtime record ref.
+- [x] Full DoD passes: `make contracts`, `make test`, `make lint`, `make build`.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
