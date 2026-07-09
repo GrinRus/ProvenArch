@@ -774,3 +774,26 @@ Observed improvement:
 Residual UX work after Slice 26:
 - The execution blocker is still runtime/provider behavior, not a visual UI blocker: qwen produced 10 PostHog collect artifact-handoff failures and later timed out readiness for the FTGO profile.
 - The next iteration should decide whether to improve runtime/provider prompt behavior or add deeper per-shard artifact-pair inspection in the UI.
+
+## Slice 27 Result
+
+Implemented:
+- Added per-shard artifact-pair state to the Analysis shard/log table.
+- The table and blocker drilldown now distinguish `Runtime only`, `Markdown only`, `Manifest only`, `Artifact pair present` and missing selected-run shard artifacts.
+- The blocker drilldown shows separate refs for runtime execution metadata, authored markdown and `shard-pack-manifest.json`, so a first-time operator can verify the collect handoff without inferring it from raw logs.
+- Existing selected-run artifact refs and run logs remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui test -- App.test.tsx --run` -> `73 passed`
+- full UI suite: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui test -- --run` -> `90 passed`
+- UI typecheck: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui typecheck` -> passed
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `90` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A failed collect shard with only `runtime-execution.json` now reads as `Runtime only` and explicitly says authored markdown plus manifest are missing.
+- A neighboring shard with markdown and manifest reads as `Artifact pair present`, making mixed collect results easier to scan.
+- The retry decision is clearer: raw output remains useful for provider diagnosis, but the operator can first check whether the required authored artifact pair exists.
+
+Residual UX work after Slice 27:
+- Rendered failed-run visual QA should be added when a stable mocked failed-run browser fixture is available; current verification is component-level plus DoD.
+- The execution blocker remains runtime/provider behavior: qwen must reliably write the collect artifact pair before the medium live matrix can pass.

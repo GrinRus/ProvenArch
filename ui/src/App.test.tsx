@@ -2958,7 +2958,12 @@ describe("App", () => {
         runArtifacts: {
           [runID]: {
             run_id: runID,
-            artifacts: [{ path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" }],
+            artifacts: [
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/runtime-execution.json", kind: "runtime", label: "runtime execution" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/invoices-overview.md", kind: "report", label: "invoices overview" },
+              { path: "reports/taskruns/run-analysis-v2/staging/shards/invoices/shard-pack-manifest.json", kind: "manifest", label: "shard manifest" },
+            ],
           },
         },
       }),
@@ -2987,12 +2992,20 @@ describe("App", () => {
     expect(shardTable).toHaveTextContent("fake");
     expect(shardTable).toHaveTextContent("failed");
     expect(shardTable).toHaveTextContent("runtime-execution.json");
+    expect(shardTable).toHaveTextContent("Runtime only");
+    expect(shardTable).toHaveTextContent("authored markdown and shard-pack-manifest are missing");
+    expect(shardTable).toHaveTextContent("Artifact pair present");
     expect(shardTable).toHaveTextContent("2s");
     expect(shardTable).toHaveTextContent("Duration unavailable");
     expect(shardTable).not.toHaveTextContent("not exposed");
 
     const drilldown = screen.getByTestId("analysis-failed-shard-details");
     expect(drilldown).toHaveTextContent("collect manifest missing");
+    expect(drilldown).toHaveTextContent("Runtime record");
+    expect(drilldown).toHaveTextContent("Authored markdown");
+    expect(drilldown).toHaveTextContent("Manifest");
+    expect(drilldown).toHaveTextContent("reports/taskruns/run-analysis-v2/staging/shards/payments/runtime-execution.json");
+    expect(drilldown).toHaveTextContent("missing");
 
     const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
     expect(liveDiagnostics).toHaveTextContent("Live diagnostics");

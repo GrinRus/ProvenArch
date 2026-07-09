@@ -1494,6 +1494,41 @@ code {
   font-size: 0.82rem;
 }
 
+.artifact-pair-state {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 0.74rem;
+  line-height: 1.32;
+}
+
+.artifact-pair-state strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.artifact-pair-state.ok strong {
+  color: var(--ok);
+}
+
+.artifact-pair-state.warn strong {
+  color: var(--warn);
+}
+
+.artifact-pair-state.error strong {
+  color: var(--err);
+}
+
+.artifact-pair-refs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.22rem;
+}
+
+.artifact-pair-refs > div {
+  padding: 0.38rem;
+}
+
 .permission-recovery-panel {
   display: grid;
   gap: 0.58rem;
@@ -1928,43 +1963,48 @@ code {
 }
 
 .analysis-shard-table {
-  min-width: 820px;
+  min-width: 980px;
   table-layout: fixed;
 }
 
 .analysis-shard-table th:nth-child(1),
 .analysis-shard-table td:nth-child(1) {
-  width: 21%;
+  width: 18%;
 }
 
 .analysis-shard-table th:nth-child(2),
 .analysis-shard-table td:nth-child(2) {
-  width: 10%;
+  width: 9%;
 }
 
 .analysis-shard-table th:nth-child(3),
 .analysis-shard-table td:nth-child(3) {
-  width: 12%;
+  width: 10%;
 }
 
 .analysis-shard-table th:nth-child(4),
 .analysis-shard-table td:nth-child(4) {
-  width: 8%;
+  width: 7%;
 }
 
 .analysis-shard-table th:nth-child(5),
 .analysis-shard-table td:nth-child(5) {
-  width: 16%;
+  width: 14%;
 }
 
 .analysis-shard-table th:nth-child(6),
 .analysis-shard-table td:nth-child(6) {
-  width: 15%;
+  width: 16%;
 }
 
 .analysis-shard-table th:nth-child(7),
 .analysis-shard-table td:nth-child(7) {
-  width: 18%;
+  width: 10%;
+}
+
+.analysis-shard-table th:nth-child(8),
+.analysis-shard-table td:nth-child(8) {
+  width: 16%;
 }
 
 .analysis-shard-table td {
@@ -1980,8 +2020,8 @@ code {
 .analysis-shard-table td:nth-child(3),
 .analysis-shard-table th:nth-child(4),
 .analysis-shard-table td:nth-child(4),
-.analysis-shard-table th:nth-child(6),
-.analysis-shard-table td:nth-child(6) {
+.analysis-shard-table th:nth-child(7),
+.analysis-shard-table td:nth-child(7) {
   white-space: nowrap;
 }
 
@@ -4370,7 +4410,7 @@ code {
 
   .analysis-shard-table td:nth-child(5),
   .analysis-shard-table td:nth-child(6),
-  .analysis-shard-table td:nth-child(7) {
+  .analysis-shard-table td:nth-child(8) {
     grid-template-columns: 1fr;
   }
 

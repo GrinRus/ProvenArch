@@ -1490,8 +1490,18 @@ type AnalysisShardRow = {
   provider: string;
   status: "succeeded" | "active" | "failed" | "warning" | "observed";
   artifactRef: string;
+  artifactPair: AnalysisArtifactPairState;
   duration: string;
   lastMessage: string;
+};
+
+type AnalysisArtifactPairState = {
+  label: string;
+  detail: string;
+  tone: "info" | "ok" | "warn" | "error";
+  runtimeRefs: string[];
+  markdownRefs: string[];
+  manifestRefs: string[];
 };
 
 type AnalysisLiveMetric = {
@@ -2197,6 +2207,7 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                 <th>Provider</th>
                 <th>Status</th>
                 <th>Artifact/log ref</th>
+                <th>Artifact pair</th>
                 <th>Duration</th>
                 <th>Last message</th>
               </tr>
@@ -2209,6 +2220,12 @@ function AnalysisShardTable({ rows }: { rows: AnalysisShardRow[] }) {
                   <td data-label="Provider">{row.provider}</td>
                   <td data-label="Status">{row.status}</td>
                   <td data-label="Artifact/log ref">{row.artifactRef}</td>
+                  <td data-label="Artifact pair">
+                    <span className={`artifact-pair-state ${row.artifactPair.tone}`}>
+                      <strong>{row.artifactPair.label}</strong>
+                      <span>{row.artifactPair.detail}</span>
+                    </span>
+                  </td>
                   <td data-label="Duration">{row.duration}</td>
                   <td data-label="Last message">{row.lastMessage}</td>
                 </tr>
@@ -2320,6 +2337,24 @@ function AnalysisFailedShardDetails({ rows, detailsRef }: { rows: AnalysisShardR
               <span>
                 {row.status.toUpperCase()} · {row.stepId} · {row.scope}
               </span>
+              <span className={`artifact-pair-state ${row.artifactPair.tone}`}>
+                <strong>{row.artifactPair.label}</strong>
+                <span>{row.artifactPair.detail}</span>
+              </span>
+              <dl className="compact-defs artifact-pair-refs">
+                <div>
+                  <dt>Runtime record</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.runtimeRefs)}</dd>
+                </div>
+                <div>
+                  <dt>Authored markdown</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.markdownRefs)}</dd>
+                </div>
+                <div>
+                  <dt>Manifest</dt>
+                  <dd>{formatArtifactPairRefs(row.artifactPair.manifestRefs)}</dd>
+                </div>
+              </dl>
               <code>{row.lastMessage}</code>
             </li>
           ))}
@@ -2369,13 +2404,16 @@ function buildAnalysisShardRows(
     const stepId = last?.step_id || entries.find((entry) => entry.step_id)?.step_id || runStatus?.current_step || "-";
     const hasError = entries.some((entry) => entry.level === "error");
     const hasWarning = entries.some((entry) => entry.level === "warning");
+    const scope = last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace";
+    const artifactRef = last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only");
     rows.push({
       key,
       stepId,
-      scope: last?.domain_id || fieldString(last?.fields, "domain_id") || fieldString(last?.fields, "repo") || fieldString(last?.fields, "shard_id") || "workspace",
+      scope,
       provider: setupRuntime === "fake" ? "fake" : fieldString(last?.fields, "provider") || provider,
       status: hasError ? "failed" : hasWarning ? "warning" : runStatus?.status === "succeeded" ? "succeeded" : runStatus?.current_step && stepMatches(runStatus.current_step, stepId) ? "active" : "observed",
-      artifactRef: last?.taskrun_path || (artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "logs only"),
+      artifactRef,
+      artifactPair: buildAnalysisArtifactPairState(scope, artifactRef, artifacts),
       duration: durationFromLogFields(last?.fields),
       lastMessage: last?.message || "-",
     });
@@ -2388,11 +2426,98 @@ function buildAnalysisShardRows(
       provider,
       status: runStatus.status === "failed" ? "failed" : runStatus.status === "succeeded" ? "succeeded" : runStatus.status === "running" ? "active" : "observed",
       artifactRef: artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only",
+      artifactPair: buildAnalysisArtifactPairState("workspace", artifacts.length > 0 ? `${artifacts.length} selected-run artifacts` : "status only", artifacts),
       duration: "Duration unavailable",
       lastMessage: runStatus.error || runStatus.error_code || "No shard logs loaded yet.",
     });
   }
   return rows;
+}
+
+function buildAnalysisArtifactPairState(scope: string, artifactRef: string, artifacts: Artifact[]): AnalysisArtifactPairState {
+  const shardScoped = scope !== "workspace" && scope.trim().length > 0;
+  const normalizedScope = scope.trim();
+  const selectedPaths = artifacts.map((artifact) => artifact.path).filter((path) => pathMatchesShardScope(path, normalizedScope));
+  const refPaths = pathMatchesShardScope(artifactRef, normalizedScope) ? [artifactRef] : [];
+  const paths = Array.from(new Set([...selectedPaths, ...refPaths]));
+  const runtimeRefs = paths.filter((path) => path.endsWith("/runtime-execution.json"));
+  const markdownRefs = paths.filter((path) => /\.(md|markdown)$/i.test(path) && !path.endsWith("/shard-pack-manifest.md"));
+  const manifestRefs = paths.filter((path) => path.endsWith("/shard-pack-manifest.json"));
+
+  if (!shardScoped) {
+    return {
+      label: "Run-level evidence",
+      detail: artifacts.length > 0 ? "selected-run artifacts are available, but this row is not shard-scoped" : "artifact list not loaded for this run",
+      tone: artifacts.length > 0 ? "info" : "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (markdownRefs.length > 0 && manifestRefs.length > 0) {
+    return {
+      label: "Artifact pair present",
+      detail: "authored markdown and shard-pack-manifest are both visible",
+      tone: "ok",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (markdownRefs.length > 0) {
+    return {
+      label: "Markdown only",
+      detail: "authored markdown is visible, but shard-pack-manifest is missing",
+      tone: "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (manifestRefs.length > 0) {
+    return {
+      label: "Manifest only",
+      detail: "shard-pack-manifest is visible, but authored markdown is missing",
+      tone: "warn",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  if (runtimeRefs.length > 0) {
+    return {
+      label: "Runtime only",
+      detail: "runtime-execution exists; authored markdown and shard-pack-manifest are missing",
+      tone: "error",
+      runtimeRefs,
+      markdownRefs,
+      manifestRefs,
+    };
+  }
+  return {
+    label: artifacts.length > 0 ? "No shard artifacts" : "Artifact list not loaded",
+    detail: artifacts.length > 0 ? "selected-run artifacts do not include this shard" : "load selected-run artifacts before retry triage",
+    tone: artifacts.length > 0 ? "warn" : "info",
+    runtimeRefs,
+    markdownRefs,
+    manifestRefs,
+  };
+}
+
+function pathMatchesShardScope(path: string, scope: string): boolean {
+  if (!scope) {
+    return false;
+  }
+  const shardSegment = `staging/shards/${scope}/`;
+  return path.includes(`/${shardSegment}`) || path.startsWith(shardSegment);
+}
+
+function formatArtifactPairRefs(paths: string[]): string {
+  if (paths.length === 0) {
+    return "missing";
+  }
+  const visible = paths.slice(0, 2).join(", ");
+  return paths.length > 2 ? `${visible} +${paths.length - 2} more` : visible;
 }
 
 function findStepIndex(stepId?: string): number {
