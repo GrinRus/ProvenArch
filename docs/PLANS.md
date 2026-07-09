@@ -1462,6 +1462,31 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 
 ---
 
+## UX/UI Iteration: Onboarding Recovery Rendered QA
+
+### Context
+- 2026-07-09 medium `regres long` diagnostic `regres-long-posthog-ftgo-20260709T162033Z` ran from clean commit `a71cc9d` with direct `scripts/full-run-batch-matrix.sh`.
+- Matrix result: `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` stopped at operational host preflight because `qwen` headless probe timed out after 30s.
+- `single-git_url/baseline` reached FTGO headless init collect, then failed as `runtime_contract_failed` with `partial_failure_count=5`, `repair_attempts=12`, `repair_exhausted=5`, `stall_count=18`, `pre_artifact_stalls=16`, `post_artifact_stalls=2`, `valid_artifact_controlled_stops=7`, and step-level Excellent blockers on `init.step1.collect`.
+- Rendered QA already covers provider stream, failed shard, permissions, Ask, Publish Git and Source recovery. The first-time onboarding/recovery surface still lacks stable browser evidence.
+
+### Plan
+- [x] Add a mocked Playwright rendered QA scenario for onboarding source/runner recovery.
+- [x] Cover duplicate source-name recovery, provider readiness failure guidance, recent workspace affordances, disabled first-analysis action, console-error absence and no horizontal overflow.
+- [x] Fix any narrow rendered layout defects found during the QA pass without changing backend/API/schema/runtime contracts.
+- [x] Update UX report with live evidence, implemented slice result and residual work.
+- [x] Run rendered QA plus full DoD with the exact Node toolchain.
+- [x] Commit the slice.
+
+### Acceptance
+- [x] A first-time operator can see what blocks onboarding and which setup step to fix next without entering Console V2.
+- [x] Duplicate source diagnostics and provider command/auth/quota guidance remain readable on desktop and narrow mobile.
+- [x] First analysis stays disabled until workspace, sources, runner and local readiness are ready.
+- [x] Full DoD passes: `make contracts`, `make test`, `make lint`, `make build`.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

@@ -1081,3 +1081,35 @@ Observed improvement:
 Residual UX work after Slice 36:
 - Continue rotating through remaining first-time and recovery paths with rendered QA.
 - Live execution still depends on qwen reliably producing collect markdown plus `shard-pack-manifest.json`; the latest PostHog path profile failed `10/16` shards at artifact handoff.
+
+## Slice 37 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 36 from clean commit `a71cc9d`.
+- action: confirmed clean tree, writable `/tmp/provenarch-live-e2e`, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T162033Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T162033Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` stopped at operational host preflight: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- `single-git_url/baseline` reached FTGO qwen headless init collect and failed with `runtime_contract_failed`, `runner_unavailable`, `quality_gates_failed`, `runtime_flow_failed`, `partial_failure_count=5`, `repair_attempts=12`, `repair_exhausted=5`, `focused_repairs=12`, `stall_count=18`, `pre_artifact_stalls=16`, `post_artifact_stalls=2`, `valid_artifact_controlled_stops=7`.
+- step-level Excellent blockers remained on `init.step1.collect`: `runtime_quality.repair_exhausted`, `runtime_quality.repair_heavy`, `runtime_quality.stall_pressure`, with `repair_attempts=17`, `stall_count=38`, `final_validation_class=manifest_shape`, `terminal_validation_error_excerpt=runtime_stalled_before_artifacts`.
+- UX conclusion: this rerun produced fresh first-time reliability evidence but no frontend smoke because backend failed before snapshot frontend execution. The next useful product slice was stable rendered QA for onboarding recovery: the first screen a new user sees when sources or provider readiness block first analysis.
+
+Implemented:
+- Added `ui/e2e/onboarding-recovery-mock.spec.ts`, a stable mocked launcher-onboarding Playwright scenario enabled only with `UI_E2E_SCENARIO=onboarding-recovery-mock`.
+- The fixture models workspace create/open, recent workspace availability/missing states, duplicate repo-name source diagnostics, headless `qwen-code` selection and `headless_probe_timeout` readiness failure.
+- The browser test verifies onboarding progress summary, duplicate source diagnostics, disabled source save, disabled console/first-analysis actions, provider command/auth/quota guidance, doctor result copy, console-error absence and no horizontal overflow.
+- Visual QA exposed one layout polish issue: the runner recovery metric grid could split `ACP_QWEN_CMD` awkwardly on desktop. The grid now uses adaptive metric-card widths so provider command/env tokens stay readable.
+- Existing onboarding API responses remain the only input; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered onboarding recovery QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51868 UI_E2E_SCENARIO=onboarding-recovery-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-onboarding-recovery-rendered-20260709T1804Z npm run --prefix ui e2e:live -- onboarding-recovery-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-onboarding-recovery-rendered-20260709T1804Z/onboarding-recovery-desktop.png`, `/tmp/provenarch-ui-onboarding-recovery-rendered-20260709T1804Z/onboarding-recovery-mobile.png`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator can see the current onboarding blocker before entering Console V2: source duplicate diagnostics are repeated in the progress summary, repo rows and action gate.
+- Provider readiness failure guidance now has rendered desktop/mobile evidence that names the selected provider, expected command, env override, probe stage, suggested fix and safe fake-baseline fallback.
+- The first-analysis button remains disabled until source validation and local readiness pass, while the UI keeps retry controls visible.
+
+Residual UX work after Slice 37:
+- Continue rotating through remaining first-time and recovery paths with rendered QA, especially Charter/Proposal review recovery states that still rely mostly on component coverage or live smoke screenshots.
+- Live execution remains blocked by provider/runtime reliability: qwen must pass readiness consistently and write collect markdown plus `shard-pack-manifest.json` without repeated `runtime_stalled_before_artifacts`.
