@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
-import { providerCommandEnv, providerCommandHint } from "../lib/providerGuidance";
+import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
 import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
@@ -498,6 +498,7 @@ function OnboardingRunnerRecovery({
   const doctorStatus = runtimeProviderCheck ? `${runtimeProviderCheck.label}: ${runtimeProviderCheck.status}` : "not checked";
   const isPassing = runtimeProviderCheck?.status === "pass";
   const isFailing = runtimeProviderCheck?.status === "fail";
+  const guidance = providerReadinessGuidance(setupRuntimeProvider, runtimeProviderCheck?.message || runtimeProviderCheck?.suggestion);
   const summary = isPassing
     ? "Headless provider is ready for first analysis after the other setup gates pass."
     : isFailing
@@ -530,11 +531,23 @@ function OnboardingRunnerRecovery({
           <span className="metric-label">Readiness check</span>
           <strong>{doctorStatus}</strong>
         </div>
+        <div>
+          <span className="metric-label">Failure mode</span>
+          <strong>{isPassing ? "Provider ready" : guidance.failureMode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Probe stage</span>
+          <strong>{isPassing ? "Ready" : guidance.probeStage}</strong>
+        </div>
       </div>
       <dl className="compact-defs onboarding-runner-recovery-detail">
         <div>
           <dt>Doctor message</dt>
           <dd>{runtimeProviderCheck?.message ?? "Run Check readiness after selecting the runner."}</dd>
+        </div>
+        <div>
+          <dt>Operator focus</dt>
+          <dd>{isPassing ? "Provider readiness passed; continue with workspace and source readiness gates." : guidance.operatorFocus}</dd>
         </div>
         {runtimeProviderCheck?.suggestion ? (
           <div>
@@ -545,8 +558,9 @@ function OnboardingRunnerRecovery({
       </dl>
       <ul className="analysis-next-actions">
         <li>Use fake baseline for a deterministic first walkthrough when live provider setup is not ready.</li>
-        <li>For headless, install/login to {providerCommand} or set {envOverride} to a working command.</li>
-        <li>Run Check readiness again before Run first analysis.</li>
+        {(isPassing ? [`For headless, keep ${providerCommand} available to the ACP service before live analysis.`, "Run first analysis after the remaining setup gates pass."] : guidance.nextActions).map((action) => (
+          <li key={action}>{action}</li>
+        ))}
       </ul>
     </div>
   );

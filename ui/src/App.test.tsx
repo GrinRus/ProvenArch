@@ -1017,8 +1017,10 @@ describe("App", () => {
     expect(runnerRecovery).toHaveTextContent("claude or claude-code");
     expect(runnerRecovery).toHaveTextContent("ACP_CLAUDE_CMD");
     expect(runnerRecovery).toHaveTextContent("Runtime provider: fail");
+    expect(runnerRecovery).toHaveTextContent("Command unavailable");
+    expect(runnerRecovery).toHaveTextContent("Binary discovery");
     expect(runnerRecovery).toHaveTextContent("Use fake baseline for a deterministic first walkthrough");
-    expect(runnerRecovery).toHaveTextContent("Run Check readiness again before Run first analysis.");
+    expect(runnerRecovery).toHaveTextContent("Run Check local readiness before starting the first live analysis.");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Fix local readiness blockers");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Provider ID: claude-code");
   });
@@ -3628,6 +3630,75 @@ describe("App", () => {
     expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("usage limit reached");
     expect(screen.getByTestId("provider-readiness-recovery")).toHaveTextContent("confirm quota");
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh")).toHaveLength(startCallsBefore);
+  });
+
+  it("explains headless provider probe timeouts before retrying analysis", async () => {
+    const runID = "run-qwen-probe-timeout";
+    const timeoutMessage = "qwen: headless_probe_timeout: qwen headless probe timed out after 30s";
+    const fetchMock = createFetchMock({
+      runID,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "init",
+          status: "failed",
+          started_at: "2026-07-09T06:56:00Z",
+          finished_at: "2026-07-09T06:57:00Z",
+          current_step: "init.step1.collect",
+          warnings: [],
+          error_code: "runner_unavailable",
+          error: timeoutMessage,
+        },
+      },
+      onboardingStatus: {
+        ok: true,
+        launcher_mode: false,
+        workspace_selected: true,
+        workspace_ready: true,
+        workspace: "/tmp/workspace",
+        manifest_present: true,
+        runtime: {
+          selected: true,
+          runtime: "headless",
+          runtime_provider: "qwen-code",
+          provider_source: "override",
+        },
+        can_enter_console: true,
+        recent_workspaces: [],
+      },
+      doctorResponse: {
+        ok: false,
+        summary: "needs attention",
+        checks: [
+          { id: "git", label: "Git", status: "pass", message: "git found" },
+          {
+            id: "runtime_provider",
+            label: "Runtime provider",
+            status: "fail",
+            message: timeoutMessage,
+            suggestion: "Confirm qwen login/quota and rerun readiness.",
+          },
+        ],
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("stage-readiness");
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+    await waitFor(() => expect(screen.getByTestId("stage-readiness")).toHaveClass("is-selected"));
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+
+    const providerRecovery = await screen.findByTestId("provider-readiness-recovery");
+    expect(providerRecovery).toHaveTextContent("qwen-code");
+    expect(providerRecovery).toHaveTextContent("ACP_QWEN_CMD");
+    expect(providerRecovery).toHaveTextContent("Headless probe timeout");
+    expect(providerRecovery).toHaveTextContent("Text readiness probe");
+    expect(providerRecovery).toHaveTextContent("qwen did not return the readiness response");
+    expect(providerRecovery).toHaveTextContent("short headless prompt outside ACP");
+    expect(providerRecovery).toHaveTextContent("retry Analysis only after Runtime provider passes");
   });
 
   it("explains terminal canceled runs without presenting them as runtime failures", async () => {

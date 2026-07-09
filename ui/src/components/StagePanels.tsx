@@ -8,7 +8,7 @@ import { RunStatusPanel } from "./RunStatusPanel";
 import { TabNav } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
-import { providerCommandEnv, providerCommandHint } from "../lib/providerGuidance";
+import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
@@ -617,6 +617,8 @@ function ProviderReadinessRecovery({
   const envOverride = providerCommandEnv(setupRuntimeProvider);
   const doctorStatus = runtimeCheck ? `${runtimeCheck.label}: ${runtimeCheck.status}` : "not checked";
   const lastRunBlocker = isRunnerUnavailable(selectedRunErrorCode) ? "runner_unavailable" : "none selected";
+  const readinessMessage = runtimeCheck?.message || selectedRunError || selectedRunErrorCode || "";
+  const guidance = providerReadinessGuidance(setupRuntimeProvider, readinessMessage);
   const summary = isRunnerUnavailable(selectedRunErrorCode)
     ? "The selected run stopped because provider/tool availability failed. Confirm the provider command, auth/quota and runtime mode before retrying."
     : runtimeCheck?.status === "fail"
@@ -646,6 +648,14 @@ function ProviderReadinessRecovery({
           <strong>{envOverride}</strong>
         </div>
         <div>
+          <span className="metric-label">Failure mode</span>
+          <strong>{guidance.failureMode}</strong>
+        </div>
+        <div>
+          <span className="metric-label">Probe stage</span>
+          <strong>{guidance.probeStage}</strong>
+        </div>
+        <div>
           <span className="metric-label">Last run blocker</span>
           <strong>{lastRunBlocker}</strong>
         </div>
@@ -657,7 +667,11 @@ function ProviderReadinessRecovery({
         </div>
         <div>
           <dt>Doctor message</dt>
-          <dd>{runtimeCheck?.message || selectedRunError || "Run local readiness to check provider availability."}</dd>
+          <dd>{readinessMessage || "Run local readiness to check provider availability."}</dd>
+        </div>
+        <div>
+          <dt>Operator focus</dt>
+          <dd>{guidance.operatorFocus}</dd>
         </div>
         {runtimeCheck?.suggestion ? (
           <div>
@@ -667,11 +681,9 @@ function ProviderReadinessRecovery({
         ) : null}
       </dl>
       <ul className="analysis-next-actions">
-        <li>Run Check local readiness after fixing provider binary, authentication or quota.</li>
-        <li>
-          Use {envOverride} when the executable is not on PATH or uses a custom location.
-        </li>
-        <li>Return to Analysis and retry only after the Runtime provider doctor check passes.</li>
+        {guidance.nextActions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
       </ul>
     </section>
   );

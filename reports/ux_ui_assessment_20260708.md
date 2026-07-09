@@ -712,3 +712,33 @@ Live medium status:
 Residual UX work after Slice 24:
 - Medium live rerun requires the canonical `/tmp/provenarch-live-e2e/posthog/posthog` and `/tmp/provenarch-live-e2e/ftgo/ftgo-application` checkouts on a trusted host.
 - Continue deterministic polish on remaining retry/error states while live medium is operationally blocked.
+
+## Slice 25 Result
+
+Live medium retry:
+- goal: run the requested medium live E2E after preparing the canonical PostHog checkout.
+- action: restored `/tmp/provenarch-live-e2e/posthog/posthog` as a real Git checkout at pinned ref `14d29a548d63665d60b506cf13bd5cfb2de7c743`, confirmed exact Node `v22.21.1`, provider binaries and free disk, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T065646Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T065646Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`; both `single-path/baseline` and `single-git_url/baseline` stopped before backend/frontend execution with `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this is host/provider readiness evidence, not a product backend/UI verdict. The useful product gap is that provider recovery must distinguish a text readiness probe timeout from generic binary/auth/quota failure before the operator retries Analysis.
+
+Implemented:
+- Added shared provider readiness guidance for headless probe timeout, artifact-smoke failure, auth/quota blocker and command-unavailable cases.
+- Readiness `Provider readiness recovery` now shows failure mode, probe stage and operator focus next to selected provider, doctor status, command override and last run blocker.
+- Onboarding `Provider setup for first analysis` uses the same guidance before a first-time operator enters Console V2.
+- Existing doctor response and selected-run error text remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui test -- App.test.tsx --run -t "provider readiness|provider probe timeouts|runner unavailable"` -> `2 passed`
+- UI typecheck: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui typecheck` -> passed
+- rendered qwen-timeout check: Playwright opened the Vite UI with mocked `/api/*`, asserted `provider-readiness-recovery` content and no horizontal overflow on `1440x980` and `390x900`; screenshots: `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-provider-timeout-manual.1wiqoc/provider-timeout-readiness-desktop.png`, `/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-provider-timeout-manual.1wiqoc/provider-timeout-readiness-mobile.png`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `90` UI tests, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator who sees `qwen headless_probe_timeout` no longer gets only generic provider setup copy.
+- The screen now names the failed probe (`Text readiness probe`), explains that the bounded readiness response did not arrive, and keeps retry blocked on `Check local readiness` before Analysis.
+- Onboarding and Readiness now share the same provider-recovery taxonomy, reducing terminology drift before and after Console entry.
+
+Residual UX work after Slice 25:
+- Medium live rerun remains blocked on this host by provider readiness: `qwen` headless probe timeout before backend/frontend execution.
+- Continue deterministic polish on remaining retry/error states while live medium is operationally blocked by provider readiness.
