@@ -828,3 +828,33 @@ Observed improvement:
 Residual UX work after Slice 28:
 - Add rendered failed-run visual QA around this exact `domain_id != shard_id` fixture.
 - The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.
+
+## Slice 29 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 28 from clean commit `c2c1633`.
+- action: confirmed `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, FTGO git URL preset pinned at `558dfc53b11d30a5f1d995c0c6d58d5106c28189`, exact Node `v22.21.1`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T104135Z`.
+- observed evidence: `single-path/baseline` stopped before backend/frontend as `operational_host_preflight_failed` because `qwen headless probe timed out after 30s`; reports exist under `/tmp/provenarch-test_arch_project/reports/*regres-long-posthog-ftgo-20260709T104135Z-single-path-baseline*`.
+- observed evidence: `single-git_url/baseline` passed provider preflight, bounded precheck, fake init and fake refresh, then reached FTGO qwen init collect. The first collect shard failed as `runtime_contract_failed` with `stage=collect_pair_repair` and `runtime_stalled_before_artifacts`; the public shard summary had `1 failed / 15 pending` when enough diagnostic evidence had been captured.
+- observed evidence: the selected run log grew to multi-megabyte `runtime_output` JSON stream chunks before a durable authored artifact pair appeared; the run was manually interrupted and therefore final status is `infra_signal_terminated`, not a release verdict.
+- UX conclusion: while the active run is still streaming, a first-time operator needs a compact "provider stream active, artifact pair pending" state instead of interpreting raw provider chunks as collect progress.
+
+Implemented:
+- Analysis now renders `Live diagnostics` for an active selected run when live telemetry is present, not only after terminal failure.
+- Runtime output JSON stream events are summarized as provider stream chunk count, JSON stream event count and signal types.
+- A running collect step with provider stream telemetry but no authored markdown or `shard-pack-manifest.json` is classified as `provider stream` / `Artifact pair pending`.
+- Next actions tell the operator to wait for authored markdown plus manifest before treating collect as complete, and to use raw-output metadata instead of reading the full provider stream if collect stalls or repair starts.
+- Existing run logs, selected-run artifacts and run status remain the only inputs; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- targeted component test: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin npm run --prefix ui test -- App.test.tsx --run -t "surfaces active provider stream"` -> `1 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `91` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A live FTGO/qwen operator no longer has to infer active collect state from multi-megabyte raw provider stream logs.
+- The Analysis screen now separates "provider is talking" from "collect artifact pair exists", which is the critical decision boundary before retry or wait.
+- Terminal failed-shard triage from Slices 26-28 remains intact; Slice 29 fills the pre-terminal active-run state.
+
+Residual UX work after Slice 29:
+- Add rendered browser visual QA for active provider stream diagnostics once a stable mocked running-run fixture is available.
+- The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.

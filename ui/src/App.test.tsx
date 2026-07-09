@@ -3024,6 +3024,159 @@ describe("App", () => {
     expect(liveDiagnostics).toHaveTextContent("Retry after the provider artifact write path is fixed");
   });
 
+  it("surfaces active provider stream when collect has no authored shard artifacts yet", async () => {
+    const runID = "run-provider-stream";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runID,
+        runStarted: true,
+        onboardingStatus: {
+          ok: true,
+          launcher_mode: false,
+          workspace_selected: true,
+          workspace_ready: true,
+          workspace: "/tmp/workspace",
+          manifest_present: true,
+          runtime: {
+            selected: true,
+            runtime: "headless",
+            runtime_provider: "qwen-code",
+            provider_source: "override",
+          },
+          can_enter_console: true,
+          recent_workspaces: [],
+        },
+        runStatus: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            current_step: "init.step1.collect",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: null,
+            warnings: [],
+            error_code: null,
+            error: null,
+          },
+        },
+        runLogs: {
+          [runID]: {
+            run_id: runID,
+            items: [
+              {
+                cursor: 1,
+                timestamp: "2026-04-03T12:00:01Z",
+                level: "info",
+                kind: "event",
+                step_id: "init.step1.collect",
+                domain_id: "ftgo-application",
+                message: "runtime task started",
+                fields: { provider: "qwen-code", shard_id: "ftgo-root-shard", shards_total: 16 },
+              },
+              {
+                cursor: 2,
+                timestamp: "2026-04-03T12:00:02Z",
+                level: "info",
+                kind: "runtime_output",
+                stream: "stdout",
+                step_id: "init.step1.collect",
+                message: JSON.stringify({
+                  type: "stream_event",
+                  event: {
+                    type: "content_block_delta",
+                    delta: { type: "thinking_delta", thinking: "checking repository structure" },
+                  },
+                }),
+              },
+              {
+                cursor: 3,
+                timestamp: "2026-04-03T12:00:03Z",
+                level: "info",
+                kind: "runtime_output",
+                stream: "stdout",
+                step_id: "init.step1.collect",
+                message: JSON.stringify({
+                  type: "stream_event",
+                  event: {
+                    type: "content_block_delta",
+                    delta: { type: "text_delta", text: "drafting collect artifacts" },
+                  },
+                }),
+              },
+            ],
+            next_cursor: 3,
+            eof: false,
+          },
+        },
+        runArtifacts: {
+          [runID]: {
+            run_id: runID,
+            artifacts: [],
+          },
+        },
+        runReviewSummary: {
+          [runID]: {
+            run_id: runID,
+            pipeline: "init",
+            status: "running",
+            started_at: "2026-04-03T12:00:00Z",
+            finished_at: null,
+            current_step: "init.step1.collect",
+            warnings: [],
+            error_code: null,
+            error: null,
+            steps: [
+              {
+                step_id: "step0_constitution",
+                label: "Charter",
+                state: "done",
+                provider: "qwen-code",
+                artifact_count: 1,
+                artifact_paths: ["charter/overview.md"],
+                taskrun_paths: [],
+                warnings_count: 0,
+                errors_count: 0,
+                last_message: "charter ready",
+              },
+              {
+                step_id: "step1_collect",
+                label: "Collect",
+                state: "active",
+                provider: "qwen-code",
+                artifact_count: 0,
+                artifact_paths: [],
+                taskrun_paths: [],
+                warnings_count: 0,
+                errors_count: 0,
+                last_message: "runtime stream active",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+    await screen.findByTestId("console-shell");
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveClass("is-selected"));
+
+    expect(screen.queryByTestId("analysis-failure-recovery")).not.toBeInTheDocument();
+    const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
+    expect(liveDiagnostics).toHaveTextContent("provider stream");
+    expect(liveDiagnostics).toHaveTextContent("Provider output is streaming, but no authored shard artifact pair is visible yet");
+    expect(liveDiagnostics).toHaveTextContent("Artifact pair pending");
+    expect(liveDiagnostics).toHaveTextContent("runtime stream is active; authored markdown and shard-pack-manifest are not visible yet");
+    expect(liveDiagnostics).toHaveTextContent("Provider stream");
+    expect(liveDiagnostics).toHaveTextContent("2 chunks");
+    expect(liveDiagnostics).toHaveTextContent("2 JSON stream events");
+    expect(liveDiagnostics).toHaveTextContent("thinking_delta, text_delta");
+    expect(liveDiagnostics).toHaveTextContent("Watch for authored markdown plus shard-pack-manifest before treating provider output as collect progress.");
+    expect(liveDiagnostics).toHaveTextContent("If collect stalls or repair starts, use raw-output metadata instead of reading the full provider stream.");
+  });
+
   it("copies run logs using the active line+fields view", async () => {
     const runID = "run-copy-fields";
     const writeText = vi.fn(async (_text: string) => undefined);

@@ -1402,6 +1402,31 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 
 ---
 
+## UX/UI Iteration: Active Provider Stream Diagnostics
+
+### Context
+- 2026-07-09 medium `regres long` diagnostic `regres-long-posthog-ftgo-20260709T104135Z` produced two distinct live signals after Slice 28.
+- `single-path/baseline` remained an operational host/provider preflight failure: `qwen headless probe timed out after 30s`.
+- `single-git_url/baseline` reached FTGO qwen init collect, then the first shard failed `collect_pair_repair` with `runtime_stalled_before_artifacts`; before terminal evidence, the active run log was dominated by provider `runtime_output` JSON stream chunks.
+- The UI already explains terminal artifact-handoff failures, but an active selected run needed a compact "provider stream active, artifact pair pending" state before a first-time operator opens raw stream diagnostics.
+
+### Plan
+- [x] Render Analysis live diagnostics for active selected runs when telemetry is loaded.
+- [x] Summarize `runtime_output` JSON stream chunks into count, stream-event count and signal types.
+- [x] Classify running collect telemetry with no authored markdown or `shard-pack-manifest.json` as provider stream / artifact pair pending.
+- [x] Add a UI regression for active qwen-like stream output before authored shard artifacts exist.
+- [x] Update UX report with live evidence and residual work.
+- [x] Run full DoD with exact Node toolchain.
+- [x] Commit the slice.
+
+### Acceptance
+- [x] Active Analysis shows `provider stream` diagnostics before terminal failure when provider output is streaming.
+- [x] The diagnostic copy distinguishes provider chatter from durable collect progress by naming missing authored markdown plus `shard-pack-manifest.json`.
+- [x] Next actions route raw stream inspection to stall/repair cases instead of asking the operator to read the full stream.
+- [x] Full DoD passes: `make contracts`, `make test`, `make lint`, `make build`.
+
+---
+
 ## Implemented vs Planned (operational mirror)
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

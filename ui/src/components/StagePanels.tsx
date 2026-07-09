@@ -1371,6 +1371,7 @@ export function AnalysisStagePanel({
   const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
   const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
   const artifactCount = artifacts.length;
+  const showActiveLiveDiagnostics = selectedRunIsActive && runStatus?.status !== "failed" && liveDiagnostics.hasTelemetry;
 
   const focusBlockerDetails = useCallback(() => {
     blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
@@ -1434,6 +1435,7 @@ export function AnalysisStagePanel({
         blockerCount={blockerRows.length}
         onReviewBlocker={handleReviewBlocker}
       />
+      {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
       <AnalysisFailureRecovery
         busy={busy}
         runStatus={runStatus}
@@ -1787,6 +1789,7 @@ function buildAnalysisLiveDiagnostics(
   let validArtifactControlledStops = 0;
   let zeroOutputPreArtifactStalls = 0;
   let artifactHandoffStalls = 0;
+  const providerStream = summarizeProviderStream(runLogs);
 
   for (const entry of runLogs) {
     const fields = entry.fields;
@@ -1892,36 +1895,68 @@ function buildAnalysisLiveDiagnostics(
   const hasTelemetry = runLogs.length > 0 || artifacts.length > 0 || warnings.length > 0;
   const providerUnavailable = isRunnerUnavailable(runStatus?.error_code);
   const artifactHandoffBlocked = !providerUnavailable && (artifactHandoffStalls > 0 || (preArtifactStalls > 0 && repairExhausted > 0));
+  const authoredShardArtifactCount = shardRows.reduce(
+    (count, row) => count + row.artifactPair.markdownRefs.length + row.artifactPair.manifestRefs.length,
+    0,
+  );
+  const providerStreamAwaitingArtifacts =
+    runStatus?.status === "running" && providerStream.chunks > 0 && authoredShardArtifactCount === 0 && !artifactHandoffBlocked && !providerUnavailable;
   const status = providerUnavailable
     ? "provider check"
     : artifactHandoffBlocked
       ? "artifact handoff"
-      : failedCount > 0 || repairExhausted > 0
-        ? "action needed"
-        : hasTelemetry
-          ? "review"
-          : "logs missing";
+      : providerStreamAwaitingArtifacts
+        ? "provider stream"
+        : failedCount > 0 || repairExhausted > 0
+          ? "action needed"
+          : hasTelemetry
+            ? "review"
+            : "logs missing";
   const tone = providerUnavailable || failedCount > 0 || repairExhausted > 0 ? "error" : hasTelemetry ? "warn" : "info";
   const summary = providerUnavailable
     ? "Provider/tool availability blocked execution; fix Readiness provider setup before retrying the same pipeline."
     : artifactHandoffBlocked
       ? "The provider reached collect repair, but valid shard artifacts were not written before the pre-artifact stall."
-    : hasTelemetry
-      ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
-      : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
+      : providerStreamAwaitingArtifacts
+        ? "Provider output is streaming, but no authored shard artifact pair is visible yet; wait for markdown plus shard-pack-manifest before treating collect as complete."
+        : hasTelemetry
+          ? "Shard, repair, stall and raw-output signals from the selected run are summarized here before retry."
+          : "No live log telemetry is loaded for this failed run; use persisted status and artifacts first.";
 
   const metrics: AnalysisLiveMetric[] = [
     {
       label: "Failure mode",
-      value: artifactHandoffBlocked ? "Artifact handoff stalled" : providerUnavailable ? "Provider unavailable" : failedCount > 0 ? "Shard failure" : "Telemetry review",
+      value: artifactHandoffBlocked
+        ? "Artifact handoff stalled"
+        : providerUnavailable
+          ? "Provider unavailable"
+          : providerStreamAwaitingArtifacts
+            ? "Artifact pair pending"
+            : failedCount > 0
+              ? "Shard failure"
+              : "Telemetry review",
       detail: artifactHandoffBlocked
         ? "collect repair did not produce both markdown and shard-pack-manifest before stalling"
         : providerUnavailable
           ? "readiness blocked before durable shard artifacts"
-          : failedCount > 0
-            ? "inspect failed shard evidence before retry"
-            : "no terminal artifact handoff blocker detected",
+          : providerStreamAwaitingArtifacts
+            ? "runtime stream is active; authored markdown and shard-pack-manifest are not visible yet"
+            : failedCount > 0
+              ? "inspect failed shard evidence before retry"
+              : "no terminal artifact handoff blocker detected",
     },
+    ...(providerStream.chunks > 0
+      ? [
+          {
+            label: "Provider stream",
+            value: `${providerStream.chunks} ${providerStream.chunks === 1 ? "chunk" : "chunks"}`,
+            detail:
+              providerStream.streamEvents > 0
+                ? `${providerStream.streamEvents} JSON stream ${providerStream.streamEvents === 1 ? "event" : "events"} · ${providerStream.stdout} stdout / ${providerStream.stderr} stderr`
+                : `${providerStream.stdout} stdout / ${providerStream.stderr} stderr · ${formatCompactCount(providerStream.characters)} chars`,
+          },
+        ]
+      : []),
     {
       label: "Shard state",
       value: formatShardMetric(plannedShards, observedCount, succeededCount, failedCount),
@@ -1950,6 +1985,9 @@ function buildAnalysisLiveDiagnostics(
   ];
   const traces: AnalysisLiveTrace[] = [
     { label: "Provider", value: providerList.length > 0 ? providerList.join(", ") : "not exposed in loaded logs" },
+    ...(providerStream.chunks > 0
+      ? [{ label: "Stream signal", value: providerStream.signalTypes.length > 0 ? providerStream.signalTypes.join(", ") : "plain runtime output" }]
+      : []),
     { label: "Recovery stage", value: recoveryModeList.length > 0 ? recoveryModeList.join(", ") : "not logged" },
     { label: "Terminal excerpt", value: terminalExcerpt || "No terminal validation excerpt loaded." },
   ];
@@ -1960,7 +1998,16 @@ function buildAnalysisLiveDiagnostics(
     summary,
     metrics,
     traces,
-    actions: buildAnalysisLiveActions(failedCount, repairExhausted, stallCount, rawRefs.size, hasTelemetry, providerUnavailable, artifactHandoffBlocked),
+    actions: buildAnalysisLiveActions(
+      failedCount,
+      repairExhausted,
+      stallCount,
+      rawRefs.size,
+      hasTelemetry,
+      providerUnavailable,
+      artifactHandoffBlocked,
+      providerStreamAwaitingArtifacts,
+    ),
     hasTelemetry,
   };
 }
@@ -1973,6 +2020,7 @@ function buildAnalysisLiveActions(
   hasTelemetry: boolean,
   providerUnavailable: boolean,
   artifactHandoffBlocked: boolean,
+  providerStreamAwaitingArtifacts: boolean,
 ): string[] {
   if (providerUnavailable) {
     const actions = ["Check Readiness provider setup, binary/auth/quota before retrying the same pipeline."];
@@ -1983,6 +2031,12 @@ function buildAnalysisLiveActions(
   }
   if (!hasTelemetry) {
     return ["Load run logs or open persisted artifacts before retrying the same pipeline."];
+  }
+  if (providerStreamAwaitingArtifacts) {
+    return [
+      "Watch for authored markdown plus shard-pack-manifest before treating provider output as collect progress.",
+      "If collect stalls or repair starts, use raw-output metadata instead of reading the full provider stream.",
+    ];
   }
   const actions = artifactHandoffBlocked
     ? ["Open the failed shard row and raw-output ref to confirm whether markdown and shard-pack-manifest were written.", "Retry after the provider artifact write path is fixed or a collect-capable provider is selected."]
@@ -1997,6 +2051,89 @@ function buildAnalysisLiveActions(
     actions.push("Use raw-output metadata to compare stdout/stderr against the failed shard evidence.");
   }
   return actions;
+}
+
+type ProviderStreamSummary = {
+  chunks: number;
+  streamEvents: number;
+  stdout: number;
+  stderr: number;
+  characters: number;
+  signalTypes: string[];
+};
+
+function summarizeProviderStream(runLogs: RunLogEntry[]): ProviderStreamSummary {
+  const signalTypes = new Set<string>();
+  let chunks = 0;
+  let streamEvents = 0;
+  let stdout = 0;
+  let stderr = 0;
+  let characters = 0;
+
+  for (const entry of runLogs) {
+    if (entry.kind !== "runtime_output") {
+      continue;
+    }
+    chunks += 1;
+    characters += entry.message.length;
+    if (entry.stream === "stderr") {
+      stderr += 1;
+    } else {
+      stdout += 1;
+    }
+    const parsed = parseRuntimeOutputJSON(entry.message);
+    if (!parsed) {
+      continue;
+    }
+    const topType = objectString(parsed, "type");
+    const event = objectField(parsed, "event");
+    const eventType = objectString(event, "type");
+    const delta = objectField(event, "delta") ?? objectField(parsed, "delta");
+    const deltaType = objectString(delta, "type");
+    if (topType === "stream_event" || eventType || deltaType) {
+      streamEvents += 1;
+    }
+    const signal = firstNonEmpty([deltaType, eventType, topType]);
+    if (signal) {
+      signalTypes.add(signal);
+    }
+  }
+
+  return {
+    chunks,
+    streamEvents,
+    stdout,
+    stderr,
+    characters,
+    signalTypes: Array.from(signalTypes).slice(0, 3),
+  };
+}
+
+function parseRuntimeOutputJSON(message: string): Record<string, unknown> | null {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function objectField(record: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  const value = record?.[key];
+  return isRecord(value) ? value : null;
+}
+
+function objectString(record: Record<string, unknown> | null, key: string): string {
+  const value = record?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function artifactHandoffStalled(normalizedMessage: string, normalizedValidationError: string, repairStage: string): boolean {
@@ -2686,6 +2823,16 @@ function formatDurationMillis(milliseconds: number): string {
     return `${seconds}s`;
   }
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+function formatCompactCount(value: number): string {
+  if (value < 1000) {
+    return `${value}`;
+  }
+  if (value < 1_000_000) {
+    return `${Math.round(value / 100) / 10}k`;
+  }
+  return `${Math.round(value / 100_000) / 10}m`;
 }
 
 function PendingPermissionsTable({ pendingPermissions }: { pendingPermissions: RuntimePermissionRequest[] }) {
