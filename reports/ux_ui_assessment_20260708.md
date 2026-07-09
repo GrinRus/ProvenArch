@@ -1051,3 +1051,33 @@ Observed improvement:
 Residual UX work after Slice 35:
 - The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
 - Continue rotating through remaining first-time and recovery paths with rendered QA, especially onboarding/source recovery states that only have manual or component-level evidence.
+
+## Slice 36 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 35 from clean commit `28418db`.
+- action: confirmed clean tree, writable `/tmp/provenarch-live-e2e`, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T141636Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T141636Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` reached PostHog qwen collect and failed with `runtime_contract_failed`, `quality_gates_failed`, `runtime_flow_failed`, `partial_failure_count=10`, `repair_attempts=12`, `repair_exhausted=10`, `focused_repairs=12`, `stall_count=23`, `pre_artifact_stalls=22`, `post_artifact_stalls=1`, `valid_artifact_controlled_stops=2` and shard summary `6 succeeded / 10 failed`.
+- `single-git_url/baseline` stopped before backend/frontend execution as `operational_host_preflight_failed`: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced strong mixed-batch recovery evidence. The product UI already has rendered coverage for provider-stream and failed-shard Analysis states, so the next useful slice was stable rendered QA for Source validation recovery, a first-time setup blocker that still lacked a dedicated Playwright mock.
+
+Implemented:
+- Added `ui/e2e/source-recovery-mock.spec.ts`, a stable mocked Source validation Playwright scenario enabled only with `UI_E2E_SCENARIO=source-recovery-mock`.
+- The fixture models an already selected workspace whose `workspace.yaml` has a long Git URL and long ref, while validation returns `workspace.repo.git_url.fetch_failed`.
+- The browser test verifies Source recovery copy, affected repo, diagnostic code, source type, current source/ref, suggested fix, blocked repository table, blocked Readiness action, console-error absence and no horizontal overflow.
+- Existing Source recovery UI behavior remains unchanged; this slice adds durable rendered QA evidence only.
+
+Post-change evidence:
+- rendered Source recovery QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51867 UI_E2E_SCENARIO=source-recovery-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-source-recovery-rendered-20260709T1614Z npm run --prefix ui e2e:live -- source-recovery-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-source-recovery-rendered-20260709T1614Z/source-recovery-desktop.png`, `/tmp/provenarch-ui-source-recovery-rendered-20260709T1614Z/source-recovery-mobile.png`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- Source validation recovery is now protected by repeatable browser evidence rather than only manual screenshots and component tests.
+- A first-time operator with a failing Git URL/ref sees the Source recovery panel and disabled Readiness path on desktop and narrow mobile without horizontal overflow.
+- The live PostHog run added fresh evidence that mixed collect batches need aggregate failure clarity, but no new Source UI defect was observed.
+
+Residual UX work after Slice 36:
+- Continue rotating through remaining first-time and recovery paths with rendered QA.
+- Live execution still depends on qwen reliably producing collect markdown plus `shard-pack-manifest.json`; the latest PostHog path profile failed `10/16` shards at artifact handoff.

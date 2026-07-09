@@ -119,6 +119,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add rendered browser QA and mobile-card polish for pending runtime permission recovery.
 - [x] Add rendered browser QA and layout polish for failed Ask/Q&A recovery.
 - [x] Add rendered browser QA and recovery polish for failed Publish Git mutations.
+- [x] Add stable rendered browser QA for Source validation recovery with long repo/source diagnostics.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -158,8 +159,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 28) Add rendered browser QA for pending runtime permission recovery and use mobile-first request cards when the raw request table is too dense.
 29) Add rendered browser QA for failed Ask/Q&A recovery and keep recovery metrics readable on desktop/mobile.
 30) Add rendered browser QA for failed Publish Git mutations and keep recovery local to the commit plan/inspector.
-31) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-32) Commit and use the report to drive the next iteration.
+31) Add stable rendered browser QA for Source validation recovery with long Git URL/ref diagnostics, readiness blocking, desktop/mobile overflow checks and screenshots.
+32) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+33) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -176,6 +178,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - `ui/e2e/permission-recovery-mock.spec.ts`
 - `ui/e2e/qa-recovery-mock.spec.ts`
 - `ui/e2e/publish-git-recovery-mock.spec.ts`
+- `ui/e2e/source-recovery-mock.spec.ts`
 - `ui/src/hooks/useGitActions.ts`
 - `ui/src/styles.css`
 - `reports/ux_ui_assessment_20260708.md`
@@ -274,6 +277,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-09: Implemented slice 33 rendered permission-recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T125743Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies Analysis permission triage, right-inspector blocker detail, Readiness runtime-permission settings access and narrow-mobile readability. Visual QA exposed that the raw pending-permissions table was too dense on mobile, so pending permission requests now render mobile-first cards while retaining the desktop raw table. Screenshots are under `/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
 - 2026-07-09: Implemented slice 34 rendered Ask/Q&A recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T131747Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies failed `qa.ask` recovery guidance, audit refs, retrying the original question, read-only safety, no-citations state and no horizontal overflow. Visual QA exposed narrow desktop recovery cards and a wrapped `Refresh` action in Q&A history, so Ask recovery metrics now use responsive grid tracks and the history refresh action keeps a stable single-line label. Screenshots are under `/tmp/provenarch-ui-qa-recovery-rendered-20260709T1329Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build).
 - 2026-07-09: Implemented slice 35 rendered Publish Git recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T133940Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies failed commit/proposal branch mutations, local Commit plan recovery, Git publication inspector error state, retryability and no horizontal overflow. Visual QA exposed that the global next-action inspector still looked ready after a failed Git mutation, so Publish now changes next action to blocked recovery guidance until the operator reviews the Git failure. Screenshots are under `/tmp/provenarch-ui-publish-git-recovery-rendered-20260709T1352Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build).
+- 2026-07-09: Implemented slice 36 stable Source recovery rendered QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T141636Z` produced real PostHog runtime evidence in `single-path/baseline`: matrix `FAIL`, shard summary `6 succeeded / 10 failed`, repeated `collect_pair_repair -> runtime_stalled_before_artifacts`, `partial_failure_count=10`, and excellent blockers on `init.step1.collect`; `single-git_url/baseline` stopped at qwen `headless_probe_timeout`. New Playwright coverage verifies Source validation recovery for a long Git URL/ref, blocked readiness state, desktop/mobile readability and no horizontal overflow. Screenshots are under `/tmp/provenarch-ui-source-recovery-rendered-20260709T1614Z`; rendered QA and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build).
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
