@@ -114,6 +114,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Add Charter baseline recovery guidance so prompt/charter bundle warnings are actionable before Analysis.
 - [x] Add Proposals package recovery guidance so incomplete proposal/changelog packages are actionable before Publish.
 - [x] Summarize active provider JSON stream chunks in the Activity drawer and label active Analysis provider stream as a run signal.
+- [x] Add rendered browser QA for the Activity drawer provider-stream summary on desktop and narrow mobile.
 - [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
 
 ### Non-goals
@@ -148,8 +149,9 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 23) Make Charter baseline warnings actionable by showing affected artifact/category/prompt usage, severity, message, suggested fix and save-then-analyze actions before the raw editor warnings.
 24) Make Proposals package blockers actionable by showing proposal/changelog package state, primary blocker, suggested fix and publication path before the review room.
 25) Make active provider stream readable in shared Activity by summarizing JSON stream chunks while preserving full raw log/export access.
-26) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-27) Commit and use the report to drive the next iteration.
+26) Add rendered browser QA for the provider-stream Activity summary with a stable mocked running-run fixture.
+27) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
+28) Commit and use the report to drive the next iteration.
 
 ### Files expected to change
 - `ui/src/components/ActivityDrawer.tsx`
@@ -161,6 +163,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - `ui/src/components/ConsoleShellPrimitives.test.tsx`
 - `ui/src/App.test.tsx`
 - `ui/e2e/live-flow.spec.ts`
+- `ui/e2e/provider-stream-mock.spec.ts`
 - `ui/src/styles.css`
 - `reports/ux_ui_assessment_20260708.md`
 - `README.md`
@@ -204,6 +207,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - [x] Analysis shard drilldown shows per-shard artifact-pair state, distinguishing runtime-only evidence from authored markdown + `shard-pack-manifest.json`.
 - [x] Activity drawer summarizes provider JSON stream chunks without hiding full raw payload access.
 - [x] Active provider-stream Analysis diagnostics use `Run signal` instead of terminal `Failure mode` wording.
+- [x] Rendered provider-stream browser QA verifies desktop and narrow-mobile Activity summary readability, raw payload disclosure, and no horizontal overflow.
 
 ### Risks
 - Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
@@ -248,6 +252,7 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - 2026-07-09: Implemented slice 26 Analysis artifact-handoff guidance without backend/API/schema changes. Analysis live diagnostics now parse `stage=collect_pair_repair` and `runtime_stalled_before_artifacts` from existing run logs, classify the failure as `Artifact handoff stalled`, show the recovery stage, and put markdown + `shard-pack-manifest.json` verification before blind retry. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
 - 2026-07-09: Implemented slice 27 per-shard artifact-pair inspection without backend/API/schema changes. Analysis shard/log table and blocker drilldown now derive artifact-pair state from existing selected-run artifact refs, distinguishing `Runtime only`, `Markdown only`, `Manifest only`, `Artifact pair present` and missing shard-artifact states. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
 - 2026-07-09: Implemented slice 30 Activity provider-stream readability without backend/API/schema changes. The current medium run `regres-long-posthog-ftgo-20260709T112238Z` reached PostHog qwen collect and repeated `collect_pair_repair -> runtime_stalled_before_artifacts` (`4 failed / 12 pending` by DoD checkpoint), then was diagnostically stopped as `infra_signal_terminated`; the first 4 shard failures are genuine artifact-handoff failures, later `context canceled` rows came from the stop, and no top-level `matrix_result_*` was written. Activity now summarizes JSON stream chunks while preserving full raw log/export access, and active Analysis labels stream telemetry as `Run signal`. Targeted App/primitive tests and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
+- 2026-07-09: Implemented slice 31 rendered provider-stream QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T120910Z` failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s, so the product UI evidence came from a stable mocked running-run fixture. New Playwright coverage verifies the Analysis live diagnostics, Activity summary, raw-payload disclosure and no horizontal overflow on desktop and narrow mobile; screenshots are under `/tmp/provenarch-ui-provider-stream-rendered-20260709T1230Z`. Targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization

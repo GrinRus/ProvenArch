@@ -887,3 +887,35 @@ Residual UX work after Slice 30:
 - Rerun medium live from the new commit when provider/runtime bandwidth is available; this interrupted diagnostic is not release-quality evidence.
 - Add rendered browser visual QA for the Activity drawer stream summary once a stable mocked running-run fixture is available.
 - The execution blocker remains runtime/provider behavior: qwen must reliably write collect markdown + manifest before the medium matrix can pass.
+
+## Slice 31 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 30 from clean commit `fd7347c`.
+- action: confirmed `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1` via `ACP_NODE_TOOL_CANDIDATES`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T120910Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T120910Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` and `single-git_url/baseline` both stopped before backend/frontend execution as `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced no new product UI/backend execution evidence. It confirms the active operational blocker is provider readiness, while the remaining product-quality gap from Slice 30 was rendered visual coverage for the provider-stream Activity summary.
+
+Implemented:
+- Added `ui/e2e/provider-stream-mock.spec.ts`, a stable mocked running-run Playwright scenario enabled only with `UI_E2E_SCENARIO=provider-stream-mock`.
+- The fixture mocks Console V2 API responses for a running qwen Analysis run with two JSON provider stream events and no authored shard artifact pair yet.
+- The browser test verifies Analysis `Live diagnostics`, `Run signal`, `Artifact pair pending`, Activity drawer summary, compact provider stream event rows, full raw-payload disclosure, console-error absence and no horizontal overflow.
+- Desktop and narrow-mobile screenshots are captured as rendered evidence; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered provider-stream QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51862 UI_E2E_SCENARIO=provider-stream-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-provider-stream-rendered-20260709T1230Z npm run --prefix ui e2e:live -- provider-stream-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-provider-stream-rendered-20260709T1230Z/provider-stream-desktop.png`, `/tmp/provenarch-ui-provider-stream-rendered-20260709T1230Z/provider-stream-mobile.png`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui typecheck` -> passed
+- targeted component tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- ConsoleShellPrimitives.test.tsx App.test.tsx --run` -> `85 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- Slice 30's provider-stream readability is now protected by rendered browser evidence, not only component assertions.
+- A first-time operator sees the active Analysis signal and Activity summary on desktop without raw JSON dominating the drawer.
+- On narrow mobile, the same provider-stream summary remains readable after the Analysis context and does not introduce horizontal overflow.
+
+Residual UX work after Slice 31:
+- The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
+- Continue the UX/UI loop on the next first-time or non-happy-path surface that is not already covered by rendered QA.
