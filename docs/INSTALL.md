@@ -4,7 +4,7 @@
 
 ## Release status
 
-- Latest public release: `v0.1.8`
+- Latest public release: `v0.1.9`
 - Supported platforms: macOS/Linux on `amd64` and `arm64`
 - License: Apache-2.0
 - Primary install command:
@@ -34,7 +34,7 @@ acp version
 Опциональные переменные:
 
 ```bash
-ACP_VERSION=v0.1.8 INSTALL_DIR=/usr/local/bin sh install.sh
+ACP_VERSION=v0.1.9 INSTALL_DIR=/usr/local/bin sh install.sh
 ```
 
 По умолчанию `ACP_VERSION=latest`: installer разрешает последний GitHub Release через Releases API, включая beta/prerelease releases, затем скачивает archive `acp_<os>_<arch>.tar.gz`, проверяет `checksums.txt` и устанавливает только бинарь `acp`.
