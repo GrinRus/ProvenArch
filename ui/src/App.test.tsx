@@ -2849,8 +2849,11 @@ describe("App", () => {
     expect(
       within(permissionRecovery).getByText("Use Readiness - Advanced runtime settings - Runtime Permissions to choose the intended mode/channel."),
     ).toBeInTheDocument();
+    const permissionCards = screen.getByTestId("runs-pending-permissions-cards");
+    expect(permissionCards).toHaveTextContent("perm-1");
+    expect(permissionCards).toHaveTextContent("npm install");
     expect(await screen.findByTestId("runs-pending-permissions-table")).toBeInTheDocument();
-    expect(screen.getByText("perm-1")).toBeInTheDocument();
+    expect(screen.getAllByText("perm-1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("needs_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ask_unsafe_operation").length).toBeGreaterThan(0);
     expect(screen.getAllByText("npm install").length).toBeGreaterThan(0);

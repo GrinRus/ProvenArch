@@ -2898,7 +2898,46 @@ function PendingPermissionsTable({ pendingPermissions }: { pendingPermissions: R
               <li>If the request is unexpected, adjust source scope or runtime profile before retrying the failed pipeline.</li>
             </ul>
           </section>
-          <div className="run-table-wrap">
+          <div className="permission-request-cards" data-testid="runs-pending-permissions-cards">
+            {pendingPermissions.map((request) => (
+              <article className="permission-request-card" key={request.request_id || `${request.step_id}-${request.action}-${request.path_or_command}-card`}>
+                <div className="section-heading-row">
+                  <div>
+                    <span className="metric-label">Permission request</span>
+                    <strong className="permission-request-card-title">{request.action || "runtime permission"}</strong>
+                  </div>
+                  <StatusBadge tone="warn">{request.decision?.decision || "pending"}</StatusBadge>
+                </div>
+                <dl className="compact-defs permission-request-summary">
+                  <div>
+                    <dt>Request ID</dt>
+                    <dd>{request.request_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{request.provider || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Step</dt>
+                    <dd>{request.step_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Rule</dt>
+                    <dd>{request.decision?.rule_id || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Target</dt>
+                    <dd>{request.path_or_command || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{request.reason || request.decision?.message || "-"}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+          <div className="run-table-wrap permission-request-table-wrap">
             <table className="run-table" data-testid="runs-pending-permissions-table">
               <thead>
                 <tr>

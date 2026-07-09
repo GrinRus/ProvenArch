@@ -1564,6 +1564,26 @@ code {
   margin-top: 0;
 }
 
+.permission-request-cards {
+  display: none;
+  gap: 0.5rem;
+}
+
+.permission-request-card {
+  display: grid;
+  gap: 0.48rem;
+  padding: 0.58rem;
+  border: 1px solid rgba(184, 83, 9, 0.18);
+  border-radius: 0.42rem;
+  background: var(--surface);
+}
+
+.permission-request-card-title {
+  display: block;
+  margin-top: 0.12rem;
+  overflow-wrap: anywhere;
+}
+
 .analysis-timeline {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -4385,6 +4405,14 @@ code {
   .run-table,
   .activity-table {
     min-width: 760px;
+  }
+
+  .permission-request-cards {
+    display: grid;
+  }
+
+  .permission-request-table-wrap {
+    display: none;
   }
 
   .analysis-shard-table {

@@ -952,3 +952,36 @@ Observed improvement:
 Residual UX work after Slice 32:
 - The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
 - Continue rotating through remaining first-time and recovery paths with rendered QA, especially surfaces that still rely only on component tests.
+
+## Slice 33 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 32 from clean commit `25f4e83`.
+- action: confirmed clean tree, `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1` via `ACP_NODE_TOOL_CANDIDATES`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T125743Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T125743Z.md` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` and `single-git_url/baseline` both stopped before backend/frontend execution as `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced no new product UI/backend execution evidence. The next useful product slice was therefore rendered QA for the already implemented managed-mode pending permission recovery path.
+
+Implemented:
+- Added `ui/e2e/permission-recovery-mock.spec.ts`, a stable mocked failed-run Playwright scenario enabled only with `UI_E2E_SCENARIO=permission-recovery-mock`.
+- The fixture models `runtime_permission_required` with a qwen collect shell request, `needs_user` decision, `ask_unsafe_operation` policy rule, command target and reason.
+- The browser test verifies Analysis recovery copy, permission triage, raw desktop table, right-inspector blocker detail, Readiness advanced Runtime Permissions settings, console-error absence and no horizontal overflow.
+- Visual QA exposed that the raw pending-permissions table was too dense on narrow mobile, so pending permission requests now render readable mobile-first cards while retaining the desktop raw table.
+- Existing pending permission data remains the only input; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered permission-recovery QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51864 UI_E2E_SCENARIO=permission-recovery-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z npm run --prefix ui e2e:live -- permission-recovery-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z/permission-recovery-desktop.png`, `/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z/permission-recovery-readiness-desktop.png`, `/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z/permission-recovery-mobile.png`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui typecheck` -> passed
+- targeted UI tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- App.test.tsx styles.test.ts --run -t "pending runtime permission|styles"` -> `2 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator can understand a managed-mode permission stop from the Analysis recovery panel and right inspector without reading a dense raw table first.
+- On narrow mobile, the permission request now appears as a compact card with request id, provider, step, rule, target and reason.
+- The recovery path from Analysis to `Readiness -> Advanced runtime settings -> Runtime Permissions` is now protected by rendered browser evidence.
+
+Residual UX work after Slice 33:
+- The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
+- Continue rotating through remaining first-time and recovery paths with rendered QA, especially retry/error surfaces that still rely only on component tests.
