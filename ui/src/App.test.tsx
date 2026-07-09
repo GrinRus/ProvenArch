@@ -29,6 +29,8 @@ type FetchMockState = {
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
   systemVersion?: MockJSON;
+  gitCommitResponse?: { status: number; body: MockJSON };
+  proposalBranchResponse?: { status: number; body: MockJSON };
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -661,6 +663,9 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/git/commit") {
+      if (state.gitCommitResponse) {
+        return jsonResponse(state.gitCommitResponse.body, state.gitCommitResponse.status);
+      }
       const payload = JSON.parse(String(init?.body ?? "{}")) as { message?: string };
       return jsonResponse({
         status: "ok",
@@ -669,6 +674,9 @@ function createFetchMock(state: FetchMockState = {}) {
     }
 
     if (method === "POST" && url === "/api/git/proposal-branch") {
+      if (state.proposalBranchResponse) {
+        return jsonResponse(state.proposalBranchResponse.body, state.proposalBranchResponse.status);
+      }
       const payload = JSON.parse(String(init?.body ?? "{}")) as { name?: string };
       return jsonResponse({
         branch: payload.name ?? "proposal/beta-refresh",
@@ -2289,6 +2297,49 @@ describe("App", () => {
     fireEvent.click(proposalBranchButton);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
+  });
+
+  it("surfaces failed Publish Git actions in the commit plan and inspector", async () => {
+    const fetchMock = createFetchMock({
+      runStarted: true,
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [{ path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" }],
+        },
+      },
+      artifactText: {
+        "reports/coverage/summary.md": "Coverage ready for publication.\n",
+        "reports/coverage/open-questions.md": "",
+      },
+      gitCommitResponse: {
+        status: 409,
+        body: { error: { code: "git_commit_failed", message: "workspace has unresolved merge conflicts" } },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    await screen.findByTestId("review-panel");
+
+    fireEvent.click(screen.getByTestId("stage-publish"));
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+
+    fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
+
+    const recovery = await screen.findByTestId("publish-git-action-recovery");
+    expect(recovery).toHaveTextContent("Git action failed");
+    expect(recovery).toHaveTextContent("Git commit failed: workspace has unresolved merge conflicts");
+    expect(recovery).toHaveTextContent("Workspace Git state was not changed");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("failed");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Git commit failed");
+    expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("failed");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Resolve Git action failure");
+    expect(screen.getByTestId("next-action-panel")).toHaveTextContent("Review the Git action failure in Commit plan before retrying.");
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("Git action failed");
+    expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("workspace has unresolved merge conflicts");
+    expect(screen.getByTestId("publish-commit-selected-btn")).not.toBeDisabled();
   });
 
   it("renders diagram artifacts without sending loading placeholder text to Mermaid", async () => {

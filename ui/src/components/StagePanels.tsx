@@ -5061,6 +5061,7 @@ export function PublishStagePanel({
   gitMessage,
   proposalBranch,
   gitStatus,
+  gitError,
   artifacts,
   selectedArtifact,
   selectedArtifactContent,
@@ -5132,9 +5133,11 @@ export function PublishStagePanel({
   const publishGateTone = blockingGateItems.length > 0 ? "error" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "warn" : "ok";
   const publishGateLabel = blockingGateItems.length > 0 ? "blocked" : warningGateItems.length > 0 || openQuestionGateItems.length > 0 ? "review" : "ready";
   const publishGateDetail = primaryPublishGateItem ? `${primaryPublishGateItem.label}: ${primaryPublishGateItem.detail}` : "Git actions are allowed after final review.";
-  const gitActionLabel = blockingGateItems.length > 0 ? "blocked" : gitMessage.trim() ? "ready" : "needs message";
+  const gitActionLabel = gitError ? "failed" : blockingGateItems.length > 0 ? "blocked" : gitMessage.trim() ? "ready" : "needs message";
   const gitActionDetail =
-    blockingGateItems.length > 0
+    gitError
+      ? gitError
+      : blockingGateItems.length > 0
       ? `${blockingGateItems[0].label}: ${blockingGateItems[0].detail}`
       : gitMessage.trim()
         ? `Commit message prepared: ${gitMessage}`
@@ -5414,7 +5417,7 @@ export function PublishStagePanel({
                 <h2>Commit plan</h2>
                 <p className="hint">Prepared commit/proposal branch actions use the existing Git API.</p>
               </div>
-              <StatusBadge tone={gitStatus ? "ok" : "info"}>{gitStatus ? "updated" : "pending"}</StatusBadge>
+              <StatusBadge tone={gitError ? "error" : gitStatus ? "ok" : "info"}>{gitError ? "failed" : gitStatus ? "updated" : "pending"}</StatusBadge>
             </div>
             <dl className="compact-defs">
               <div>
@@ -5428,6 +5431,13 @@ export function PublishStagePanel({
             </dl>
             <label htmlFor="publishGitMessage">Commit message</label>
             <input id="publishGitMessage" value={gitMessage} onChange={(event) => onGitMessageChange(event.target.value)} />
+            {gitError ? (
+              <div className="publish-git-recovery" data-testid="publish-git-action-recovery" role="alert">
+                <strong>Git action failed</strong>
+                <span>{gitError}</span>
+                <p>Workspace Git state was not changed by this action. Review the message or branch name, check local Git permissions/status, then retry.</p>
+              </div>
+            ) : null}
             <div className="actions publish-actions">
               <button
                 type="button"

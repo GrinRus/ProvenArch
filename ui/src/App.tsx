@@ -174,6 +174,7 @@ export default function App() {
     gitMessage,
     proposalBranch,
     gitStatus,
+    gitError,
     bootstrapWorkspaceSetup,
     setManifestContent,
     setGuidedDocsImportsPath,
@@ -675,9 +676,9 @@ export default function App() {
   const gitPublication = useMemo<InspectorItem[]>(
     () => [
       {
-        severity: gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
-        label: gitStatus ? "Last Git action" : "Publication state",
-        detail: gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
+        severity: gitError ? "error" : gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
+        label: gitError ? "Git action failed" : gitStatus ? "Last Git action" : "Publication state",
+        detail: gitError || gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
       },
       {
         severity: "info",
@@ -690,7 +691,7 @@ export default function App() {
         detail: proposalBranch || "not prepared",
       },
     ],
-    [artifactCount, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
+    [artifactCount, gitError, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
   );
 
   const publishExternalGateItems = useMemo(
@@ -743,7 +744,8 @@ export default function App() {
     runErrorCode: runStatus?.error_code ?? undefined,
     reviewFindingsCount: openQuestions.trim() ? 1 : 0,
     releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
-  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
+    gitActionFailed: Boolean(gitError),
+  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, gitError, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -998,6 +1000,7 @@ export default function App() {
               gitMessage={gitMessage}
               proposalBranch={proposalBranch}
               gitStatus={gitStatus}
+              gitError={gitError}
               onGitMessageChange={setGitMessage}
               onProposalBranchChange={setProposalBranch}
               onCommit={() => void handleGitCommit()}
@@ -1092,6 +1095,7 @@ export default function App() {
           gitMessage={gitMessage}
           proposalBranch={proposalBranch}
           gitStatus={gitStatus}
+          gitError={gitError}
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
@@ -1175,17 +1179,24 @@ function deriveNextAction(
     runErrorCode?: string | null;
     reviewFindingsCount: number;
     releaseBlockersCount: number;
+    gitActionFailed: boolean;
   },
 ): NextAction {
   if (activeStage === "publish") {
     const disabledReason = !state.hasArtifacts
       ? "No generated workspace artifacts are ready to publish."
+      : state.gitActionFailed
+        ? "Review the Git action failure in Commit plan before retrying."
       : state.hardBlockersCount > 0
         ? "Resolve hard blockers before committing workspace artifacts."
         : undefined;
     return {
-      label: "Commit selected artifacts",
-      description: disabledReason ? "Resolve publish blockers before creating a Git commit." : "Create a Git commit for reviewed architecture workspace updates.",
+      label: state.gitActionFailed ? "Resolve Git action failure" : "Commit selected artifacts",
+      description: state.gitActionFailed
+        ? "Use the Commit plan recovery details, local Git status and prepared message before retrying the Git action."
+        : disabledReason
+          ? "Resolve publish blockers before creating a Git commit."
+          : "Create a Git commit for reviewed architecture workspace updates.",
       primaryActionId: "publish",
       disabledReason,
     };

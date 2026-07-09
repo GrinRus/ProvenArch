@@ -3119,6 +3119,36 @@ code {
   min-height: var(--control-min-height);
 }
 
+.publish-git-recovery {
+  display: grid;
+  gap: 0.32rem;
+  padding: 0.62rem;
+  border: 1px solid color-mix(in srgb, var(--err) 42%, var(--line));
+  border-radius: 0.42rem;
+  background: color-mix(in srgb, var(--err) 8%, var(--surface));
+  color: var(--ink);
+}
+
+.publish-git-recovery strong {
+  color: var(--err);
+}
+
+.publish-git-recovery span,
+.publish-git-recovery p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.publish-git-recovery span {
+  font-size: 0.84rem;
+}
+
+.publish-git-recovery p {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  line-height: 1.38;
+}
+
 .publish-primary-action {
   width: 100%;
   justify-content: center;

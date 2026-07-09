@@ -1018,3 +1018,36 @@ Observed improvement:
 Residual UX work after Slice 34:
 - The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
 - Continue rotating through remaining first-time and recovery paths with rendered QA, especially Publish/Git mutation edge states and onboarding/source recovery states that only have manual or component-level evidence.
+
+## Slice 35 Result
+
+Live medium retry:
+- goal: rerun medium `regres long` qwen-only after Slice 34 from clean commit `4df9cce`.
+- action: confirmed clean tree, `/tmp/provenarch-live-e2e` writable, PostHog checkout pinned at `14d29a548d63665d60b506cf13bd5cfb2de7c743`, exact Node `v22.21.1` via `ACP_NODE_TOOL_CANDIDATES`, `qwen 0.17.1`, then ran direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T133940Z`.
+- observed evidence: `/tmp/provenarch-test_arch_project/reports/matrix_result_regres-long-posthog-ftgo-20260709T133940Z.json` is `FAIL`, non-release, `strict_pass_runs=0/2`.
+- `single-path/baseline` and `single-git_url/baseline` both stopped before backend/frontend execution as `operational_host_preflight_failed`.
+- primary blocker: `qwen: headless_probe_timeout: qwen headless probe timed out after 30s`.
+- UX conclusion: this rerun produced no new product UI/backend execution evidence. The next useful product slice was therefore rendered QA for Publish Git mutation failures, a final handoff path that previously had component coverage but no dedicated rendered failure evidence.
+
+Implemented:
+- Added `ui/e2e/publish-git-recovery-mock.spec.ts`, a stable mocked Publish Playwright scenario enabled only with `UI_E2E_SCENARIO=publish-git-recovery-mock`.
+- The fixture models a successful analysis run with publishable artifacts and selected-run Git diff, while `/api/git/commit` and `/api/git/proposal-branch` return user-fixable Git failures.
+- Publish now keeps failed Git mutation detail local to the Commit plan, mirrors it in the Git publication inspector, and changes the global next action from false-ready commit guidance to blocked recovery guidance.
+- The Charter Git helper also shows the same local Git failure text because it uses the shared Git action hook.
+- Existing Git API responses remain the only input; no backend/API/schema/runtime contract changed.
+
+Post-change evidence:
+- rendered Publish Git recovery QA: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH UI_E2E_BASE_URL=http://127.0.0.1:51866 UI_E2E_SCENARIO=publish-git-recovery-mock UI_E2E_OUTPUT_DIR=/tmp/provenarch-ui-publish-git-recovery-rendered-20260709T1352Z npm run --prefix ui e2e:live -- publish-git-recovery-mock.spec.ts` -> `1 passed`
+- screenshots: `/tmp/provenarch-ui-publish-git-recovery-rendered-20260709T1352Z/publish-git-recovery-desktop.png`, `/tmp/provenarch-ui-publish-git-recovery-rendered-20260709T1352Z/publish-git-recovery-mobile.png`
+- UI typecheck: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui typecheck` -> passed
+- targeted UI tests: `PATH=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin:$PATH npm run --prefix ui test -- App.test.tsx --run -t "Publish Git actions|failed Publish Git actions|Publish gate"` -> `4 passed`
+- full DoD: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make contracts test lint build` -> passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build)
+
+Observed improvement:
+- A first-time operator no longer sees a green right-inspector `Commit selected artifacts` action after a Git mutation fails.
+- The failed commit/proposal branch state names that workspace Git state was not changed, preserves the prepared message/branch inputs and keeps retry controls visible.
+- Desktop and narrow-mobile evidence now cover Publish Git mutation failure, not only the happy handoff path.
+
+Residual UX work after Slice 35:
+- The execution blocker remains provider readiness on this host: qwen must pass the headless probe before the medium matrix can produce new product UI/backend evidence.
+- Continue rotating through remaining first-time and recovery paths with rendered QA, especially onboarding/source recovery states that only have manual or component-level evidence.

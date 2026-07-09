@@ -189,7 +189,8 @@ Must show:
 - diff summary by workspace folder;
 - selected artifact preview with `Preview`, `Diff`, `Evidence`, `Changelog`;
 - publish gate, checklist, blockers, commit plan and proposal branch;
-- prepared commit message actions.
+- prepared commit message actions;
+- failed Git mutation recovery next to the commit/proposal branch controls.
 
 ## State model
 
@@ -286,6 +287,7 @@ empty/partial state rather than changing backend contracts implicitly.
   - legacy `POST /api/qa/ask` remains compatibility-only, not the target UI path.
 - Publish:
   - existing Git helper flows for commit and proposal branch;
+  - failed Git helper mutations remain visible in the Commit plan and Git publication inspector until retried;
   - workspace artifact list/diff summary should be derived from current Git helper surfaces where
     possible, otherwise rendered as partial state until a separate backend slice is approved.
 

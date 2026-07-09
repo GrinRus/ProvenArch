@@ -3,6 +3,7 @@ type BaselineGitPanelProps = {
   gitMessage: string;
   proposalBranch: string;
   gitStatus: string;
+  gitError: string;
   onGitMessageChange: (value: string) => void;
   onProposalBranchChange: (value: string) => void;
   onCommit: () => void;
@@ -15,6 +16,7 @@ export function BaselineGitPanel(props: BaselineGitPanelProps) {
     gitMessage,
     proposalBranch,
     gitStatus,
+    gitError,
     onGitMessageChange,
     onProposalBranchChange,
     onCommit,
@@ -37,6 +39,7 @@ export function BaselineGitPanel(props: BaselineGitPanelProps) {
       </button>
 
       {gitStatus ? <p className="status ok">{gitStatus}</p> : null}
+      {gitError ? <p className="status err">{gitError}</p> : null}
     </section>
   );
 }
