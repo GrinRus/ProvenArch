@@ -26,10 +26,11 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
+| Code quality audit remediation | planned (Epic 19) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; local frontend security hardening remains Wave 1+ non-goal |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 17
-- follow-up: none active for MVP stakeholder matrix
+- follow-up: 19 active (quality remediation without hosted/frontend-security scope expansion)
 - out of MVP: 12, 13
 
 ---

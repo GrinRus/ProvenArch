@@ -1516,3 +1516,82 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
+| 19 Code quality remediation | planned | 29 audit findings + 13 dead-code groups decomposed into reviewable local-first slices in `docs/BACKLOG.md` |
+
+---
+
+## EP-20260710-code-quality-audit
+
+### Context
+- Baseline: commit `122e4c9b5a91b29e243677c0dac0fe2ebfca226b` with a clean starting worktree.
+- Goal: evidence-backed quality audit of production Go/React code, deterministic tests, CI/tooling, contracts/spec drift and ordinary lifecycle/recovery behavior.
+- Findings taxonomy: `DEAD`, `BUG`, `REF`, `QUAL`; only `Confirmed` and `High` confidence entries are reportable.
+
+### Plan
+- [x] Lock scope, finding contract, impact/priority/effort scales and excluded checks.
+- [x] Run four isolated review streams: Static, Backend, UI and Tooling.
+- [x] Execute allowed deterministic checks and classify environment limitations separately from code findings.
+- [x] Deduplicate sanitized fragments without returning to source during synthesis.
+- [x] Publish `docs/CODE_AUDIT_2026-07-10.md` with prioritized remediation roadmap and confirmed dead-code register.
+- [x] Verify the final worktree changes only this plan and the audit report.
+
+### Non-goals
+- No production-code fixes, schema/API/contract changes or dependency upgrades.
+- No live providers/matrices, fuzzing, dependency advisory scans or analysis outside the explicit quality scope.
+- No raw logs, generated inputs or lower-confidence conjectures in the report.
+
+### Acceptance
+- Every finding has `file:line`, normal scenario, expected/actual, evidence, root cause, recommendation and acceptance test.
+- Tool signals are manually validated; unsupported or host-limited checks are recorded as limitations, not findings.
+- Final diff is documentation-only and contains no public-interface or production behavior change.
+
+### Results
+- Main register: 29 findings — 19 BUG, 3 REF, 7 QUAL; 19 Major/P1 and 10 Normal/P2; no Blocker.
+- Dead-code register: 13 confirmed groups covering 60 Go/TypeScript/shell identifiers or assignments.
+- Deterministic baseline passed: contracts, Go tests, race/shuffle, Python 230 tests, Vitest 93 tests, UI mock Playwright 7/7 and lint.
+- Confirmed quality gaps include generated UI drift, ShellCheck coverage, missing V8 coverage dependency and missing failure-injection/request-order tests.
+- No production code, API, schema or contract changes were made.
+- Final worktree verification found only `docs/PLANS.md` and `docs/CODE_AUDIT_2026-07-10.md`.
+
+---
+
+## EP-20260710-code-audit-remediation-backlog
+
+### Context
+- The completed audit at `docs/CODE_AUDIT_2026-07-10.md` identified 29 reportable findings and 13 confirmed dead-code groups.
+- The project remains a local-first MVP with a loopback/trusted-operator React UI embedded into the Go binary.
+- Security/compliance enforcement and hosted/multi-user frontend hardening remain Wave 1+.
+
+### Goals
+- Convert every audit finding into a small, dependency-ordered implementation slice.
+- Make all Major/P1 remediation release-blocking while keeping required CI deterministic and provider-free.
+- Synchronize the reference backlog, canonical stakeholder matrix and operational mirror.
+
+### Non-goals
+- No production-code, API, schema or contract implementation in this planning slice.
+- No frontend auth/authz, CSP/CORS hardening program, hosted exposure or security policy work.
+- No live provider/matrix execution.
+
+### Plan
+- [x] Add Epic 19 goals, scope boundary, priority phases and epic-level acceptance to `docs/BACKLOG.md`.
+- [x] Map `BUG-001..019`, `REF-001..003`, `QUAL-001..007` and `DEAD-001..013` to reviewable slices.
+- [x] Record dependencies, affected modules, deterministic tests, docs obligations and DoD for every slice.
+- [x] Keep UI remediation limited to correctness, accessibility and deterministic QA.
+- [x] Synchronize `docs/STAKEHOLDER_DOC.md` and the operational mirror.
+
+### Acceptance
+- Every audit ID appears in exactly one primary Epic 19 slice; related IDs may be referenced as dependencies only.
+- P1 ordering prevents promotion/lifecycle/schema/UI/release work from racing incompatible foundations.
+- Schema-changing slices explicitly require schema-guardian, fixtures and documentation synchronization.
+- P3 deletion slices run only after behavior-restoration decisions that could reuse dead code.
+- Existing local-first and Wave 1+ security boundaries remain unchanged.
+
+### Results
+- Epic 19 contains 38 PR-sized slices/sub-slices: 16 P1, 12 P2 (including one optional
+  V8-coverage gap slice) and 10 P3.
+- P1 is grouped into crash/lifecycle, contract/source, UI correctness and release reproducibility phases.
+- Frontend security hardening was deliberately excluded; local UI work covers stale state, data loss, accessibility and deterministic browser QA.
+- Documentation verification passed: `git diff --check`, exact one-to-one audit-ID mapping and
+  slice-count checks. Full DoD was not repeated because this slice changes no code,
+  schemas/spec contracts or fixtures; the same exact code baseline DoD is recorded as passing
+  in the immediately preceding audit ExecPlan.
