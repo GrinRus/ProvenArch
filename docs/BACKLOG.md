@@ -477,6 +477,399 @@ Suggested PR slices:
     first-pass proposal output must fail before promotion, and exact linked actionable bullets
     must pass without `runtime_quality.repair_heavy`
 
+## Epic 19 — Code Quality Audit Remediation (Local-first MVP)
+
+Status: planned; source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at baseline
+`122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
+
+### Goal
+
+- закрыть все 19 Major/P1 findings до следующего public release;
+- разложить Normal/P2 и confirmed dead code на независимые reviewable slices;
+- усилить crash consistency, run lifecycle, contract correctness, UI state consistency,
+  reproducibility и deterministic CI без расширения product scope;
+- сохранить local-first MVP, синхронно эволюционировать затронутые public contracts и
+  оставить required CI без live network dependencies.
+
+### Explicit non-goals and local frontend boundary
+
+- frontend остаётся локальной loopback/trusted-operator surface, встроенной в Go binary;
+- этот epic **не добавляет** frontend authentication/authorization, multi-user isolation,
+  hosted exposure, CSP/CORS hardening program, browser sandboxing, security/compliance policy
+  enforcement или отдельный secrets boundary;
+- security baseline остаётся Wave 1+ и должен планироваться отдельным epic/threat-model только
+  если deployment меняется с local/trusted на shared, remote или hosted;
+- UI slices ниже исправляют correctness, stale state, data loss, accessibility и deterministic
+  QA; они не должны маскироваться под frontend security work;
+- live provider matrix не становится required per-PR CI: она остаётся manual trusted-machine
+  pre-release gate по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+
+### Priority and sequencing
+
+| Phase | Exit criterion | Slices |
+|---|---|---|
+| P1-A Crash/lifecycle | canonical state crash-safe; async runs имеют одного owner | 19A–19E |
+| P1-B Contract/source correctness | refresh и collect используют fresh, symmetric evidence | 19F–19H |
+| P1-C UI correctness | historical/active state не смешивается и edits не теряются | 19I–19L |
+| P1-D Release reproducibility | embed, verdict и contract tools воспроизводимы | 19M–19O |
+| P2 Quality hardening | заявленное semantic/UI/CI behavior покрыто deterministic tests | 19P–19V |
+| P3 Cleanup | confirmed dead code удалён после зависимых behavior decisions | 19W–19X |
+
+P1 slices допускают параллельную работу только внутри независимых групп. Обязательные
+dependencies: `19A -> 19B`, `19C -> 19D -> 19E`, `19G -> 19H`,
+`19J -> {19K1, 19K2, 19L}`, `19M + 19O -> 19N`. Slices `19W*/19X` выполняются последними,
+чтобы не удалять код, который ещё нужен для восстановления заявленного behavior.
+
+### Epic acceptance
+
+- все `BUG-001..BUG-019` закрыты regression tests или явно superseded одним принятым
+  behavior/ADR решением;
+- `REF-001..REF-003` и `QUAL-001..QUAL-007` имеют implemented deterministic gates;
+- `DEAD-001..DEAD-013` удалены либо оставлены только с documented active call site;
+- required CI выполняет canonical `make contracts`, `make test`, `make lint` и build/drift
+  checks без live providers;
+- каждый completed slice проходит `make contracts`, `make test`, `make lint`, `make build`;
+- schema/contract slices синхронизируют `schemas/*`, `docs/spec/*`,
+  `docs/APPENDIX_SCHEMAS.md`, examples, fixtures, validators/tests и ADR rationale;
+- behavior slices обновляют README/ARCHITECTURE/STAKEHOLDER/TESTING_STRATEGY только там,
+  где фактическое operator-facing или testing behavior меняется;
+- завершение P1 подтверждается deterministic CI; manual live release gate выполняется
+  отдельно и не блокирует review отдельных non-live slices.
+
+### Suggested PR slices
+
+#### `19A Atomic recovery-state persistence`
+
+- Priority/effort/findings: P1 / M / `BUG-005`.
+- Deliverable: отдельный atomic write primitive для run history, shard summaries и runtime
+  checkpoints: temp file, fsync, rename, error propagation и last-good/recovery diagnostic.
+- Modules: `internal/workspace`, `internal/orchestrator/service_runs*`,
+  `restart_reconcile*`, `sharding_artifacts*`.
+- Tests: fault injection до/после write/rename, malformed current + valid last-good,
+  restart replay; ошибки persistence не должны silently становиться empty history.
+- Docs: ARCHITECTURE/TESTING_STRATEGY — только crash/recovery semantics.
+- Dependency: первая backend slice; prerequisite для 19B.
+
+#### `19B Transactional canonical promotion`
+
+- Priority/effort/findings: P1 / L / `BUG-001`; depends on 19A.
+- Deliverable: build/validate managed generation в sibling staging tree, затем atomic activation
+  или journaled rollback; live canonical tree не мутируется до готовности generation.
+- Modules: `internal/orchestrator/docflow_promotion*`, model/diagram materialization,
+  workspace generation helpers.
+- Tests: fail each N-th copy/remove/model/diagram operation; after failure workspace соответствует
+  ровно previous либо new complete generation, mixed artifacts запрещены.
+- Docs: ARCHITECTURE + recovery operator guidance; public artifact schemas не меняются.
+
+#### `19C Async panic isolation`
+
+- Priority/effort/findings: P1 / S / `BUG-003`.
+- Deliverable: recover только на outer async goroutine boundary; terminal internal failure и
+  `finishAsyncRun` гарантируются через defer, synchronous panic semantics не меняются.
+- Modules: `internal/orchestrator/service_runs*` и async lifecycle tests.
+- Tests: panic runner для init/refresh/QA; API process жив, slot освобождён, pending run продолжен.
+- Docs: testing strategy only; API contract shape unchanged.
+
+#### `19D Server-owned shutdown`
+
+- Priority/effort/findings: P1 / M / `BUG-002`; depends on 19C.
+- Deliverable: signal-aware server context и bounded `Service.Close/Shutdown`, отменяющий
+  active/pending runs, provider process groups и post-shutdown writes.
+- Modules: `cmd/acp`, `internal/api`, `internal/orchestrator`, provider process-group adapters.
+- Tests: context cancellation и process-level SIGTERM with blocking fake provider; terminal
+  history persisted, no orphan process, bounded exit.
+- Docs: CLI/ARCHITECTURE shutdown semantics; no frontend security changes.
+
+#### `19E Coherent service/session generation`
+
+- Priority/effort/findings: P1 / M / `BUG-006`, `BUG-007`; depends on 19D.
+- Deliverable: immutable workspace/service/config snapshot per request; coordinated service
+  generation swap; runtime reselection returns conflict while active/pending or performs
+  explicit quiesce before replacement.
+- Modules: `internal/api/server*`, onboarding runtime selection, orchestrator registry.
+- Tests: concurrent polling + workspace/runner mutation under race detector; direct-mode
+  reported/effective runner equality; no stale goroutine ownership.
+- Docs: API/ARCHITECTURE conflict behavior if a new 409 surface is introduced.
+
+#### `19F Fresh unpinned git_url resolution`
+
+- Priority/effort/findings: P1 / M / `BUG-004`.
+- Deliverable: after fetch resolve remote default HEAD, reset ACP-owned cache to exact SHA and
+  persist resolved SHA in run evidence; pinned ref behavior remains unchanged.
+- Modules: `internal/workspace/resolver*` and resolver fixtures.
+- Tests: local bare remote receives new default-branch commit; second resolve without ref reads
+  new content; pinned ref remains stable; no live network.
+- Docs: WORKSPACE_SPEC/README source freshness semantics without schema change.
+
+#### `19G Minimum collect evidence contract`
+
+- Priority/effort/findings: P1 / M / `BUG-008`.
+- Deliverable: non-empty documents/citations and authored document citation IDs become explicit
+  collect contract requirements before checkpoint/apply.
+- Modules: shard-pack schema, contracts/docflow validators, runtime apply gate.
+- Tests/fixtures: empty arrays, missing citation IDs and sparse semantic packets fail and enter
+  existing repair/terminal path; valid minimal fixture passes.
+- Docs: full schema-guardian sync, Appendix Schemas, examples, fixtures and ADR rationale.
+- Dependency: run before 19H to avoid two competing schema migrations.
+
+#### `19H Symmetric document/citation validation`
+
+- Priority/effort/findings: P1 / M / `BUG-009`; depends on 19G.
+- Deliverable: every `citation.document_ids` resolves to a current document and reverse links
+  remain symmetric before and after document-ID remap.
+- Modules: contracts/docflow validation and staged index/remap validation.
+- Tests/fixtures: unknown ID, typo, asymmetric binding and post-remap dangling ID fail;
+  valid duplicate-ID remap remains green.
+- Docs: PIPELINE_SPEC + schema appendix/fixtures through schema-guardian workflow.
+
+#### `19I Historical run artifact snapshots`
+
+- Priority/effort/findings: P1 / M / `BUG-011`.
+- Deliverable: UI model keeps canonical label and run-scoped staged read path separately;
+  historical preview/coverage/questions always read selected-run snapshot.
+- Modules: `ui/src/lib/appContracts.ts`, `useRunArtifacts` and artifact API adapter.
+- Tests: two runs share canonical paths but contain different staged content; old selection never
+  reads current canonical file.
+- Docs: UI behavior docs only; no auth, browser perimeter or backend security scope.
+
+#### `19J Request-scoped UI detail state`
+
+- Priority/effort/findings: P1 / M / `BUG-012`, `BUG-014`.
+- Deliverable: reusable request generation/AbortController primitive and keyed
+  `{requestKey,status,data}` state for run status, logs, artifacts, previews and Git diff.
+- Modules: run/log/artifact/diff hooks and shared UI async-state helper.
+- Tests: deferred A then B responses; late A cannot update any B panel; unmount abort is clean.
+- Docs: none unless operator-visible loading/error behavior changes.
+
+#### `19K1 Run mutation acknowledgement`
+
+- Priority/effort/findings: P1 / S / `BUG-013`; depends on 19J.
+- Deliverable: accepted start/cancel response materializes provisional state immediately;
+  follow-up GET failure is recoverable reconciliation, not mutation failure.
+- Modules: `useRunActions` and run polling/recovery state.
+- Tests: POST success + first GET failure does not duplicate start/cancel; polling recovers the
+  same run ID and preserves accepted action copy.
+- Docs: UI recovery copy only if labels change; no frontend security work.
+
+#### `19K2 Q&A provisional run and selection ordering`
+
+- Priority/effort/findings: P1 / M / `BUG-015`; depends on 19J.
+- Deliverable: accepted Q&A response creates provisional run before detail GET; history selection
+  uses request generation and last selection wins.
+- Modules: Ask/Q&A StagePanels state and QA API adapter.
+- Tests: first detail GET may fail and recover the same ID; delayed A history response cannot
+  replace selected B; duplicate submit is impossible while accepted run reconciles.
+- Docs: Ask recovery behavior only; no frontend security work.
+
+#### `19L Editor revision safety`
+
+- Priority/effort/findings: P1 / M / `BUG-016`, `BUG-017`; depends on 19J.
+- Deliverable: form revision/snapshot checks for manifest save and single-owner, per-path dirty
+  draft loading for charter/baseline editor.
+- Modules: `useManifestEditor`, `useBaselineEditor` and App selection effect.
+- Tests: edit during deferred save remains dirty; duplicate/late load cannot overwrite typed text.
+- Docs: none unless save/recovery UX changes.
+
+#### `19M Deterministic embedded UI bundle`
+
+- Priority/effort/findings: P1 / M / `BUG-018`.
+- Deliverable: stabilize Vite chunk/file generation, add clean exact-commit build comparison and
+  fail PR when `internal/api/ui_dist` is stale.
+- Modules: Vite config, Makefile generated-copy target, UI workflow and embedded bundle manifest.
+- Tests: two independent temp-root builds have identical paths/digests; stale embed fixture/check
+  fails while unchanged build produces empty diff.
+- Docs: TESTING_STRATEGY and release build instructions.
+
+#### `19N Release composite-verdict gate`
+
+- Priority/effort/findings: P1 / M / `BUG-019`; depends on 19M and 19O.
+- Deliverable: release job receives canonical verdict + accepted UX/artifact assessments and runs
+  offline verifier before GoReleaser/write permissions.
+- Modules: release workflow and existing `verify-release-verdict.py` contract tests.
+- Tests: missing, FAIL, matrix-mismatched or unaccepted SWE inputs prevent GoReleaser; complete
+  accepted evidence allows dry-run publication path.
+- Docs: RELEASE_LIVE_E2E_RUNBOOK/release process; full live matrix remains manual trusted-machine.
+
+#### `19O Locked contract validator toolchain`
+
+- Priority/effort/findings: P1 / M / `REF-002`.
+- Deliverable: versioned lockfile/package for ajv-cli, ajv-formats and js-yaml; contract target
+  runs installed exact versions and does not resolve mutable registry latest.
+- Modules: contract tooling package/lockfile, Makefile and contracts workflow.
+- Tests: offline contract validation after clean install; version update requires explicit
+  lockfile diff; current positive/negative contract fixtures unchanged.
+- Docs: CONTRIBUTING/TESTING_STRATEGY toolchain bootstrap.
+
+#### `19P Restore Step 1 card enrichment`
+
+- Priority/effort/findings: P2 / M / `BUG-010`, `DEAD-001`.
+- Decision: retain the existing PIPELINE_SPEC behavior and restore one contract-safe enrichment
+  call after semantic apply; do not delete the cluster.
+- Modules: Step 1 handler and semantic card rendering/enrichment.
+- Tests: init/refresh with domain/team cards creates one idempotent Derived section with evidence
+  refs and never auto-creates/renames human-owned cards.
+- Docs: no contract change; update architecture only if exact execution point is documented.
+
+#### `19Q Generic refresh semantic guard`
+
+- Priority/effort/findings: P2 / M / `REF-001`, `DEAD-002`.
+- Decision: preserve the documented refresh guard, but replace/rework narrow unreachable helpers
+  into a generic policy that marks or rejects runtime/provider metadata and off-topic candidates
+  without domain-specific heuristics.
+- Modules: semantic normalization/diagnostics and refresh tests.
+- Tests: runtime metadata/off-topic candidate is marked/filtered, legitimate same-domain entity
+  survives, init behavior is unchanged, diagnostic is deterministic.
+- Docs: ARCHITECTURE + ADR explaining generic policy and no hidden domain whitelist.
+
+#### `19R1 ARIA tabs controller`
+
+- Priority/effort/findings: P2 / S / `QUAL-001`.
+- Deliverable: reusable roving-tabindex controller with Arrow/Home/End navigation and stable
+  tab-to-tabpanel relationships.
+- Modules: `TabNav` and tabbed stage panels.
+- Tests: only active tab is tabbable; keyboard focus/selection and labelled panel behavior.
+- Docs: UI accessibility contract; usability scope only.
+
+#### `19R2 Keyboard path combobox`
+
+- Priority/effort/findings: P2 / S / `QUAL-002`.
+- Deliverable: active option state, aria-activedescendant, Arrow/Enter/Escape behavior and
+  pointer/keyboard parity.
+- Modules: `LocalPathCombobox` and onboarding/source consumers.
+- Tests: full keyboard-only selection, Escape close and active descendant assertions.
+- Docs: UI accessibility contract; no security boundary change.
+
+#### `19R3 Accessible async announcements`
+
+- Priority/effort/findings: P2 / S / `QUAL-003`.
+- Deliverable: shared alert/live-status primitive plus aria-invalid/describedby wiring for
+  asynchronous validation, save and run errors.
+- Modules: App/onboarding status and error surfaces.
+- Tests: error alert, polite progress/success and field-linked diagnostic behavior.
+- Docs: UI accessibility contract; desktop/mobile mock QA remains green.
+
+#### `19S1 Confirmed shell dead-code cleanup`
+
+- Priority/effort/findings: P2 / S / `DEAD-011`, `DEAD-012`, `DEAD-013`.
+- Deliverable: remove unused matrix/batch helpers and frontend status assignments without
+  changing active result classification.
+- Modules: batch and matrix shell scripts.
+- Tests: Python/shell contract tests and bash syntax remain green; targeted reference search empty.
+- Dependency: perform before enabling ShellCheck in 19S2.
+
+#### `19S2 ShellCheck in canonical lint`
+
+- Priority/effort/findings: P2 / S / `QUAL-005`; depends on 19S1.
+- Deliverable: Makefile lint executes ShellCheck for production scripts with only narrow,
+  documented suppressions for intentional indirect trap callbacks/export idioms.
+- Modules: Makefile, shell lint configuration and script test fixtures.
+- Tests: current scripts clean; a test probe with unused variable or invalid shell pattern fails.
+- Docs: TESTING_STRATEGY canonical lint baseline.
+
+#### `19S3 Required PR lint job`
+
+- Priority/effort/findings: P2 / S / `QUAL-004`; depends on 19S2.
+- Deliverable: required PR workflow invokes canonical `make lint` rather than duplicating a
+  partial gofmt/typecheck subset.
+- Modules: backend/UI workflow composition and Makefile entrypoint.
+- Tests: intentionally unformatted Go or ShellCheck violation makes required check red;
+  valid branch remains provider-free.
+- Docs: TESTING_STRATEGY required CI matrix.
+
+#### `19T Logs endpoint smoke coverage`
+
+- Priority/effort/findings: P2 / S / `QUAL-006`.
+- Deliverable: smoke-api requests run logs with cursor/limit and validates response shape and
+  pagination cursor.
+- Modules: `scripts/smoke-api.sh` and its deterministic stubs/tests.
+- Tests: 5xx, malformed payload and invalid cursor fail; normal empty/non-empty pages pass.
+- Docs: TESTING_STRATEGY smoke baseline synchronized.
+
+#### `19U Deterministic mock Playwright CI`
+
+- Priority/effort/findings: P2 / M / `QUAL-007`.
+- Deliverable: separate `e2e:mock` runner with local Vite server and explicit seven-scenario
+  matrix; no live providers, external repos or network dependencies.
+- Modules: Playwright mock config/runner, UI package scripts, Makefile and UI workflow.
+- Tests: 7 passed / 0 skipped; broken selector fails required check; desktop/mobile overflow and
+  console-error assertions remain active.
+- Docs: TESTING_STRATEGY; release-facing live scenario allowlist unchanged.
+
+#### `19U2 Optional V8 coverage baseline`
+
+- Priority/effort/source: P2 optional / S / residual audit test gap, not a reportable finding.
+- Deliverable: lock `@vitest/coverage-v8` and publish a deterministic text/JSON coverage summary
+  that includes all `ui/src` files.
+- Modules: UI package/lockfile and deterministic unit-test workflow; no Playwright coupling.
+- Tests: clean install produces coverage without prompt/download; initial thresholds are recorded
+  baseline and may only ratchet upward.
+- Docs: TESTING_STRATEGY; this optional coverage slice is independent from the required
+  browser-CI finding.
+
+#### `19V Pinned Python tooling runtime`
+
+- Priority/effort/findings: P2 / M / `REF-003`.
+- Deliverable: exact supported Python version, setup-python in workflows and one
+  version-checking wrapper used by Makefile/scripts.
+- Modules: CI workflows, developer version file/wrapper and Python test entrypoints.
+- Tests: wrong interpreter fails before suite; all jobs report same version; 230 tests pass.
+- Docs: CONTRIBUTING/TESTING_STRATEGY bootstrap.
+
+#### `19W1 Runtime-draft wrapper cleanup`
+
+- Priority/effort/findings: P3 / S / `DEAD-003`.
+- Deliverable: remove six orchestrator runtime-draft wrappers and use canonical
+  `internal/runtimedrafts` call sites only.
+- Tests: runtime-draft/orchestrator package tests + Staticcheck 2026.1.
+- Dependency: after all P1 backend slices.
+
+#### `19W2 Sharding wrapper cleanup`
+
+- Priority/effort/findings: P3 / S / `DEAD-004`.
+- Deliverable: remove four legacy sharding planner/artifact wrappers without adding aliases.
+- Tests: deterministic sharding tests + Staticcheck 2026.1.
+- Dependency: after all P1 backend slices.
+
+#### `19W3 Provider argument wrapper cleanup`
+
+- Priority/effort/findings: P3 / S / `DEAD-005`.
+- Deliverable: remove three legacy default-argument entry points and retain the
+  permission-aware builders.
+- Tests: Claude/Qwen/Codex adapter argument tests + Staticcheck 2026.1.
+- Dependency: after lifecycle/runtime P1 slices.
+
+#### `19W4 Docflow compatibility helper cleanup`
+
+- Priority/effort/findings: P3 / S / `DEAD-006`.
+- Deliverable: remove two local helpers superseded by the artifact-quality layer.
+- Tests: docflow/artifact-quality package tests + Staticcheck 2026.1.
+- Dependency: after 19G/19H contract work.
+
+#### `19W5 Package-local residual cleanup track`
+
+- Priority/effort/findings: P3 / S each / `DEAD-007`.
+- Rule: one PR per package; no cross-package forwarding wrapper.
+
+| Sub-slice | Package/location | Required test |
+|---|---|---|
+| `19W5a` | `internal/api/review_diff.go` | API/review diff package tests |
+| `19W5b` | `internal/model/store.go` | model store/golden tests |
+| `19W5c` | `internal/orchestrator/quality.go` | orchestrator quality tests |
+| `19W5d` | `internal/reports/compiler.go` | reports compiler tests |
+| `19W5e` | `internal/runtime/promptcontract/collect_repair.go` | prompt-contract tests |
+
+Каждый sub-slice дополнительно запускает Staticcheck 2026.1 и full DoD. Track выполняется
+после 19P/19Q decisions и всех P1 backend slices.
+
+#### `19X UI dead-surface cleanup`
+
+- Priority/effort/findings: P3 / S / `DEAD-008`, `DEAD-009`, `DEAD-010`.
+- Deliverable: remove unused Diagnostic import/props, legacy QA client and facade members, unless
+  a preceding correctness slice has created an explicit active consumer.
+- Modules: App/StagePanels, QA client and run-review/diff/explorer hooks.
+- Tests: noUnusedLocals/noUnusedParameters, Vitest and mock Playwright all green.
+- Dependency: after 19I–19L so request-state refactor owns the final hook surface.
+
 ## Cleanup follow-up (post-beta, owner confirmation required)
 
 Открытые пункты после cleanup slice:
