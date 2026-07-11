@@ -61,9 +61,14 @@ Tracker reconciliation from 2026-07-02 archived implementation-complete plans in
 
 ### Continuous Backlog Queue Policy
 
-Current normal product backlog queue is empty. `docs/STAKEHOLDER_DOC.md` marks MVP product epics as done within the current beta boundary, and `docs/BACKLOG.md` remains a reference/acceptance backlog rather than the active execution queue.
+The normal product backlog queue has two active post-beta programs: Epic 19 (`Code Quality Audit Remediation`) and Epic 20 (`Console UX trust, evidence workflow and IA reset`).
+The first selected UX engineering slice is `20A Run-pinned evidence snapshot truth` under
+`EP-20260711-run-pinned-evidence-review`. `docs/BACKLOG.md` remains the reference/acceptance
+backlog; this file selects and sequences focused active slices.
 
 Allowed next workstreams:
+- `EP-20260710-code-audit-remediation-backlog` as the active Epic 19 planning track.
+- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice.
 - Existing live-quality/release-validation plans below, only when their trusted-machine/provider prerequisites are satisfied.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
@@ -75,209 +80,110 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
-EP-20260708-ux-ui-quality-loop
+EP-20260711-run-pinned-evidence-review
 
 ### Context
-The user requested an iterative UX/UI quality loop for the ACP operator console: understand the product and user journey, inspect every screen, run live E2E on a medium task when host prerequisites allow it, write a UX/UI quality report, plan improvements, commit, and repeat until a first-time operator can complete the happy path and recovery paths clearly. Existing diagnostic evidence in `reports/ux_current_state_20260707.md` shows the fake-runtime UI flow passes, but the rendered console is still too dense around shared shell chrome: Activity drawer, right inspector, and active run summary compete with the stage workbench.
+Epic 20 starts with the highest-risk trust defect in the current Console V2. The persisted
+`final-run-index.json` contract already requires both `canonical_path` and `staged_path`, but
+the TypeScript contract drops `staged_path` and selected-run Review reads the current canonical
+path. Coverage and open questions are also loaded from stable current-workspace paths. After a
+new promotion, an operator can therefore select an older `run_id` while seeing newer bytes.
+This slice restores immutable run-pinned review without changing the canonical artifact schema.
 
 ### Goals (must have)
-- [x] Map the current user journey across onboarding, Source, Readiness, Charter, Analysis, Review, Proposals, Ask and Publish.
-- [x] Capture rendered UI evidence for desktop and mobile with the deterministic fake-runtime live smoke.
-- [x] Attempt the requested medium live E2E path only through public runbook surfaces; classify host/provider blockers instead of changing canonical matrices or curated repos.
-- [x] Write a current UX/UI quality assessment and actionable improvement plan.
-- [x] Implement the first focused UI polish slice without schema/API/runtime contract changes.
-- [x] Add or update UI tests for changed shell behavior.
-- [x] Run relevant verification and commit the slice.
-- [x] Implement the Review hierarchy slice so the review queue and selected preview are primary while the full artifact explorer is secondary.
-- [x] Add mobile Review section jumps for long first-time review sessions.
-- [x] Simplify first-run Readiness by keeping advanced runtime tools compact and closed during the primary readiness path.
-- [x] Add an explicit Analysis failed-run recovery path with retry and blocker drilldown.
-- [x] Add an explicit Ask/Q&A failed-run recovery path with audit refs and same-question retry.
-- [x] Keep the secondary Review artifact explorer stable while switching filters during evidence review.
-- [x] Add Publish readiness summary and mobile section jumps for the final Git handoff path.
-- [x] Add onboarding setup summary with current blocker, next action and explicit disabled-action reasons.
-- [x] Restore trusted-host PostHog checkout outside the repo and execute the medium qwen-only baseline matrix through `scripts/full-run-batch-matrix.sh`.
-- [x] Classify the live medium result with report/profile/status evidence instead of treating it as a visual UI regression.
-- [x] Implement a live diagnostics UX slice for shard collection, focused repair and partial failure recovery.
-- [x] Implement pending permission triage so managed-mode `runtime_permission_required` failures are understandable before raw table inspection.
-- [x] Mirror pending permission step/rule/target/reason detail in the right inspector hard blocker.
-- [x] Add cooperative cancel guidance for active selected runs without changing cancel API behavior.
-- [x] Distinguish terminal canceled/reconciled runs from runtime failures in Analysis recovery and inspector copy.
-- [x] Distinguish terminal canceled/reconciled Q&A runs from answer validation/runtime failures in Ask recovery.
-- [x] Show terminal canceled/reconciled Analysis runs as `canceled`/`recovered` across status, mission control, active run summary and history.
-- [x] Make the shared Activity drawer distinguish terminal canceled/reconciled runs from generic failures when log entries are absent.
-- [x] Make Analysis recovery and global next action use retained-evidence actions for terminal canceled/reconciled runs.
-- [x] Route provider-unavailable Analysis, Publish and Ask recovery copy to Readiness provider checks instead of generic failed-shard retry guidance.
-- [x] Add a Readiness provider recovery surface so provider-unavailable reroutes land on command/auth/quota guidance before retry.
-- [x] Add onboarding runner recovery guidance so first-time headless setup shows expected command/env override before first analysis.
-- [x] Add Source validation recovery guidance so repo/source validation errors are actionable before raw diagnostics.
-- [x] Add Charter baseline recovery guidance so prompt/charter bundle warnings are actionable before Analysis.
-- [x] Add Proposals package recovery guidance so incomplete proposal/changelog packages are actionable before Publish.
-- [x] Summarize active provider JSON stream chunks in the Activity drawer and label active Analysis provider stream as a run signal.
-- [x] Add rendered browser QA for the Activity drawer provider-stream summary on desktop and narrow mobile.
-- [x] Add rendered browser QA and UI polish for failed artifact-handoff shard drilldown.
-- [x] Add rendered browser QA and mobile-card polish for pending runtime permission recovery.
-- [x] Add rendered browser QA and layout polish for failed Ask/Q&A recovery.
-- [x] Add rendered browser QA and recovery polish for failed Publish Git mutations.
-- [x] Add stable rendered browser QA for Source validation recovery with long repo/source diagnostics.
-- [ ] Continue the iterative UX/UI loop across remaining first-time, recovery, retry and non-happy path surfaces.
+- [ ] Preserve top-level `run_id`/`generated_at` and document `staged_path` in the frontend
+      final-run index contract.
+- [ ] Resolve every selected-run final document from its staged path, including coverage and
+      open-question artifacts when present in that run's index.
+- [ ] Require index `run_id` to match the selected run and every `staged_path` to remain inside
+      `reports/taskruns/<run_id>/staging/final/`.
+- [ ] Load preview, coverage and open questions as one run-id-keyed snapshot transaction with
+      stale-response suppression or abort behavior.
+- [ ] Model `Run snapshot` and `Current workspace` as explicit, non-interchangeable source modes.
+- [ ] Default selected History/Review evidence to `Run snapshot` and expose
+      `Current workspace` only as an explicit user action.
+- [ ] Show selected `run_id`, generated timestamp and source mode in the Review/Publish evidence
+      context; runtime/provider authority remains scoped to Epic `20C`.
+- [ ] Treat a missing, unreadable or incomplete staged snapshot as an explicit selected-run
+      error; never fall back to canonical bytes.
+- [ ] Add deterministic two-run regression coverage and rendered proof with the same canonical
+      paths but different content.
 
 ### Non-goals
-- [ ] Do not change workspace, runtime, artifact, schema, or API contracts in this UX polish slice.
-- [ ] Do not edit canonical release matrices, curated repo files, or add a wrapper over the matrix harness.
-- [ ] Do not treat deterministic fake-runtime UX evidence as release readiness.
-- [ ] Do not redesign the console visual language; preserve the approved dense operator-console direction.
+- [ ] Do not change `schemas/final-run-index.schema.json` or synthesize a second snapshot format.
+- [ ] Do not redesign the full navigation, artifact viewer or Publish gate in this slice.
+- [ ] Do not add persisted review approvals or exact file-scoped Git commit behavior.
+- [ ] Do not change runtime promotion, canonical workspace writes or live E2E matrices.
+- [ ] Do not require a live provider; required acceptance uses fake/recorded deterministic data.
 
 ### Approach
-1) Study project docs, current UI implementation, design baseline and existing UX evidence.
-2) Run fake-runtime rendered QA and inspect screenshots across primary screens.
-3) Run live E2E host/tool/provider preflight for the medium path; continue only if runbook prerequisites are satisfied.
-4) Write a UX/UI report with findings, state coverage, recovery gaps and prioritized fixes.
-5) Implement the smallest coherent improvement slice: context-aware Activity drawer, progressive-disclosure inspector, and successful-run review emphasis.
-6) Implement the next Review-focused slice: primary review queue, selected evidence preview, secondary artifact explorer and mobile section jumps.
-7) Implement the next Readiness-focused slice: keep exact runtime controls available while preserving the first-run readiness path and screenshot hierarchy.
-8) Implement non-happy-path recovery polish for failed Analysis and Ask runs.
-9) Implement Publish handoff polish: publication readiness summary, mobile section jumps and rendered mobile Publish evidence.
-10) Implement onboarding first-run polish: current setup blocker, next action and disabled-action reasons.
-11) Use the medium matrix result to design the next live diagnostics slice: shard-plan progress, succeeded/failed/repairing counts, repair attempt state, terminal validation excerpt, raw-output refs and concrete rerun/triage actions.
-12) Improve managed permission recovery UX using existing pending request fields: blocked step, operation, decision/rule, target/reason and safe next actions.
-13) Mirror managed permission blocker context in the right inspector so the global hard-blocker surface stays actionable.
-14) Clarify active-run cancellation as cooperative stop with taskrun evidence/history preserved.
-15) Distinguish terminal `run_canceled` and restart-reconciled runs from runtime/provider failures.
-16) Extend the same terminal canceled/reconciled language to Ask/Q&A answer runs without changing the async QA API.
-17) Promote the same terminal outcome labels into Analysis status, mission control, active run summary and history counts while leaving generic runtime failures as `failed`.
-18) Extend terminal outcome labels into the shared Activity drawer summary/empty-log state so stopped/reconciled runs do not read as generic failures.
-19) Extend retained-evidence action copy into Analysis recovery and global next action for terminal stopped/reconciled runs.
-20) Make Readiness the actionable landing surface for provider outages by showing selected provider, doctor status, command override and binary/auth/quota recovery actions.
-21) Make onboarding Runner actionable for headless provider setup by showing expected command, env override, doctor status and fake fallback before first analysis.
-22) Make Source validation actionable by showing the first blocking repo/source diagnostic, current source/ref and save-then-validate recovery actions before raw diagnostics.
-23) Make Charter baseline warnings actionable by showing affected artifact/category/prompt usage, severity, message, suggested fix and save-then-analyze actions before the raw editor warnings.
-24) Make Proposals package blockers actionable by showing proposal/changelog package state, primary blocker, suggested fix and publication path before the review room.
-25) Make active provider stream readable in shared Activity by summarizing JSON stream chunks while preserving full raw log/export access.
-26) Add rendered browser QA for the provider-stream Activity summary with a stable mocked running-run fixture.
-27) Add rendered browser QA for failed artifact-handoff shard drilldown and fix any visual defects exposed by it.
-28) Add rendered browser QA for pending runtime permission recovery and use mobile-first request cards when the raw request table is too dense.
-29) Add rendered browser QA for failed Ask/Q&A recovery and keep recovery metrics readable on desktop/mobile.
-30) Add rendered browser QA for failed Publish Git mutations and keep recovery local to the commit plan/inspector.
-31) Add stable rendered browser QA for Source validation recovery with long Git URL/ref diagnostics, readiness blocking, desktop/mobile overflow checks and screenshots.
-32) Verify with component tests, UI build, rendered smoke when feasible, and DoD commands proportional to the slice.
-33) Commit and use the report to drive the next iteration.
+1) Extend the TypeScript final-index document contract with required `staged_path` and keep
+   its top-level `run_id`/`generated_at` parsing aligned with the existing JSON schema.
+2) Introduce a small evidence-source view model that distinguishes a selected run snapshot from
+   the current canonical workspace.
+3) Validate that the index belongs to the selected run and that normalized staged paths are
+   contained under that run's `staging/final` root before issuing artifact reads.
+4) Build one run-id-keyed snapshot load for preview, coverage and open questions; abort or ignore
+   stale responses when selection changes. Do not retain stable-path fallback in snapshot mode.
+5) Distinguish an optional document absent from the index (`Not produced for this run`) from an
+   indexed document that cannot be read (`Snapshot unavailable`).
+6) Add primary-context copy and explicit unavailable/corrupt snapshot recovery near the
+   selected evidence rather than as a remote global error.
+7) Add two run fixtures sharing canonical paths while staging different bytes; assert rapid
+   run A -> run B -> run A switching never leaks canonical, cross-run or stale async content.
+8) Run focused UI tests, typecheck/build, rendered multi-run QA and the repository Full DoD.
+9) Update behavior documentation only where run-history/current-workspace semantics are
+   described, then commit this slice independently before selecting `20B`.
 
 ### Files expected to change
-- `ui/src/components/ActivityDrawer.tsx`
-- `ui/src/components/RightInspector.tsx`
-- `ui/src/components/ActiveRunStrip.tsx`
-- `ui/src/components/OnboardingShell.tsx`
-- `ui/src/App.tsx`
-- `ui/src/components/StagePanels.tsx`
-- `ui/src/components/ConsoleShellPrimitives.test.tsx`
+- `ui/src/lib/appContracts.ts`
+- `ui/src/hooks/useRunArtifacts.ts`
+- `ui/src/hooks/useRunActions.ts`
+- `ui/src/hooks/useRunExplorer.ts`
+- `ui/src/App.tsx` and/or the touched Review/Publish context component
 - `ui/src/App.test.tsx`
-- `ui/e2e/live-flow.spec.ts`
-- `ui/e2e/provider-stream-mock.spec.ts`
-- `ui/e2e/analysis-failed-shard-mock.spec.ts`
-- `ui/e2e/permission-recovery-mock.spec.ts`
-- `ui/e2e/qa-recovery-mock.spec.ts`
-- `ui/e2e/publish-git-recovery-mock.spec.ts`
-- `ui/e2e/source-recovery-mock.spec.ts`
-- `ui/src/hooks/useGitActions.ts`
-- `ui/src/styles.css`
-- `reports/ux_ui_assessment_20260708.md`
-- `README.md`
-- `docs/ARCHITECTURE.md`
-- `docs/UI_CONSOLE_V2_DESIGN.md`
-- `docs/STAKEHOLDER_DOC.md`
-- `docs/PLANS.md`
+- deterministic `historical-run-snapshot` UI/Playwright scenario for same-path multi-run evidence
+- `docs/ARCHITECTURE.md`, `docs/UI_CONSOLE_V2_DESIGN.md` and testing docs only where the
+  implemented source-mode behavior needs synchronization
 
 ### Acceptance criteria
-- [x] Activity drawer keeps active/failed run diagnostics easy to open, but does not consume review/publish attention after success by default.
-- [x] Right inspector keeps `Next action` prominent and collapses or summarizes empty/secondary sections without hiding hard blockers, warnings, evidence, runtime safety or Git publication access.
-- [x] Active run strip highlights review/artifact state after a successful run instead of making stale `current_step` the dominant signal.
-- [x] Review makes the queue and selected evidence preview the primary path, while the full artifact explorer is an explicit secondary disclosure.
-- [x] Mobile Review exposes section jumps before the long evidence/queue/artifact/trust stack.
-- [x] Readiness keeps advanced runtime panels out of the first-run visual path while preserving direct operator access to timeouts/execution/permissions/provider overrides.
-- [x] Analysis failed runs show classification, blocked step, retained evidence, warnings and a retry action for the same pipeline.
-- [x] Ask failed runs show classification, blocked step, QA audit refs, warnings and a retry action for the same question.
-- [x] Ask terminal canceled/reconciled runs show canceled/recovered outcome, stopped/recovered step, retained QA audit evidence and an Ask-again action instead of answer-validation failure wording.
-- [x] Review artifact explorer stays open and keeps filtered artifact lists visible while switching between diagram/report/proposal/runtime groups.
-- [x] Publish shows publication set, gate, open-question and Git-action state above the fold and exposes mobile jumps for `Diff`, `Preview`, `Gate` and `Commit`.
-- [x] Onboarding shows the current setup step, current blocker, next action and disabled-action reason before the user enters Console V2.
-- [x] Primary fake-runtime flow remains passable through live Playwright smoke, including Ask and mobile Review evidence.
-- [x] Medium live E2E is either executed through `scripts/full-run-batch-matrix.sh` or explicitly blocked with runbook classification and evidence.
-- [x] Live medium execution evidence is captured from `matrix_result_regres-long-posthog-ftgo-20260708T130309Z.json`, profile status JSON and execution reports.
-- [x] Live failed-run diagnostics expose shard progress and recovery state without requiring raw log inspection first.
-- [x] Live diagnostics distinguish provider activity, focused repair, partial collect continuation and terminal runtime contract failure.
-- [x] Pending permission requests expose a triage summary, target/reason, policy rule, decision and safe next actions before the raw request table.
-- [x] Right inspector hard blockers expose pending permission step, rule, target and reason instead of a generic pending message.
-- [x] Active selected runs explain that cancel is cooperative and preserves taskrun evidence/history.
-- [x] Terminal canceled runs show stopped-step/run-again/History evidence copy instead of generic runtime-failure recovery.
-- [x] Terminal canceled/restart-reconciled Analysis runs show `canceled`/`recovered` in status, mission control, active run summary and History without reclassifying generic runtime failures.
-- [x] Activity drawer empty-log states show canceled/recovered recovery copy with retained History evidence instead of `Run failed before log entries`.
-- [x] Analysis recovery and right-inspector next action say run again/review retained evidence for terminal canceled/reconciled runs instead of generic retry/blocker wording.
-- [x] Readiness provider recovery shows selected provider, doctor status/message, command override and last `runner_unavailable` blocker before retry.
-- [x] Onboarding Runner shows selected provider, expected command, command override, doctor status/message and fake fallback before first live analysis.
-- [x] Readiness and Onboarding provider recovery classify headless probe timeout, artifact-smoke, auth/quota and command-unavailable readiness blockers before retry.
-- [x] Source validation recovery shows affected repo/workspace, diagnostic, source type, current source/ref and save-then-validate actions before raw validation details.
-- [x] Charter baseline recovery shows affected artifact, category, runtime use, diagnostic, suggested fix and save-selected-artifact actions before raw editor warnings.
-- [x] Proposals package recovery shows proposal/changelog package state, primary blocker, suggested fix and publication path before Publish.
-- [x] Analysis live diagnostics classify pre-artifact artifact-handoff stalls, show the recovery stage and tell the operator to confirm both markdown and `shard-pack-manifest.json` before retry.
-- [x] Analysis shard drilldown shows per-shard artifact-pair state, distinguishing runtime-only evidence from authored markdown + `shard-pack-manifest.json`.
-- [x] Activity drawer summarizes provider JSON stream chunks without hiding full raw payload access.
-- [x] Active provider-stream Analysis diagnostics use `Run signal` instead of terminal `Failure mode` wording.
-- [x] Rendered provider-stream browser QA verifies desktop and narrow-mobile Activity summary readability, raw payload disclosure, and no horizontal overflow.
-- [x] Rendered failed-shard browser QA verifies artifact-handoff recovery, shard-scoped drilldown, long-classification wrapping and no horizontal overflow.
-- [x] Rendered permission recovery browser QA verifies Analysis triage, right-inspector blocker detail, Readiness runtime-permission settings access, mobile request cards and no horizontal overflow.
-- [x] Rendered Ask recovery browser QA verifies failed answer guidance, QA audit refs, retry behavior, read-only safety, no citations state and no horizontal overflow.
-- [x] Rendered Publish Git recovery browser QA verifies failed commit/proposal branch mutations, local recovery copy, inspector state, retryability and no horizontal overflow.
+- [ ] Run A and Run B use the same canonical overview/coverage/questions paths but distinct
+      staged content; selecting either run shows only its own bytes and metadata.
+- [ ] A final index whose `run_id` differs from the selected run is rejected, and normalized
+      staged paths outside `reports/taskruns/<selected-run>/staging/final/` are never read.
+- [ ] Rapid A -> B -> A selection cannot let a late response from B overwrite the final A
+      snapshot.
+- [ ] Changing the current canonical file after both runs does not alter either historical
+      preview.
+- [ ] Missing staged content renders `Snapshot unavailable` (or equivalent) with run/path
+      context and does not issue a canonical-path read.
+- [ ] An optional document absent from a run index renders `Not produced for this run` and is
+      not treated as corrupt snapshot data.
+- [ ] Review and Publish evidence context display run id, generated time and `Run snapshot`;
+      explicit current-workspace mode displays `Current workspace`.
+- [ ] Focused component tests, UI typecheck/build and rendered multi-run QA pass without console
+      errors or document-level horizontal overflow.
+- [ ] Full DoD passes: `make contracts`, `make test`, `make lint`, `make build`.
+- [ ] Documentation and fixtures remain aligned with the unchanged final-run index schema.
 
 ### Risks
-- Collapsing shared shell sections can hide useful diagnostic context if the summary copy is weak; tests should verify critical sections remain discoverable.
-- Live provider runs can fail on quota/auth/toolchain/path prerequisites; those must be classified as operational blockers, not product UX regressions.
-- UI density improvements can break existing live E2E selectors if test IDs or visible controls move unexpectedly.
+- Existing tests with different canonical paths per run can pass while hiding the bug; same-path,
+  different-byte fixtures are mandatory.
+- Some run indexes may not contain optional coverage/question documents. Snapshot mode must show
+  `Not produced for this run` rather than borrowing current workspace files.
+- A staged path can be syntactically present but point at another run or outside staging; path
+  normalization and selected-run containment are part of the trust boundary.
+- Independent async requests can resolve out of order during run switching; the selected run id
+  must key the complete snapshot transaction, not just the primary preview.
+- A missing staged file can be tempting to recover through canonical fallback; that would
+  recreate the trust defect and is explicitly forbidden.
+- Publish currently mixes run-scoped preview with workspace-scoped Git state. This slice labels
+  those contexts but leaves full publication-boundary correction to `20B`.
 
 ### Progress log
-- 2026-07-08: Started UX/UI quality loop. Read project mission, architecture, pipeline spec, live E2E runbook, design baseline, current UX smoke report and shell implementation.
-- 2026-07-08: Fresh fake-runtime rendered smoke passed (`run_20260708_094849_001`, QA `run_20260708_094856_002`) and confirmed the primary UX debt: succeeded Review/Ask/Publish screens were dominated by old init logs and repeated empty inspector sections. Medium live E2E was blocked before execution as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` exists but is not a Git checkout at the pinned SHA; no canonical matrix or curated repo file was changed.
-- 2026-07-08: Implemented slice 1 shell polish: context-aware Activity drawer, progressive-disclosure right inspector and review-oriented active run strip. Targeted shell tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_095725_001`, QA `run_20260708_095731_002`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`; commit prepared for this slice.
-- 2026-07-08: Implemented slice 2 Review hierarchy polish: queue/selected preview are now the primary review path, full artifact explorer is a secondary disclosure, selected queue items are highlighted, and mobile Review exposes section jumps. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_102054_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
-- 2026-07-08: Re-ran the medium `regres long` preflight through `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell`. Writable roots and provider binaries were present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`), but `/tmp/provenarch-live-e2e/posthog/posthog` still failed `git rev-parse HEAD` because it is not a Git checkout. Matrix execution remains blocked as `operational_host_preflight_failed`; no canonical matrix or curated repo file was changed.
-- 2026-07-08: Implemented slice 3 Readiness polish: advanced runtime settings now render as a compact operator-tools disclosure, default closed, with live smoke verifying the settings remain reachable but closing them before the readiness screenshot. Targeted App tests, full UI Vitest suite, typecheck, build and fake-runtime rendered smoke passed (`run_20260708_104434_001`). Full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
-- 2026-07-08: Re-ran the medium `regres long` preflight after slice 3. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; no canonical matrix or curated repo file was changed.
-- 2026-07-08: Implemented slice 4 non-happy-path polish: failed Analysis runs now show a dedicated recovery path with error classification, blocked step, retained evidence, warning count, same-pipeline retry and blocker drilldown. Targeted App tests, full UI Vitest suite, typecheck, build, fake-runtime rendered smoke (`run_20260708_111016_001`) and full DoD (`make contracts test lint build`) passed.
-- 2026-07-08: Re-ran the medium `regres long` preflight after slice 4. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
-- 2026-07-08: Implemented slice 5 Ask/Q&A recovery polish: failed Q&A runs now show recovery guidance with classification, blocked step, `reports/taskruns/<run_id>/qa/` audit refs, warning detail and same-question retry. The rendered smoke exposed a Review artifact explorer regression where switching to `Diagrams` closed or hid the secondary artifact list; the explorer is now controlled and filter actions keep it open. Targeted App tests, typecheck, build, fake-runtime rendered smoke (`run_20260708_115053_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
-- 2026-07-08: Re-ran the medium `regres long` preflight after slice 5. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; no canonical matrix, curated repo file or wrapper script was changed.
-- 2026-07-08: Implemented slice 6 Publish handoff polish: Publish now shows an above-the-fold readiness summary for publication set, gate state, open questions and Git action; mobile Publish exposes sticky section jumps for `Diff`, `Preview`, `Gate` and `Commit`; live smoke now captures `frontend-publish-mobile.png`. Targeted App tests, typecheck, frontend live E2E contract tests, build, fake-runtime rendered smoke (`run_20260708_121704_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
-- 2026-07-08: Re-ran the medium `regres long` preflight after slice 6. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
-- 2026-07-08: Implemented slice 7 onboarding blocker-summary polish: the pre-console onboarding screen now shows current setup step, next action, current blocker, per-step status and disabled-action reasons for `Open console` / `Run first analysis`. Targeted App tests, typecheck, full UI Vitest suite, build, rendered onboarding smoke (`/tmp/provenarch-ui-onboarding-summary-results.KbB5En`), fake-runtime rendered smoke (`run_20260708_124024_001`) and full DoD (`make contracts test lint build`) passed with exact Node `22.21.1`.
-- 2026-07-08: Re-ran the medium `regres long` preflight after slice 7. Writable roots and provider binaries were still present (`qwen 0.17.1`, `Claude Code 2.1.85`, `codex-cli 0.131.0`, Node `v22.21.1`), and `scripts/live-e2e-plan.py --mode regres --size long --providers qwen --format shell` still generated the direct `full-run-batch-matrix.sh` command. Matrix execution remains blocked as `operational_host_preflight_failed` because `/tmp/provenarch-live-e2e/posthog/posthog` still fails `git rev-parse HEAD`; current UX changes also leave the main worktree dirty until committed, so this is not an acceptance run.
-- 2026-07-08: Restored the trusted-host PostHog checkout outside the repo at pinned ref `14d29a548d63665d60b506cf13bd5cfb2de7c743` and ran `regres long` qwen-only baseline through direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260708T130309Z`. Matrix result was `FAIL`: both `single-path` PostHog and `single-git_url` FTGO failed in `init.step1.collect` with `runtime_contract_failed`, `quality_gates_failed`, `runtime_flow_failed`, partial shard failures, repair exhaustion and stall pressure. PostHog recorded `partial_failure_count=9`; FTGO recorded `partial_failure_count=8`, `repair_attempts=11`, `repair_exhausted=8`, `focused_repairs=11`, `stall_count=17`, `pre_artifact_stalls=17`, and raw output refs `8`. UX conclusion: the next slice should improve live diagnostics and recovery clarity for shard collection/repair failures before rerunning medium live E2E.
-- 2026-07-08: Implemented slice 9 live diagnostics in Analysis failed-run recovery without backend/schema changes. The panel derives shard state, focused repair counts, stall pressure, provider refs, terminal validation excerpt and raw-output refs from existing run logs/artifacts, with targeted App coverage for collect partial + `collect_pair_repair` + `runtime_stalled_before_artifacts` evidence.
-- 2026-07-08: Attempted the next `regres long` qwen-only medium rerun from clean commit `8a7786a`. Preflight passed for clean tree, provider binaries and report root, but `/tmp/provenarch-live-e2e` was absent and restoring canonical PostHog path checkout failed with `No space left on device` after the partial object store reached about `3.3G` and `/tmp` had only `116MiB` free. Removed the temporary partial checkout and stopped before matrix execution as `operational_host_preflight_failed`; rerun requires a trusted host or volume with enough space for the pinned PostHog checkout.
-- 2026-07-08: Implemented slice 11 pending permission triage in `Analysis -> Pending permissions` without backend/schema changes. The panel now summarizes blocked step, operation, decision, policy rule, primary target/reason and safe next actions before the raw request table; approve/deny broker remains future scope. Targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 12 right-inspector permission blocker copy without backend/schema changes. Pending permissions now surface as `Permission: <action>` with step, decision/rule, target and reason in the global hard-blocker panel; targeted App test (`67` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 13 active-run cancellation guidance without backend/API/schema changes. Active selected runs now explain that cancel requests a cooperative stop and keeps taskrun evidence in History; targeted primitive test (`10` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 14 terminal cancellation recovery copy without backend/API/schema changes. Terminal `run_canceled` runs now show canceled/stopped-step/run-again/retained-History evidence wording in Analysis recovery and right-inspector blockers, while restart-reconciled runs use preserved-evidence copy; targeted App test (`68` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 16 Analysis outcome-label polish without backend/API/schema changes. Terminal `run_canceled` and restart-reconciled failed runs now display as `canceled`/`recovered` in Analysis header, mission control, status panel, active run strip and History counts/table; generic runtime/provider failures remain `failed`. Targeted App/primitive tests (`79` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 17 Activity drawer outcome-label polish without backend/API/schema changes. Terminal canceled/recovered selected runs now show `canceled run`/`recovered run` summaries and empty-log recovery copy with retained History guidance; generic failures still say `Run failed before log entries`. Targeted App/primitive tests (`79` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 18 retained-evidence action polish without backend/API/schema changes. Analysis recovery and the global next-action inspector now use `Run <pipeline> again`, `Review retained evidence` and retained-History copy for terminal canceled/restart-reconciled runs, while generic failures still use retry/blocker wording. Targeted App test (`69` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 19 provider-unavailable recovery polish without backend/API/schema changes. `runner_unavailable` now shows `Provider unavailable`, routes the global next action to Readiness provider checks, explains binary/auth/quota before retry, updates Analysis live diagnostics away from generic failed-shard guidance, and uses the same Readiness guidance in Ask and Publish blockers. Targeted App test (`70` tests), UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 20 Readiness provider recovery without backend/API/schema changes. Readiness now shows selected provider, doctor status/message/suggested fix, command override and last run blocker for headless/provider-unavailable/doctor-fail states; the inspector route lands there without starting a retry. Targeted App test (`70` tests), UI typecheck, fake-runtime rendered smoke (`run_20260708_194304_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 21 onboarding runner recovery without backend/API/schema changes. Runner onboarding now shows selected provider, expected executable, `ACP_*_CMD` override, runtime-provider doctor status/message and fake-baseline fallback before first live analysis. Targeted App test (`70` tests), UI typecheck, rendered onboarding desktop/mobile check (`/tmp/provenarch-ui-onboarding-runner-manual.laqv2_2p`), fake-runtime rendered smoke (`run_20260708_195749_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-08: Implemented slice 22 Source validation recovery without backend/API/schema changes. Source now shows affected repo/workspace, diagnostic, source type, current source/ref, suggested fix and save-then-validate actions before raw validation details. Targeted App test (`71` tests), UI typecheck, rendered Source recovery desktop/mobile check (`/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-source-recovery-manual.Z9MEYk`), fake-runtime rendered smoke (`run_20260708_201043_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-09: Implemented slice 23 Charter baseline recovery without backend/API/schema changes. Charter now shows affected artifact, category, runtime use, diagnostic, suggested fix and exact `Save selected baseline artifact` action before raw editor warnings. Targeted App test (`72` tests), UI typecheck, rendered Charter recovery desktop/mobile check (`/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-charter-recovery-manual.zN6vmE`), fake-runtime rendered smoke (`run_20260709_062422_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-09: Implemented slice 24 Proposals package recovery without backend/API/schema changes. Proposals now shows proposal/changelog package state, primary blocker, suggested fix and publication path before the review room when generated proposal packages are partial, while changelog-only runs keep the changelog preview selected. Targeted App test (`72` tests), UI typecheck, rendered Proposals recovery desktop/mobile check (`/tmp/provenarch-ui-proposals-recovery-manual.TNgFwb`), fake-runtime rendered smoke (`run_20260709_064232_001`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed.
-- 2026-07-09: Bootstrapped the canonical PostHog path checkout at pinned ref `14d29a548d63665d60b506cf13bd5cfb2de7c743` and ran the requested medium `regres long` qwen-only baseline through direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T065646Z`. Matrix result was `FAIL`: both `single-path/baseline` and `single-git_url/baseline` stopped before backend/frontend execution as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. This is host/provider readiness evidence, not a product UI/backend verdict.
-- 2026-07-09: Implemented slice 25 provider readiness timeout guidance without backend/API/schema changes. Readiness and Onboarding now derive failure mode/probe stage/operator focus for headless probe timeout, artifact smoke, auth/quota and command-unavailable blockers from existing doctor/run error text. Targeted App provider-readiness tests, UI typecheck, rendered qwen-timeout desktop/mobile check (`/var/folders/0y/qkpd1n592qjgm3w3rcl_gs6m0000gn/T/provenarch-ui-provider-timeout-manual.1wiqoc`) and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
-- 2026-07-09: Re-ran the medium `regres long` qwen-only baseline from clean commit `3de030e` through direct `scripts/full-run-batch-matrix.sh` with matrix id `regres-long-posthog-ftgo-20260709T072237Z`. Matrix result was `FAIL`: `single-path/baseline` reached PostHog backend execution and failed in `init.step1.collect` with `runtime_contract_failed`, `quality_gates_failed`, `runtime_flow_failed`, `partial_failure_count=10`, `repair_attempts=14`, `repair_exhausted=10`, `stall_count=27`, `pre_artifact_stalls=24`, `raw_output_refs=10`, and shard summary `6 succeeded / 10 failed`; each failed shard reported `stage=collect_pair_repair` and `runtime_stalled_before_artifacts`. `single-git_url/baseline` failed earlier as `operational_host_preflight_failed` because qwen headless readiness timed out after 30s.
-- 2026-07-09: Implemented slice 26 Analysis artifact-handoff guidance without backend/API/schema changes. Analysis live diagnostics now parse `stage=collect_pair_repair` and `runtime_stalled_before_artifacts` from existing run logs, classify the failure as `Artifact handoff stalled`, show the recovery stage, and put markdown + `shard-pack-manifest.json` verification before blind retry. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 27 per-shard artifact-pair inspection without backend/API/schema changes. Analysis shard/log table and blocker drilldown now derive artifact-pair state from existing selected-run artifact refs, distinguishing `Runtime only`, `Markdown only`, `Manifest only`, `Artifact pair present` and missing shard-artifact states. Targeted App test, full UI Vitest suite, UI typecheck and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `90` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 30 Activity provider-stream readability without backend/API/schema changes. The current medium run `regres-long-posthog-ftgo-20260709T112238Z` reached PostHog qwen collect and repeated `collect_pair_repair -> runtime_stalled_before_artifacts` (`4 failed / 12 pending` by DoD checkpoint), then was diagnostically stopped as `infra_signal_terminated`; the first 4 shard failures are genuine artifact-handoff failures, later `context canceled` rows came from the stop, and no top-level `matrix_result_*` was written. Activity now summarizes JSON stream chunks while preserving full raw log/export access, and active Analysis labels stream telemetry as `Run signal`. Targeted App/primitive tests and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 31 rendered provider-stream QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T120910Z` failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s, so the product UI evidence came from a stable mocked running-run fixture. New Playwright coverage verifies the Analysis live diagnostics, Activity summary, raw-payload disclosure and no horizontal overflow on desktop and narrow mobile; screenshots are under `/tmp/provenarch-ui-provider-stream-rendered-20260709T1230Z`. Targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 32 rendered failed-shard QA and drilldown polish without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T123421Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies the live-shaped `domain_id != shard_id` artifact-handoff failure on desktop/detail/mobile, while UI polish wraps long recovery metric values and keeps blocker drilldown focused on shard-scoped failures when present. Screenshots are under `/tmp/provenarch-ui-analysis-failed-shard-rendered-20260709T1240Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 33 rendered permission-recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T125743Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies Analysis permission triage, right-inspector blocker detail, Readiness runtime-permission settings access and narrow-mobile readability. Visual QA exposed that the raw pending-permissions table was too dense on mobile, so pending permission requests now render mobile-first cards while retaining the desktop raw table. Screenshots are under `/tmp/provenarch-ui-permission-recovery-rendered-20260709T1310Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, Vite build and Go build).
-- 2026-07-09: Implemented slice 34 rendered Ask/Q&A recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T131747Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies failed `qa.ask` recovery guidance, audit refs, retrying the original question, read-only safety, no-citations state and no horizontal overflow. Visual QA exposed narrow desktop recovery cards and a wrapped `Refresh` action in Q&A history, so Ask recovery metrics now use responsive grid tracks and the history refresh action keeps a stable single-line label. Screenshots are under `/tmp/provenarch-ui-qa-recovery-rendered-20260709T1329Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `92` UI tests, UI typecheck, Vite build and Go build).
-- 2026-07-09: Implemented slice 35 rendered Publish Git recovery QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T133940Z` again failed before backend/frontend execution in both profiles as `operational_host_preflight_failed` because `qwen` headless readiness timed out after 30s. New Playwright coverage verifies failed commit/proposal branch mutations, local Commit plan recovery, Git publication inspector error state, retryability and no horizontal overflow. Visual QA exposed that the global next-action inspector still looked ready after a failed Git mutation, so Publish now changes next action to blocked recovery guidance until the operator reviews the Git failure. Screenshots are under `/tmp/provenarch-ui-publish-git-recovery-rendered-20260709T1352Z`; targeted UI checks and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build).
-- 2026-07-09: Implemented slice 36 stable Source recovery rendered QA without backend/API/schema changes. Medium rerun `regres-long-posthog-ftgo-20260709T141636Z` produced real PostHog runtime evidence in `single-path/baseline`: matrix `FAIL`, shard summary `6 succeeded / 10 failed`, repeated `collect_pair_repair -> runtime_stalled_before_artifacts`, `partial_failure_count=10`, and excellent blockers on `init.step1.collect`; `single-git_url/baseline` stopped at qwen `headless_probe_timeout`. New Playwright coverage verifies Source validation recovery for a long Git URL/ref, blocked readiness state, desktop/mobile readability and no horizontal overflow. Screenshots are under `/tmp/provenarch-ui-source-recovery-rendered-20260709T1614Z`; rendered QA and full DoD (`make contracts test lint build` with exact Node `22.21.1`) passed (`230` Python tests, `93` UI tests, UI typecheck, Vite build and Go build).
+- 2026-07-11: Selected `20A` as the first P0 slice after the full UX/UI trust and craft audit;
+  recorded the dependency-ordered Epic 20 program in `docs/BACKLOG.md`. Implementation has not
+  started.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
@@ -1595,3 +1501,4 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
   slice-count checks. Full DoD was not repeated because this slice changes no code,
   schemas/spec contracts or fixtures; the same exact code baseline DoD is recorded as passing
   in the immediately preceding audit ExecPlan.
+| 20 Console UX trust and IA reset | planned (P0 selected) | Corrective post-beta program; `20A` run-pinned evidence snapshot truth is the active normal product slice |
