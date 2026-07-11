@@ -870,6 +870,319 @@ dependencies: `19A -> 19B`, `19C -> 19D -> 19E`, `19G -> 19H`,
 - Tests: noUnusedLocals/noUnusedParameters, Vitest and mock Playwright all green.
 - Dependency: after 19I–19L so request-state refactor owns the final hook surface.
 
+## Epic 20 — Console UX trust, evidence workflow and IA reset (post-beta)
+
+Context:
+- Epic 16 и Epic 17 дали рабочий beta baseline и сильное recovery-покрытие, но последующий
+  task-based аудит показал системный разрыв: console хорошо объясняет runtime diagnostics,
+  однако недостаточно надёжно отвечает на вопросы «какой run я смотрю», «какие данные
+  проверены», «что именно будет закоммичено» и «что считается завершённым».
+- Это corrective successor для UI/IA частей Epics 16–17. После реализации Epic 20 новая
+  группировка `Setup / Runs / Review / Publish` и global `Ask` заменяет требование о восьми
+  обязательных numbered stages; backend/runtime contracts, local-first boundary,
+  deterministic required CI и release live-E2E guardrails сохраняются.
+- Главные trust defects подтверждены кодом и rendered multi-run проверкой:
+  selected historical run теряет обязательный `staged_path` и читает latest
+  `canonical_path`; UI обещает `Commit selected artifacts`, а backend выполняет
+  `git add -A`; client-only runtime selector может расходиться с effective server runtime;
+  fake walkthrough может выглядеть как publication-ready evidence.
+- Оставшийся UI debt — raw Markdown через `<pre>` в Review/Proposals/Publish, presence-based
+  stage statuses, permanently disabled approval actions, обязательный вид `Ask` в rail,
+  перегруженный first viewport, неполные keyboard contracts и монолитные
+  `StagePanels.tsx` / `styles.css`.
+
+Product decisions for this epic:
+- historical run review is an immutable run snapshot; current canonical workspace is a
+  separate, explicitly labelled mode and is never a silent fallback;
+- MVP Git action remains full-workspace commit because that is the current backend contract;
+  UI calls it `Commit all workspace changes`, shows the full change inventory and requires
+  confirmation; exact file/folder-scoped commit needs a separate owner-approved API/schema
+  slice;
+- Git mutation is available only in Publish; Charter and other workbenches link to Publish
+  instead of bypassing its gate;
+- fake stays the recommended deterministic walkthrough, but its outputs are labelled
+  `Demo evidence` and never inherit normal live-evidence readiness; an intentional fake
+  commit uses a distinct `Commit all demo workspace changes` confirmation;
+- runtime/provider identity is process- and run-scoped: current effective values come from
+  server readback; historical runs use persisted run-start `runtime_mode` plus
+  `step_providers` (shown as one provider or `Mixed`), never the current client selection;
+  Console does not hot-restart its own process in this epic and instead shows exact restart
+  guidance until a new server readback confirms the desired configuration;
+- Charter/analysis brief remains recommended, not mandatory: skipping it is an explicit
+  choice with a quality warning;
+- Review and Proposals stay honest read-only inspection surfaces until a persisted review
+  decision contract exists; disabled `Approve` affordances are removed;
+- unresolved open questions are visible publication risks and require explicit confirmation,
+  but are not silently converted into an undocumented hard blocker;
+- Ask remains async and read-only over the current canonical workspace, is labelled with that
+  context and becomes a global utility rather than a mandatory step;
+- guided operator content is the default; raw paths, runtime telemetry, permission internals
+  and advanced settings move behind an expert/diagnostics disclosure.
+- any slice that introduces tabs, dialogs, async states or navigation must create/reuse the
+  minimum semantic primitive in that slice; `20K` consolidates and migrates the remaining UI,
+  not postpones component contracts until after new screens are built.
+- `20B`, `20C` and `20F` start with a current-payload sufficiency check. If required Git,
+  runtime or queue state is absent, the first PR is contract-only with docs, validators,
+  fixtures and backend tests; UI work follows only after readback is authoritative.
+
+Priority and dependency order:
+- P0 trust foundation: `20A` first; `20B` and `20C` can then proceed independently;
+  `20D` depends on `20C`.
+- P1 decision workflow: `20E` depends on `20A–20D`; `20F` depends on `20C`;
+  `20G` depends on `20A`; `20H` can run after `20B`.
+- P1/P2 structure and craft: `20I` depends on `20E`; `20J` on `20I + 20G`;
+  `20K` follows the trust components from `20G/20H/20I`; `20L` depends on `20I + 20K`;
+  `20M` depends on `20E + 20G + 20J`.
+- `20N` closes the program, but every preceding slice must add its own focused tests rather
+  than deferring coverage to the final slice.
+
+Acceptance:
+- selecting two runs with the same `canonical_path` and different content always renders each
+  run's own staged bytes, coverage and open questions; missing/corrupt snapshot data becomes
+  an explicit error and never falls back to latest canonical content;
+- Review and Publish identify `run_id`, persisted run runtime/provider set, generated time and
+  `Run snapshot` versus `Current workspace` context in the primary header;
+- every full-workspace commit path accurately describes its scope, shows tracked/untracked
+  inventory covered by the action and requires confirmation; proposal-branch creation has a
+  separate branch name/base confirmation and both mutation types are unavailable outside Publish;
+- effective runtime/provider/permission mode comes from server readback; a desired setting
+  cannot be presented as active until a restarted process confirms it through readback;
+- fake output is visibly demo/wiring evidence in Analysis, Review and Publish and requires a
+  distinct intentional confirmation before commit;
+- one shared workflow selector drives rail/navigation status, Review/Proposals blockers,
+  inspector next action and Publish gate without contradictory ready/blocked states;
+- normal run actions are disabled while a run is active; an explicit queue action names the
+  pending pipeline and explains debounce/supersession before it is submitted;
+- Markdown artifacts are readable by default with safe Rendered/Raw/Diff modes, source
+  provenance and deterministic loading/empty/error/large-content states;
+- primary IA is grouped as `Setup / Runs / Review / Publish`; Ask and Settings/Diagnostics are
+  utilities, browser Back/Forward works, and URL state restores at least view, run and artifact;
+- on `1440`, `1280`, `1024` and `390x844` viewports there is no document-level horizontal
+  overflow; stage title, current state and primary next action fit in the first mobile viewport;
+- tabs, combobox, forms, async status/error announcements and destructive confirmations meet
+  their keyboard/screen-reader contracts and automated accessibility checks have no critical
+  violations;
+- required CI remains fake/fixture-driven and network-free; release-facing provider-live
+  coverage stays on the canonical runbook and existing scenario/reason taxonomy unless a
+  separate release-gate slice is approved;
+- each implementation slice updates tests and relevant docs and completes
+  `make contracts`, `make test`, `make lint`, `make build` before commit.
+
+Non-goals:
+- no hosted mode, security/compliance enforcement or source-repository writes;
+- no artifact schema change for run-pinned review: `staged_path` already exists in the
+  canonical final-run index and must be consumed rather than reinvented;
+- no persisted evidence/proposal approval workflow in this epic;
+- no exact selected-file Git commit hidden inside a UI-only change;
+- no one-shot visual rebrand or big-bang rewrite of `StagePanels.tsx`; keep the current calm
+  palette/dark navigation identity and migrate touched vertical slices incrementally;
+- no canonical release matrix, curated repo list, live reason taxonomy or provider set changes.
+
+Suggested PR slices:
+- `20A Run-pinned evidence snapshot truth` (P0, first selected slice)
+  - preserve top-level `run_id`/`generated_at` and document `staged_path` in the TypeScript
+    final-index contract and build selected-run refs from staged paths, including coverage and
+    open-question documents
+  - require index `run_id` to equal the selected run and every staged document path to remain
+    under `reports/taskruns/<run_id>/staging/final/`; cross-run/out-of-root paths fail closed
+  - load preview/coverage/questions as one run-id-keyed snapshot transaction with abort or
+    stale-response suppression so rapid `A -> B -> A` switching cannot mix responses
+  - add explicit `Run snapshot` / `Current workspace` source mode; never silently mix modes
+  - default History/Review selection to `Run snapshot`; `Current workspace` is an explicit user
+    action, never an error fallback
+  - distinguish `Not produced for this run` (optional document absent from the index) from
+    `Snapshot unavailable` (indexed staged file cannot be read)
+  - show run id, generated timestamp and source mode beside selected evidence; historical
+    runtime/provider identity follows in `20C`
+  - tests: two runs, same canonical paths, different bytes; rapid A/B/A switching; mismatched
+    index run id; cross-run staged path; missing indexed file; optional absent document; stale
+    canonical file; selected-run coverage/open-questions isolation
+  - expected code surface: `ui/src/lib/appContracts.ts`,
+    `ui/src/hooks/useRunArtifacts.ts`, `ui/src/hooks/useRunActions.ts`,
+    `ui/src/hooks/useRunExplorer.ts`, Review/Publish headers, `ui/src/App.test.tsx` and a named
+    deterministic `historical-run-snapshot` rendered scenario
+  - exit: rendered multi-run proof shows the older run's bytes after a newer promotion
+
+- `20B Honest full-workspace Publish boundary` (P0; depends on `20A` for snapshot labelling)
+  - PR `20B1`, only if needed: add an authoritative Git change-inventory read contract covering
+    modified/deleted/untracked paths, with API docs, validators/fixtures and backend tests
+  - PR `20B2`: implement the truthful Publish UI only after the inventory contract is sufficient
+  - rename the action to `Commit all workspace changes` and label artifact selection as preview,
+    not commit scope
+  - show branch, tracked modifications, deletions and untracked paths covered by `git add -A`;
+    block commit if that inventory cannot be loaded
+  - require a confirmation summary with change counts, unresolved-question warning and the
+    selected evidence context; cancel performs no mutation
+  - keep proposal-branch creation as a separate confirmation naming branch/base; it must not
+    inherit commit-scope copy
+  - remove commit/branch mutation controls from Charter and route users to Publish
+  - tests: dirty file outside selected run is visible; untracked file is visible; cancel is
+    side-effect free; Charter has no mutation path; successful commit refreshes real Git state
+  - expected code surface: `BaselineGitPanel.tsx`, `StagePanels.tsx`, `useGitActions.ts`,
+    workspace Git API/handler tests; contract docs are updated if inventory fields are added
+
+- `20C Effective runtime identity and restart boundary` (P0)
+  - PR `20C1`: add/confirm an authoritative read contract for current effective runtime,
+    provider/step-provider set and permission mode, plus persisted per-run `runtime_mode` and
+    `step_providers`; use one provider label or `Mixed` for multi-provider runs
+  - PR `20C2`: consume that contract in the UI after contract docs/fixtures/backend tests pass
+  - make server readback the source of truth for current effective runtime/provider/permissions
+    and persisted run metadata the source for historical Review
+  - display desired and effective values separately; use `Pending restart` until a restarted
+    process reports the desired configuration
+  - make run preflight/top bar/Analysis use effective values, never a client-only selection
+  - do not add a UI hot-restart API; provide an exact restart command/instruction and refresh
+    readback after reconnect
+  - tests: UI selects headless while server remains fake; simulated server restart/readback
+    success; mixed step providers; missing historical metadata; readback/reconnect error;
+    direct mode and onboarding first-run identity
+  - expected code surface: server status/readiness API, `appContracts.ts`, runtime hooks,
+    `TopStatusBar.tsx`, Readiness and Analysis; invoke schema/contract synchronization if the
+    public payload changes
+
+- `20D Fake/demo evidence boundary` (P0; depends on `20C`)
+  - add persistent `Deterministic demo` identity to run summary, Review trust status and Publish
+  - replace `Evidence ready` / normal `READY` semantics for fake with `Demo evidence`
+  - keep fake publication available only as `Commit all demo workspace changes`
+    with a warning that no live architecture analysis occurred
+  - tests: fake can complete walkthrough, never appears live-ready, normal headless run keeps
+    live evidence semantics, demo confirmation is required before Git mutation
+  - expected code surface: shared run identity selector, Analysis/Review/Publish/inspector copy,
+    fake Playwright fixtures and README walkthrough wording
+
+- `20E Shared workflow status and publication gate` (P1; depends on `20A–20D`)
+  - replace presence-based `done` with `available / needs_review / blocked / complete` semantics
+  - derive one typed gate model from selected snapshot health, validation/doctor state,
+    UI-visible promoted evidence blockers, proposal package, open questions, fake/live identity
+    and Git mutation errors
+  - preserve Epic 18 black-box boundary: `reports/taskruns/*-quality.json`, runtime telemetry
+    and matrix counters never decide artifact acceptance in the product gate
+  - use the same model in navigation, stage header, inspector and Publish; prevent a green
+    top-level status when a detailed gate is blocked
+  - remove permanently disabled evidence/proposal approval buttons and offer only real
+    navigation/recovery actions
+  - tests: table-driven state matrix for partial artifacts, proposal blocker, open questions,
+    fake, failed Git action, clean post-commit workspace and stale selected run
+  - expected code surface: `stageModel.ts`, a new pure workflow selector/view model,
+    `App.tsx`, Review/Proposals/Publish and inspector components
+
+- `20F Deliberate run start, refresh and queue semantics` (P1; depends on `20C`)
+  - PR `20F1`, only if needed: expose pending/superseded run identity and pipeline through a
+    contract-first read model with docs/fixtures/backend tests
+  - PR `20F2`: implement deliberate queue controls against that authoritative read model
+  - disable ordinary init/refresh actions while a run is active across Analysis and inspector
+  - expose `Queue refresh after current run` only when existing backend queue semantics apply;
+    show pending run id/pipeline and replacement/supersession rule before confirmation
+  - keep last accepted evidence selected if a start request fails
+  - tests: double click, active run, pending replacement, request failure, cancellation and
+    post-terminal queue transition
+  - expected code surface: run service/API read model, run hooks, Analysis mission control,
+    active-run strip and inspector; preserve single-active/debounce backend invariants
+
+- `20G Shared evidence-first ArtifactViewer` (P1; depends on `20A`)
+  - render Markdown safely by default with headings, lists, tables, fenced code, local evidence
+    links and Mermaid; raw HTML stays disabled
+  - provide consistent `Rendered / Raw / Diff` modes and source metadata in Review, Proposals
+    and Publish
+  - add loading, empty, unavailable snapshot, parse error and large-content behavior without
+    replacing content with generic cards
+  - tests: tables/code/links/Mermaid, script injection, broken artifact, long lines, diff view,
+    keyboard mode switch and snapshot/current-workspace source badge
+  - expected code surface: new `ArtifactViewer` component, artifact-link resolver,
+    Review/Proposals/Publish integrations and focused component tests
+
+- `20H Accessibility-critical interaction contracts` (P1; can follow `20B`)
+  - implement WAI-ARIA tab keyboard behavior: roving tabindex, arrows, Home/End,
+    `aria-controls` and linked tabpanels
+  - make local-path combobox support ArrowUp/Down, Enter, Escape, active option and predictable
+    focus/blur behavior
+  - connect field errors with `aria-invalid`/`aria-describedby` and announce async errors,
+    completion and destructive-confirmation results through live regions
+  - fix text contrast roles, remove or implement permanently disabled shell controls and make
+    local time update correctly or remove it
+  - tests: keyboard-only onboarding and artifact viewer, focus return after dialogs/drawers,
+    screen-reader names and automated axe checks
+  - expected code surface: `TabNav.tsx`, `LocalPathCombobox.tsx`, onboarding fields,
+    async feedback primitives, top bar and token styles
+
+- `20I Navigation model and URL-restorable context` (P1; depends on `20E`)
+  - PR `20I1 Navigation/IA`: replace the mandatory numbered rail with grouped destinations and
+    relocate utilities without adding URL state in the same review
+  - replace the mandatory numbered rail with grouped primary destinations:
+    `Setup / Runs / Review / Publish`
+  - move Ask to a global read-only utility and Settings/Diagnostics to expert access without
+    changing their runtime/API semantics
+  - PR `20I2 URL context`: persist and restore navigation context after `20I1` is accepted
+  - persist at least view, selected run and selected artifact in URL/history; Back/Forward and
+    reload restore a valid context and sanitize missing ids
+  - preserve/migrate operator-facing `data-testid` values with unit/fake E2E coverage; do not
+    add hidden compatibility controls
+  - expected code surface: navigation model, shell/rail, `App.tsx` state boundary and URL tests
+
+- `20J Guided Setup, Runs and Review composition` (P1/P2; depends on `20I` and `20G`)
+  - PR `20J1 Guided Setup + Runs`: change first-run preparation and run mission control only
+  - compose Setup from Workspace, Sources, recommended Analysis brief and Runner/Readiness;
+    make `Run without brief` an explicit quality trade-off
+  - make Runs answer first: what is running, current step/blocker, next action and history;
+    keep shard/raw telemetry behind diagnostics
+  - PR `20J2 Review + Ask context`: recompose evidence/decision work and contextual utility
+  - compose Review around evidence queue, findings/gaps, domain map and proposals/decisions
+    using the shared viewer and gate
+  - label Ask as `Current workspace` context until run-scoped Q&A has an explicit contract
+  - tests: first-time guided walkthrough, explicit Charter skip, failed run recovery,
+    historical review, proposal blocker and contextual Ask entry
+  - expected code surface: onboarding transition, stage composition, Analysis/Review/Ask
+    containers and navigation copy; pipeline semantics stay unchanged
+
+- `20K Semantic UI consolidation and density` (P2; after primary trust components stabilize)
+  - define semantic roles for text, surface, border, action, status and focus plus a compact
+    type scale, 6–8 spacing steps, three radii and compact/comfortable density
+  - consolidate the `Button`, `Tabs`, `StageHeader`, `RecoveryPanel`,
+    `Metric/DefinitionList`, `DataTable/CardList` and async state primitives introduced/reused
+    by earlier vertical slices; do not rebuild accepted interactions
+  - migrate only components touched by Epic 20; remove nested card borders where section
+    heading, alignment and whitespace express the hierarchy better
+  - bundle the intended UI font or make the system-font contract explicit and deterministic
+  - tests: token reference/lint, component variants and states, focus/contrast checks and
+    representative visual fixtures
+  - expected code surface: token/style layers, `ConsolePrimitives.tsx` and touched stage modules
+
+- `20L Responsive shell and first-viewport budget` (P2; depends on `20I` and `20K`)
+  - at `1024–1439px` use compact navigation and an inspector drawer instead of reserving three
+    permanent columns
+  - after idle/success collapse active-run chrome to one summary line; on mobile show one health
+    summary with collapsible run detail before stage content
+  - convert decision tables to mobile cards where comparison is not essential; keep intentional
+    scroll only for true tabular comparison
+  - viewport gates: no document overflow at `1440/1280/1024/390`, workbench at least `720px`
+    wide at `1024`, and mobile stage title/state/primary action visible above `y=520`
+  - tests: settled and loading screenshots, drawer focus/escape behavior, long paths/text,
+    Review/Analysis/Publish first viewport and orientation changes
+  - expected code surface: shell/rail/inspector/active-run components and responsive styles
+
+- `20M Review/Publish module seam and maintainability` (P2; depends on `20E`, `20G`, `20J`)
+  - extract Review and Publish containers/view models from the monolithic
+    `StagePanels.tsx` while preserving public props and operator-facing selectors
+  - centralize recovery/gate/viewer composition instead of duplicating panel anatomy
+  - keep the refactor behavior-neutral beyond already accepted Epic 20 UX decisions; split
+    other stages only when their own vertical slice is touched
+  - tests: existing Review/Publish suite remains green, pure selectors receive table-driven
+    coverage and bundle/typecheck show no circular stage dependencies
+
+- `20N Task-based UX regression gate, docs and rollout` (P2; closes the epic)
+  - add deterministic fixtures for two-run snapshot isolation, dirty files outside the selected
+    artifact, fake/live identity, desired/effective runtime mismatch, active/pending queue and
+    partial artifact packages
+  - add task assertions, not only no-overflow checks: first viewport answers current state,
+    blocker and next action; commit confirmation names full scope; Back/Forward restores context
+  - run component/a11y tests and rendered fake scenarios at `1440/1280/1024/390`; keep provider
+    live runs manual and classify their evidence through the existing release runbook
+  - update README, ARCHITECTURE, UI design baseline, TESTING_STRATEGY, stakeholder matrix and
+    screenshots only after the corresponding behavior is implemented
+  - exit: a first-time user completes guided fake walkthrough without mistaking demo output for
+    live evidence, and an experienced operator can inspect raw diagnostics without cluttering
+    the default decision flow
+
 ## Cleanup follow-up (post-beta, owner confirmation required)
 
 Открытые пункты после cleanup slice:
