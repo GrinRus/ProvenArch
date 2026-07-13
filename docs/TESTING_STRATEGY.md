@@ -111,6 +111,7 @@ Baseline scenario set:
   - run-history persistence пишет `.last-good`; service startup recovers from malformed current `reports/taskruns/run-history.json` when the last-good copy is valid and records a recovery diagnostic path
   - async run panic isolation covers terminal `failed/internal_failure` history, service survival after a panicking runner, active-slot/cancel cleanup and pending-run continuation; direct `Service.Run` panic tests continue to require caller-visible re-panic
   - server-owned shutdown tests cover active run context cancellation, queued pending run `run_canceled` terminalization without runner start, post-shutdown `ErrServiceClosed`, and API `Serve` context cancellation waiting for orchestrator shutdown
+  - coherent API session generation tests cover request-scoped workspace/service/runtime snapshots, direct/onboarding effective runtime readback, `409` conflicts for workspace switch/runtime switch/runtime profile mutation during active async work, unchanged manifest on conflict, and concurrent polling plus mutation attempts under `go test -race ./internal/api`
   - initial async run queueing returns a history persistence error before launching the background run when `run-history.json` cannot be written
   - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
   - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`

@@ -26,7 +26,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
-| Code quality audit remediation | in progress (Epic 19 / PR-1) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; PR-1 has committed `19A` atomic persistence/run-history last-good recovery, `19B` transactional canonical promotion and `19C` async panic isolation, and is implementing `19D` server-owned shutdown for bounded serve cancellation and active/pending run cleanup. Local frontend security hardening remains Wave 1+ non-goal |
+| Code quality audit remediation | in progress (Epic 19 / PR-1) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; PR-1 has committed `19A` atomic persistence/run-history last-good recovery, `19B` transactional canonical promotion, `19C` async panic isolation and `19D` server-owned shutdown, and is implementing `19E` coherent API session generation so workspace/runtime replacements conflict with active/pending work instead of mixing service ownership. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | planned (post-beta; Epic 20, `20A` selected) | `docs/BACKLOG.md` defines the dependency-ordered corrective program; `docs/PLANS.md` selects immutable run-pinned evidence review as the first P0 slice. Current Console V2 remains the implemented beta baseline until each slice is accepted. |
 
 Epic matrix:
@@ -65,6 +65,7 @@ Epic matrix:
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
 - ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
 - в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
+- пока есть active или queued run, смена workspace/runner и runtime profile mutations возвращают явный conflict; UI/API должны продолжать показывать effective runtime текущей service generation до terminal state.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:
@@ -480,6 +481,7 @@ Wizard из блоков-шаблонов:
 - результатом остаются те же git-tracked артефакты workspace  
 - если данных недостаточно, job не придумывает ответ, а пишет gaps/questions/coverage
 - одновременно активен только один run на workspace; debounce window 5 минут, policy `last event wins`
+- workspace/runtime session replacement и runtime profile writes запрещены во время active/pending work, чтобы queued/running analysis всегда оставался привязан к одной service generation
 - internal API trigger допустим только как optional trusted local/private deployment mode и не является обязательной CI/CD поверхностью MVP
 
 ### 10.3. Позже (после MVP)

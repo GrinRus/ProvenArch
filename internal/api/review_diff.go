@@ -50,24 +50,23 @@ type runReviewStepSummary struct {
 }
 
 func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runID string) {
-	service := s.getService()
-	if service == nil {
+	snapshot := s.sessionSnapshot()
+	if snapshot.Service == nil {
 		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before reading run review summary")
 		return
 	}
-	runInfo, ok := service.GetRun(runID)
+	runInfo, ok := snapshot.Service.GetRun(runID)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
 	}
-	artifacts, _ := service.GetRunArtifacts(runID)
-	logs, err := readAllRunLogs(service, runID)
+	artifacts, _ := snapshot.Service.GetRunArtifacts(runID)
+	logs, err := readAllRunLogs(snapshot.Service, runID)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "run_logs_unavailable", err.Error())
 		return
 	}
-	runtimeConfig := s.getRuntimeConfig()
-	steps := buildRunReviewSteps(runInfo, artifacts, logs, runtimeConfig.Mode)
+	steps := buildRunReviewSteps(runInfo, artifacts, logs, snapshot.RuntimeConfig.Mode)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":       runInfo.RunID,
 		"pipeline":     runInfo.Pipeline,
@@ -377,8 +376,9 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 	runID := strings.TrimSpace(query.Get("run_id"))
 	stepID := strings.TrimSpace(query.Get("step_id"))
 
-	ws := s.getWorkspace()
-	files, err := collectWorkspaceGitDiffFiles(request.Context(), ws, pathFilter, folderFilter, runID, stepID, s.getService())
+	snapshot := s.sessionSnapshot()
+	ws := snapshot.Workspace
+	files, err := collectWorkspaceGitDiffFiles(request.Context(), ws, pathFilter, folderFilter, runID, stepID, snapshot.Service)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
 		return

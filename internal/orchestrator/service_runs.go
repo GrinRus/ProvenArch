@@ -261,6 +261,13 @@ func (s *Service) ListRuns(limit int) []RunInfo {
 	return infos[:limit]
 }
 
+func (s *Service) HasInFlightRun() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.isActiveRunLocked() || s.pendingRun != nil
+}
+
 func (s *Service) nextRunID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

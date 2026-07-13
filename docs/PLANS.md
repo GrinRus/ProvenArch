@@ -105,7 +105,9 @@ for transactional promotion and reliable run lifecycle recovery.
       is stable.
 - [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary
       is stable.
-- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit
+      boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
       boundary is stable.
 
 ### Non-goals
@@ -180,7 +182,8 @@ old/new bytes visible under canonical paths.
       complete generation visible, never a mixed generation.
 - [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
 - [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
-- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change public artifact schemas, final-run-index shape or provider contracts.
@@ -262,7 +265,8 @@ the service process instead of recording a terminal async failure.
 - [x] Preserve synchronous `Service.Run` panic behavior: panic still propagates to the caller
       while existing terminal history semantics remain intact.
 - [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
-- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change normal runtime error classification or cancellation semantics.
@@ -332,7 +336,8 @@ mutations can still enqueue new run writes.
 - [x] Wire `api.Server.Serve` to call bounded HTTP shutdown and orchestrator shutdown on
       context cancellation.
 - [x] Wire `cmd/acp serve` to a signal-aware context for SIGINT/SIGTERM/SIGHUP.
-- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change runtime provider selection, pipeline semantics or queue/debounce behavior
@@ -385,6 +390,95 @@ Internal API only: `orchestrator.Service.Shutdown`, `orchestrator.Service.Close`
   `closed=true`. Existing provider process-group cleanup remains driven by runtime context
   cancellation. Verification passed: targeted orchestrator/API/docsync tests, `go test ./internal/...`,
   and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19e-coherent-service-generation
+
+### Context
+`19E` follows committed `19D`. Launcher mode can select a workspace, select a runtime and then
+serve normal workspace-bound endpoints from one process. Current API handlers mostly read
+`workspace`, `service` and `runtimeConfig` through independent getters, while onboarding/runtime
+mutation handlers can replace session state. That leaves room for one request to observe a
+mixed generation, for runtime/profile mutations to race with active async work, and for
+onboarding/direct-mode status to report desired runtime state rather than the service generation
+that will actually handle new runs.
+
+### Goals (must have)
+- [x] Add a request-scoped immutable API session snapshot containing the selected workspace,
+      orchestrator service, runtime config and generation metadata.
+- [x] Make workspace/runtime session replacement coordinated under one server lock so handlers
+      cannot combine stale service ownership with fresh workspace/runtime state.
+- [x] Reject workspace or runtime replacement while the current service has active or queued
+      async work, returning an explicit conflict instead of silently swapping ownership.
+- [x] Make onboarding/direct-mode runtime status report the effective runtime config for the
+      current service generation.
+- [x] Preserve existing local-first MVP boundaries: no provider-list changes, hosted mode,
+      schema migration or Epic 20 UI redesign.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not introduce UI hot restart or process restart orchestration.
+- [ ] Do not change pipeline semantics, queue/debounce rules or provider execution behavior.
+- [ ] Do not change public artifact schemas or runtime provider IDs.
+- [ ] Do not start Epic 20 before Epic 19 is complete and merged.
+
+### Implementation
+1) Add a small `serverSessionSnapshot` value in `internal/api` and use it in request handlers
+   that need workspace/service/runtime state together.
+2) Add an orchestrator lifecycle query that reports whether a service has active or pending async
+   work without exposing mutable internals.
+3) Replace independent workspace/service/runtime reads in high-risk handlers with one snapshot
+   read, especially run start/status/log/artifact/review/Git/runtime/onboarding surfaces.
+4) Gate onboarding workspace selection and runtime selection/profile mutations with a
+   `serviceHasInFlightWork` conflict check before replacing session state or changing runtime
+   config used by future service generations.
+5) Keep direct-mode construction as a ready generation from process CLI config; launcher mode
+   creates a new generation only after a workspace has been opened and runtime selected.
+6) Update docs for the operator-visible conflict behavior only; no schema or fixture sync is
+   expected unless implementation proves a public contract change is unavoidable.
+
+### Interfaces
+No schema changes. HTTP error surface may add conflict errors such as
+`workspace_switch_conflict` or `runtime_switch_conflict` for mutations attempted during active or
+queued runs.
+
+### Tests
+- API snapshot/readback: direct-mode onboarding status reports the effective runtime config from
+  the current generation.
+- Workspace switch conflict: selecting a different workspace while an async run is active is
+  rejected and leaves the original service/run visible.
+- Runtime switch conflict: selecting a new runtime while active or pending work exists is
+  rejected and leaves effective runtime readback unchanged.
+- Race-focused coverage: concurrent polling/status reads and runtime/workspace mutation attempts
+  are safe under `go test -race ./internal/api`.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md` for
+  session-generation conflict semantics if the HTTP conflict behavior is implemented.
+- No schemas, examples or fixtures should change.
+
+### Acceptance
+- [x] Targeted `go test ./internal/api` covers snapshot/coherence conflicts.
+- [x] Race-focused `go test -race ./internal/api` passes for the new lifecycle tests.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms handlers use coherent snapshots where workspace/service/runtime state
+      must agree and no Epic 20 behavior leaked into this slice.
+
+### Progress log
+- 2026-07-13: Implemented `19E` coherent service/session generation. API handlers now take a
+  request-scoped `serverSessionSnapshot` for workspace/service/runtime state, server session
+  mutations advance a generation under one lock, onboarding workspace/runtime switches and
+  runtime profile/manifest writes return conflict while the current service has active or queued
+  async work, and direct/onboarding status reports the effective runtime config for the current
+  generation. Orchestrator exposes read-only `HasInFlightRun` for API conflict checks.
+  Regression coverage verifies workspace switch conflict, runtime switch conflict, unchanged
+  manifest on runtime profile conflict, effective runtime readback and concurrent polling/mutation
+  safety under the race detector. Verification passed: `go test ./internal/api ./internal/orchestrator`,
+  `go test -race ./internal/api`, `go test ./internal/...`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

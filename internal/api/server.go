@@ -35,6 +35,7 @@ type Server struct {
 	service           *orchestrator.Service
 	runtimeConfig     ServerRuntimeConfig
 	serviceFactory    ServiceFactory
+	generation        uint64
 }
 
 type ServerRuntimeConfig struct {
@@ -57,6 +58,23 @@ type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Serv
 
 const defaultServerShutdownTimeout = 10 * time.Second
 
+var errSessionMutationConflict = errors.New("workspace or runtime cannot change while a run is active or queued")
+
+type serverSessionSnapshot struct {
+	Workspace         workspace.Root
+	WorkspacePath     string
+	WorkspaceSelected bool
+	RuntimeSelected   bool
+	LauncherMode      bool
+	Service           *orchestrator.Service
+	RuntimeConfig     ServerRuntimeConfig
+	Generation        uint64
+}
+
+func (snapshot serverSessionSnapshot) ready() bool {
+	return snapshot.WorkspaceSelected && snapshot.Workspace.Path != "" && snapshot.Service != nil
+}
+
 func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
 	return NewServerWithRuntime(ws, service, ServerRuntimeConfig{
 		Mode:           acpruntime.RuntimeModeFake,
@@ -66,15 +84,7 @@ func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
 }
 
 func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runtimeConfig ServerRuntimeConfig) *Server {
-	if strings.TrimSpace(runtimeConfig.Mode) == "" {
-		runtimeConfig.Mode = acpruntime.RuntimeModeFake
-	}
-	if runtimeConfig.Provider == "" {
-		runtimeConfig.Provider = acpruntime.ProviderClaudeCode
-	}
-	if runtimeConfig.ProviderSource == "" {
-		runtimeConfig.ProviderSource = acpruntime.ProviderSourceDefault
-	}
+	runtimeConfig = normalizeServerRuntimeConfig(runtimeConfig, ServerRuntimeConfig{})
 	return &Server{
 		workspace:         ws,
 		workspacePath:     ws.Path,
@@ -82,19 +92,12 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		runtimeSelected:   true,
 		runtimeConfig:     runtimeConfig,
 		service:           service,
+		generation:        1,
 	}
 }
 
 func NewLauncherServer(runtimeConfig ServerRuntimeConfig, factory ServiceFactory) *Server {
-	if strings.TrimSpace(runtimeConfig.Mode) == "" {
-		runtimeConfig.Mode = acpruntime.RuntimeModeFake
-	}
-	if runtimeConfig.Provider == "" {
-		runtimeConfig.Provider = acpruntime.ProviderClaudeCode
-	}
-	if runtimeConfig.ProviderSource == "" {
-		runtimeConfig.ProviderSource = acpruntime.ProviderSourceDefault
-	}
+	runtimeConfig = normalizeServerRuntimeConfig(runtimeConfig, ServerRuntimeConfig{})
 	return &Server{
 		launcherMode:   true,
 		runtimeConfig:  runtimeConfig,
@@ -191,73 +194,7 @@ func firstError(errs ...error) error {
 	return nil
 }
 
-func (s *Server) getWorkspace() workspace.Root {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.workspace
-}
-
-func (s *Server) getWorkspacePath() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.workspacePath
-}
-
-func (s *Server) hasReadyWorkspace() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.workspaceSelected && s.workspace.Path != "" && s.service != nil
-}
-
-func (s *Server) getService() *orchestrator.Service {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.service
-}
-
-func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.runtimeConfig
-}
-
-func (s *Server) isRuntimeSelected() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.runtimeSelected
-}
-
-func (s *Server) setWorkspace(ws workspace.Root) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workspace = ws
-	s.workspacePath = ws.Path
-	s.workspaceSelected = true
-}
-
-func (s *Server) setDraftWorkspace(path string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workspace = workspace.Root{}
-	s.workspacePath = path
-	s.workspaceSelected = true
-	s.service = nil
-}
-
-func (s *Server) attachWorkspace(ws workspace.Root) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workspace = ws
-	s.workspacePath = ws.Path
-	s.workspaceSelected = true
-	if s.serviceFactory != nil {
-		s.service = s.serviceFactory(ws, s.runtimeConfig)
-	}
-}
-
-func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func normalizeServerRuntimeConfig(config ServerRuntimeConfig, previous ServerRuntimeConfig) ServerRuntimeConfig {
 	if strings.TrimSpace(config.Mode) == "" {
 		config.Mode = acpruntime.RuntimeModeFake
 	}
@@ -268,27 +205,190 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) {
 		config.ProviderSource = acpruntime.ProviderSourceDefault
 	}
 	if strings.TrimSpace(config.Build.Version) == "" {
-		config.Build = s.runtimeConfig.Build
+		config.Build = previous.Build
 	}
-	config.ExecutionOverrides = s.runtimeConfig.ExecutionOverrides
-	config.RunLogsTTL = s.runtimeConfig.RunLogsTTL
-	config.RunLogsMaxRuns = s.runtimeConfig.RunLogsMaxRuns
+	if executionOverridesEmpty(config.ExecutionOverrides) {
+		config.ExecutionOverrides = previous.ExecutionOverrides
+	}
+	if config.RunLogsTTL == 0 {
+		config.RunLogsTTL = previous.RunLogsTTL
+	}
+	if config.RunLogsMaxRuns == 0 {
+		config.RunLogsMaxRuns = previous.RunLogsMaxRuns
+	}
+	return config
+}
+
+func executionOverridesEmpty(overrides acpruntime.ExecutionOverrides) bool {
+	return overrides.Strategy == nil &&
+		overrides.MaxParallel == nil &&
+		overrides.FailurePolicy == nil &&
+		overrides.ShardMode == nil
+}
+
+func (s *Server) sessionSnapshot() serverSessionSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return serverSessionSnapshot{
+		Workspace:         s.workspace,
+		WorkspacePath:     s.workspacePath,
+		WorkspaceSelected: s.workspaceSelected,
+		RuntimeSelected:   s.runtimeSelected,
+		LauncherMode:      s.launcherMode,
+		Service:           s.service,
+		RuntimeConfig:     s.runtimeConfig,
+		Generation:        s.generation,
+	}
+}
+
+func (s *Server) getWorkspace() workspace.Root {
+	return s.sessionSnapshot().Workspace
+}
+
+func (s *Server) getWorkspacePath() string {
+	return s.sessionSnapshot().WorkspacePath
+}
+
+func (s *Server) hasReadyWorkspace() bool {
+	return s.sessionSnapshot().ready()
+}
+
+func (s *Server) getService() *orchestrator.Service {
+	return s.sessionSnapshot().Service
+}
+
+func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
+	return s.sessionSnapshot().RuntimeConfig
+}
+
+func (s *Server) isRuntimeSelected() bool {
+	return s.sessionSnapshot().RuntimeSelected
+}
+
+func (s *Server) serviceHasInFlightWorkLocked() bool {
+	return s.service != nil && s.service.HasInFlightRun()
+}
+
+func (s *Server) mutateWorkspaceRoot(mutate func(workspace.Root) (workspace.Root, error)) (workspace.Root, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return workspace.Root{}, errSessionMutationConflict
+	}
+	reopened, err := mutate(s.workspace)
+	if err != nil {
+		return workspace.Root{}, err
+	}
+	s.workspace = reopened
+	s.workspacePath = reopened.Path
+	s.workspaceSelected = true
+	s.generation++
+	return reopened, nil
+}
+
+func (s *Server) saveWorkspaceManifest(content string) (*orchestrator.Service, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return nil, errSessionMutationConflict
+	}
+	workspacePath := strings.TrimSpace(s.workspacePath)
+	if workspacePath == "" {
+		return nil, errors.New("workspace is not selected")
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, workspace.ManifestFileName), []byte(content), 0o644); err != nil {
+		return nil, fmt.Errorf("manifest_write_failed: %w", err)
+	}
+	reopened, err := workspace.Open(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("manifest_reopen_failed: %w", err)
+	}
+	if err := reopened.EnsureLayout(); err != nil {
+		return nil, fmt.Errorf("workspace_layout_failed: %w", err)
+	}
+	if err := reopened.EnsureBaselineBundle(); err != nil {
+		return nil, fmt.Errorf("workspace_baseline_failed: %w", err)
+	}
+	s.workspace = reopened
+	s.workspacePath = reopened.Path
+	s.workspaceSelected = true
+	var reconcileService *orchestrator.Service
+	if s.service == nil && s.serviceFactory != nil {
+		s.service = s.serviceFactory(reopened, s.runtimeConfig)
+		reconcileService = s.service
+	}
+	s.generation++
+	return reconcileService, nil
+}
+
+func (s *Server) setWorkspace(ws workspace.Root) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return errSessionMutationConflict
+	}
+	s.workspace = ws
+	s.workspacePath = ws.Path
+	s.workspaceSelected = true
+	s.generation++
+	return nil
+}
+
+func (s *Server) setDraftWorkspace(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return errSessionMutationConflict
+	}
+	s.workspace = workspace.Root{}
+	s.workspacePath = path
+	s.workspaceSelected = true
+	s.service = nil
+	s.generation++
+	return nil
+}
+
+func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return nil, errSessionMutationConflict
+	}
+	s.workspace = ws
+	s.workspacePath = ws.Path
+	s.workspaceSelected = true
+	if s.serviceFactory != nil {
+		s.service = s.serviceFactory(ws, s.runtimeConfig)
+	}
+	s.generation++
+	return s.service, nil
+}
+
+func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) (*orchestrator.Service, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serviceHasInFlightWorkLocked() {
+		return nil, errSessionMutationConflict
+	}
+	config = normalizeServerRuntimeConfig(config, s.runtimeConfig)
 	s.runtimeConfig = config
 	s.runtimeSelected = true
 	if s.workspaceSelected && s.workspace.Path != "" && s.serviceFactory != nil {
 		s.service = s.serviceFactory(s.workspace, s.runtimeConfig)
 	}
+	s.generation++
+	return s.service, nil
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
 	if apiPath == "/api/health" || apiPath == "/api/system/version" || apiPath == "/api/system/info" || strings.HasPrefix(apiPath, "/api/onboarding/") {
 		return false
 	}
-	s.mu.RLock()
-	selected := s.workspaceSelected
-	ready := selected && s.workspace.Path != "" && s.service != nil
-	pathSelected := selected && strings.TrimSpace(s.workspacePath) != ""
-	s.mu.RUnlock()
+	snapshot := s.sessionSnapshot()
+	selected := snapshot.WorkspaceSelected
+	ready := snapshot.ready()
+	pathSelected := selected && strings.TrimSpace(snapshot.WorkspacePath) != ""
 	if ready {
 		return false
 	}
@@ -319,9 +419,7 @@ func (s *Server) handleSystemInfo(writer http.ResponseWriter, request *http.Requ
 		writeMethodNotAllowed(writer, http.MethodGet)
 		return
 	}
-	s.mu.RLock()
-	info := s.runtimeConfig.Build
-	s.mu.RUnlock()
+	info := s.sessionSnapshot().RuntimeConfig.Build
 	writeJSON(writer, http.StatusOK, map[string]string{
 		"version": firstNonEmpty(info.Version, "dev"),
 		"commit":  firstNonEmpty(info.Commit, "none"),
@@ -445,36 +543,28 @@ func (s *Server) handleWorkspaceManifest(writer http.ResponseWriter, request *ht
 			return
 		}
 
-		workspacePath := s.getWorkspacePath()
-		if strings.TrimSpace(workspacePath) == "" {
-			writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before saving workspace.yaml")
-			return
-		}
-		if err := os.WriteFile(filepath.Join(workspacePath, workspace.ManifestFileName), []byte(payload.Content), 0o644); err != nil {
-			writeError(writer, http.StatusInternalServerError, "manifest_write_failed", err.Error())
-			return
-		}
-
-		reopened, err := workspace.Open(workspacePath)
+		service, err := s.saveWorkspaceManifest(payload.Content)
 		if err != nil {
-			writeError(writer, http.StatusInternalServerError, "manifest_reopen_failed", err.Error())
-			return
-		}
-		if err := reopened.EnsureLayout(); err != nil {
-			writeError(writer, http.StatusInternalServerError, "workspace_layout_failed", err.Error())
-			return
-		}
-		if err := reopened.EnsureBaselineBundle(); err != nil {
-			writeError(writer, http.StatusInternalServerError, "workspace_baseline_failed", err.Error())
-			return
-		}
-		if s.hasReadyWorkspace() {
-			s.setWorkspace(reopened)
-		} else {
-			s.attachWorkspace(reopened)
-			if service := s.getService(); service != nil {
-				service.ReconcileStaleRunsAfterRestart()
+			switch {
+			case errors.Is(err, errSessionMutationConflict):
+				writeError(writer, http.StatusConflict, "workspace_switch_conflict", err.Error())
+			case strings.Contains(err.Error(), "workspace is not selected"):
+				writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before saving workspace.yaml")
+			case strings.HasPrefix(err.Error(), "manifest_write_failed:"):
+				writeError(writer, http.StatusInternalServerError, "manifest_write_failed", strings.TrimPrefix(err.Error(), "manifest_write_failed: "))
+			case strings.HasPrefix(err.Error(), "manifest_reopen_failed:"):
+				writeError(writer, http.StatusInternalServerError, "manifest_reopen_failed", strings.TrimPrefix(err.Error(), "manifest_reopen_failed: "))
+			case strings.HasPrefix(err.Error(), "workspace_layout_failed:"):
+				writeError(writer, http.StatusInternalServerError, "workspace_layout_failed", strings.TrimPrefix(err.Error(), "workspace_layout_failed: "))
+			case strings.HasPrefix(err.Error(), "workspace_baseline_failed:"):
+				writeError(writer, http.StatusInternalServerError, "workspace_baseline_failed", strings.TrimPrefix(err.Error(), "workspace_baseline_failed: "))
+			default:
+				writeError(writer, http.StatusInternalServerError, "manifest_save_failed", err.Error())
 			}
+			return
+		}
+		if service != nil {
+			service.ReconcileStaleRunsAfterRestart()
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -510,9 +600,14 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 			return
 		}
 
-		ws := s.getWorkspace()
-		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyTimeouts(ws, payload.Timeouts)
+		reopened, err := s.mutateWorkspaceRoot(func(ws workspace.Root) (workspace.Root, error) {
+			return (runtimeprofile.RuntimeProfilePatchService{}).ApplyTimeouts(ws, payload.Timeouts)
+		})
 		if err != nil {
+			if errors.Is(err, errSessionMutationConflict) {
+				writeError(writer, http.StatusConflict, "runtime_profile_conflict", err.Error())
+				return
+			}
 			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
 				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
 				return
@@ -520,7 +615,6 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 			writeError(writer, http.StatusInternalServerError, "runtime_timeouts_write_failed", err.Error())
 			return
 		}
-		s.setWorkspace(reopened)
 		resolved := acpruntime.ResolveTimeouts(reopened.Manifest)
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"ok":        true,
@@ -536,9 +630,9 @@ func (s *Server) handleRuntimeTimeouts(writer http.ResponseWriter, request *http
 func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *http.Request) {
 	switch request.Method {
 	case http.MethodGet:
-		ws := s.getWorkspace()
-		resolved := s.service.ResolveExecutionProfile(ws.Manifest)
-		stepProviders, err := s.service.ResolveStepProviderProfile(ws.Manifest)
+		snapshot := s.sessionSnapshot()
+		resolved := snapshot.Service.ResolveExecutionProfile(snapshot.Workspace.Manifest)
+		stepProviders, err := snapshot.Service.ResolveStepProviderProfile(snapshot.Workspace.Manifest)
 		if err != nil {
 			writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
 			return
@@ -566,9 +660,14 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 			return
 		}
 
-		ws := s.getWorkspace()
-		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyExecution(ws, payload.Execution)
+		reopened, err := s.mutateWorkspaceRoot(func(ws workspace.Root) (workspace.Root, error) {
+			return (runtimeprofile.RuntimeProfilePatchService{}).ApplyExecution(ws, payload.Execution)
+		})
 		if err != nil {
+			if errors.Is(err, errSessionMutationConflict) {
+				writeError(writer, http.StatusConflict, "runtime_profile_conflict", err.Error())
+				return
+			}
 			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
 				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
 				return
@@ -576,9 +675,9 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 			writeError(writer, http.StatusInternalServerError, "runtime_execution_write_failed", err.Error())
 			return
 		}
-		s.setWorkspace(reopened)
-		resolved := s.service.ResolveExecutionProfile(reopened.Manifest)
-		stepProviders, err := s.service.ResolveStepProviderProfile(reopened.Manifest)
+		snapshot := s.sessionSnapshot()
+		resolved := snapshot.Service.ResolveExecutionProfile(reopened.Manifest)
+		stepProviders, err := snapshot.Service.ResolveStepProviderProfile(reopened.Manifest)
 		if err != nil {
 			writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
 			return
@@ -622,9 +721,14 @@ func (s *Server) handleRuntimePermissions(writer http.ResponseWriter, request *h
 			return
 		}
 
-		ws := s.getWorkspace()
-		reopened, err := (runtimeprofile.RuntimeProfilePatchService{}).ApplyPermissions(ws, payload.Permissions)
+		reopened, err := s.mutateWorkspaceRoot(func(ws workspace.Root) (workspace.Root, error) {
+			return (runtimeprofile.RuntimeProfilePatchService{}).ApplyPermissions(ws, payload.Permissions)
+		})
 		if err != nil {
+			if errors.Is(err, errSessionMutationConflict) {
+				writeError(writer, http.StatusConflict, "runtime_profile_conflict", err.Error())
+				return
+			}
 			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
 				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
 				return
@@ -632,7 +736,6 @@ func (s *Server) handleRuntimePermissions(writer http.ResponseWriter, request *h
 			writeError(writer, http.StatusInternalServerError, "runtime_permissions_write_failed", err.Error())
 			return
 		}
-		s.setWorkspace(reopened)
 		resolved := acpruntime.ResolvePermissions(reopened.Manifest)
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"ok":        true,
@@ -650,11 +753,11 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 		writeMethodNotAllowed(writer, http.MethodGet)
 		return
 	}
-	ws := s.getWorkspace()
-	timeouts := acpruntime.ResolveTimeouts(ws.Manifest)
-	execution := s.service.ResolveExecutionProfile(ws.Manifest)
-	permissions := acpruntime.ResolvePermissions(ws.Manifest)
-	stepProviders, err := s.service.ResolveStepProviderProfile(ws.Manifest)
+	snapshot := s.sessionSnapshot()
+	timeouts := acpruntime.ResolveTimeouts(snapshot.Workspace.Manifest)
+	execution := snapshot.Service.ResolveExecutionProfile(snapshot.Workspace.Manifest)
+	permissions := acpruntime.ResolvePermissions(snapshot.Workspace.Manifest)
+	stepProviders, err := snapshot.Service.ResolveStepProviderProfile(snapshot.Workspace.Manifest)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
 		return
@@ -1002,17 +1105,17 @@ func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusBadRequest, "question_required", "question is required")
 		return
 	}
-	if !s.isRuntimeSelected() {
+	snapshot := s.sessionSnapshot()
+	if !snapshot.RuntimeSelected {
 		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting Q&A")
 		return
 	}
-	service := s.getService()
-	if service == nil {
+	if snapshot.Service == nil {
 		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before starting Q&A")
 		return
 	}
-	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
-		Workspace:      s.getWorkspace(),
+	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      snapshot.Workspace,
 		Pipeline:       orchestrator.PipelineQA,
 		NonInteractive: true,
 		Question:       question,
@@ -1064,7 +1167,8 @@ func (s *Server) handleQARunsList(writer http.ResponseWriter, request *http.Requ
 		limit = parsedLimit
 	}
 
-	runs := s.service.ListRuns(0)
+	snapshot := s.sessionSnapshot()
+	runs := snapshot.Service.ListRuns(0)
 	items := []map[string]any{}
 	for _, runInfo := range runs {
 		if runInfo.Pipeline != string(orchestrator.PipelineQA) {
@@ -1081,12 +1185,13 @@ func (s *Server) handleQARunsList(writer http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) handleQARunStatus(writer http.ResponseWriter, runID string) {
-	runInfo, ok := s.service.GetRun(runID)
+	snapshot := s.sessionSnapshot()
+	runInfo, ok := snapshot.Service.GetRun(runID)
 	if !ok || runInfo.Pipeline != string(orchestrator.PipelineQA) {
 		writeError(writer, http.StatusNotFound, "qa_run_not_found", "qa run not found")
 		return
 	}
-	payload, err := s.formatQARunPayload(runInfo)
+	payload, err := s.formatQARunPayload(snapshot.Workspace, runInfo)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "qa_answer_unavailable", err.Error())
 		return
@@ -1152,17 +1257,16 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	if !s.isRuntimeSelected() {
+	snapshot := s.sessionSnapshot()
+	if !snapshot.RuntimeSelected {
 		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting analysis")
 		return
 	}
-	service := s.getService()
-	if service == nil {
+	if snapshot.Service == nil {
 		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before starting analysis")
 		return
 	}
-	ws := s.getWorkspace()
-	report := ws.Validate(request.Context(), workspace.ValidateOptions{
+	report := snapshot.Workspace.Validate(request.Context(), workspace.ValidateOptions{
 		ResolveRepos: true,
 		FetchGit:     false,
 		VerifyRefs:   true,
@@ -1170,7 +1274,7 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 	if !report.OK {
 		writeJSON(writer, http.StatusBadRequest, map[string]any{
 			"ok":        false,
-			"workspace": ws.Path,
+			"workspace": snapshot.Workspace.Path,
 			"error": map[string]string{
 				"code":    "workspace_not_ready",
 				"message": "fix workspace, repository and runtime readiness blockers before starting analysis",
@@ -1182,8 +1286,8 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		return
 	}
 
-	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
-		Workspace:      ws,
+	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      snapshot.Workspace,
 		Pipeline:       pipeline,
 		NonInteractive: true,
 	})
@@ -1274,7 +1378,8 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		limit = parsedLimit
 	}
 
-	runs := s.service.ListRuns(0)
+	snapshot := s.sessionSnapshot()
+	runs := snapshot.Service.ListRuns(0)
 	items := make([]map[string]any, 0, len(runs))
 	for _, runInfo := range runs {
 		if runInfo.Pipeline == string(orchestrator.PipelineQA) {
@@ -1291,7 +1396,8 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 }
 
 func (s *Server) handlePipelineRunStatus(writer http.ResponseWriter, runID string) {
-	runInfo, ok := s.service.GetRun(runID)
+	snapshot := s.sessionSnapshot()
+	runInfo, ok := snapshot.Service.GetRun(runID)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
@@ -1300,7 +1406,8 @@ func (s *Server) handlePipelineRunStatus(writer http.ResponseWriter, runID strin
 }
 
 func (s *Server) handlePipelineRunArtifacts(writer http.ResponseWriter, runID string) {
-	artifacts, ok := s.service.GetRunArtifacts(runID)
+	snapshot := s.sessionSnapshot()
+	artifacts, ok := snapshot.Service.GetRunArtifacts(runID)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
@@ -1312,7 +1419,8 @@ func (s *Server) handlePipelineRunArtifacts(writer http.ResponseWriter, runID st
 }
 
 func (s *Server) handlePipelineRunPermissions(writer http.ResponseWriter, runID string) {
-	permissions, ok := s.service.GetRunPermissions(runID)
+	snapshot := s.sessionSnapshot()
+	permissions, ok := snapshot.Service.GetRunPermissions(runID)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
@@ -1349,7 +1457,8 @@ func (s *Server) handlePipelineRunLogs(writer http.ResponseWriter, request *http
 		limit = parsedLimit
 	}
 
-	page, ok, err := s.service.GetRunLogs(runID, cursor, limit)
+	snapshot := s.sessionSnapshot()
+	page, ok, err := snapshot.Service.GetRunLogs(runID, cursor, limit)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
@@ -1383,7 +1492,8 @@ func (s *Server) handlePipelineRunsPost(writer http.ResponseWriter, request *htt
 		}
 	}
 
-	if err := s.service.CancelRun(runID); err != nil {
+	snapshot := s.sessionSnapshot()
+	if err := snapshot.Service.CancelRun(runID); err != nil {
 		if errors.Is(err, orchestrator.ErrRunNotFound) {
 			writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 			return
@@ -1517,7 +1627,7 @@ func formatQARunSummaryPayload(runInfo orchestrator.RunInfo) map[string]any {
 	return payload
 }
 
-func (s *Server) formatQARunPayload(runInfo orchestrator.RunInfo) (map[string]any, error) {
+func (s *Server) formatQARunPayload(ws workspace.Root, runInfo orchestrator.RunInfo) (map[string]any, error) {
 	payload := formatQARunSummaryPayload(runInfo)
 	payload["answer"] = nil
 	payload["citations"] = []qa.Citation{}
@@ -1529,7 +1639,7 @@ func (s *Server) formatQARunPayload(runInfo orchestrator.RunInfo) (map[string]an
 	}
 
 	answerRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "qa-answer.json")
-	answerRaw, err := s.getWorkspace().ReadFile(answerRel)
+	answerRaw, err := ws.ReadFile(answerRel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return payload, nil
@@ -1541,7 +1651,7 @@ func (s *Server) formatQARunPayload(runInfo orchestrator.RunInfo) (map[string]an
 		return nil, err
 	}
 	contextRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "context-pack.json")
-	contextRaw, err := s.getWorkspace().ReadFile(contextRel)
+	contextRaw, err := ws.ReadFile(contextRel)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", contextRel, err)
 	}
