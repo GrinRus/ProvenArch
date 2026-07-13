@@ -245,6 +245,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "ACP_CLAUDE_CMD_BIN": "claude",
             "ACP_QWEN_CMD_BIN": "qwen",
             "ACP_CODEX_CMD_BIN": "codex",
+            "ACP_CODEX_MODEL": "gpt-5.5",
+            "ACP_CODEX_REASONING_EFFORT": "xhigh",
             "ACP_APPLY_TIMEOUTS_VIA_API": "1",
             "RUN_COUNT": str(run_count),
         }

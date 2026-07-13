@@ -1143,6 +1143,8 @@ class BatchFailureClassificationTest(unittest.TestCase):
     def test_frontend_live_passes_codex_command_env(self) -> None:
         script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('"ACP_CODEX_CMD=$ACP_CODEX_CMD_BIN"', script)
+        self.assertIn('"ACP_CODEX_MODEL=$ACP_CODEX_MODEL"', script)
+        self.assertIn('"ACP_CODEX_REASONING_EFFORT=$ACP_CODEX_REASONING_EFFORT"', script)
         self.assertIn('"UI_E2E_ARTIFACT_SOURCE=snapshot"', script)
         self.assertIn('"UI_E2E_SNAPSHOT_RUN_ID=$refresh_run_id"', script)
         self.assertIn('cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/', script)

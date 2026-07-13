@@ -236,7 +236,8 @@
      - `ACP_CLAUDE_CMD` (default resolution `claude`, then legacy `claude-code`)
      - `ACP_QWEN_CMD` (default `qwen`)
      - `ACP_CODEX_CMD` (default `codex`)
-   - live batch preflight records selected-provider readiness before deep matrix execution; command/probe/auth/quota failures, codex CLI compatibility blockers (for example `gpt-5.5` on an old Codex CLI) and selected-provider artifact smoke failure are operational blockers, not product verdicts; provider `model`/`modelUsage` telemetry is diagnostic text and does not block readiness
+   - generic `codex-code` runtime model remains CLI/default-config controlled unless `ACP_CODEX_MODEL` / `ACP_CODEX_REASONING_EFFORT` are set; live E2E sets these env defaults to `gpt-5.5` and `xhigh` for Codex only, while `qwen-code` and `claude-code` keep provider CLI defaults
+   - live batch preflight records selected-provider readiness before deep matrix execution; command/probe/auth/quota failures, codex CLI compatibility blockers (for example live E2E `gpt-5.5` on an old Codex CLI) and selected-provider artifact smoke failure are operational blockers, not product verdicts; provider `model`/`modelUsage` telemetry is diagnostic text and does not block readiness
    - raw provider failure metadata includes redacted lifecycle diagnostics: resolved command path, argv, cwd, include dirs, pid, duration/exit reason, stdout/stderr byte counts, selected provider, prompt byte count, resolved runtime timeout profile and allowlisted `ACP_*_CMD`/timeout env presence/hash; prompt payload argv values are replaced with byte count + hash when present, and stdout/stderr diagnostics are redacted before persistence/streaming
 
 6) **Workspace (`internal/workspace`)** *(implemented baseline)*
