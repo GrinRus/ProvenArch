@@ -123,6 +123,10 @@ export type Artifact = {
   path: string;
   kind: string;
   label: string;
+  read_path?: string;
+  canonical_path?: string;
+  source_run_id?: string;
+  source_mode?: "run_snapshot" | "current_workspace";
 };
 
 export type ArtifactsResponse = {
@@ -131,12 +135,20 @@ export type ArtifactsResponse = {
 };
 
 export type FinalRunIndexDocument = {
+  id?: string;
   canonical_path: string;
+  staged_path: string;
   kind?: string;
   title?: string;
+  topics?: string[];
+  citation_ids?: string[];
+  source_shards?: string[];
+  status?: string;
 };
 
 export type FinalRunIndex = {
+  run_id?: string;
+  generated_at?: string;
   citation_index_path?: string;
   canonical_documents?: FinalRunIndexDocument[];
 };

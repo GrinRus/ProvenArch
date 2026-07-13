@@ -113,7 +113,9 @@ for transactional promotion and reliable run lifecycle recovery.
       boundary is stable.
 - [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
+- [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -687,7 +689,9 @@ that every remapped citation document ID resolves to the current final-run docum
       still map to unique final document IDs, and citation bindings must follow that remap.
 - [x] Update pipeline/schema docs and ADR rationale for symmetric evidence bindings without
       changing provider list, `workspace.yaml`, live matrices or Epic 20 UI behavior.
-- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H` review/commit
+- [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H` review/commit
+      boundary is stable.
+- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
       boundary is stable.
 
 ### Non-goals
@@ -759,6 +763,94 @@ invalid shard-pack manifests and staged citation indexes with dangling/asymmetri
   documents and valid duplicate-ID remap. Verification passed: `go test ./internal/contracts ./internal/orchestrator`,
   `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19i-historical-run-artifact-snapshots
+
+### Context
+`19I` follows committed `19H`. The backend final-run index already carries
+`canonical_path` and `staged_path`, but the frontend contract keeps only `canonical_path`.
+`useRunArtifacts` converts selected-run final documents back into canonical paths and
+`handleOpenArtifact` reads those canonical paths through `/api/artifacts`. Coverage summary and
+open questions are also loaded from stable canonical paths. When a later run promotes new bytes
+to the same canonical path, selecting an older run can show current workspace bytes under the
+older run label.
+
+### Goals (must have)
+- [x] Preserve final-run-index `run_id`, `generated_at` and per-document `staged_path` in the
+      TypeScript contract.
+- [x] Keep artifact display/selection keyed by canonical label while reading selected-run bytes
+      from run-scoped `staged_path`.
+- [x] Reject mismatched final-run-index `run_id` and out-of-root `staged_path` values instead of
+      falling back to canonical bytes.
+- [x] Load coverage summary and open questions from selected-run staged documents when the
+      final-run index contains those canonical documents.
+- [x] Add deterministic UI regression with two runs sharing the same canonical path but different
+      staged bytes; older selection must not read current canonical content.
+- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not implement Epic 20 source-mode UI copy (`Run snapshot` / `Current workspace`) in this
+      slice.
+- [ ] Do not add a new backend snapshot API or change final-run-index schema.
+- [ ] Do not solve all stale async response races; `19J` owns request-generation and abort
+      primitives.
+- [ ] Do not change Publish commit scope or Git semantics.
+
+### Implementation
+1) Extend `ui/src/lib/appContracts.ts` so final-run-index payloads include top-level `run_id`,
+   `generated_at` and required document `staged_path`.
+2) Extend `Artifact` with optional internal read metadata (`read_path`, canonical path/source
+   markers) while preserving `path` as the operator-facing canonical label used by existing UI
+   selectors.
+3) In `useRunArtifacts`, parse the selected run's final-run-index, validate `run_id` and
+   `staged_path` root, derive display artifacts from `canonical_path`, and read previews from
+   `read_path`.
+4) Make final-run-index failure fail closed for snapshot mode: do not use canonical final
+   document paths when the selected run index is corrupt, mismatched or cross-run.
+5) Load coverage/open-question content through the same selected-run final-index mapping when
+   available, with canonical fallback only for runs that have no final-run-index artifact.
+
+### Interfaces
+Frontend-only TypeScript contract extension. HTTP and JSON schemas do not change.
+
+### Tests
+- UI regression: run A and run B expose `reports/as-is/overview.md` with different staged bytes;
+  selecting A reads A staged bytes, selecting B reads B staged bytes, and canonical current bytes
+  are never displayed for either selected historical run.
+- Coverage/open-question regression: selected-run staged coverage documents override canonical
+  workspace files.
+- Existing artifact filters and proposal/publish artifact lists continue to work with canonical
+  display paths.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` and stakeholder/operator docs only for selected-run snapshot
+  preview behavior. No schema/example changes are expected.
+
+### Acceptance
+- [x] `npm --prefix ui test -- --run` passes.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] `go test ./internal/docsync` passes after docs update.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19J` request-generation primitive or Epic 20 source-mode IA
+      leaked into this slice.
+- [x] Commit `19I: read historical artifacts from run snapshots`.
+
+### Progress log
+- 2026-07-13: Started `19I` after clean `19H` commit. Spec-first, docs-sync and
+  UI-implementation-QA rules apply because this slice changes frontend artifact read behavior
+  and operator-visible Review evidence correctness.
+- 2026-07-13: Implemented `19I`. The frontend final-run-index contract now preserves
+  `run_id`, `generated_at` and document `staged_path`; Review artifacts keep canonical display
+  paths but read previews from selected-run staged paths. Final-run-index run mismatches and
+  cross-run staged paths fail closed without canonical fallback, while runs without a final index
+  keep the existing current-workspace read behavior. Coverage summary and open questions load
+  from selected-run staged documents when indexed. UI regression covers two runs sharing
+  `reports/as-is/overview.md` with different staged bytes and proves current canonical bytes are
+  not displayed. Verification passed: UI typecheck, UI Vitest `94/94`, `go test ./internal/docsync`,
+  and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

@@ -1780,6 +1780,46 @@ describe("App", () => {
         },
         artifactText: {
           "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/reports/as-is/overview.md": "# As-is overview\n",
+          "reports/taskruns/run-1/staging/final/reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+          "reports/taskruns/run-1/staging/final/proposals/proposal-payments/proposal.md": "# Payments proposal\n",
+          "reports/taskruns/run-1/staging/final/reports/changelog/2026-04-03.md": "# Iteration changelog\n",
+          "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
+            version: 1,
+            run_id: "run-1",
+            pipeline: "init",
+            generated_at: "2026-04-03T12:00:00Z",
+            canonical_documents: [
+              {
+                id: "doc.overview",
+                kind: "report",
+                title: "As-is overview",
+                canonical_path: "reports/as-is/overview.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+              {
+                id: "doc.diagram",
+                kind: "diagram",
+                title: "C4 context",
+                canonical_path: "reports/diagrams/c4-context.mmd",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/diagrams/c4-context.mmd",
+              },
+              {
+                id: "doc.proposal",
+                kind: "proposal",
+                title: "Payments proposal",
+                canonical_path: "proposals/proposal-payments/proposal.md",
+                staged_path: "reports/taskruns/run-1/staging/final/proposals/proposal-payments/proposal.md",
+              },
+              {
+                id: "doc.changelog",
+                kind: "changelog",
+                title: "Iteration changelog",
+                canonical_path: "reports/changelog/2026-04-03.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/changelog/2026-04-03.md",
+              },
+            ],
+          }),
         },
       }),
     );
@@ -2193,6 +2233,9 @@ describe("App", () => {
           "proposals/proposal-baseline/proposal.md": "# Proposal\n",
           "reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
           "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/reports/as-is/overview.md": "# As-is overview\n",
+          "reports/taskruns/run-1/staging/final/proposals/proposal-baseline/proposal.md": "# Proposal\n",
+          "reports/taskruns/run-1/staging/final/reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
           "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
             version: 1,
             run_id: "run-1",
@@ -2205,6 +2248,20 @@ describe("App", () => {
                 title: "As-is overview",
                 canonical_path: "reports/as-is/overview.md",
                 staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+              {
+                id: "doc.proposal-baseline",
+                kind: "proposal",
+                title: "Baseline proposal",
+                canonical_path: "proposals/proposal-baseline/proposal.md",
+                staged_path: "reports/taskruns/run-1/staging/final/proposals/proposal-baseline/proposal.md",
+              },
+              {
+                id: "doc.run-changelog",
+                kind: "changelog",
+                title: "Run changelog",
+                canonical_path: "reports/changelog/2026-05-31-run-1.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/changelog/2026-05-31-run-1.md",
               },
             ],
           }),
@@ -3579,6 +3636,147 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe(taskrunPath);
       expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("\"task\":\"ok\"");
+    });
+  });
+
+  it("reads historical Review artifacts from selected-run staged paths", async () => {
+    const baseFetch = createFetchMock();
+    const finalIndexPath = (runID: string) => `reports/taskruns/${runID}/staging/final/final-run-index.json`;
+    const stagedOverviewPath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/as-is/overview.md`;
+    const stagedCoveragePath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/coverage/summary.md`;
+    const stagedQuestionsPath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/coverage/open-questions.md`;
+    const finalIndex = (runID: string) => ({
+      version: 1,
+      run_id: runID,
+      pipeline: "refresh",
+      generated_at: "2026-04-03T12:02:30Z",
+      citation_index_path: `reports/taskruns/${runID}/staging/final/citation-index.json`,
+      canonical_documents: [
+        {
+          id: "doc.overview",
+          kind: "report",
+          title: `${runID} overview`,
+          canonical_path: "reports/as-is/overview.md",
+          staged_path: stagedOverviewPath(runID),
+        },
+        {
+          id: "doc.coverage",
+          kind: "report",
+          title: `${runID} coverage`,
+          canonical_path: "reports/coverage/summary.md",
+          staged_path: stagedCoveragePath(runID),
+        },
+        {
+          id: "doc.questions",
+          kind: "report",
+          title: `${runID} questions`,
+          canonical_path: "reports/coverage/open-questions.md",
+          staged_path: stagedQuestionsPath(runID),
+        },
+      ],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-old",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:02:00Z",
+              finished_at: "2026-04-03T12:02:30Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+            {
+              run_id: "run-new",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: "2026-04-03T12:01:30Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+          ],
+        });
+      }
+
+      for (const runID of ["run-old", "run-new"]) {
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
+          return jsonResponse({
+            run_id: runID,
+            pipeline: "refresh",
+            status: "succeeded",
+            started_at: "2026-04-03T12:02:00Z",
+            finished_at: "2026-04-03T12:02:30Z",
+            warnings: [],
+            error_code: null,
+            error: null,
+          });
+        }
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
+          return jsonResponse({
+            run_id: runID,
+            artifacts: [{ path: finalIndexPath(runID), kind: "taskrun", label: "Final run index" }],
+          });
+        }
+        if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
+          return jsonResponse({ run_id: runID, items: [], next_cursor: 0, eof: true });
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(finalIndexPath(runID))}`) {
+          return jsonResponse(finalIndex(runID));
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedOverviewPath(runID))}`) {
+          return textResponse(runID === "run-old" ? "# Old snapshot overview\n" : "# New snapshot overview\n");
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedCoveragePath(runID))}`) {
+          return textResponse(runID === "run-old" ? "Old snapshot coverage\n" : "New snapshot coverage\n");
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedQuestionsPath(runID))}`) {
+          return textResponse(runID === "run-old" ? "- Old snapshot question\n" : "- New snapshot question\n");
+        }
+      }
+
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fas-is%2Foverview.md") {
+        return textResponse("# Current canonical overview SHOULD NOT SHOW\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Current canonical coverage SHOULD NOT SHOW\n");
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/overview.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# Old snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("Current canonical");
+      expect(screen.getByTestId("coverage-summary-content").textContent ?? "").toContain("Old snapshot coverage");
+    });
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    fireEvent.click(screen.getByRole("button", { name: "run-new" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
+    });
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/overview.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("Current canonical");
+      expect(screen.getByTestId("coverage-summary-content").textContent ?? "").toContain("New snapshot coverage");
     });
   });
 

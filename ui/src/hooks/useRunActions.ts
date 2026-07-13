@@ -25,7 +25,7 @@ type RunActionsContext = {
   fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
   clearArtifacts: () => void;
   fetchArtifacts: (runId: string) => Promise<void>;
-  loadCoverageArtifacts: () => Promise<void>;
+  loadCoverageArtifacts: (runId?: string) => Promise<void>;
 };
 
 export function useRunActions({
@@ -67,7 +67,7 @@ export function useRunActions({
       setRunStatus(typed);
       if (finalStatuses.has(typed.status)) {
         await fetchArtifacts(id);
-        await loadCoverageArtifacts();
+        await loadCoverageArtifacts(id);
       }
       return typed;
     },

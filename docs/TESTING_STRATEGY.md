@@ -224,6 +224,10 @@ Release workflow hardening:
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
+- UI Review regression covers two selected runs with identical canonical artifact paths but
+  different staged bytes; historical Review preview, coverage and questions must read the
+  selected run's `reports/taskruns/<run_id>/staging/final/...` bytes rather than current
+  canonical workspace files.
 - runtime draft manifest metadata: optional `updated_at` is accepted, while legacy/envelope fields such as `repo_scopes`, `compatibility`, `generated_at`, `pipeline`, output aliases such as `logical_path`, or `proposals[]` remain invalid
 - strict collect validation:
   - artifact-root-prefixed, absolute, missing-file, directory and hidden provider/tool `documents[].path` (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`) fail-ятся без rewrite
