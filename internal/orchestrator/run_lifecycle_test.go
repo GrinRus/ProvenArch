@@ -134,6 +134,98 @@ func TestRunWithIDTerminalGuardPersistsFailedHistoryOnPanic(t *testing.T) {
 	}
 }
 
+func TestAsyncRunPanicIsTerminalAndDoesNotEscapeGoroutine(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(panicRunner{}),
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time {
+			return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+
+	info := waitForRunTerminalInfo(t, service, runID, 2*time.Second)
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed async panic run, got %s", info.Status)
+	}
+	if info.ErrorCode != "internal_failure" {
+		t.Fatalf("expected internal_failure error code, got %q", info.ErrorCode)
+	}
+	if !strings.Contains(info.Error, "run panic") {
+		t.Fatalf("expected run panic error, got %q", info.Error)
+	}
+
+	nextRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("service should accept a new run after async panic: %v", err)
+	}
+	if nextRunID == runID {
+		t.Fatalf("expected distinct follow-up run id")
+	}
+	waitForRunTerminalInfo(t, service, nextRunID, 2*time.Second)
+}
+
+func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	releaseFirst := make(chan struct{})
+	runner := &panicFirstThenReturnRunner{releaseFirst: releaseFirst}
+	service := NewService(
+		WithRunner(runner),
+		WithHistoryWorkspace(ws),
+		WithDebounceWindow(time.Minute),
+		WithClock(func() time.Time {
+			return time.Date(2026, 7, 13, 12, 30, 0, 0, time.UTC)
+		}),
+	)
+
+	firstRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start first async run: %v", err)
+	}
+	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("queue pending async run: %v", err)
+	}
+	if secondRunID == firstRunID {
+		t.Fatalf("expected distinct pending run id")
+	}
+
+	close(releaseFirst)
+	firstInfo := waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
+	if firstInfo.Status != RunStatusFailed || firstInfo.ErrorCode != "internal_failure" {
+		t.Fatalf("expected first run failed/internal_failure, got status=%s code=%q", firstInfo.Status, firstInfo.ErrorCode)
+	}
+	waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	if calls := runner.callCount(); calls < 2 {
+		t.Fatalf("expected pending run to start after panic; runner calls=%d", calls)
+	}
+}
+
 func TestTerminalGuardPersistsFailedHistoryOnContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -247,6 +339,35 @@ type panicRunner struct{}
 
 func (panicRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, error) {
 	panic("boom")
+}
+
+type panicFirstThenReturnRunner struct {
+	releaseFirst <-chan struct{}
+	mu           sync.Mutex
+	calls        int
+}
+
+func (runner *panicFirstThenReturnRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	runner.mu.Lock()
+	runner.calls++
+	call := runner.calls
+	runner.mu.Unlock()
+
+	if call == 1 {
+		select {
+		case <-ctx.Done():
+			return acpruntime.Result{}, ctx.Err()
+		case <-runner.releaseFirst:
+			panic("boom")
+		}
+	}
+	return acpruntime.Result{}, nil
+}
+
+func (runner *panicFirstThenReturnRunner) callCount() int {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.calls
 }
 
 type blockingRunner struct {

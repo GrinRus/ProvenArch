@@ -101,7 +101,9 @@ for transactional promotion and reliable run lifecycle recovery.
 - [x] Keep the PR deterministic: no live provider dependency and no release matrix changes.
 - [x] Continue PR-1 with `19B` transactional canonical promotion after `19A` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary
+- [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary
+      is stable.
+- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary
       is stable.
 
 ### Non-goals
@@ -174,7 +176,8 @@ old/new bytes visible under canonical paths.
       promotion generation outside canonical paths, validate it, then activate it with a journaled
       rollback path so a failed promotion leaves either the previous complete generation or the new
       complete generation visible, never a mixed generation.
-- [ ] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
+- [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change public artifact schemas, final-run-index shape or provider contracts.
@@ -236,6 +239,74 @@ and test fault injection.
   activation, and removes the redundant post-promotion draft copy. Regression coverage injects
   failures across copy/model/diagram/activation operations and verifies old-or-new complete
   generation semantics. Verification passed: `go test ./internal/orchestrator`,
+  `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19c-async-panic-isolation
+
+### Context
+`19C` follows committed `19B`. Synchronous `Service.Run` currently terminalizes panic failures
+and re-panics, preserving caller-visible panic semantics. The async path starts `runWithID` in a
+goroutine and then calls `finishAsyncRun`; if the runner panics, the goroutine can skip
+`finishAsyncRun`, leave `activeRunID`/cancel state occupied, block a queued pending run, and crash
+the service process instead of recording a terminal async failure.
+
+### Goals (must have)
+- [x] Isolate async runner panics at the outer goroutine boundary so the service process stays
+      alive, the panicked run gets terminal `failed/internal_failure` history, and
+      `finishAsyncRun` always releases the slot and starts a pending run.
+- [x] Preserve synchronous `Service.Run` panic behavior: panic still propagates to the caller
+      while existing terminal history semantics remain intact.
+- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change normal runtime error classification or cancellation semantics.
+- [ ] Do not change queue/debounce policy beyond releasing slots after async panic.
+- [ ] Do not change provider contracts, public schemas, UI contracts or live matrices.
+
+### Implementation
+1) Wrap only the goroutine body in `launchAsyncRun` with `defer`.
+2) Ensure the defer calls `finishAsyncRun` exactly once for every async run, including panics.
+3) Recover panics at the async goroutine boundary, terminalize the run as
+   `internal_failure`/`run failed: panic` if `runWithID` has not already done so, and do not
+   re-panic from the goroutine.
+4) Keep `runWithID` synchronous panic semantics unchanged: its existing panic guard may
+   terminalize and re-panic, so direct callers still observe a panic.
+5) Add tests for async init panic and queued pending-run continuation after the active run
+   panics.
+
+### Interfaces
+No public API/schema changes. Internal-only lifecycle helpers may be added to
+`internal/orchestrator/service_runs.go` if needed.
+
+### Tests
+- Async panic runner: `StartAsyncRun` returns a run ID, the service remains usable, run history
+  records terminal `failed/internal_failure`, and the active slot is released.
+- Active async panic with queued pending run: pending run starts after the panicked active run is
+  finalized.
+- Existing synchronous panic test remains unchanged and continues to require caller-visible panic.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`
+  only for lifecycle/recovery behavior. No fixtures or schemas change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers async panic terminalization and pending-run
+      continuation.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no synchronous panic masking and no double `finishAsyncRun`.
+
+### Progress log
+- 2026-07-13: Implemented `19C` async panic isolation. `launchAsyncRun` now wraps the outer
+  goroutine with a defer that recovers runner panics, terminalizes the run as
+  `failed/internal_failure` when needed, and always calls `finishAsyncRun` to release active
+  slots/cancel state and launch pending work. Direct `Service.Run` panic behavior remains
+  caller-visible through the existing runWithID terminal guard. Regression coverage verifies async
+  panic terminalization, service reuse after panic, pending-run continuation, and existing sync
+  re-panic semantics. Verification passed: targeted lifecycle tests, `go test ./internal/orchestrator`,
   `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
 

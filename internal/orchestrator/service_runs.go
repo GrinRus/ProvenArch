@@ -379,8 +379,14 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 	}
 
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				panicErr := fmt.Errorf("run panic: %v", recovered)
+				s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
+			}
+			s.finishAsyncRun(ctx, runID)
+		}()
 		_, _, _ = s.runWithID(runCtx, request, runID)
-		s.finishAsyncRun(ctx, runID)
 	}()
 }
 
