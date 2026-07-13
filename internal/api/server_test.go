@@ -678,6 +678,90 @@ func TestWorkspaceValidateEndpoint(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHealthEndpointReturnsReadOnlyPassReport(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	before := snapshotWorkspaceFiles(t, server.getWorkspace().Path)
+	response, err := http.Get(httpServer.URL + "/api/workspace/health")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/health: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 200, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload workspaceHealthPayload
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode workspace health payload: %v", err)
+	}
+	if payload.Version != 1 || payload.Status != "pass" {
+		t.Fatalf("expected pass workspace health report, got %+v", payload)
+	}
+	if payload.Summary.Info != 0 || payload.Summary.Warning != 0 || payload.Summary.Error != 0 || len(payload.Items) != 0 {
+		t.Fatalf("expected empty pass report, got %+v", payload)
+	}
+	after := snapshotWorkspaceFiles(t, server.getWorkspace().Path)
+	assertWorkspaceSnapshotEqual(t, before, after)
+}
+
+func TestWorkspaceHealthEndpointReturnsAdvisoryFindings(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	ws := server.getWorkspace()
+	if err := ws.WriteFile("model/entities/svc.payments.yaml", []byte(strings.Join([]string{
+		"id: svc.payments",
+		"type: service",
+		"name: Payments",
+		"provenance:",
+		"  kind: observation",
+		"  confidence: 0.9",
+		"",
+	}, "\n"))); err != nil {
+		t.Fatalf("write model entity: %v", err)
+	}
+	if err := ws.WriteFile("reports/agent-outputs/domains/payments.md", []byte("# Payments\n")); err != nil {
+		t.Fatalf("write domain output: %v", err)
+	}
+	if err := ws.WriteFile("proposals/proposal-payments/proposal.md", []byte("# Proposal\n\n## Evidence\n- README.md\n")); err != nil {
+		t.Fatalf("write proposal: %v", err)
+	}
+	if err := ws.WriteFile("reports/coverage/open-questions.md", []byte("# Open questions\n\n- Who owns payments?\n")); err != nil {
+		t.Fatalf("write open questions: %v", err)
+	}
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	response, err := http.Get(httpServer.URL + "/api/workspace/health")
+	if err != nil {
+		t.Fatalf("GET /api/workspace/health: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected status 200, got %d body=%s", response.StatusCode, string(body))
+	}
+	var payload workspaceHealthPayload
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode workspace health payload: %v", err)
+	}
+	if payload.Status != "warn" {
+		t.Fatalf("expected warn status, got %+v", payload)
+	}
+	if payload.Summary.Warning != 3 || payload.Summary.Info != 1 || payload.Summary.Error != 0 {
+		t.Fatalf("unexpected summary: %+v", payload.Summary)
+	}
+	assertWorkspaceHealthPayloadItem(t, payload, "model.observation.missing_evidence", "warning", "model/entities/svc.payments.yaml")
+	assertWorkspaceHealthPayloadItem(t, payload, "domain.output.orphan", "warning", "reports/agent-outputs/domains/payments.md")
+	assertWorkspaceHealthPayloadItem(t, payload, "proposal.missing_review_sections", "warning", "proposals/proposal-payments/proposal.md")
+	assertWorkspaceHealthPayloadItem(t, payload, "coverage.open_questions.count", "info", "reports/coverage/open-questions.md")
+}
+
 func TestQAAskEndpointReturnsWorkspaceBackedResponseAndDoesNotMutateWorkspace(t *testing.T) {
 	t.Parallel()
 
@@ -3929,6 +4013,34 @@ repos:
 type qaAPICitation struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+}
+
+type workspaceHealthPayload struct {
+	Version int    `json:"version"`
+	Status  string `json:"status"`
+	Summary struct {
+		Info    int `json:"info"`
+		Warning int `json:"warning"`
+		Error   int `json:"error"`
+	} `json:"summary"`
+	Items []struct {
+		ID           string   `json:"id"`
+		Severity     string   `json:"severity"`
+		Title        string   `json:"title"`
+		Path         string   `json:"path"`
+		RelatedPaths []string `json:"related_paths"`
+	} `json:"items"`
+}
+
+func assertWorkspaceHealthPayloadItem(t *testing.T, payload workspaceHealthPayload, id string, severity string, path string) {
+	t.Helper()
+
+	for _, item := range payload.Items {
+		if item.ID == id && item.Severity == severity && item.Path == path {
+			return
+		}
+	}
+	t.Fatalf("expected workspace health item id=%s severity=%s path=%s in %+v", id, severity, path, payload.Items)
 }
 
 func newQATestServer(t *testing.T) *Server {
