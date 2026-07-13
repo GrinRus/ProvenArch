@@ -31,6 +31,8 @@ type FetchMockState = {
   systemVersion?: MockJSON;
   gitCommitResponse?: { status: number; body: MockJSON };
   proposalBranchResponse?: { status: number; body: MockJSON };
+  workspaceHealthResponse?: MockJSON;
+  workspaceHealthStatus?: number;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -423,6 +425,19 @@ function createFetchMock(state: FetchMockState = {}) {
         manifest: baselineBundleManifest,
         warnings: state.baselineBundleWarnings ?? [],
       });
+    }
+
+    if (method === "GET" && url === "/api/workspace/health") {
+      return jsonResponse(
+        state.workspaceHealthResponse ?? {
+          version: 1,
+          generated_at: "2026-07-10T00:00:00Z",
+          status: "pass",
+          summary: { info: 0, warning: 0, error: 0 },
+          items: [],
+        },
+        state.workspaceHealthStatus ?? 200,
+      );
     }
 
     if (method === "GET" && url === "/api/runtime/timeouts") {
@@ -1340,10 +1355,72 @@ describe("App", () => {
     expect(screen.getByTestId("blockers-panel")).toBeInTheDocument();
     expect(screen.getByTestId("evidence-refs-panel")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-health-panel")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("No health findings"));
     expect(screen.getByTestId("runtime-safety-panel")).toBeInTheDocument();
     expect(screen.getByTestId("git-publication-panel")).toHaveTextContent("proposal/beta-refresh");
     expect(screen.getByTestId("activity-drawer")).toHaveAccessibleName("Selected run activity drawer");
     expect(screen.queryByTestId(`setup-${"stepper"}`)).not.toBeInTheDocument();
+  });
+
+  it("renders workspace health warnings in Readiness and the right inspector", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        workspaceHealthResponse: {
+          version: 1,
+          generated_at: "2026-07-10T00:00:00Z",
+          status: "warn",
+          summary: { info: 1, warning: 1, error: 0 },
+          items: [
+            {
+              id: "model.observation.missing_evidence",
+              severity: "warning",
+              title: "Observation entity \"svc.payments\" has no evidence",
+              path: "model/entities/svc.payments.yaml",
+              related_paths: [],
+            },
+            {
+              id: "coverage.open_questions.count",
+              severity: "info",
+              title: "1 unresolved coverage question(s) are open",
+              path: "reports/coverage/open-questions.md",
+              related_paths: [],
+            },
+          ],
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    await waitFor(() => expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("model.observation.missing_evidence"));
+    expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("model/entities/svc.payments.yaml");
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+    expect(await screen.findByTestId("workspace-health-summary")).toHaveTextContent("warn");
+    expect(screen.getByTestId("workspace-health-items")).toHaveTextContent("Observation entity");
+  });
+
+  it("renders workspace health scan failures without blocking the console", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        workspaceHealthStatus: 500,
+        workspaceHealthResponse: {
+          error: {
+            code: "workspace_health_failed",
+            message: "scan failed",
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp();
+
+    await waitFor(() => expect(screen.getByTestId("workspace-health-panel")).toHaveTextContent("Workspace health scan failed"));
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+    expect(await screen.findByTestId("workspace-health-summary")).toHaveTextContent("scan failed");
+    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
   });
 
   it("routes Review empty-state recovery to Analysis instead of disabling the primary action", async () => {

@@ -80,6 +80,203 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260623-karpathy-adoption-roadmap
+
+### Context
+The Karpathy LLM Wiki analysis in `docs/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md` and `docs/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md` concluded that ACP should not become a free-form personal/wiki system. The useful import is narrower: treat accepted architecture knowledge as a maintained, Git-versioned, provenance-backed artifact that compounds through explicit review.
+
+Current ACP already has the stronger foundation needed for this:
+- source repos and imported docs are raw/read-only inputs;
+- runtime writes staged artifacts under explicit write roots;
+- orchestrator validates schemas/manifests and controls canonical promotion;
+- stable architecture knowledge lives in `reports/*`, `model/*`, `proposals/*`, `charter/*`, `reports/changelog/*` and run-scoped taskrun artifacts;
+- `qa.ask` is intentionally run-scoped and does not mutate canonical reports/model.
+
+The implementation roadmap must preserve MVP constraints:
+- no hosted mode;
+- no security/compliance enforcement expansion;
+- required CI remains deterministic/fake and does not require live providers or network;
+- canonical artifacts are not mutated directly by runtime providers;
+- schema/contract changes require synchronized docs, validators, fixtures and tests.
+
+This plan is a roadmap for owner selection. It does not override the existing queue unless the owner chooses one of its slices as the next engineering workstream.
+
+### Goals (must have)
+- [ ] Adopt Karpathy's "compiled knowledge artifact" framing for ACP without changing runtime contracts.
+- [ ] Add a deterministic workspace health/lint surface over already published workspace artifacts.
+- [ ] Add an explicit Ask-answer-to-proposal promotion path that keeps Q&A compounding reviewable and non-automatic.
+- [ ] Harden citation/claim identity checks before introducing any new claim model.
+- [ ] Defer claim ledger, contradiction policy and search projection until smaller slices prove the need and contracts are clear.
+- [ ] Keep every slice reviewable, deterministic and covered by focused tests/fixtures.
+
+### Non-goals
+- [ ] Do not build a generic Obsidian-compatible personal wiki.
+- [ ] Do not let runtime providers own or silently rewrite canonical workspace files.
+- [ ] Do not auto-promote `qa.ask` answers into `reports/as-is/*`, `model/*` or `charter/*`.
+- [ ] Do not add MCP memory server, hosted sharing, background autonomous rewrite, or vector DB as source of truth in MVP.
+- [ ] Do not overload topology edges (`calls`, `reads`, `writes`, etc.) with general claim relations (`supports`, `contradicts`, `supersedes`).
+
+### Approach
+1) **Slice K1 - Product framing / terminology**
+   - Update README, architecture overview and selected UI copy to describe `arch-workspace` as a validated compiled architecture knowledge base.
+   - Keep this wording-only: no API/schema/runtime behavior changes.
+   - Sync wording with the existing "not chat history" positioning.
+
+2) **Slice K2 - Deterministic workspace health/lint**
+   - Add a deterministic health scanner over current workspace artifacts, separate from `validator-verdict.json`.
+   - Initial checks should use existing data only: broken artifact refs, old unresolved questions, findings without proposals, proposals without evidence refs, observation provenance gaps, duplicate entity alias candidates, orphan domain outputs and broken final/citation index links.
+   - Publish a small report surface, for example `reports/health/workspace-health.json` plus `reports/health/workspace-health.md`, only if the artifact contract is documented and fixture-backed.
+   - Surface the summary in `Readiness`/`Review` before adding any live-provider lint.
+
+3) **Slice K3 - Ask answer promotion to proposal draft**
+   - Add an explicit user action from a selected async QA answer to create a proposal draft package.
+   - Preserve `qa.ask` read-only/canonical-non-mutating semantics.
+   - Suggested output package:
+     - `proposals/qa-synthesis-<run-id>-<slug>/proposal.md`
+     - `proposals/qa-synthesis-<run-id>-<slug>/evidence.md`
+     - `proposals/qa-synthesis-<run-id>-<slug>/source-qa-answer.json`
+   - Ensure citations and unresolved assumptions are copied into the proposal package.
+   - Route review through existing `Proposals`/`Publish` surfaces.
+
+4) **Slice K4 - Citation/claim identity hardening**
+   - Strengthen checks around existing `citation-index.json` and report claim IDs before adding new model directories.
+   - Detect duplicate/unstable claim IDs, missing citation coverage for key report surfaces and citation refs that no longer resolve.
+   - Prefer health-report warnings first; promote to validator/blocking behavior only with explicit policy.
+
+5) **Slice K5 - Claim ledger prototype (post-MVP candidate)**
+   - Only after K2/K4, consider `model/claims/*.yaml` for a narrow fact set.
+   - Start with architecture facts that already map to existing model semantics: service uses datastore, service calls service/external, service exposes API, service publishes/subscribes topic.
+   - Add schema/spec/fixtures/tests in the same slice; use `acp-schema-guardian`.
+
+6) **Slice K6 - Contradiction review queue (post-claim-ledger)**
+   - Add typed claim relations only after claims have stable IDs.
+   - Treat contradiction as reviewable knowledge, not automatic cleanup.
+   - Keep relation vocabulary small and policy-owned: `supports`, `contradicts`, `supersedes`.
+
+7) **Slice K7 - Rebuildable search projection**
+   - Add only if QA/context loading becomes a measured pain.
+   - Keep search index disposable and rebuildable from canonical workspace files.
+   - Do not make SQLite/FTS/vector output canonical or required external infrastructure.
+
+### Minimal first deliverable
+The first implementation slice should be K2, not K5/K6/K7. A deterministic health/lint report imports the most useful Karpathy maintenance loop while preserving ACP's current architecture and avoiding schema-heavy claim ontology work.
+
+K1 can be bundled with K2 if the diff stays small; otherwise keep K1 as a docs/UX-only precursor.
+
+### Files expected to change
+K1:
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- selected UI copy in `ui/src/components/*` / `ui/src/lib/*` only if needed
+
+K2:
+- new or existing internal package for health scanning, for example `internal/workspacehealth/*`
+- `internal/api/*` if exposing health through API
+- `internal/orchestrator/*` only if health report is generated as part of run/promotion
+- `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*` for `Readiness`/`Review` summary
+- `fixtures/scenarios/*` and/or dedicated health fixtures
+- `docs/spec/PIPELINE_SPEC.md`, `docs/TESTING_STRATEGY.md`, `docs/APPENDIX_SCHEMAS.md` if a new report contract is introduced
+
+K3:
+- `internal/qa/*` and/or `internal/api/*`
+- proposal package writer under orchestrator/API boundary
+- `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
+- fixtures for QA answer promotion
+- docs/spec/API and pipeline docs if a new endpoint is added
+
+K4-K7:
+- `schemas/*`, `docs/spec/*`, `fixtures/*`, `examples/*`, validators and ADR rationale as required by schema/contract policy
+
+### Acceptance criteria
+- [ ] K1 wording explains ACP as a compiled architecture knowledge base without weakening existing boundaries.
+- [ ] K2 health checks are deterministic, fixture-backed and run without live providers/network.
+- [ ] K2 does not replace step3 validator and does not block promotion unless a later policy says so.
+- [ ] K3 creates proposal drafts only by explicit user action.
+- [ ] K3 preserves canonical non-mutation of `qa.ask`.
+- [ ] K4 detects claim/citation identity drift without introducing an unreviewed claim ontology.
+- [ ] K5-K7 are not implemented without fresh schema/spec-first plans.
+- [ ] Full DoD passes for each implementation slice: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Test plan
+- K1:
+  - `./scripts/run-go.sh test ./internal/docsync`
+  - `git diff --check`
+- K2:
+  - unit tests for each health rule;
+  - fixture workspace tests for clean/warn/error health reports;
+  - API tests if health endpoint is added;
+  - UI tests for summary rendering and empty/partial states;
+  - docs-sync test for terminology and source-of-truth consistency.
+- K3:
+  - API tests for valid QA promotion, missing answer, stale run and path-safety;
+  - proposal package golden/fixture tests;
+  - UI tests for explicit promotion action and no automatic mutation;
+  - regression asserting `qa.ask` still writes only run-scoped artifacts.
+- K4-K7:
+  - schema/contract tests, fixture/golden updates and `acp-schema-guardian` workflow when new contracts are introduced.
+
+### Risks
+- Health report can duplicate validator responsibilities if the scope is not explicit.
+- Ask promotion can create proposal spam unless the UI makes it a deliberate review action.
+- Claim ledger can become a second model if introduced before citation identity hardening.
+- Search projection can become hidden source of truth unless it is rebuildable and disposable.
+- Terminology changes can overpromise "memory" unless docs keep the staged/validated promotion boundary clear.
+
+### Progress log
+- 2026-06-23: Created adoption roadmap from Karpathy analysis. Selected deterministic workspace health/lint as the recommended first implementation slice, with Ask promotion and claim/citation hardening as follow-ups.
+
+### Plan ID
+EP-20260710-workspace-health-snapshot
+
+### Context
+This is the concrete K2a implementation slice from `EP-20260623-karpathy-adoption-roadmap`.
+It imports the Karpathy maintenance loop as a deterministic, read-only health snapshot over
+accepted workspace artifacts, without turning ACP into a free-form wiki and without adding
+canonical `reports/health/*` artifacts in this slice.
+
+### Goals (must have)
+- [x] Add deterministic `internal/workspacehealth` scanner over existing workspace files.
+- [x] Expose `GET /api/workspace/health` as a read-only API endpoint.
+- [x] Surface health status/counts in `Readiness` and detailed items in the right inspector.
+- [x] Keep health advisory: no run/review/publish/Q&A blocking and no runtime/provider calls.
+- [x] Update README/ARCHITECTURE/STAKEHOLDER/API docs for the implemented K2a behavior.
+- [ ] Complete full DoD for the implementation slice and archive/close the plan after owner review.
+
+### Non-goals
+- [x] Do not persist `reports/health/workspace-health.json|md`.
+- [x] Do not change `qa.ask` or add Ask-to-Proposal promotion in this slice.
+- [x] Do not add claim ledger, contradiction policy, vector DB or search projection.
+- [x] Do not introduce schemas for health output until/unless a persisted artifact is added.
+
+### Approach
+1) Implement scanner rules for observation model provenance without evidence, orphan domain outputs, proposal review sections and unresolved open-question count.
+2) Add API route and tests that confirm pass/warn responses and read-only behavior.
+3) Add typed frontend client/state and reuse existing `Readiness`/right-inspector surfaces.
+4) Update docs and run focused backend/frontend/docs checks before full DoD.
+
+### Files expected to change
+- `internal/workspacehealth/*`
+- `internal/api/server.go`, `internal/api/server_test.go`
+- `ui/src/App.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/lib/*`, `ui/src/App.test.tsx`
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/STAKEHOLDER_DOC.md`, `docs/spec/API_SPEC.md`, `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Clean workspace returns `status=pass` with no findings.
+- [x] Missing observation evidence, orphan domain output and proposal review-section gaps return warning items.
+- [x] Open questions return info item only.
+- [x] Malformed model YAML returns health `status=fail` as report content, not API lifecycle failure.
+- [x] UI states cover no findings, warning items and scan failed.
+- [x] Health scan is read-only and does not mutate workspace files.
+
+### Risks
+- Health can duplicate validator semantics; K2a keeps rules advisory and outside promotion gates.
+- Proposal section check is intentionally simple heading-based lint; richer proposal quality belongs in a later slice.
+- Persisted health artifacts would require a new contract/schema/docs fixture pass and are deferred to K2b.
+
+### Progress log
+- 2026-07-10: Implemented K2a read-only workspace health snapshot, API endpoint, Readiness/right-inspector UI surface and docs sync. Focused Go/UI checks and full Go suite passed; canonical `make contracts|test|lint|build` remains blocked on this host until Node.js 22.21.1 is available.
+
+### Plan ID
 EP-20260711-run-pinned-evidence-review
 
 ### Context

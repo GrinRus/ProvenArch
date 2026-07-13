@@ -5,9 +5,10 @@
 [![backend](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml)
 [![ui](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml)
 
-ACP строит Git-версионируемый architecture workspace для одного или нескольких локальных
-репозиториев. Результат - не картинка и не чат-лог, а набор файлов с evidence, отчетами,
-диаграммами, findings, proposals и derived model.
+ACP строит Git-версионируемую compiled architecture knowledge base для одного или
+нескольких локальных репозиториев. Результат - не картинка и не чат-лог, а набор
+файлов с evidence, отчетами, диаграммами, findings, proposals, derived model и
+read-only health snapshot по опубликованным workspace artifacts.
 
 В одну строку:
 
@@ -18,15 +19,17 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-06-05.
+> **Последняя ревизия README:** 2026-07-10.
 
 ## Что это
 
-Architecture Control Plane (ACP) - **local-first инструмент анализа архитектуры**.
+Architecture Control Plane (ACP) - **local-first инструмент анализа архитектуры** и
+поддержания проверяемой architecture knowledge base.
 Вы указываете один или несколько репозиториев и, при необходимости, импортированные
 документы. ACP запускает staged pipeline, просит runtime provider собрать архитектурные
 evidence, валидирует созданные артефакты и записывает принятый результат в отдельный
-architecture workspace.
+architecture workspace. LLM/runtime drafts remain staged, orchestrator validates/promotes,
+human review принимает решения, а Git хранит accepted architecture knowledge.
 
 ACP нужен, когда вы хотите получить:
 
@@ -125,7 +128,7 @@ acp serve
 После onboarding основной UI остаётся прежним:
 
 1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state, а source validation recovery panel поднимет blocking repo/source diagnostics выше raw `workspace.yaml` details.
-2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
+2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts плюс read-only workspace health snapshot; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
 3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts; charter baseline recovery panel поднимет prompt/charter bundle warnings до запуска Analysis.
 4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table, warning/error drilldown, failed-run recovery path и live diagnostics для shard/repair/stall/raw-output сигналов; terminal canceled/restart-reconciled runs показываются как `canceled`/`recovered`, а provider-unavailable failures ведут к Readiness checks before retry.
 5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals; proposal package recovery поднимет неполные proposal/changelog packages до Publish; задайте read-only Q&A с run history/citations/safety/recovery panel и подготовьте git changes.

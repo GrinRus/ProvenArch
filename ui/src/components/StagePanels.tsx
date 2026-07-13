@@ -33,6 +33,7 @@ import type {
   RunReviewSummaryResponse,
   RunStatusResponse,
   ValidateResponse,
+  WorkspaceHealthResponse,
 } from "../lib/appContracts";
 import type { LoadGitDiffOptions } from "../lib/gitDiffApi";
 
@@ -451,6 +452,10 @@ export type ReadinessStageProps = {
   onRunFirstAnalysis: () => void;
   runtimeSettingsPanel: ReactNode;
   artifactCount: number;
+  workspaceHealthReport: WorkspaceHealthResponse | null;
+  workspaceHealthStatus: "idle" | "loading" | "loaded" | "error";
+  workspaceHealthError: string;
+  onRefreshWorkspaceHealth: () => void;
   runtimeTimeoutEffective: RuntimeTimeoutValues;
   runtimeExecutionEffective: RuntimeExecutionValues;
   runtimePermissionEffective: RuntimePermissionValues;
@@ -475,6 +480,10 @@ export function ReadinessStagePanel({
   onRunFirstAnalysis,
   runtimeSettingsPanel,
   artifactCount,
+  workspaceHealthReport,
+  workspaceHealthStatus,
+  workspaceHealthError,
+  onRefreshWorkspaceHealth,
   runtimeTimeoutEffective,
   runtimeExecutionEffective,
   runtimePermissionEffective,
@@ -502,6 +511,14 @@ export function ReadinessStagePanel({
         setupRuntimeProvider={setupRuntimeProvider}
         artifactCount={artifactCount}
         runtimePermissionEffective={runtimePermissionEffective}
+      />
+
+      <WorkspaceHealthSummary
+        busy={busy}
+        report={workspaceHealthReport}
+        status={workspaceHealthStatus}
+        error={workspaceHealthError}
+        onRefresh={onRefreshWorkspaceHealth}
       />
 
       <div className="stage-local-next-action" data-testid="readiness-next-action">
@@ -855,6 +872,95 @@ function ReadinessSummaryCards({
       />
     </section>
   );
+}
+
+function WorkspaceHealthSummary({
+  busy,
+  report,
+  status,
+  error,
+  onRefresh,
+}: {
+  busy: boolean;
+  report: WorkspaceHealthResponse | null;
+  status: "idle" | "loading" | "loaded" | "error";
+  error: string;
+  onRefresh: () => void;
+}) {
+  const tone = workspaceHealthTone(report, status);
+  return (
+    <section className="status-block" data-testid="workspace-health-summary">
+      <div className="section-heading-row">
+        <h2>Workspace health</h2>
+        <StatusBadge tone={tone}>{workspaceHealthLabel(report, status)}</StatusBadge>
+      </div>
+      <p className="hint">Read-only snapshot over published workspace artifacts. It does not block run, review, publish, or Q&amp;A flows.</p>
+      <div className="actions compact-actions">
+        <button type="button" onClick={onRefresh} disabled={busy || status === "loading"} data-testid="workspace-health-refresh-btn">
+          Refresh health
+        </button>
+      </div>
+      {status === "loading" ? <p className="status">Workspace health scan running.</p> : null}
+      {status === "error" ? <p className="status err">Workspace health scan failed: {error || "scan failed"}</p> : null}
+      {status !== "loading" && status !== "error" && !report ? <p className="hint">Workspace health not available.</p> : null}
+      {report ? (
+        <>
+          <p className={report.status === "fail" ? "status err" : report.status === "warn" ? "status warn" : "status ok"}>
+            {report.items.length === 0
+              ? "No health findings."
+              : `${report.summary.error} error(s), ${report.summary.warning} warning(s), ${report.summary.info} info item(s).`}
+          </p>
+          {report.items.length > 0 ? (
+            <ul className="compact-list" data-testid="workspace-health-items">
+              {report.items.slice(0, 6).map((item) => (
+                <li key={`${item.id}-${item.path}`}>
+                  <span className={item.severity === "error" ? "status err" : item.severity === "warning" ? "status warn" : "status"}>
+                    {item.id}
+                  </span>{" "}
+                  {item.title}
+                  {item.path ? (
+                    <>
+                      {" "}
+                      <code>{item.path}</code>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function workspaceHealthTone(report: WorkspaceHealthResponse | null, status: "idle" | "loading" | "loaded" | "error") {
+  if (status === "error") {
+    return "error" as const;
+  }
+  if (!report || status === "loading") {
+    return "info" as const;
+  }
+  if (report.status === "fail") {
+    return "error" as const;
+  }
+  if (report.status === "warn") {
+    return "warn" as const;
+  }
+  return "ok" as const;
+}
+
+function workspaceHealthLabel(report: WorkspaceHealthResponse | null, status: "idle" | "loading" | "loaded" | "error") {
+  if (status === "loading") {
+    return "scanning";
+  }
+  if (status === "error") {
+    return "scan failed";
+  }
+  if (!report) {
+    return "not available";
+  }
+  return report.status;
 }
 
 function RuntimeProfileSummary({
