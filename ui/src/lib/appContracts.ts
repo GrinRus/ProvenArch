@@ -17,6 +17,7 @@ export type ValidateResponse = {
     source: string;
     path: string;
     ref?: string;
+    resolved_sha?: string;
   }>;
 };
 

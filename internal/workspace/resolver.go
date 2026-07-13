@@ -12,10 +12,11 @@ import (
 )
 
 type ResolvedRepo struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
-	Path   string `json:"path"`
-	Ref    string `json:"ref,omitempty"`
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Path        string `json:"path"`
+	Ref         string `json:"ref,omitempty"`
+	ResolvedSHA string `json:"resolved_sha,omitempty"`
 }
 
 type ResolveOptions struct {
@@ -269,6 +270,7 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 		}
 	}
 
+	resolvedSHA := ""
 	if options.VerifyRefs && strings.TrimSpace(repo.Ref) != "" {
 		if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", strings.TrimSpace(repo.Ref)+"^{commit}"); err != nil {
 			if _, checkoutErr := gitExec.Run(ctx, effectiveCacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); checkoutErr != nil {
@@ -295,9 +297,59 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 				Suggestion: "Ensure the requested ref exists and can be checked out",
 			}}
 		}
+		head, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return ResolvedRepo{}, []Diagnostic{{
+				Level:      DiagnosticError,
+				Code:       "workspace.repo.git_url.invalid_head",
+				Repo:       repo.Name,
+				Path:       effectiveCacheDir,
+				Message:    err.Error(),
+				Suggestion: "Ensure the requested ref resolves to a valid commit",
+			}}
+		}
+		resolvedSHA = strings.TrimSpace(head)
+	} else {
+		remoteRef, sha, err := resolveGitURLRemoteDefaultHead(ctx, gitExec, effectiveCacheDir)
+		if err != nil {
+			return ResolvedRepo{}, []Diagnostic{{
+				Level:      DiagnosticError,
+				Code:       "workspace.repo.git_url.default_head_failed",
+				Repo:       repo.Name,
+				Path:       effectiveCacheDir,
+				Message:    err.Error(),
+				Suggestion: "Ensure the remote has a default branch HEAD and can be fetched by git",
+			}}
+		}
+		if err := checkoutExactGitCommit(ctx, gitExec, effectiveCacheDir, sha); err != nil {
+			return ResolvedRepo{}, []Diagnostic{{
+				Level:      DiagnosticError,
+				Code:       "workspace.repo.git_url.reset_failed",
+				Repo:       repo.Name,
+				Path:       effectiveCacheDir,
+				Message:    fmt.Sprintf("cannot reset git_url cache to %s (%s): %v", sha, remoteRef, err),
+				Suggestion: "Remove the ACP-owned .acp/repos cache entry and retry, or verify repository permissions",
+			}}
+		}
+		resolvedSHA = strings.TrimSpace(sha)
 	}
 
-	if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD"); err != nil {
+	if strings.TrimSpace(resolvedSHA) == "" {
+		head, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return ResolvedRepo{}, []Diagnostic{{
+				Level:      DiagnosticError,
+				Code:       "workspace.repo.git_url.invalid_head",
+				Repo:       repo.Name,
+				Path:       effectiveCacheDir,
+				Message:    err.Error(),
+				Suggestion: "Ensure repository is cloned and has a valid HEAD",
+			}}
+		}
+		resolvedSHA = strings.TrimSpace(head)
+	}
+
+	if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.git_url.invalid_head",
@@ -308,7 +360,83 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 		}}
 	}
 
-	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref}, repoDiagnostics
+	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref, ResolvedSHA: resolvedSHA}, repoDiagnostics
+}
+
+func resolveGitURLRemoteDefaultHead(ctx context.Context, gitExec GitExecutor, repoPath string) (string, string, error) {
+	if output, err := gitExec.Run(ctx, repoPath, "ls-remote", "--symref", "origin", "HEAD"); err == nil {
+		remoteRef, sha := parseRemoteHeadSymref(output)
+		if remoteRef != "" {
+			resolvedSHA, revErr := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", remoteRef+"^{commit}")
+			if revErr == nil {
+				return remoteRef, strings.TrimSpace(resolvedSHA), nil
+			}
+		}
+		if sha != "" {
+			resolvedSHA, revErr := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", sha+"^{commit}")
+			if revErr == nil {
+				return "HEAD", strings.TrimSpace(resolvedSHA), nil
+			}
+		}
+	}
+
+	_, _ = gitExec.Run(ctx, repoPath, "remote", "set-head", "origin", "--auto")
+	remoteRef, err := gitExec.Run(ctx, repoPath, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("cannot resolve remote default HEAD: %w", err)
+	}
+	remoteRef = strings.TrimSpace(remoteRef)
+	if remoteRef == "" {
+		return "", "", fmt.Errorf("cannot resolve remote default HEAD: empty origin/HEAD")
+	}
+	resolvedSHA, err := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", remoteRef+"^{commit}")
+	if err != nil {
+		return "", "", fmt.Errorf("cannot resolve remote default ref %q: %w", remoteRef, err)
+	}
+	return remoteRef, strings.TrimSpace(resolvedSHA), nil
+}
+
+func parseRemoteHeadSymref(output string) (string, string) {
+	remoteRef := ""
+	sha := ""
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "ref:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 && fields[2] == "HEAD" && strings.HasPrefix(fields[1], "refs/heads/") {
+				branch := strings.TrimPrefix(fields[1], "refs/heads/")
+				if branch != "" {
+					remoteRef = "refs/remotes/origin/" + branch
+				}
+			}
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "HEAD" {
+			sha = fields[0]
+		}
+	}
+	return remoteRef, sha
+}
+
+func checkoutExactGitCommit(ctx context.Context, gitExec GitExecutor, repoPath string, sha string) error {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return fmt.Errorf("resolved commit SHA is empty")
+	}
+	if _, err := gitExec.Run(ctx, repoPath, "checkout", "--force", "--detach", sha); err != nil {
+		return err
+	}
+	if _, err := gitExec.Run(ctx, repoPath, "reset", "--hard", sha); err != nil {
+		return err
+	}
+	if _, err := gitExec.Run(ctx, repoPath, "clean", "-ffdx"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r Root) resolveRepoCacheDir(repoName string, source string) (string, error) {

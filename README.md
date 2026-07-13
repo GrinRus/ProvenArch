@@ -350,7 +350,11 @@ arch-workspace/
 
 Repository sources могут быть local checkout paths или GitHub/GitLab-style `git_url`.
 Для `git_url` ACP использует local `git` command и auth context текущего пользователя
-или CI runner. ACP не хранит отдельные repository credentials.
+или CI runner. Непривязанный `git_url` (`ref` не задан) перед каждым анализом fetch-ится
+в ACP-owned cache under `.acp/repos`, затем cache force-reset-ится на exact commit remote
+default `HEAD`; resolved commit SHA возвращается в fetch-backed resolver/run evidence. Если
+`ref` задан, он продолжает выбирать эту ветку/тег/SHA вместо remote default. ACP не хранит
+отдельные repository credentials и не изменяет пользовательские `path` checkout-ы.
 
 Imported documents, например выгрузки из Confluence, живут под `docs.imports_path` by default.
 Optional `<docs.imports_path>/index.yaml` может хранить metadata импортированных файлов:

@@ -107,7 +107,9 @@ for transactional promotion and reliable run lifecycle recovery.
       is stable.
 - [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
+- [x] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
+      boundary is stable.
+- [ ] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
       boundary is stable.
 
 ### Non-goals
@@ -479,6 +481,92 @@ queued runs.
   safety under the race detector. Verification passed: `go test ./internal/api ./internal/orchestrator`,
   `go test -race ./internal/api`, `go test ./internal/...`, and full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19f-fresh-git-url-resolution
+
+### Context
+`19F` follows committed `19E`. Workspace `git_url` sources are ACP-owned caches under
+`.acp/repos`, but an unpinned source can currently keep reading the previously checked-out cache
+after the remote default branch advances. That makes refresh/collect evidence stale even though
+the operator declared a remote source rather than a pinned revision. The fix must keep
+user-owned `path` checkouts non-mutating and must not change the `workspace.yaml` schema.
+
+### Goals (must have)
+- [x] For unpinned `git_url` repos, fetch the remote, resolve the remote default `HEAD`, and
+      force the ACP-owned cache to the exact resolved commit before analysis reads it.
+- [x] Preserve pinned `ref` behavior: an explicit branch/tag/SHA continues to select that ref
+      rather than the remote default `HEAD`.
+- [x] Expose the exact resolved commit SHA in resolver output and run evidence when a fetch
+      occurred.
+- [x] Keep `path` sources read-only: validation may compare refs and warn, but must not mutate
+      user checkouts.
+- [x] Add no live-network dependency; tests use local temporary repositories and bare remotes.
+- [ ] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change `workspace.yaml` schema or provider list.
+- [ ] Do not introduce a new repository credential store or hosted source resolution plane.
+- [ ] Do not start `19G` collect contract work or Epic 20 UI trust work in this slice.
+- [ ] Do not rewrite user-owned `path` repositories to configured refs.
+
+### Implementation
+1) Extend `workspace.ResolvedRepo` with optional `resolved_sha`, keeping it omitted for dry
+   validation or unresolved sources.
+2) In `resolveGitURLRepo`, after clone/fetch, resolve either the explicit `ref` or the remote
+   default `HEAD` to an exact commit SHA.
+3) For unpinned `git_url`, update the local `origin/HEAD` view from the remote default and
+   `reset --hard` the ACP-owned cache to the resolved SHA. For pinned refs, checkout the explicit
+   ref and record its resolved SHA without switching to remote default.
+4) Add resolved repo evidence to run logs after fetch-backed validation, so run artifacts/logs
+   preserve the exact source revisions used for analysis.
+5) Update TypeScript validate response typing for the optional `resolved_sha` readback; UI
+   display remains best-effort and does not become a new workflow gate in this slice.
+6) Update README, `docs/spec/WORKSPACE_SPEC.md`, `docs/ARCHITECTURE.md` and testing docs only
+   for actual source freshness/readback semantics.
+
+### Interfaces
+No schema changes. Public API readback adds optional `resolved_repos[].resolved_sha` in workspace
+validation responses when ACP fetched a `git_url` source; run logs add `source_repos` metadata
+containing the same resolved SHA evidence for execution runs.
+
+### Tests
+- Local bare remote: first unpinned resolve reads default-branch content, then after a new remote
+  default-branch commit the second resolve reads the fresh content.
+- Unpinned resolver records `resolved_sha` equal to cache `HEAD`.
+- Pinned SHA/ref remains stable after the remote default branch advances.
+- `path` source ref verification does not mutate the checkout `HEAD`.
+- Execution run logs include fetched `source_repos[].resolved_sha` evidence.
+
+### Docs/fixtures
+- Update `README.md`, `docs/spec/WORKSPACE_SPEC.md`, `docs/ARCHITECTURE.md`,
+  `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`.
+- No JSON schemas, examples, golden fixtures or live matrices change.
+
+### Acceptance
+- [x] `go test ./internal/workspace` covers git_url freshness and pinned stability.
+- [x] Targeted orchestrator/API test covers persisted run-log resolved SHA evidence.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms only ACP-owned git_url caches are reset and no user checkout mutation
+      path was introduced.
+- [x] Commit `19F: refresh unpinned git_url sources`.
+
+### Progress log
+- 2026-07-13: Started `19F` after clean `19E` commit. Backlog scope confirmed: fresh unpinned
+  `git_url` resolution, resolved SHA evidence, local bare-remote regressions and docs-only
+  source freshness sync without `workspace.yaml` schema changes.
+- 2026-07-13: Implemented `19F`. Unpinned `git_url` cache resolution now fetches the remote,
+  resolves remote default `HEAD`, force-checkouts/resets/cleans the ACP-owned cache to the exact
+  commit, and exposes `resolved_sha` in fetch-backed resolver output plus persisted run-log
+  `source_repos` evidence. Pinned SHA/ref selection remains separate from remote default, and
+  path-source ref verification remains non-mutating. Regression coverage uses only local bare
+  remotes and verifies fresh default-branch content, pinned stability, path checkout safety and
+  run-log SHA evidence. Verification passed: `go test ./internal/workspace ./internal/orchestrator`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

@@ -93,7 +93,7 @@
    - `internal/orchestrator/orchestrator.go` остаётся entry shell/pipeline glue; `pipelineExecution` state сгруппирован во вложенные run-progress/artifact-registry/runtime/quality/semantic-docflow/draft buckets, а run finalization, step handlers, artifact registry methods, service run-registry/history lifecycle и semantic/card enrichment вынесены в dedicated package files
    - Работает с единым central workspace (`arch-workspace`) как корнем артефактов MVP
    - Валидирует `workspace.yaml` по `schemas/workspace.schema.json`
-   - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner
+   - Разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner; unpinned `git_url` cache перед execution fetch-ится и force-reset-ится на exact remote default `HEAD` SHA, а resolved SHA пишется в fetch-backed resolver/run evidence без изменения пользовательских `path` checkout-ов
    - Оркестрирует domain-first слой агентов
    - Materialize-ит per-domain execution contracts (`reports/agent-outputs/domains/*.task-envelope.json`) для canonical domain cards
    - Step1 repo binding: источник истины `repo_scope` в domain card; fallback только slug-match `domain_id` ↔ `repo.name`
@@ -253,7 +253,7 @@
    - поддерживает optional `repos[].analysis.include/exclude` для shard planner; legacy `repos[].analysis.role` удалён из active workspace contract
    - поддерживает optional persisted runtime profile в `runtime.profile` (`timeouts + execution + permissions`, см. `WORKSPACE_SPEC`)
    - verify `ref` для `path` source использует fallback (`ref` -> `origin/ref` -> `refs/remotes/origin/ref`) и выдаёт warning при `HEAD` mismatch
-   - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context
+   - clone/fetch для `git_url` выполняет на той же машине через локальный `git` и текущий user/runner auth context; если `ref` не задан, ACP-owned cache refresh-ится на exact remote default `HEAD` commit перед анализом
    - git_url cache key использует только `slug(repo.name)+hash(git_url)` (legacy slug-only cache fallback удалён из active behavior)
    - не хранит отдельные credentials внутри ACP
    - safe path joins (никогда не читаем вне workspace root)

@@ -99,7 +99,7 @@ Epic matrix:
 - `workspace.yaml` валидируется по отдельному schema-contract и хранит только repo sources + `docs.imports_path`.
 - В `workspace.yaml` хранятся локальные пути к продуктовым репозиториям и/или GitHub/GitLab URL.
 - `repos[].analysis.role` удалён из active contract; workspace manifest хранит только source metadata и optional `analysis.include/exclude`.
-- Если указан `git_url`, clone/fetch выполняется через локальный `git` на устройстве пользователя или в runner-контексте CI.
+- Если указан `git_url`, clone/fetch выполняется через локальный `git` на устройстве пользователя или в runner-контексте CI; unpinned source перед анализом refresh-ится на exact remote default `HEAD` SHA в ACP-owned cache, а пользовательские `path` checkout-ы не изменяются.
 - В `docs/imports/` лежат вручную импортированные документы (например, выгрузки из Confluence).
 - Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через manifest и считается fixed MVP convention.
 
@@ -303,7 +303,7 @@ arch-workspace/
    - управляет шагами pipeline  
    - готовит контекст и PromptPack перед запуском каждого шага  
    - загружает baseline bundle agents/skills/prompts из workspace  
-   - разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner  
+   - разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner; для unpinned `git_url` фиксирует exact resolved SHA в run evidence
    - принимает только required step artifacts + runtime execution metadata и сохраняет их в workspace
    - работает в interactive local mode и non-interactive CI mode
    - вызывается как напрямую пользователем, так и из CI/CD trigger flows

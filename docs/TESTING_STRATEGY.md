@@ -45,6 +45,7 @@
 - pipeline runs на synthetic repos и fixture workspaces
 - artifact fixtures without live providers в required tests
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
+- `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
 
 ### Smoke tests
 - CLI smoke
