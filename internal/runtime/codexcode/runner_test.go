@@ -75,6 +75,16 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 	assertCodexArg(t, args, "-")
 }
 
+func TestCodexArgsUseConfiguredModelAndReasoningEffort(t *testing.T) {
+	t.Setenv("ACP_CODEX_MODEL", "gpt-5.5")
+	t.Setenv("ACP_CODEX_REASONING_EFFORT", "xhigh")
+
+	args := buildCodexArgsWithIncludeDirectories("/tmp/work", nil)
+
+	assertCodexFlagValue(t, args, "--model", "gpt-5.5")
+	assertCodexFlagValue(t, args, "-c", `model_reasoning_effort="xhigh"`)
+}
+
 func TestManagedCodexArgsOmitDangerFullAccess(t *testing.T) {
 	t.Parallel()
 

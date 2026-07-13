@@ -24,8 +24,18 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.module = load_module()
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        self._old_codex_model = os.environ.pop("ACP_CODEX_MODEL", None)
+        self._old_codex_reasoning_effort = os.environ.pop("ACP_CODEX_REASONING_EFFORT", None)
 
     def tearDown(self) -> None:
+        if self._old_codex_model is not None:
+            os.environ["ACP_CODEX_MODEL"] = self._old_codex_model
+        else:
+            os.environ.pop("ACP_CODEX_MODEL", None)
+        if self._old_codex_reasoning_effort is not None:
+            os.environ["ACP_CODEX_REASONING_EFFORT"] = self._old_codex_reasoning_effort
+        else:
+            os.environ.pop("ACP_CODEX_REASONING_EFFORT", None)
         self.tempdir.cleanup()
 
     def _write_script(self, name: str, body: str) -> str:
@@ -65,9 +75,30 @@ class WriteBatchPreflightTest(unittest.TestCase):
             self.assertIn(feature, args)
         self.assertIn("--ignore-user-config", args)
         self.assertIn("--ignore-rules", args)
+        self.assertIn("--model", args)
+        self.assertIn("gpt-5.5", args)
+        self.assertIn("-c", args)
+        self.assertIn('model_reasoning_effort="xhigh"', args)
         self.assertIn("--ephemeral", args)
         self.assertEqual("-", args[-1])
         self.assertIn("ACP_READY", stdin_text)
+
+    def test_codex_model_args_can_be_overridden_or_disabled(self) -> None:
+        os.environ["ACP_CODEX_MODEL"] = "gpt-5.4"
+        os.environ["ACP_CODEX_REASONING_EFFORT"] = "high"
+        args, _ = self.module.headless_probe_invocation("codex")
+
+        self.assertIn("--model", args)
+        self.assertIn("gpt-5.4", args)
+        self.assertIn('model_reasoning_effort="high"', args)
+
+        os.environ["ACP_CODEX_MODEL"] = ""
+        os.environ["ACP_CODEX_REASONING_EFFORT"] = ""
+        args, _ = self.module.headless_probe_invocation("codex")
+
+        self.assertNotIn("--model", args)
+        self.assertNotIn("gpt-5.5", args)
+        self.assertNotIn("-c", args)
 
     def test_qwen_artifact_smoke_uses_runtime_write_args(self) -> None:
         sentinel_path = self.root / "write-dir" / "sentinel.txt"
@@ -430,6 +461,26 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("", result["subclass"])
         self.assertEqual("passed", result["artifact_smoke"])
 
+    def test_probe_provider_readiness_uses_live_codex_model_for_version_blocker(self) -> None:
+        os.environ["ACP_CODEX_MODEL"] = "gpt-5.4"
+        command = self._write_script(
+            "codex-stub",
+            "#!/bin/sh\n"
+            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"; printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"; exit 0; fi\n"
+            "printf '%s\n' 'codex-cli 0.118.0'\n",
+        )
+
+        result = self.module.probe_provider_readiness(
+            "codex",
+            command,
+            str(REPO_ROOT),
+            "codex-cli 0.118.0",
+            'model = "gpt-5.5"\n',
+        )
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual("", result["subclass"])
+
     def test_probe_provider_readiness_uses_auth_only_codex_home_and_runtime_args(self) -> None:
         source_home = self.root / "source-codex-home"
         source_home.mkdir()
@@ -446,15 +497,23 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "has_plugins_disable=0\n"
             "has_ignore_config=0\n"
             "has_ignore_rules=0\n"
+            "has_model=0\n"
+            "has_reasoning=0\n"
             "prev=''\n"
             "for arg in \"$@\"; do\n"
             "  if [ \"$prev\" = \"--disable\" ] && [ \"$arg\" = \"plugins\" ]; then has_plugins_disable=1; fi\n"
+            "  if [ \"$prev\" = \"--model\" ] && [ \"$arg\" = \"gpt-5.5\" ]; then has_model=1; fi\n"
+            "  if [ \"$prev\" = \"-c\" ] && [ \"$arg\" = 'model_reasoning_effort=\"xhigh\"' ]; then has_reasoning=1; fi\n"
             "  if [ \"$arg\" = \"--ignore-user-config\" ]; then has_ignore_config=1; fi\n"
             "  if [ \"$arg\" = \"--ignore-rules\" ]; then has_ignore_rules=1; fi\n"
             "  prev=\"$arg\"\n"
             "done\n"
             "if [ \"$has_plugins_disable\" != \"1\" ] || [ \"$has_ignore_config\" != \"1\" ] || [ \"$has_ignore_rules\" != \"1\" ]; then\n"
             "  printf 'missing codex isolation args: %s\\n' \"$*\" >&2\n"
+            "  exit 2\n"
+            "fi\n"
+            "if [ \"$has_model\" != \"1\" ] || [ \"$has_reasoning\" != \"1\" ]; then\n"
+            "  printf 'missing codex model args: %s\\n' \"$*\" >&2\n"
             "  exit 2\n"
             "fi\n"
             "if [ -z \"${CODEX_HOME:-}\" ] || [ ! -f \"$CODEX_HOME/auth.json\" ] || [ ! -f \"$CODEX_HOME/installation_id\" ]; then\n"

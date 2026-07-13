@@ -59,6 +59,51 @@ EP-YYYYMMDD-<slug>
 ## Active Plans
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
+### Plan ID
+EP-20260713-live-e2e-codex-model-pin
+
+### Context
+Live E2E/release runs should compare stable provider surfaces. The user asked to pin Codex runs to `gpt-5.5` with extra-high reasoning while leaving qwen and claude on their installed CLI defaults. Existing Codex runtime ignores user `config.toml` by design, so the pin must be explicit runtime/preflight argv, not ambient config.
+
+### Goals (must have)
+- [x] Add env-driven Codex `--model` / reasoning config args without changing qwen/claude defaults.
+- [x] Make live E2E default Codex env `ACP_CODEX_MODEL=gpt-5.5` and `ACP_CODEX_REASONING_EFFORT=xhigh`.
+- [x] Ensure preflight probes and artifact smoke use the same Codex model surface as runtime.
+- [x] Update tests and live E2E docs.
+- [ ] Archive this completed slice during the next tracker reconciliation.
+
+### Non-goals
+- [x] Do not extend `workspace.yaml` runtime profile schema in this slice.
+- [x] Do not pin qwen or claude models.
+- [x] Do not edit canonical matrix repo selections or add a wrapper over `scripts/full-run-batch-matrix.sh`.
+
+### Approach
+1) Add optional Codex model/reasoning args in the adapter from env.
+2) Set live batch/matrix/generator defaults and pass them through child backend/frontend runs.
+3) Align preflight compatibility checks with the explicit live Codex model.
+4) Update targeted tests and docs.
+
+### Files expected to change
+- `internal/runtime/codexcode/runner.go`
+- `scripts/write-batch-preflight.py`
+- `scripts/full-run-batch.sh`
+- `scripts/full-run-batch-matrix.sh`
+- `scripts/live-e2e-plan.py`
+- focused tests and live E2E docs
+
+### Acceptance criteria
+- [x] Codex live E2E requests `gpt-5.5` with `model_reasoning_effort="xhigh"`.
+- [x] qwen/claude invocations remain model-default.
+- [x] Old Codex CLI compatibility blocker follows the explicit live Codex model, not user config.
+- [x] Focused Go/Python tests pass.
+
+### Risks
+- A host with an older Codex CLI now fails earlier in live preflight because the default requested Codex model is explicit.
+
+### Progress log
+- 2026-07-13: Implemented slice in a focused patch; full DoD pending after targeted verification.
+- 2026-07-13: Focused Go/Python/shell checks passed; full DoD (`make contracts test lint build`) passed with `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin` after installing UI deps in this worktree.
+
 ### Continuous Backlog Queue Policy
 
 The normal product backlog queue has two active post-beta programs: Epic 19 (`Code Quality Audit Remediation`) and Epic 20 (`Console UX trust, evidence workflow and IA reset`).
