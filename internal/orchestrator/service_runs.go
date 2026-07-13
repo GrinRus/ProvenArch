@@ -29,6 +29,10 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	now := s.clock().UTC()
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return "", ErrServiceClosed
+	}
 	storeQueuedRun := func() error {
 		return s.upsertRunLocked(runRecord{
 			info: RunInfo{
@@ -368,6 +372,13 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 	if s.runCancels == nil {
 		s.runCancels = map[string]context.CancelFunc{}
 	}
+	if s.closed {
+		s.mu.Unlock()
+		cancel()
+		s.terminalizeActiveRunAfterUnexpectedExit(runID, context.Canceled, "run failed: service shutdown")
+		s.finishAsyncRun(ctx, runID)
+		return
+	}
 	s.runCancels[runID] = cancel
 	if _, requested := s.cancelRequests[runID]; requested {
 		shouldCancelImmediately = true
@@ -405,7 +416,7 @@ func (s *Service) finishAsyncRun(ctx context.Context, runID string) {
 	if s.activeRunID == runID {
 		s.activeRunID = ""
 	}
-	if s.pendingRun != nil {
+	if !s.closed && s.pendingRun != nil {
 		next = s.pendingRun
 		s.pendingRun = nil
 		s.activeRunID = next.runID
@@ -417,6 +428,82 @@ func (s *Service) finishAsyncRun(ctx context.Context, runID string) {
 	}
 	if next != nil {
 		s.launchAsyncRun(ctx, next.runID, next.request)
+	}
+}
+
+func (s *Service) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return s.Shutdown(ctx)
+}
+
+func (s *Service) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := s.clock().UTC()
+	var activeRunID string
+	var cancelFns []context.CancelFunc
+
+	s.mu.Lock()
+	s.closed = true
+	activeRunID = s.activeRunID
+	if s.pendingRun != nil {
+		s.failQueuedRunLocked(s.pendingRun.runID, now, runErrorCodeCanceled, "service shutdown canceled queued run")
+		s.pendingRun = nil
+	}
+	for _, cancel := range s.runCancels {
+		if cancel != nil {
+			cancelFns = append(cancelFns, cancel)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, cancel := range cancelFns {
+		cancel()
+	}
+	if strings.TrimSpace(activeRunID) == "" {
+		return nil
+	}
+	if err := s.waitForRunTerminal(ctx, activeRunID); err != nil {
+		s.terminalizeActiveRunAfterUnexpectedExit(activeRunID, context.Canceled, "run failed: service shutdown")
+		return err
+	}
+	return nil
+}
+
+func (s *Service) failQueuedRunLocked(runID string, finishedAt time.Time, errorCode string, errorMessage string) {
+	record, ok := s.runs[runID]
+	if !ok || record == nil || record.info.Status != RunStatusQueued {
+		return
+	}
+	info := record.info
+	info.Status = RunStatusFailed
+	info.ErrorCode = errorCode
+	info.Error = strings.TrimSpace(errorMessage)
+	if info.Error == "" {
+		info.Error = "run canceled"
+	}
+	info.FinishedAt = &finishedAt
+	_ = s.upsertRunLocked(runRecord{
+		info:      info,
+		artifacts: append([]Artifact(nil), record.artifacts...),
+	})
+}
+
+func (s *Service) waitForRunTerminal(ctx context.Context, runID string) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		info, ok := s.GetRun(runID)
+		if !ok || info.Status == RunStatusSucceeded || info.Status == RunStatusFailed {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }
 

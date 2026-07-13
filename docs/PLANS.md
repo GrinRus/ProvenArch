@@ -103,8 +103,10 @@ for transactional promotion and reliable run lifecycle recovery.
       boundary is stable.
 - [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary
       is stable.
-- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary
       is stable.
+- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit
+      boundary is stable.
 
 ### Non-goals
 - [ ] Do not implement `19B` transactional canonical promotion in the first pass.
@@ -177,7 +179,8 @@ old/new bytes visible under canonical paths.
       rollback path so a failed promotion leaves either the previous complete generation or the new
       complete generation visible, never a mixed generation.
 - [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
-- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change public artifact schemas, final-run-index shape or provider contracts.
@@ -258,7 +261,8 @@ the service process instead of recording a terminal async failure.
       `finishAsyncRun` always releases the slot and starts a pending run.
 - [x] Preserve synchronous `Service.Run` panic behavior: panic still propagates to the caller
       while existing terminal history semantics remain intact.
-- [ ] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change normal runtime error classification or cancellation semantics.
@@ -309,6 +313,78 @@ No public API/schema changes. Internal-only lifecycle helpers may be added to
   re-panic semantics. Verification passed: targeted lifecycle tests, `go test ./internal/orchestrator`,
   `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19d-server-owned-shutdown
+
+### Context
+`19D` follows committed `19C`. `cmd/acp run` already uses `signal.NotifyContext`, but
+`cmd/acp serve` still passes `context.Background()` into `api.Server.Serve`. API serve shutdown
+uses `http.Server.Shutdown(context.Background())`, and orchestrator `Service` has cancel maps for
+active async runs but no closed/shutdown state. A process-level signal can therefore leave active
+runs/provider processes outside a bounded service-owned shutdown path, and post-shutdown API
+mutations can still enqueue new run writes.
+
+### Goals (must have)
+- [x] Add bounded service-owned shutdown for async runs: reject new starts after shutdown,
+      cancel active run contexts, terminalize queued pending runs, release lifecycle state, and
+      wait for active terminal state until the shutdown context expires.
+- [x] Wire `api.Server.Serve` to call bounded HTTP shutdown and orchestrator shutdown on
+      context cancellation.
+- [x] Wire `cmd/acp serve` to a signal-aware context for SIGINT/SIGTERM/SIGHUP.
+- [ ] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change runtime provider selection, pipeline semantics or queue/debounce behavior
+      except at shutdown.
+- [ ] Do not redesign process execution; provider process groups remain owned by existing
+      `providercommon` command context/process-group adapters.
+- [ ] Do not change public API schemas or frontend behavior.
+
+### Implementation
+1) Add `ErrServiceClosed`, `Service.Shutdown(ctx)` and `Service.Close()` in
+   `internal/orchestrator/service_runs.go`.
+2) Add a `closed` flag under `Service.mu`; `StartAsyncRun` returns `ErrServiceClosed` once set.
+3) During shutdown, mark pending queued run as `failed/run_canceled`, cancel active run contexts,
+   and wait/poll for the active run to reach terminal state until `ctx.Done()`.
+4) Ensure `finishAsyncRun` does not launch pending work after `closed=true`.
+5) Add `api.Server.Shutdown(ctx)` and make `Serve` use a bounded timeout for both HTTP and
+   orchestrator shutdown.
+6) In `cmd/acp serve`, create `signal.NotifyContext` and pass it to `server.Serve` in both
+   launcher and workspace modes.
+
+### Interfaces
+Internal API only: `orchestrator.Service.Shutdown`, `orchestrator.Service.Close` and
+`api.Server.Shutdown`. Public HTTP/schema contracts do not change.
+
+### Tests
+- Service shutdown cancels an active blocking runner and persists terminal canceled history.
+- Service shutdown fails a queued pending run and prevents it from starting.
+- `StartAsyncRun` after shutdown returns `ErrServiceClosed`.
+- API `Serve` returns after context cancellation and calls service shutdown.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`
+  for server-owned shutdown semantics. No fixtures or schemas change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers service shutdown lifecycle.
+- [x] `go test ./internal/api` covers serve-context shutdown.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms post-shutdown starts are rejected and pending work does not launch
+      after `closed=true`.
+
+### Progress log
+- 2026-07-13: Implemented `19D` server-owned shutdown. `acp serve` now passes a
+  SIGINT/SIGTERM/SIGHUP-aware context into API serving; API `Serve` performs bounded HTTP and
+  orchestrator shutdown and waits for service cleanup on context cancellation. Orchestrator
+  `Service.Shutdown`/`Close` set a closed flag, reject post-shutdown starts, cancel active run
+  contexts, terminalize queued pending runs as `run_canceled`, and prevent pending launch after
+  `closed=true`. Existing provider process-group cleanup remains driven by runtime context
+  cancellation. Verification passed: targeted orchestrator/API/docsync tests, `go test ./internal/...`,
+  and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

@@ -110,6 +110,7 @@ Baseline scenario set:
   - workspace-owned persistence использует fault-injection tests для atomic write failure points: before write, before rename и parent directory sync; failed writes must not leave partial current JSON or stale temp files
   - run-history persistence пишет `.last-good`; service startup recovers from malformed current `reports/taskruns/run-history.json` when the last-good copy is valid and records a recovery diagnostic path
   - async run panic isolation covers terminal `failed/internal_failure` history, service survival after a panicking runner, active-slot/cancel cleanup and pending-run continuation; direct `Service.Run` panic tests continue to require caller-visible re-panic
+  - server-owned shutdown tests cover active run context cancellation, queued pending run `run_canceled` terminalization without runner start, post-shutdown `ErrServiceClosed`, and API `Serve` context cancellation waiting for orchestrator shutdown
   - initial async run queueing returns a history persistence error before launching the background run when `run-history.json` cannot be written
   - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
   - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`

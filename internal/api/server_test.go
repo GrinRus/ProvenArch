@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,6 +44,77 @@ func TestHealthEndpoint(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", response.StatusCode)
 	}
+}
+
+func TestServeContextCancellationShutsDownService(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	service := server.getService()
+	ws := server.getWorkspace()
+	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      ws,
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	address := freeTCPAddress(t)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(ctx, address)
+	}()
+	waitForHTTPHealth(t, "http://"+address+"/api/health", 2*time.Second)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("serve returned error after context cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("serve did not stop after context cancellation")
+	}
+
+	info, ok := service.GetRun(runID)
+	if !ok {
+		t.Fatalf("expected run %q", runID)
+	}
+	if info.Status != orchestrator.RunStatusFailed || info.ErrorCode != "run_canceled" {
+		t.Fatalf("expected service shutdown to cancel active run, got status=%s code=%q", info.Status, info.ErrorCode)
+	}
+}
+
+func freeTCPAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free TCP address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close free TCP listener: %v", err)
+	}
+	return address
+}
+
+func waitForHTTPHealth(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		response, err := http.Get(url)
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server did not become healthy at %s before timeout", url)
 }
 
 func TestSystemInfoEndpointReturnsBuildMetadataBeforeWorkspaceSelection(t *testing.T) {

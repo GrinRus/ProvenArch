@@ -108,6 +108,9 @@ acp serve
 ```
 
 Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
+`acp serve` обрабатывает SIGINT/SIGTERM/SIGHUP через bounded shutdown: HTTP listener
+останавливается gracefully, active runtime run получает context cancellation, queued pending
+runs завершаются как canceled, а новые async starts после shutdown отклоняются.
 
 В onboarding UI:
 

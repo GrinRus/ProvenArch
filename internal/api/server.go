@@ -55,6 +55,8 @@ type BuildInfo struct {
 
 type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Service
 
+const defaultServerShutdownTimeout = 10 * time.Second
+
 func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
 	return NewServerWithRuntime(ws, service, ServerRuntimeConfig{
 		Mode:           acpruntime.RuntimeModeFake,
@@ -146,21 +148,47 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) Serve(ctx context.Context, address string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	httpServer := &http.Server{
 		Addr:    address,
 		Handler: s.Handler(),
 	}
 
+	shutdownErrCh := make(chan error, 1)
 	go func() {
 		<-ctx.Done()
-		_ = httpServer.Shutdown(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultServerShutdownTimeout)
+		defer cancel()
+		shutdownErrCh <- firstError(httpServer.Shutdown(shutdownCtx), s.Shutdown(shutdownCtx))
 	}()
 
 	err := httpServer.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
+		if ctx.Err() != nil {
+			return <-shutdownErrCh
+		}
 		return nil
 	}
 	return err
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	service := s.getService()
+	if service == nil {
+		return nil
+	}
+	return service.Shutdown(ctx)
+}
+
+func firstError(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) getWorkspace() workspace.Root {

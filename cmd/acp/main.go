@@ -152,6 +152,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return exitCodeValidation
 	}
+	serveCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stopSignals()
 
 	if strings.TrimSpace(*workspacePath) == "" {
 		if *autoInit || strings.TrimSpace(*repoName) != "" || strings.TrimSpace(*repoPath) != "" || strings.TrimSpace(*repoGitURL) != "" || strings.TrimSpace(*repoRef) != "" || strings.TrimSpace(*reposFile) != "" {
@@ -171,7 +173,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			return exitCodeOK
 		}
 		fmt.Fprintf(stdout, "starting ACP onboarding server on %s\n", *listenAddress)
-		if err := server.Serve(context.Background(), *listenAddress); err != nil {
+		if err := server.Serve(serveCtx, *listenAddress); err != nil {
 			fmt.Fprintf(stderr, "serve failed: %v\n", err)
 			return exitCodeValidation
 		}
@@ -223,7 +225,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "starting ACP API server on %s for workspace %s\n", *listenAddress, ws.Path)
-	if err := server.Serve(context.Background(), *listenAddress); err != nil {
+	if err := server.Serve(serveCtx, *listenAddress); err != nil {
 		fmt.Fprintf(stderr, "serve failed: %v\n", err)
 		return exitCodeValidation
 	}

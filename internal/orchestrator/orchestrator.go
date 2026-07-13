@@ -54,6 +54,7 @@ const (
 var (
 	ErrRunNotFound      = errors.New("run not found")
 	ErrRunNotCancelable = errors.New("run not cancelable")
+	ErrServiceClosed    = errors.New("service is shut down")
 )
 
 type Service struct {
@@ -68,6 +69,7 @@ type Service struct {
 	runs           map[string]*runRecord
 	runIDSequence  int
 	debounceWindow time.Duration
+	closed         bool
 	activeRunID    string
 	pendingRun     *pendingRun
 	runCancels     map[string]context.CancelFunc
