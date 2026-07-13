@@ -66,6 +66,10 @@ The first selected UX engineering slice is `20A Run-pinned evidence snapshot tru
 `EP-20260711-run-pinned-evidence-review`. `docs/BACKLOG.md` remains the reference/acceptance
 backlog; this file selects and sequences focused active slices.
 
+Wave 1 planning also contains Epic 21 / `EP-20260712-evidence-backed-architecture-refresh`;
+implementation has not started, and its first reviewable slice is
+`21A Architecture home + documentation quality baseline`.
+
 Allowed next workstreams:
 - `EP-20260710-code-audit-remediation-backlog` as the active Epic 19 planning track.
 - `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice.
@@ -73,6 +77,7 @@ Allowed next workstreams:
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
 - New Wave 1 or product work: create a fresh decision-complete ExecPlan before implementation.
+- `EP-20260712-evidence-backed-architecture-refresh`: begin with slice `21A`; slices `21B+` require their own focused plan update and contract synchronization before implementation.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
@@ -381,6 +386,85 @@ This slice restores immutable run-pinned review without changing the canonical a
 - 2026-07-11: Selected `20A` as the first P0 slice after the full UX/UI trust and craft audit;
   recorded the dependency-ordered Epic 20 program in `docs/BACKLOG.md`. Implementation has not
   started.
+
+### Plan ID
+EP-20260712-evidence-backed-architecture-refresh
+
+### Context
+ProvenArch already creates validated, Git-versioned architecture artifacts in a separate workspace,
+but its primary overview is not yet an intentional navigation home and refresh does not first explain
+what source changed or why particular domains/artifacts must be regenerated. This Wave 1 plan adds an
+evidence-backed architecture home followed by deterministic source revision and impact planning,
+explainable no-op behavior, affected-only collect execution and finally safe surgical promotion.
+
+The implementation must retain the current trust boundaries: source repos remain read-only; current
+source evidence outranks Git messages; runtime outputs remain staged and validator-gated; unknown
+impact causes conservative refresh; required CI remains deterministic and provider-independent.
+
+### Goals (must have)
+- [ ] Make `reports/as-is/overview.md` the architecture workspace home without changing its path.
+- [ ] Add machine-checkable documentation-quality rules to `step2.asis_docs` and aligned guidance to `qa.ask`.
+- [ ] Persist an exact per-repo source revision baseline for successful promoted architecture runs.
+- [ ] Compute a deterministic refresh impact plan before provider collect execution.
+- [ ] Add bounded recent Git intent evidence without treating commit messages as source truth.
+- [ ] Support safe, explainable no-op refreshes.
+- [ ] Dispatch collect only for affected shards/domains with conservative fallback for ambiguity.
+- [ ] Preserve unaffected canonical artifacts byte-for-byte after dependency-aware promotion exists.
+- [ ] Expose changed/preserved/uncertain decisions in existing operator surfaces.
+
+### Non-goals
+- [ ] Do not write into analyzed source repositories.
+- [ ] Do not read the full Git history or let an LLM choose refresh scope without deterministic planning.
+- [ ] Do not add hosted scheduling, external docs integrations, providers or security enforcement.
+- [ ] Do not infer human acceptance from workspace Git history; use successful validator promotion until a separate acceptance contract exists.
+- [ ] Do not call an unmapped in-scope change a no-op.
+- [ ] Do not rename ProvenArch or replace `arch-workspace` with an OpenWiki-compatible layout.
+
+### Approach
+1) Deliver `21A` as the minimal useful slice: architecture home policy, docs/QA quality guidance, fake output and focused tests, with no schema changes.
+2) Deliver `21B` as a contract slice for source revision baselines; use `acp-schema-guardian` and `acp-test-fixtures` and synchronize all required schema/spec/example/fixture/ADR surfaces.
+3) Deliver `21C` as a pure deterministic planner over complete changed paths, prior shard/domain scopes and evidence dependencies; ambiguous input produces an explicit full-refresh plan.
+4) Deliver `21D` only after planner fixtures prove no-op safety; no-op skips providers and canonical rewrites but persists taskrun rationale.
+5) Deliver `21E` by filtering existing collect dispatch with the validated impact plan and passing only bounded affected-scope Git intent evidence to providers.
+6) Deliver `21F` by merging freshly generated affected artifacts with explicitly selected known-good baseline artifacts, then validating the complete staged publication set before promotion.
+7) Deliver `21G` after behavior exists: add operator-facing explanations, update product language and perform deterministic plus optional trusted-machine quality validation.
+
+### Files expected to change
+- `docs/BACKLOG.md`
+- `docs/PLANS.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/spec/WORKSPACE_SPEC.md` only if persisted workspace configuration changes
+- `docs/APPENDIX_SCHEMAS.md`, `schemas/*`, `examples/*`, `fixtures/*` for `21B/21C` contracts
+- `internal/workspace/*` or a focused internal source-revision package
+- `internal/orchestrator/*`
+- `internal/runtime/steppolicy/*`
+- `internal/runtimedrafts/*`
+- `internal/runtime/fakeruntime/*`
+- `internal/qa/*`
+- `internal/artifactquality/*`
+- focused Go/UI/scenario fixture tests for each slice
+
+### Acceptance criteria
+- [ ] Every implementation slice has focused fixtures/tests and passes Full DoD: `make contracts`, `make test`, `make lint`, `make build`.
+- [ ] Contract slices synchronize schemas, specs, appendix, examples, fixtures, validators, tests and ADR rationale.
+- [ ] No-op is possible only for unchanged clean revisions or out-of-scope-only changes.
+- [ ] Dirty worktree, missing baseline, history rewrite, oversized range and unmapped in-scope changes are explicit conservative fallbacks.
+- [ ] Planner input is never silently truncated; only provider history context is bounded.
+- [ ] Commit messages remain secondary intent evidence and cannot override current source evidence.
+- [ ] Selective promotion preserves unaffected canonical files byte-for-byte and validates one coherent final/citation index set.
+- [ ] Required CI has no live provider or network dependency.
+
+### Risks
+- Git revision state and workspace artifact state can diverge; baseline selection must bind both to one successful promoted run.
+- Path-to-domain mapping can be incomplete; correctness requires conservative fallback instead of optimistic skipping.
+- Carrying forward artifacts can preserve stale evidence unless dependency and baseline provenance are explicit and validator-checked.
+- Global overview/coverage/findings may depend on multiple domains, so surgical refresh must model aggregate dependencies rather than only copy files by path.
+- Adding impact artifacts creates contract maintenance cost; schemas and examples must be designed once the required fields are proven by the planner slice.
+
+### Progress log
+- 2026-07-12: Created Wave 1 Epic 21 and decision-complete implementation sequence. Selected `21A` as the minimal first slice; no runtime or schema behavior changed.
 
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
