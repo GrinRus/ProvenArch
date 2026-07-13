@@ -184,6 +184,7 @@ func validateShardPackManifest(manifest ShardPackManifest) error {
 	}
 	problems = append(problems, validateDocumentSet(manifest.ArtifactRoot, manifest.Documents, manifest.Citations)...)
 	problems = append(problems, validateCitationSet(manifest.Citations)...)
+	problems = append(problems, validateDocumentCitationSymmetry(manifest.Documents, manifest.Citations)...)
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("shard pack manifest is invalid: %s", strings.Join(problems, "; "))
@@ -452,4 +453,84 @@ func validateCitationSet(citations []DocumentCitation) []string {
 		seen[citation.ID] = struct{}{}
 	}
 	return problems
+}
+
+func validateDocumentCitationSymmetry(documents []AuthoredDocument, citations []DocumentCitation) []string {
+	problems := []string{}
+	documentsByID := map[string]AuthoredDocument{}
+	citationsByID := map[string]DocumentCitation{}
+	for _, doc := range documents {
+		docID := strings.TrimSpace(doc.ID)
+		if docID == "" {
+			continue
+		}
+		if _, exists := documentsByID[docID]; exists {
+			continue
+		}
+		documentsByID[docID] = doc
+	}
+	for _, citation := range citations {
+		citationID := strings.TrimSpace(citation.ID)
+		if citationID == "" {
+			continue
+		}
+		if _, exists := citationsByID[citationID]; exists {
+			continue
+		}
+		citationsByID[citationID] = citation
+	}
+
+	for idx, doc := range documents {
+		docID := strings.TrimSpace(doc.ID)
+		if docID == "" {
+			continue
+		}
+		label := fmt.Sprintf("documents[%d]", idx)
+		for _, rawCitationID := range doc.CitationIDs {
+			citationID := strings.TrimSpace(rawCitationID)
+			if citationID == "" {
+				continue
+			}
+			citation, ok := citationsByID[citationID]
+			if !ok {
+				continue
+			}
+			if !containsStringValue(citation.DocumentIDs, docID) {
+				problems = append(problems, fmt.Sprintf("%s references citation_id %q but citation does not list document_id %q", label, citationID, docID))
+			}
+		}
+	}
+
+	for idx, citation := range citations {
+		citationID := strings.TrimSpace(citation.ID)
+		if citationID == "" {
+			continue
+		}
+		label := fmt.Sprintf("citations[%d]", idx)
+		for _, rawDocumentID := range citation.DocumentIDs {
+			documentID := strings.TrimSpace(rawDocumentID)
+			if documentID == "" {
+				continue
+			}
+			doc, ok := documentsByID[documentID]
+			if !ok {
+				problems = append(problems, fmt.Sprintf("%s references unknown document_id %q", label, documentID))
+				continue
+			}
+			if !containsStringValue(doc.CitationIDs, citationID) {
+				problems = append(problems, fmt.Sprintf("%s references document_id %q but document does not list citation_id %q", label, documentID, citationID))
+			}
+		}
+	}
+	return problems
+}
+
+func containsStringValue(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }

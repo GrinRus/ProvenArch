@@ -573,6 +573,7 @@ func TestStageProposalDraftOutputsUpdatesFinalRunIndex(t *testing.T) {
 							ID:          "cite.overview",
 							Repo:        "payments",
 							Path:        "README.md",
+							ClaimIDs:    []string{"claim.overview"},
 							DocumentIDs: []string{"doc.overview"},
 						},
 					},
@@ -587,6 +588,7 @@ func TestStageProposalDraftOutputsUpdatesFinalRunIndex(t *testing.T) {
 						ID:          "cite.overview",
 						Repo:        "payments",
 						Path:        "README.md",
+						ClaimIDs:    []string{"claim.overview"},
 						DocumentIDs: []string{"doc.overview"},
 					},
 				},
@@ -798,6 +800,98 @@ func TestValidateStagedArtifactsDetectsCitationAndTopicIssues(t *testing.T) {
 	}
 }
 
+func TestValidateStagedArtifactsDetectsCitationIndexDocumentIssues(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	stagedPaths := []string{
+		"reports/taskruns/run-1/staging/final/reports/findings/findings.md",
+		"reports/taskruns/run-1/staging/final/reports/findings/other.md",
+	}
+	for _, stagedPath := range stagedPaths {
+		absStagedPath := filepath.Join(workspaceRoot, filepath.FromSlash(stagedPath))
+		if err := os.MkdirAll(filepath.Dir(absStagedPath), 0o755); err != nil {
+			t.Fatalf("mkdir staged path: %v", err)
+		}
+		if err := os.WriteFile(absStagedPath, []byte("# Findings\n"), 0o644); err != nil {
+			t.Fatalf("write staged document: %v", err)
+		}
+	}
+
+	execution := &pipelineExecution{
+		workspace: workspace.Root{Path: workspaceRoot},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				RunID: "run-1",
+				CanonicalDocuments: []contracts.FinalRunDocument{
+					{
+						ID:            "doc.findings",
+						Kind:          "report",
+						CanonicalPath: "reports/findings/findings.md",
+						StagedPath:    stagedPaths[0],
+						CitationIDs:   []string{"cite.known", "cite.other-doc"},
+					},
+					{
+						ID:            "doc.other",
+						Kind:          "report",
+						CanonicalPath: "reports/findings/other.md",
+						StagedPath:    stagedPaths[1],
+						CitationIDs:   []string{"cite.other-doc"},
+					},
+				},
+			},
+			citationIndex: &contracts.CitationIndex{
+				RunID: "run-1",
+				Citations: []contracts.DocumentCitation{
+					{
+						ID:          "cite.known",
+						Repo:        "payments-service",
+						Path:        "README.md",
+						ClaimIDs:    []string{"claim.known"},
+						DocumentIDs: []string{"doc.findings"},
+					},
+					{
+						ID:          "cite.orphan",
+						Repo:        "payments-service",
+						Path:        "service.yaml",
+						ClaimIDs:    []string{"claim.orphan"},
+						DocumentIDs: []string{"doc.missing"},
+					},
+					{
+						ID:          "cite.other-doc",
+						Repo:        "payments-service",
+						Path:        "config.yaml",
+						ClaimIDs:    []string{"claim.other"},
+						DocumentIDs: []string{"doc.other"},
+					},
+					{
+						ID:          "cite.unlisted",
+						Repo:        "payments-service",
+						Path:        "service.yaml",
+						ClaimIDs:    []string{"claim.unlisted"},
+						DocumentIDs: []string{"doc.findings"},
+					},
+				},
+			},
+			shardPacks: []contracts.ShardPackManifest{{ShardID: "payments"}},
+		},
+	}
+
+	issues := execution.validateStagedArtifacts()
+	if len(issues) == 0 {
+		t.Fatalf("expected validation issues")
+	}
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		seen[issue.Code] = true
+	}
+	for _, expected := range []string{"unknown_citation_document", "asymmetric_document_citation", "asymmetric_citation_document"} {
+		if !seen[expected] {
+			t.Fatalf("expected issue code %q, got %#v", expected, issues)
+		}
+	}
+}
+
 func TestDocflowIndexesUseConsistentManifestDocumentIDs(t *testing.T) {
 	t.Parallel()
 
@@ -961,6 +1055,21 @@ func TestDocflowIndexesDeduplicateRepeatedManifestDocumentIDs(t *testing.T) {
 	}
 	if got, want := citationsByID["cite.restaurant"].DocumentIDs, []string{docIDsByPath["reports/as-is/restaurant/restaurant-overview.md"]}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("restaurant citation was not remapped to unique document id: got=%v want=%v", got, want)
+	}
+	finalDocsByID := map[string]contracts.FinalRunDocument{}
+	for _, document := range finalIndex.CanonicalDocuments {
+		finalDocsByID[document.ID] = document
+	}
+	for _, citation := range citationIndex.Citations {
+		for _, documentID := range citation.DocumentIDs {
+			document, ok := finalDocsByID[documentID]
+			if !ok {
+				t.Fatalf("citation %q references unknown final document id %q", citation.ID, documentID)
+			}
+			if !containsTrimmedString(document.CitationIDs, citation.ID) {
+				t.Fatalf("final document %q does not reciprocate citation %q: %#v", documentID, citation.ID, document.CitationIDs)
+			}
+		}
 	}
 }
 

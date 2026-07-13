@@ -660,6 +660,22 @@ func (e *pipelineExecution) stageProposalDraftOutputsForFinalIndex() error {
 	if err != nil {
 		return err
 	}
+	citationIndex, citationChanged := reconcileRuntimeDerivedCitationDocuments(*e.citationIndex, finalRunIndex)
+	if citationChanged {
+		citationRaw, err := json.MarshalIndent(citationIndex, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal citation index with proposal drafts: %w", err)
+		}
+		citationRaw = append(citationRaw, '\n')
+		if err := stageRoot.WriteFile(citationIndexFile, citationRaw); err != nil {
+			return err
+		}
+		parsedCitationIndex, err := contracts.ParseCitationIndex(citationRaw)
+		if err != nil {
+			return err
+		}
+		e.citationIndex = &parsedCitationIndex
+	}
 	finalIndexRaw, err := json.MarshalIndent(finalRunIndex, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal final run index with proposal drafts: %w", err)

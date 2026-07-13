@@ -111,7 +111,9 @@ for transactional promotion and reliable run lifecycle recovery.
       boundary is stable.
 - [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -506,7 +508,9 @@ user-owned `path` checkouts non-mutating and must not change the `workspace.yaml
 - [x] Add no live-network dependency; tests use local temporary repositories and bare remotes.
 - [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -593,7 +597,9 @@ packets reach checkpoint/apply paths instead of the existing collect repair/term
       existing repair/terminal classification paths.
 - [x] Synchronize schema docs, examples/fixtures and tests without changing `workspace.yaml`,
       provider list, live matrices or Epic 20 UI behavior.
-- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -656,6 +662,101 @@ documents/citations and empty citation binding arrays. Workspace/API schemas do 
   recognize the new schema `minItems` wording for empty `claim_ids`; no `19H` reverse
   `citation.document_ids` resolution/remap behavior was added. Verification passed:
   `make contracts`, `go test ./internal/contracts ./internal/artifactquality ./internal/runtime/providercommon`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19h-symmetric-document-citation-validation
+
+### Context
+`19H` follows committed `19G`. The shard-pack schema and contract now require non-empty
+documents, citations and binding arrays, and documents already reject unknown `citation_ids`.
+However `citations[].document_ids` is still only shape-checked: it can point at an unknown
+document, and document/citation links can be one-way. During citation-index aggregation,
+document IDs are remapped to final canonical document IDs, but validation does not yet prove
+that every remapped citation document ID resolves to the current final-run document set.
+
+### Goals (must have)
+- [x] Reject shard-pack citations whose `document_ids` do not resolve to documents in the same
+      manifest.
+- [x] Reject asymmetric shard-pack bindings in both directions: a document-citation link must
+      be present in `documents[].citation_ids` and the matching `citations[].document_ids`.
+- [x] Validate the staged final citation index against the final run index after document-ID
+      remap so post-remap dangling document IDs and one-way links fail before promotion.
+- [x] Keep valid duplicate source document ID remap behavior green: duplicate shard-local IDs may
+      still map to unique final document IDs, and citation bindings must follow that remap.
+- [x] Update pipeline/schema docs and ADR rationale for symmetric evidence bindings without
+      changing provider list, `workspace.yaml`, live matrices or Epic 20 UI behavior.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change JSON schema field names or add a new snapshot/citation schema version.
+- [ ] Do not change collect retry policy except through existing invalid-manifest
+      repair/terminal paths.
+- [ ] Do not synthesize missing provider-authored shard-pack links in collect output; only
+      orchestrator-generated `runtime-derived` final documents may be reconciled into the
+      generated citation index so generated fallback links remain reciprocal.
+- [ ] Do not implement Epic 20 snapshot UX or frontend request-state work.
+
+### Implementation
+1) Add contract-level symmetry validation in `internal/contracts/docflow.go`: build document and
+   citation lookup maps, reject unknown `citation.document_ids`, reject
+   `document.citation_ids` entries not reciprocated by the citation, and reject
+   `citation.document_ids` entries not reciprocated by the document.
+2) Keep schema JSON unchanged unless implementation proves a shape-level schema edit is needed;
+   this slice strengthens semantic contract validation.
+3) Extend staged artifact validation in `internal/orchestrator/docflow.go` so the generated
+   `citation-index.json` and `final-run-index.json` are cross-checked after document-ID remap:
+   every citation document ID must exist, every final document citation ID must exist, and the
+   links must be reciprocal.
+4) Add focused negative tests for unknown citation document ID, document-to-citation asymmetry,
+   citation-to-document asymmetry and post-remap dangling final citation document ID.
+5) Reconcile only orchestrator-generated `runtime-derived` final documents into
+   `citation-index.json` when `buildFinalRunIndex` adds fallback citation IDs, so generated
+   final docs do not create one-way links.
+6) Keep the existing duplicate-document-ID remap test green and extend it, if needed, to prove
+   remapped citation document IDs still match final canonical document IDs.
+
+### Interfaces
+No schema field changes. Public behavior changes by rejecting previously accepted semantically
+invalid shard-pack manifests and staged citation indexes with dangling/asymmetric evidence links.
+
+### Tests
+- `ParseShardPackManifest` rejects `citations[].document_ids` that reference an unknown document.
+- `ParseShardPackManifest` rejects a document listing a citation that does not list that document.
+- `ParseShardPackManifest` rejects a citation listing a document that does not list that citation.
+- `validateStagedArtifacts` rejects post-remap citation-index document IDs not present in the
+  final run index.
+- Duplicate source document ID remap remains green and produces reciprocal final document/citation
+  links.
+
+### Docs/fixtures
+- Update `docs/spec/PIPELINE_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`,
+  `docs/TESTING_STRATEGY.md` and ADR rationale for symmetric collect evidence bindings.
+- No example JSON change is expected because current examples already use reciprocal bindings.
+
+### Acceptance
+- [x] `go test ./internal/contracts ./internal/orchestrator` passes.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19I` frontend snapshot behavior or Epic 20 UX work leaked into
+      this slice.
+- [x] Commit `19H: enforce symmetric citation bindings`.
+
+### Progress log
+- 2026-07-13: Started `19H` after clean `19G` commit. Spec-first, schema-guardian and docs-sync
+  rules apply because this slice strengthens docflow contract semantics and the documented
+  pipeline evidence contract.
+- 2026-07-13: Implemented `19H`. Shard-pack validation now rejects unknown
+  `citations[].document_ids` and one-way document/citation links; staged artifact validation
+  cross-checks generated `final-run-index.json` and `citation-index.json` after document-ID
+  remap. Runtime-derived final docs generated by the orchestrator are explicitly reconciled into
+  the generated citation index so fallback citations are reciprocal without mutating
+  provider-authored shard-pack links. Regression coverage includes unknown document IDs,
+  document-to-citation asymmetry, citation-to-document asymmetry, post-remap dangling citation
+  documents and valid duplicate-ID remap. Verification passed: `go test ./internal/contracts ./internal/orchestrator`,
   `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
 

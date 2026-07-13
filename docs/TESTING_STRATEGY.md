@@ -47,8 +47,9 @@
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 - `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
 - collect contract fixtures must include at least one authored document and one repo-backed
-  citation; sparse `documents: []`, `citations: []`, or empty document/citation binding arrays
-  are negative fixtures, not valid minimal examples
+  citation; sparse `documents: []`, `citations: []`, empty document/citation binding arrays,
+  unknown citation document IDs, and one-way document/citation bindings are negative fixtures,
+  not valid minimal examples
 
 ### Smoke tests
 - CLI smoke
@@ -219,7 +220,7 @@ Release workflow hardening:
 - invalid `workspace.yaml`
 - valid docs-first contracts (`shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
 - negative docs-first contract cases (missing citations, duplicate claim/topic ids, broken topic refs)
-- docflow index assembly with repeated provider-authored document ids across distinct canonical paths; final/citation indexes must remap them to globally unique canonical document ids
+- docflow index assembly with repeated provider-authored document ids across distinct canonical paths; final/citation indexes must remap them to globally unique canonical document ids and keep citation/document links reciprocal after remap
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)

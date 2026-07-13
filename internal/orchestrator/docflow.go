@@ -420,9 +420,6 @@ func buildStagedDocflow(input DocflowBuildInput) (DocflowBuildResult, error) {
 		return DocflowBuildResult{}, fmt.Errorf("marshal citation index: %w", err)
 	}
 	citationRaw = append(citationRaw, '\n')
-	if err := stageRoot.WriteFile(citationIndexFile, citationRaw); err != nil {
-		return DocflowBuildResult{}, err
-	}
 	parsedCitationIndex, err := contracts.ParseCitationIndex(citationRaw)
 	if err != nil {
 		return DocflowBuildResult{}, err
@@ -438,6 +435,19 @@ func buildStagedDocflow(input DocflowBuildInput) (DocflowBuildResult, error) {
 		parsedCitationIndex,
 		semantic,
 	)
+	if err != nil {
+		return DocflowBuildResult{}, err
+	}
+	parsedCitationIndex, _ = reconcileRuntimeDerivedCitationDocuments(parsedCitationIndex, finalRunIndex)
+	citationRaw, err = json.MarshalIndent(parsedCitationIndex, "", "  ")
+	if err != nil {
+		return DocflowBuildResult{}, fmt.Errorf("marshal citation index: %w", err)
+	}
+	citationRaw = append(citationRaw, '\n')
+	if err := stageRoot.WriteFile(citationIndexFile, citationRaw); err != nil {
+		return DocflowBuildResult{}, err
+	}
+	parsedCitationIndex, err = contracts.ParseCitationIndex(citationRaw)
 	if err != nil {
 		return DocflowBuildResult{}, err
 	}
@@ -1684,6 +1694,44 @@ func buildFinalRunIndex(
 	return parsed, nil
 }
 
+func reconcileRuntimeDerivedCitationDocuments(citationIndex contracts.CitationIndex, finalIndex contracts.FinalRunIndex) (contracts.CitationIndex, bool) {
+	citationOffsets := map[string]int{}
+	for idx, citation := range citationIndex.Citations {
+		citationID := strings.TrimSpace(citation.ID)
+		if citationID == "" {
+			continue
+		}
+		citationOffsets[citationID] = idx
+	}
+
+	changed := false
+	for _, document := range finalIndex.CanonicalDocuments {
+		if !containsTrimmedString(document.Topics, "runtime-derived") {
+			continue
+		}
+		documentID := strings.TrimSpace(document.ID)
+		if documentID == "" {
+			continue
+		}
+		for _, rawCitationID := range document.CitationIDs {
+			citationID := strings.TrimSpace(rawCitationID)
+			if citationID == "" {
+				continue
+			}
+			offset, ok := citationOffsets[citationID]
+			if !ok {
+				continue
+			}
+			if containsTrimmedString(citationIndex.Citations[offset].DocumentIDs, documentID) {
+				continue
+			}
+			citationIndex.Citations[offset].DocumentIDs = uniqueSorted(append(citationIndex.Citations[offset].DocumentIDs, documentID))
+			changed = true
+		}
+	}
+	return citationIndex, changed
+}
+
 func stripStagePrefix(stagedPath string) string {
 	parts := strings.Split(filepath.ToSlash(strings.TrimSpace(stagedPath)), "/staging/final/")
 	if len(parts) == 2 {
@@ -1724,9 +1772,11 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 	}
 
 	citationIDs := map[string]struct{}{}
+	citationsByID := map[string]contracts.DocumentCitation{}
 	claimIDs := map[string]struct{}{}
 	strictCitationChecks := len(e.shardPacks) > 0
 	for _, citation := range e.citationIndex.Citations {
+		citationID := strings.TrimSpace(citation.ID)
 		if _, exists := citationIDs[citation.ID]; exists {
 			issues = append(issues, contracts.ValidatorIssue{
 				Code:       "duplicate_citation_id",
@@ -1736,6 +1786,9 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 			})
 		}
 		citationIDs[citation.ID] = struct{}{}
+		if citationID != "" {
+			citationsByID[citationID] = citation
+		}
 		for _, claimID := range citation.ClaimIDs {
 			if _, exists := claimIDs[claimID]; exists {
 				issues = append(issues, contracts.ValidatorIssue{
@@ -1764,11 +1817,21 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 		}
 		for _, citationID := range document.CitationIDs {
 			if strictCitationChecks {
-				if _, ok := citationIDs[citationID]; !ok {
+				citation, ok := citationsByID[strings.TrimSpace(citationID)]
+				if !ok {
 					issues = append(issues, contracts.ValidatorIssue{
 						Code:       "unknown_document_citation",
 						Severity:   "error",
 						Message:    fmt.Sprintf("document %q references unknown citation %q", document.CanonicalPath, citationID),
+						Path:       document.CanonicalPath,
+						DocumentID: document.ID,
+						CitationID: citationID,
+					})
+				} else if !containsTrimmedString(citation.DocumentIDs, document.ID) {
+					issues = append(issues, contracts.ValidatorIssue{
+						Code:       "asymmetric_document_citation",
+						Severity:   "error",
+						Message:    fmt.Sprintf("document %q references citation %q but citation does not list document id %q", document.CanonicalPath, citationID, document.ID),
 						Path:       document.CanonicalPath,
 						DocumentID: document.ID,
 						CitationID: citationID,
@@ -1805,6 +1868,41 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 			}
 		}
 	}
+	if strictCitationChecks {
+		for _, citation := range e.citationIndex.Citations {
+			citationID := strings.TrimSpace(citation.ID)
+			if citationID == "" {
+				continue
+			}
+			for _, rawDocumentID := range citation.DocumentIDs {
+				documentID := strings.TrimSpace(rawDocumentID)
+				if documentID == "" {
+					continue
+				}
+				document, ok := documentsByID[documentID]
+				if !ok {
+					issues = append(issues, contracts.ValidatorIssue{
+						Code:       "unknown_citation_document",
+						Severity:   "error",
+						Message:    fmt.Sprintf("citation %q references unknown document %q", citationID, documentID),
+						DocumentID: documentID,
+						CitationID: citationID,
+					})
+					continue
+				}
+				if !containsTrimmedString(document.CitationIDs, citationID) {
+					issues = append(issues, contracts.ValidatorIssue{
+						Code:       "asymmetric_citation_document",
+						Severity:   "error",
+						Message:    fmt.Sprintf("citation %q references document %q but document does not list citation id %q", citationID, documentID, citationID),
+						Path:       document.CanonicalPath,
+						DocumentID: documentID,
+						CitationID: citationID,
+					})
+				}
+			}
+		}
+	}
 	sort.Slice(issues, func(i, j int) bool {
 		if issues[i].Code == issues[j].Code {
 			return issues[i].Message < issues[j].Message
@@ -1812,6 +1910,16 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 		return issues[i].Code < issues[j].Code
 	})
 	return issues
+}
+
+func containsTrimmedString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func requiresDocumentCitations(document contracts.FinalRunDocument) bool {

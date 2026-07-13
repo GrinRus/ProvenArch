@@ -17,12 +17,17 @@ non-empty `documents[].citation_ids`, and non-empty `citations[].claim_ids` /
 `citations[].document_ids`. Sparse/no-evidence collect packets are contract drift and must fail
 before checkpoint/apply instead of being treated as valid minimal output.
 
+2026-07-13 update: require symmetric document/citation bindings in shard packs and after
+document-ID remap. `citations[].document_ids` must resolve to current documents, every document
+listed by a citation must list that citation, and every final citation/document link must remain
+reciprocal in the staged `final-run-index.json` + `citation-index.json` pair.
+
 ## Alternatives considered
 - Keep migration shims for old manifests. Rejected because it preserves hidden contract branches and weakens deterministic failure behavior.
 - Keep the pre-schema collect scanner. Rejected because it duplicates schema responsibility and requires a second validation vocabulary.
 
 ## Consequences
-Workspace manifests with `repos[].analysis.role` are invalid. Collect shard manifests using legacy aliases such as `covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, `evidence_citation_ids`, top-level `step_contract`, or `compatibility` fail through schema/contract validation. Collect shard manifests with empty documents/citations or empty document/citation binding arrays also fail through schema/contract validation. Existing valid all-repo runtime behavior is unchanged.
+Workspace manifests with `repos[].analysis.role` are invalid. Collect shard manifests using legacy aliases such as `covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, `evidence_citation_ids`, top-level `step_contract`, or `compatibility` fail through schema/contract validation. Collect shard manifests with empty documents/citations, empty document/citation binding arrays, unknown citation document IDs or one-way document/citation bindings also fail through schema/contract validation. Existing valid all-repo runtime behavior is unchanged.
 
 ## Links
 - `schemas/workspace.schema.json`
