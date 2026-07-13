@@ -1182,6 +1182,132 @@ Suggested PR slices:
   - exit: a first-time user completes guided fake walkthrough without mistaking demo output for
     live evidence, and an experienced operator can inspect raw diagnostics without cluttering
     the default decision flow
+## Epic 21 — Evidence-backed Architecture Home + Impact-aware Refresh (Wave 1)
+
+Context:
+- ProvenArch already has the stronger trust and governance foundation: a separate Git-versioned
+  architecture workspace, read-only source repositories, staged runtime outputs, validator-gated
+  promotion, provenance/evidence, domain-first execution and entity-per-file model artifacts;
+- the current `reports/as-is/overview.md` is the default Review entrypoint, but it is still treated
+  primarily as one generated report rather than as the stable home page for navigating the whole
+  architecture workspace;
+- the current `refresh` pipeline reuses the init step shape and does not first persist a
+  deterministic explanation of which source revisions/files changed, which domains/shards are
+  affected, which canonical artifacts may be stale, or why a refresh can safely be a no-op;
+- this epic adopts the useful documentation-maintenance ideas commonly associated with wiki agents
+  without changing ProvenArch into a source-repo-writing docs bot or weakening its evidence and
+  validation boundaries.
+
+Goals:
+- make `reports/as-is/overview.md` the canonical human-readable architecture home for Review and
+  Ask navigation;
+- add concise documentation-quality rules to `step2.asis_docs` and compatible answer-quality rules
+  to `qa.ask`;
+- capture a deterministic source revision baseline for each resolved repository and compare refresh
+  inputs with the last successful validator-promoted `init|refresh` run;
+- use bounded recent Git history as secondary intent evidence while keeping current source files and
+  validated repository evidence authoritative;
+- compute and persist a deterministic refresh impact plan before `refresh.step1.collect`;
+- support explainable no-op refreshes and affected-only collect execution;
+- preserve unaffected canonical artifacts byte-for-byte once selective downstream promotion is safe;
+- expose what changed, why it matters, what was refreshed, what was preserved and what remains
+  uncertain through existing Analysis/Review/Publish surfaces.
+
+Non-goals:
+- do not write generated documentation or commits into analyzed source repositories;
+- do not replace the central `arch-workspace`, entity-per-file model, provenance, staged promotion,
+  validators, domain/team cards or multi-provider runtime model;
+- do not mine the full Git history, treat commit messages as stronger evidence than source code, or
+  ask the provider to infer the refresh scope without a deterministic plan;
+- do not classify an in-scope but unmapped source change as safe no-op; fall back to conservative
+  refresh and record the mapping gap;
+- do not add hosted scheduling, webhook delivery, external documentation sources or new providers;
+- do not rename the product to a wiki product; `architecture home` / `wiki-like workspace` is a UX
+  explanation over the existing evidence-backed architecture workspace.
+
+Acceptance:
+- `reports/as-is/overview.md` answers: what the system is, analyzed repo/scope, domains, where to
+  start reading, key flows, datastores/integrations, safe-change guidance and evidence gaps; it links
+  to deeper canonical artifacts instead of duplicating their full contents;
+- operator-facing docs avoid raw file inventories, manifest recaps, runtime/process narration and
+  unsupported certainty; they use short sections, explicit gaps, concrete repo/path references and
+  `what changed / why it matters` where refresh evidence exists;
+- Ask continues to be read-only, cites workspace artifacts, distinguishes confirmed facts from gaps,
+  and uses the architecture home as a high-priority navigation source without treating it as the
+  only evidence source;
+- each resolved repo in a refresh has an exact current commit identity and a baseline identity from
+  the last successful promoted architecture run; missing baseline, dirty local worktree, rewritten
+  history, unavailable commit or ambiguous mapping is explicit and forces conservative behavior;
+- the deterministic planner computes the complete changed path set for a valid baseline range,
+  maps it through effective include/exclude scope plus previous shard/domain/evidence ownership, and
+  never silently truncates planning input; oversized or unresolvable ranges fall back to full refresh;
+- provider context receives only bounded history evidence for affected scope (recent commit summaries
+  plus relevant changed paths), and prompts state that commit text explains possible intent but does
+  not override current source evidence;
+- a persisted refresh impact plan identifies source deltas, affected/unmapped domains and shards,
+  potentially stale canonical artifacts, planned actions, preserved artifacts and fallback reasons;
+- safe no-op is limited to unchanged clean revisions or changes wholly outside effective analysis
+  scope; it succeeds without provider execution or canonical artifact rewrites and retains taskrun
+  evidence explaining the decision;
+- affected-only collect dispatch preserves existing deterministic shard ordering and failure policy;
+  an unmapped in-scope change triggers conservative collect instead of being ignored;
+- selective downstream promotion carries forward unaffected artifacts only when their baseline run,
+  evidence dependencies and validator status are known; preserved files remain byte-identical and
+  final indexes record a coherent complete publication set;
+- deterministic fake/runtime fixtures cover unchanged, out-of-scope-only, one-domain, multi-domain,
+  dirty worktree, missing baseline, history rewrite and conservative fallback cases;
+- required CI remains provider-independent; live providers are used only for optional/manual quality
+  validation after deterministic tests pass.
+
+Suggested PR slices:
+- `21A Architecture home + documentation quality baseline`
+  - redefine the existing `reports/as-is/overview.md` authoring policy as the architecture workspace
+    home while keeping its canonical path and current Review default selection
+  - add the required navigation/content sections and concise human-readable quality rules to
+    `step2.asis_docs`; extend strict validation only for machine-checkable failures
+  - prioritize the overview as a QA navigation document and align `qa.ask` answer guidance with
+    explicit gaps, concrete citations and concise answers
+  - update fake artifacts plus focused prompt/runtime-draft/QA tests without schema changes
+- `21B Source revision baseline contract`
+  - specify and persist per-repo current revision, previous successful promoted revision, source kind,
+    effective scope and conservative-fallback reason under taskrun scope
+  - define the exact baseline selection rule: latest successful validator-promoted `init|refresh`, not
+    an inferred human Git acceptance event
+  - treat dirty local worktrees, missing commits and non-ancestor/history-rewrite cases explicitly
+  - synchronize schemas, `docs/spec/*`, appendix, examples, fixtures, validators and ADR rationale
+- `21C Deterministic refresh impact plan`
+  - compute changed paths before `refresh.step1.collect`
+  - map paths to effective include/exclude scope, prior shard path scopes, domain IDs, citations/model
+    provenance and canonical document dependencies
+  - persist affected/unmapped shards/domains, stale/preserved artifact candidates, planned actions and
+    conservative fallback reasons as a validated taskrun artifact
+  - process the complete changed path set for planning; if safety limits are exceeded, mark full
+    refresh instead of silently dropping paths
+- `21D Explainable no-op refresh`
+  - skip provider steps only for unchanged clean revisions or out-of-scope-only changes
+  - finish the refresh successfully with taskrun impact evidence and no canonical report/model/
+    proposal/changelog rewrites
+  - surface the no-op reason and source range in CLI/API/UI run status using existing extension
+    patterns or a separately synchronized contract change
+- `21E Affected-only collect execution + bounded Git intent evidence`
+  - dispatch only impacted existing shards/domains while preserving deterministic ordering and current
+    failure semantics
+  - pass affected-path context plus bounded recent commit summaries to collect tasks
+  - fall back to full collect for any in-scope unmapped or ambiguous change
+  - prove that source evidence wins over stale/incorrect commit messages in prompt and fixture tests
+- `21F Surgical downstream materialization and promotion`
+  - rebuild global summaries only when their dependency set changes
+  - update affected domain docs/model entities/edges/findings/proposals while carrying forward known-good
+    unaffected artifacts from the explicit baseline run
+  - keep preserved canonical files byte-identical and validate the merged final index/citation set
+  - record `updated / preserved / removed / uncertain` artifact decisions for Review and Publish
+- `21G Operator explanation, product language and release validation`
+  - show impact summary, no-op reason and artifact decisions in Analysis/Review/Publish without adding a
+    new product stage
+  - keep pre-maintenance copy truthful (`builds an evidence-backed architecture workspace`) and use
+    `builds and maintains` only after no-op/selective refresh behavior is implemented and tested
+  - update README/ARCHITECTURE/STAKEHOLDER docs and run deterministic UI plus optional trusted-machine
+    live artifact-quality validation
 
 ## Cleanup follow-up (post-beta, owner confirmation required)
 

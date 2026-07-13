@@ -28,18 +28,19 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
 | Code quality audit remediation | planned (Epic 19) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | planned (post-beta; Epic 20, `20A` selected) | `docs/BACKLOG.md` defines the dependency-ordered corrective program; `docs/PLANS.md` selects immutable run-pinned evidence review as the first P0 slice. Current Console V2 remains the implemented beta baseline until each slice is accepted. |
+| Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17
 - follow-up: 19 active (quality remediation without hosted/frontend-security scope expansion);
   20 active (post-beta UX/UI trust program; first selected slice is `20A`)
-- out of MVP: 12, 13
+- out of MVP: 12, 13, 21 (planned Wave 1)
 
 ---
 
 ## 1. Краткое резюме
 
-Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит и поддерживает **as-is архитектуру** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
+Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит **evidence-backed as-is architecture workspace** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. Текущий `refresh` повторно собирает этот workspace; impact-aware selective maintenance запланирован в Wave 1. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
 
 **В MVP мы сознательно делаем local-first режим**: пользователь разворачивает сервис локально, локально же у него доступны checkout-папки и/или GitHub/GitLab URL, а все git-операции идут через локальный `git` и уже настроенный доступ пользователя. Документы лежат в workspace (например, вручную выгруженные из Confluence). Это снижает барьер внедрения и откладывает вопросы безопасности/комплаенса на Wave 1+.
 
@@ -508,6 +509,7 @@ Wizard из блоков-шаблонов:
 - git-based branching (commit + proposal branch)
 
 ### Wave 1 (после MVP)
+- evidence-backed architecture home и impact-aware incremental refresh с explainable no-op
 - интеграции с внешними источниками (Confluence/Jira/Notion/etc)  
 - autodocs integration  
 - manager-агенты по Jira/resource skew  
