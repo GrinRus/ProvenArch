@@ -47,6 +47,14 @@ function textResponse(body: string, status = 200): Response {
   });
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 function createFetchMock(state: FetchMockState = {}) {
   const runID = state.runID ?? "run-1";
   const runLogs = state.runLogs ?? {
@@ -1984,7 +1992,7 @@ describe("App", () => {
     expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded.");
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded."));
     expect(screen.getByTestId("git-diff-view")).toHaveTextContent("reports/coverage/summary.md");
 
     fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
@@ -2127,8 +2135,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff");
-    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded.");
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff"));
+    await waitFor(() => expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded."));
     expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
 
     fireEvent.click(screen.getByRole("button", { name: "Load full workspace diff" }));
@@ -3904,6 +3912,154 @@ describe("App", () => {
       expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old artifact");
     });
   });
+
+  it("ignores a late artifact preview response after a newer artifact is selected", async () => {
+    const runID = "run-preview-race";
+    const lateOldPreview = deferredResponse();
+    let oldPreviewRequested = false;
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [
+            { path: "reports/as-is/old.md", kind: "report", label: "Old delayed artifact" },
+            { path: "reports/as-is/new.md", kind: "report", label: "New current artifact" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/as-is/new.md": "# New artifact\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fas-is%2Fold.md") {
+        oldPreviewRequested = true;
+        return lateOldPreview.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
+    await waitFor(() => expect(oldPreviewRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/new\.md/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+    });
+
+    lateOldPreview.resolve(textResponse("# Old delayed artifact SHOULD NOT SHOW\n"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("SHOULD NOT SHOW");
+    });
+  }, 10_000);
+
+  it("ignores a late Git diff response after a newer artifact path is selected", async () => {
+    const runID = "run-diff-race";
+    const lateOldDiff = deferredResponse();
+    let oldDiffRequested = false;
+    const diffPayload = (path: string, marker: string) => ({
+      ok: true,
+      workspace: "/tmp/workspace",
+      run_id: runID,
+      step_id: null,
+      selected_path: path,
+      selected_file: {
+        path,
+        folder: "reports/as-is",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      files: [
+        {
+          path,
+          folder: "reports/as-is",
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          binary: false,
+        },
+      ],
+      folders: [{ folder: "reports/as-is", files: 1, additions: 1, deletions: 0 }],
+      hunks: [
+        {
+          header: "@@ -1 +1 @@",
+          lines: [{ kind: "add", new_line: 1, content: marker }],
+        },
+      ],
+      message: marker,
+      empty: false,
+    });
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [
+            { path: "reports/as-is/old.md", kind: "report", label: "Old diff artifact" },
+            { path: "reports/as-is/new.md", kind: "report", label: "New diff artifact" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/as-is/old.md": "# Old artifact\n",
+        "reports/as-is/new.md": "# New artifact\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.startsWith("/api/git/diff")) {
+        const parsed = new URL(url, "http://localhost");
+        const selectedPath = parsed.searchParams.get("path") ?? "";
+        if (selectedPath === "reports/as-is/old.md") {
+          oldDiffRequested = true;
+          return lateOldDiff.promise;
+        }
+        if (selectedPath === "reports/as-is/new.md") {
+          return jsonResponse(diffPayload(selectedPath, "New diff content"));
+        }
+        return jsonResponse(diffPayload(selectedPath || "reports/as-is/default.md", "Default diff content"));
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
+    await waitFor(() => expect(oldDiffRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/new\.md/i }));
+    fireEvent.click(within(screen.getByTestId("evidence-preview-tabs")).getByRole("tab", { name: "Diff" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("reports/as-is/new.md");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("New diff content");
+    });
+
+    lateOldDiff.resolve(jsonResponse(diffPayload("reports/as-is/old.md", "Old diff content SHOULD NOT SHOW")));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("reports/as-is/new.md");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("New diff content");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").not.toContain("SHOULD NOT SHOW");
+    });
+  }, 10_000);
 
   it("renders failed run status with warnings and error details for partial live state", async () => {
     const runID = "run-partial-failed";

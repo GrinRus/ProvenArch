@@ -115,7 +115,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I`
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19K1` run mutation acknowledgement after `19J`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -691,7 +693,7 @@ that every remapped citation document ID resolves to the current final-run docum
       changing provider list, `workspace.yaml`, live matrices or Epic 20 UI behavior.
 - [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
       boundary is stable.
 
 ### Non-goals
@@ -787,7 +789,7 @@ older run label.
       final-run index contains those canonical documents.
 - [x] Add deterministic UI regression with two runs sharing the same canonical path but different
       staged bytes; older selection must not read current canonical content.
-- [ ] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
       boundary is stable.
 
 ### Non-goals
@@ -851,6 +853,93 @@ Frontend-only TypeScript contract extension. HTTP and JSON schemas do not change
   `reports/as-is/overview.md` with different staged bytes and proves current canonical bytes are
   not displayed. Verification passed: UI typecheck, UI Vitest `94/94`, `go test ./internal/docsync`,
   and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19j-request-scoped-ui-detail-state
+
+### Context
+`19J` follows committed `19I`. Review artifacts now read selected-run staged bytes, but the
+frontend still lets independent async detail requests write unkeyed state after selection changes:
+run status, logs, artifact lists, artifact previews, coverage/open questions, run review summary
+and Git diff can all be requested for run/path A and resolve after the operator has selected
+run/path B. The UI must clear stale detail state immediately and only allow the latest matching
+request generation to update the visible panel.
+
+### Goals (must have)
+- [x] Add a reusable frontend request generation / AbortController helper for abort-aware async
+      detail loading.
+- [x] Apply request-scoped state guards to run status, logs, artifacts, selected artifact preview,
+      coverage/open questions, run review summary and Git diff.
+- [x] Keep state writes keyed by the current request selection so a late response for run/path A
+      cannot update panels for run/path B.
+- [x] Clear visible detail surfaces on selection changes before replacement data lands.
+- [x] Treat unmount/selection aborts as silent cancellation, not user-visible errors.
+- [x] Continue PR-1 with `19K1` run mutation acknowledgement after `19J` review/commit boundary
+      is stable.
+
+### Non-goals
+- [ ] Do not change backend APIs, JSON schemas, final-run-index semantics or provider/runtime
+      behavior.
+- [ ] Do not implement `19K1` mutation acknowledgement, `19K2` Q&A provisional ordering or
+      `19L` editor safety.
+- [ ] Do not add Epic 20 source-mode UX, Publish scope changes, IA changes or persisted approval
+      workflow.
+- [ ] Do not refactor unrelated stage layout, visual design, accessibility primitives or
+      generated contract tooling.
+
+### Implementation
+1) Add a small shared hook in `ui/src/hooks` that starts a named request generation, aborts the
+   previous generation for that surface, exposes `signal`, `requestKey`, `isCurrent()` and cleanup
+   helpers, and suppresses ordinary `AbortError`.
+2) Extend frontend API helpers where needed so existing fetches can receive an `AbortSignal`
+   without changing backend endpoints.
+3) Update `useRunActions` so selected-run status/detail loads are keyed by run ID and ignored if
+   a newer selection supersedes them.
+4) Update `useRunLogs` so reset/page/until-EOF log loads are keyed by run ID and cursor; late log
+   pages cannot merge into a different selected run.
+5) Update `useRunArtifacts` so artifact-list, coverage/open-question and preview requests have
+   independent request generations; clearing artifacts aborts all three surfaces.
+6) Update `useRunReview` and `useGitDiff` so late review-summary or diff responses cannot replace
+   newer selected-run/path state.
+7) Add targeted UI regressions using deferred fetch responses to prove A -> B switching ignores
+   late A writes while existing `19I` snapshot behavior remains green.
+
+### Interfaces
+Frontend-only hook/API-helper types. No HTTP, backend, schema or public artifact contract change.
+
+### Tests
+- Deferred selected-run A status/log/artifact responses resolving after selected-run B do not
+  update B panels.
+- Switching selected run clears stale artifact/log/review detail state before B data lands.
+- Late artifact preview for an older selected artifact cannot overwrite a newer selected artifact.
+- Late Git diff for an older run/path cannot overwrite a newer run/path diff.
+- Aborted requests during unmount or selection change do not surface user-visible errors.
+- Existing `19I` historical snapshot tests stay green.
+
+### Docs/fixtures
+No operator documentation, schema, example or fixture changes are expected. `docs/PLANS.md` is
+the only documentation update unless implementation changes visible loading/error copy.
+
+### Acceptance
+- [x] Targeted UI Vitest suite passes.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Existing `19I` snapshot regression stays green.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19K1`, `19K2`, `19L` or Epic 20 work leaked into this slice.
+- [x] Commit `19J: isolate UI detail requests`.
+
+### Progress log
+- 2026-07-13: Started `19J` after clean `19I` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice introduces a shared frontend async-state primitive and UI
+  regressions for stale request ordering.
+- 2026-07-13: Implemented `19J`. Added `useRequestGate` for request-keyed AbortController
+  ownership and applied it to selected-run status, logs, artifacts, preview, coverage/open
+  questions, review summary and Git diff. Selection changes now clear stale detail surfaces and
+  late A responses are ignored after B becomes current. Added deferred-response regressions for
+  artifact preview and Git diff ordering while keeping the `19I` historical snapshot regression
+  green. Verification passed: UI typecheck, UI Vitest `96/96`, and full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

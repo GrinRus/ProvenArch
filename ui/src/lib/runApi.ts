@@ -1,8 +1,8 @@
 import { fetchJSON, getErrorMessage } from "./api";
 import type { RunListResponse, RunReviewSummaryResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
 
-export async function listPipelineRuns(limit = 100): Promise<RunListResponse> {
-  return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`);
+export async function listPipelineRuns(limit = 100, init?: RequestInit): Promise<RunListResponse> {
+  return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`, init);
 }
 
 export async function startPipelineRun(pipeline: "init" | "refresh"): Promise<RunStartResponse> {
@@ -13,8 +13,8 @@ export async function startPipelineRun(pipeline: "init" | "refresh"): Promise<Ru
   });
 }
 
-export async function getPipelineRunStatus(id: string, allowMissing = false): Promise<RunStatusResponse | null> {
-  const response = await fetch(`/api/pipeline/runs/${id}`);
+export async function getPipelineRunStatus(id: string, allowMissing = false, init?: RequestInit): Promise<RunStatusResponse | null> {
+  const response = await fetch(`/api/pipeline/runs/${id}`, init);
   const payload = await response.json();
   if (response.status === 404 && allowMissing) {
     return null;
@@ -25,8 +25,12 @@ export async function getPipelineRunStatus(id: string, allowMissing = false): Pr
   return payload as RunStatusResponse;
 }
 
-export async function getPipelineRunReviewSummary(id: string, allowMissing = false): Promise<RunReviewSummaryResponse | null> {
-  const response = await fetch(`/api/pipeline/runs/${id}/review-summary`);
+export async function getPipelineRunReviewSummary(
+  id: string,
+  allowMissing = false,
+  init?: RequestInit,
+): Promise<RunReviewSummaryResponse | null> {
+  const response = await fetch(`/api/pipeline/runs/${id}/review-summary`, init);
   const payload = await response.json();
   if (response.status === 404 && allowMissing) {
     return null;

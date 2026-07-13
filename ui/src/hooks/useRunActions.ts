@@ -5,6 +5,7 @@ import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
 import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
 import type { RunExplorerAction } from "../lib/runExplorerState";
 import { finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
+import { isAbortError, useRequestGate } from "./useRequestGate";
 import { useRunUpdatePolling } from "./useRunUpdatePolling";
 
 type RunActionsContext = {
@@ -48,6 +49,8 @@ export function useRunActions({
   fetchArtifacts,
   loadCoverageArtifacts,
 }: RunActionsContext) {
+  const runStatusRequest = useRequestGate("run-status");
+
   const loadRunList = useCallback(
     async (limit = 100): Promise<RunListItem[]> => {
       const payload = await listPipelineRuns(limit);
@@ -60,18 +63,31 @@ export function useRunActions({
 
   const fetchRunStatus = useCallback(
     async (id: string, allowMissing = false): Promise<RunStatusResponse | null> => {
-      const typed = await getPipelineRunStatus(id, allowMissing);
-      if (!typed) {
-        return null;
+      const token = runStatusRequest.begin(`${id}:${allowMissing ? "allow-missing" : "strict"}`);
+      try {
+        const typed = await getPipelineRunStatus(id, allowMissing, { signal: token.signal });
+        if (!runStatusRequest.isCurrent(token)) {
+          return null;
+        }
+        if (!typed) {
+          return null;
+        }
+        setRunStatus(typed);
+        if (finalStatuses.has(typed.status)) {
+          await fetchArtifacts(id);
+          await loadCoverageArtifacts(id);
+        }
+        return typed;
+      } catch (error) {
+        if (isAbortError(error) || !runStatusRequest.isCurrent(token)) {
+          return null;
+        }
+        throw error;
+      } finally {
+        runStatusRequest.finish(token);
       }
-      setRunStatus(typed);
-      if (finalStatuses.has(typed.status)) {
-        await fetchArtifacts(id);
-        await loadCoverageArtifacts(id);
-      }
-      return typed;
     },
-    [fetchArtifacts, loadCoverageArtifacts, setRunStatus]
+    [fetchArtifacts, loadCoverageArtifacts, runStatusRequest, setRunStatus]
   );
 
   const handleSelectRun = useCallback(
@@ -84,6 +100,7 @@ export function useRunActions({
       try {
         setRunActionStatus("");
         setRunID(id);
+        setRunStatus(null);
         resetRunLogs();
         clearArtifacts();
         const status = await fetchRunStatus(id);
@@ -167,6 +184,7 @@ export function useRunActions({
           },
         });
         setRunID(payload.run_id);
+        setRunStatus(null);
         const status = await fetchRunStatus(payload.run_id);
         await fetchRunLogs(payload.run_id, true);
         if (status && finalStatuses.has(status.status)) {
