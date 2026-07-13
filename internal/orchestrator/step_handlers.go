@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"sort"
 	"strings"
@@ -556,34 +555,6 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 		e.logInfo(stepID, "", "promoting validated staged artifacts", nil)
 		if err := e.promoteValidatedArtifacts(); err != nil {
 			return err
-		}
-		if e.proposalsDraftManifest != nil {
-			if draftManifestHasPrefix(e.proposalsDraftManifest, "proposals/") && e.finalRunIndex != nil {
-				removed := draftManifestCanonicalPathsWithPrefix(e.proposalsDraftManifest, "proposals/")
-				for _, canonicalPath := range removed {
-					target, resolveErr := e.workspace.Resolve(canonicalPath)
-					if resolveErr != nil {
-						return resolveErr
-					}
-					if removeErr := os.Remove(target); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-						return fmt.Errorf("remove deterministic proposal %q: %w", canonicalPath, removeErr)
-					}
-				}
-				e.removeArtifactsByPath(removed...)
-			}
-			artifacts, err := applyRuntimeDraftOutputs(
-				e.workspace,
-				e.proposalsDraftRoot,
-				*e.proposalsDraftManifest,
-				"",
-				func(target string) bool {
-					return strings.HasPrefix(target, "proposals/") || strings.HasPrefix(target, "reports/changelog/")
-				},
-			)
-			if err != nil {
-				return err
-			}
-			e.addArtifacts(artifacts...)
 		}
 	} else if e.renderContext().IsIncomplete() || len(e.partialFailures) > 0 || e.findingsSkipped {
 		e.addWarning(fmt.Sprintf("%s: canonical promotion skipped because validator verdict is missing", e.stepStatus.CurrentStep))

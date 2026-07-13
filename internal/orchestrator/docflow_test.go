@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,6 +290,240 @@ func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T
 	if !strings.Contains(string(content), "Current Overview") {
 		t.Fatalf("expected promoted overview content, got %q", string(content))
 	}
+}
+
+func TestPromoteValidatedArtifactsRollsBackMixedGenerationFailures(t *testing.T) {
+	for failAt := 1; failAt <= 28; failAt++ {
+		t.Run(fmt.Sprintf("fail-at-%02d", failAt), func(t *testing.T) {
+			workspaceRoot := t.TempDir()
+			execution := prepareTransactionalPromotionExecution(t, workspaceRoot)
+
+			operation := 0
+			restore := setPromotionFaultHookForTest(func(point promotionFaultPoint, relPath string) error {
+				operation++
+				if operation == failAt {
+					return fmt.Errorf("injected promotion failure at %s for %s", point, relPath)
+				}
+				return nil
+			})
+			err := execution.promoteValidatedArtifacts()
+			restore()
+
+			if err != nil {
+				assertTransactionalPromotionOldGeneration(t, workspaceRoot)
+				return
+			}
+			assertTransactionalPromotionNewGeneration(t, workspaceRoot)
+		})
+	}
+}
+
+func TestPromoteValidatedArtifactsActivatesCompleteGeneration(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	execution := prepareTransactionalPromotionExecution(t, workspaceRoot)
+	execution.addArtifacts(
+		Artifact{Path: "reports/as-is/services/legacy.md", Kind: "report", Label: "Legacy Service"},
+		Artifact{Path: "proposals/legacy/proposal.md", Kind: "proposal", Label: "Legacy Proposal"},
+	)
+	if err := execution.promoteValidatedArtifacts(); err != nil {
+		t.Fatalf("promote validated artifacts: %v", err)
+	}
+	assertTransactionalPromotionNewGeneration(t, workspaceRoot)
+	assertArtifactPathMissing(t, execution.artifacts, "reports/as-is/services/legacy.md")
+	assertArtifactPathMissing(t, execution.artifacts, "proposals/legacy/proposal.md")
+	assertArtifactPathPresent(t, execution.artifacts, "proposals/runtime/proposal.md")
+}
+
+func prepareTransactionalPromotionExecution(t *testing.T, workspaceRoot string) *pipelineExecution {
+	t.Helper()
+
+	ws := workspace.Root{Path: workspaceRoot}
+	runID := "run-19b"
+	oldFiles := map[string]string{
+		"reports/as-is/overview.md":                "# Old Overview\n",
+		"reports/as-is/services/legacy.md":         "# Legacy Service\n",
+		"reports/coverage/summary.md":              "# Old Coverage\n",
+		"reports/findings/findings.md":             "# Old Findings\n",
+		"reports/agent-outputs/domains/legacy.md":  "# Legacy Domain\n",
+		"reports/diagrams/c4-context.mmd":          "flowchart LR\n  Old[\"Old\"]\n",
+		"reports/diagrams/components/legacy.mmd":   "flowchart LR\n  Legacy[\"Legacy\"]\n",
+		"proposals/legacy/proposal.md":             "# Legacy Proposal\n",
+		"model/entities/service.old.yaml":          "id: service.old\ntype: service\nname: Old Service\n",
+		"model/edges/service.old_uses_db.old.yaml": "id: service.old_uses_db.old\ntype: uses\nfrom: service.old\nto: db.old\n",
+		"reports/changelog/old.md":                 "# Old Changelog\n",
+	}
+	for rel, content := range oldFiles {
+		writeWorkspaceText(t, workspaceRoot, rel, content)
+	}
+
+	documents := []contracts.FinalRunDocument{
+		{
+			ID:            "doc.overview",
+			Kind:          "report",
+			Title:         "System Overview",
+			CanonicalPath: "reports/as-is/overview.md",
+			StagedPath:    filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "reports", "as-is", "overview.md")),
+		},
+		{
+			ID:            "doc.coverage",
+			Kind:          "report",
+			Title:         "Coverage Summary",
+			CanonicalPath: "reports/coverage/summary.md",
+			StagedPath:    filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "reports", "coverage", "summary.md")),
+		},
+		{
+			ID:            "doc.proposal",
+			Kind:          "proposal",
+			Title:         "Runtime Proposal",
+			CanonicalPath: "proposals/runtime/proposal.md",
+			StagedPath:    filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "proposals", "runtime", "proposal.md")),
+		},
+		{
+			ID:            "doc.changelog",
+			Kind:          "changelog",
+			Title:         "Runtime Changelog",
+			CanonicalPath: "reports/changelog/runtime-proposals.md",
+			StagedPath:    filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "reports", "changelog", "runtime-proposals.md")),
+		},
+	}
+	stagedContents := map[string]string{
+		"reports/as-is/overview.md":              "# New Overview\n",
+		"reports/coverage/summary.md":            "# New Coverage\n",
+		"proposals/runtime/proposal.md":          "# Runtime Proposal\n",
+		"reports/changelog/runtime-proposals.md": "# Runtime Changelog\n",
+	}
+	for _, document := range documents {
+		writeWorkspaceText(t, workspaceRoot, document.StagedPath, stagedContents[document.CanonicalPath])
+	}
+
+	return &pipelineExecution{
+		runID:     runID,
+		workspace: ws,
+		store:     model.NewStore(ws),
+		compiler:  reports.NewCompiler(ws),
+		pipelineRunProgressState: pipelineRunProgressState{
+			stepStatus: RunInfo{CurrentStep: "init.step4.proposals"},
+		},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				Version:            1,
+				RunID:              runID,
+				GeneratedAt:        time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+				CanonicalDocuments: documents,
+				Semantic: contracts.SemanticSnapshot{
+					Entities: []contracts.Entity{
+						{
+							ID:   "service.new",
+							Type: "service",
+							Name: "New Service",
+							Provenance: contracts.Provenance{
+								Kind:       "observation",
+								Confidence: 0.9,
+								Evidence:   []contracts.Evidence{{Repo: "checkout", Path: "cmd/new/main.go"}},
+							},
+						},
+						{
+							ID:   "datastore.newdb",
+							Type: "datastore",
+							Name: "New DB",
+							Provenance: contracts.Provenance{
+								Kind:       "observation",
+								Confidence: 0.8,
+								Evidence:   []contracts.Evidence{{Repo: "checkout", Path: "db/schema.sql"}},
+							},
+						},
+					},
+					Edges: []contracts.Edge{
+						{
+							Type: "stores_data_in",
+							From: "service.new",
+							To:   "datastore.newdb",
+							Provenance: contracts.Provenance{
+								Kind:       "observation",
+								Confidence: 0.8,
+								Evidence:   []contracts.Evidence{{Repo: "checkout", Path: "cmd/new/main.go"}},
+							},
+						},
+					},
+				},
+			},
+			validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
+		},
+	}
+}
+
+func assertTransactionalPromotionOldGeneration(t *testing.T, workspaceRoot string) {
+	t.Helper()
+	assertFileContains(t, workspaceRoot, "reports/as-is/overview.md", "Old Overview")
+	assertFileContains(t, workspaceRoot, "reports/as-is/services/legacy.md", "Legacy Service")
+	assertFileContains(t, workspaceRoot, "reports/coverage/summary.md", "Old Coverage")
+	assertFileContains(t, workspaceRoot, "reports/findings/findings.md", "Old Findings")
+	assertFileContains(t, workspaceRoot, "reports/agent-outputs/domains/legacy.md", "Legacy Domain")
+	assertFileContains(t, workspaceRoot, "reports/diagrams/c4-context.mmd", "Old")
+	assertFileContains(t, workspaceRoot, "reports/diagrams/components/legacy.mmd", "Legacy")
+	assertFileContains(t, workspaceRoot, "proposals/legacy/proposal.md", "Legacy Proposal")
+	assertFileContains(t, workspaceRoot, "model/entities/service.old.yaml", "service.old")
+	assertFileMissing(t, workspaceRoot, "model/entities/service.new.yaml")
+	assertFileMissing(t, workspaceRoot, "proposals/runtime/proposal.md")
+	assertFileContains(t, workspaceRoot, "reports/changelog/old.md", "Old Changelog")
+	assertFileMissing(t, workspaceRoot, "reports/changelog/runtime-proposals.md")
+}
+
+func assertTransactionalPromotionNewGeneration(t *testing.T, workspaceRoot string) {
+	t.Helper()
+	assertFileContains(t, workspaceRoot, "reports/as-is/overview.md", "New Overview")
+	assertFileMissing(t, workspaceRoot, "reports/as-is/services/legacy.md")
+	assertFileContains(t, workspaceRoot, "reports/coverage/summary.md", "New Coverage")
+	assertFileMissing(t, workspaceRoot, "reports/findings/findings.md")
+	assertFileMissing(t, workspaceRoot, "reports/agent-outputs/domains/legacy.md")
+	assertFileContains(t, workspaceRoot, "reports/diagrams/c4-context.mmd", "New Service")
+	assertFileMissing(t, workspaceRoot, "reports/diagrams/components/legacy.mmd")
+	assertFileMissing(t, workspaceRoot, "proposals/legacy/proposal.md")
+	assertFileContains(t, workspaceRoot, "proposals/runtime/proposal.md", "Runtime Proposal")
+	assertFileContains(t, workspaceRoot, "model/entities/service.new.yaml", "service.new")
+	assertFileMissing(t, workspaceRoot, "model/entities/service.old.yaml")
+	assertFileContains(t, workspaceRoot, "reports/changelog/old.md", "Old Changelog")
+	assertFileContains(t, workspaceRoot, "reports/changelog/runtime-proposals.md", "Runtime Changelog")
+}
+
+func assertFileContains(t *testing.T, workspaceRoot string, rel string, needle string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(workspaceRoot, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	if !strings.Contains(string(raw), needle) {
+		t.Fatalf("expected %s to contain %q, got %q", rel, needle, string(raw))
+	}
+}
+
+func assertFileMissing(t *testing.T, workspaceRoot string, rel string) {
+	t.Helper()
+	_, err := os.Stat(filepath.Join(workspaceRoot, filepath.FromSlash(rel)))
+	if !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be missing, stat err=%v", rel, err)
+	}
+}
+
+func assertArtifactPathMissing(t *testing.T, artifacts []Artifact, path string) {
+	t.Helper()
+	for _, artifact := range artifacts {
+		if artifact.Path == path {
+			t.Fatalf("expected artifact path %s to be removed, artifacts=%v", path, artifacts)
+		}
+	}
+}
+
+func assertArtifactPathPresent(t *testing.T, artifacts []Artifact, path string) {
+	t.Helper()
+	for _, artifact := range artifacts {
+		if artifact.Path == path {
+			return
+		}
+	}
+	t.Fatalf("expected artifact path %s to be present, artifacts=%v", path, artifacts)
 }
 
 func TestStageProposalDraftOutputsUpdatesFinalRunIndex(t *testing.T) {

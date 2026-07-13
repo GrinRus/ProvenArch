@@ -99,8 +99,10 @@ for transactional promotion and reliable run lifecycle recovery.
       where the existing ownership boundary is clear.
 - [x] Add fault-injection coverage for write, sync and rename failure points.
 - [x] Keep the PR deterministic: no live provider dependency and no release matrix changes.
-- [ ] Continue PR-1 with `19B` transactional canonical promotion after `19A` review/commit
+- [x] Continue PR-1 with `19B` transactional canonical promotion after `19A` review/commit
       boundary is stable.
+- [ ] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary
+      is stable.
 
 ### Non-goals
 - [ ] Do not implement `19B` transactional canonical promotion in the first pass.
@@ -133,7 +135,7 @@ for transactional promotion and reliable run lifecycle recovery.
       and records a diagnostic path instead of returning an empty history.
 - [x] Run-history persistence errors are returned or logged through existing lifecycle status
       paths instead of being discarded.
-- [ ] Targeted packages pass under `go test`, and the full PR eventually passes
+- [x] Targeted packages pass under `go test`, and the full PR eventually passes
       `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Risks
@@ -156,6 +158,86 @@ for transactional promotion and reliable run lifecycle recovery.
 - 2026-07-13: Installed exact Node.js `22.21.1` outside the repo and reran the canonical
   `19A` gate with `ACP_NODE_TOOL_CANDIDATES`. `make contracts`, `make test`, `make lint` and
   `make build` all pass; `make build` produced no tracked embedded-UI drift.
+
+### Plan ID
+EP-20260713-epic-19-19b-transactional-promotion
+
+### Context
+`19B` follows the committed `19A` atomic persistence foundation. Current docflow promotion
+copies validated staged documents into canonical `reports/*`/`proposals/*`, removes stale
+managed files, then rebuilds `model/*` and `reports/diagrams/*` directly in the live
+workspace. A mid-promotion copy/remove/model/diagram failure can therefore leave mixed
+old/new bytes visible under canonical paths.
+
+### Goals (must have)
+- [x] Make canonical promotion transactional for managed generated surfaces: prepare a complete
+      promotion generation outside canonical paths, validate it, then activate it with a journaled
+      rollback path so a failed promotion leaves either the previous complete generation or the new
+      complete generation visible, never a mixed generation.
+- [ ] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change public artifact schemas, final-run-index shape or provider contracts.
+- [ ] Do not change live provider selection, release matrices or live E2E gates.
+- [ ] Do not introduce user authentication, hosted mode or security enforcement.
+- [ ] Do not refactor unrelated report/model compiler behavior beyond the promotion boundary.
+
+### Implementation
+1) Build a run-scoped promotion generation under `reports/taskruns/<run_id>/staging/` rather
+   than writing any canonical managed path directly.
+2) Populate the generation with all `finalRunIndex.CanonicalDocuments` from their staged paths,
+   rebuild `model/entities` and `model/edges` inside that generation, and compile diagrams
+   against the generated model before canonical activation.
+3) Treat managed canonical replacement surfaces as generation roots:
+   `reports/as-is`, `reports/coverage`, `reports/findings`, `reports/agent-outputs`,
+   `reports/diagrams`, `proposals`, `model/entities`, `model/edges`.
+4) Activate `reports/changelog/*` final-index draft files through the same journal as individual
+   files, while preserving existing changelog history instead of replacing the whole directory.
+5) Validate that every indexed canonical document exists in the generation and that no indexed
+   document targets an unmanaged canonical surface.
+6) Activate the generation by renaming existing managed roots to a journal backup and renaming
+   generation roots into place. On any forward activation failure, rollback processed roots in
+   reverse order before returning the error.
+7) Remove the redundant post-promotion runtime draft copy in proposals handling; draft outputs
+   are already staged into the final run index and must be activated only through the
+   transactional promotion path.
+
+### Interfaces
+No public API or schema changes. Internal-only helpers may be added to
+`internal/orchestrator/docflow_promotion.go` for promotion generation, validation, activation
+and test fault injection.
+
+### Tests
+- Existing promotion tests keep proving FAIL verdict rejection and stale managed-file removal.
+- Add failure-injection coverage across promotion copy/build/activation operations.
+- For each injected failure point, assert canonical generated surfaces remain exactly the
+  previous complete generation; when no injected failure fires, assert the new generation is
+  complete.
+- Include reports, proposals, model and diagrams in the old/new generation assertions.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md` and `docs/STAKEHOLDER_DOC.md` for transactional managed
+  promotion semantics and operator recovery expectations.
+- No schema/example/fixture sync is required because public contracts do not change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers rollback and successful activation.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no canonical writes happen before generation validation and
+      activation.
+
+### Progress log
+- 2026-07-13: Implemented `19B` transactional canonical promotion. Promotion now builds a
+  run-scoped generation, validates indexed documents, rebuilds model/diagrams in staging,
+  activates managed roots with journaled rollback, activates `reports/changelog/*` draft files
+  through per-file journal entries, removes stale artifact registry entries only after successful
+  activation, and removes the redundant post-promotion draft copy. Regression coverage injects
+  failures across copy/model/diagram/activation operations and verifies old-or-new complete
+  generation semantics. Verification passed: `go test ./internal/orchestrator`,
+  `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
