@@ -114,6 +114,8 @@ Top-level required fields:
 Semantic role:
 - описывает authored shard docs внутри shard staging root
 - связывает документы с canonical stable paths, topics и citation ids
+- `documents[]` и `citations[]` должны быть non-empty; каждый authored document обязан иметь
+  non-empty `citation_ids[]`, а каждая citation — non-empty `claim_ids[]` и `document_ids[]`
 - несёт semantic snapshot для derived model layer
 - schema-level rejection блокирует known legacy aliases: `covered_topics`, `question`, `relation`, `source`, `target`, finding `summary`/`inference`, `evidence_citation_ids`, top-level `step_contract`/`compatibility`
 - validator-level path hygiene дополнительно reject-ит `documents[].path`, если он указывает на hidden/provider/tool side-effect directory (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`), даже если файл физически существует под shard `write_root`

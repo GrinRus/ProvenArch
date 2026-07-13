@@ -109,8 +109,10 @@ for transactional promotion and reliable run lifecycle recovery.
       boundary is stable.
 - [x] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
       boundary is stable.
-- [ ] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
+- [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
       boundary is stable.
+- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not implement `19B` transactional canonical promotion in the first pass.
@@ -502,8 +504,10 @@ user-owned `path` checkouts non-mutating and must not change the `workspace.yaml
 - [x] Keep `path` sources read-only: validation may compare refs and warn, but must not mutate
       user checkouts.
 - [x] Add no live-network dependency; tests use local temporary repositories and bare remotes.
-- [ ] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
+- [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
       boundary is stable.
+- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
 
 ### Non-goals
 - [ ] Do not change `workspace.yaml` schema or provider list.
@@ -567,6 +571,93 @@ containing the same resolved SHA evidence for execution runs.
   run-log SHA evidence. Verification passed: `go test ./internal/workspace ./internal/orchestrator`,
   `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19g-minimum-collect-evidence-contract
+
+### Context
+`19G` follows committed `19F` and must land before `19H`. The active shard-pack schema requires
+`documents`, `citations`, `documents[].citation_ids`, `citations[].claim_ids` and
+`citations[].document_ids` fields, but schema arrays can still be empty and contract validation
+does not reject authored documents without citation IDs. That lets sparse/no-evidence collect
+packets reach checkpoint/apply paths instead of the existing collect repair/terminal path.
+
+### Goals (must have)
+- [x] Make non-empty `documents[]` and `citations[]` an explicit shard-pack schema and runtime
+      contract requirement.
+- [x] Make every authored `documents[].citation_ids` array non-empty and require its values to
+      reference existing citation IDs.
+- [x] Keep existing `citations[].claim_ids` and `citations[].document_ids` non-empty behavior,
+      and mirror it at schema level with clear validation errors.
+- [x] Ensure invalid sparse collect packs fail before checkpoint/apply and continue through the
+      existing repair/terminal classification paths.
+- [x] Synchronize schema docs, examples/fixtures and tests without changing `workspace.yaml`,
+      provider list, live matrices or Epic 20 UI behavior.
+- [ ] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not implement `19H` reverse citation symmetry (`citation.document_ids` resolving to
+      current documents and remap checks) in this slice.
+- [ ] Do not change final-run-index or citation-index schemas.
+- [ ] Do not weaken collect repair/recovery policy or synthesize provider-authored markdown.
+- [ ] Do not require live providers or network access.
+
+### Implementation
+1) Update `schemas/shard-pack-manifest.schema.json` with `minItems: 1` for `documents`,
+   `citations`, `documents[].citation_ids`, `citations[].claim_ids` and
+   `citations[].document_ids`.
+2) Tighten `internal/contracts` semantic validation so empty documents/citations and
+   authored documents without citation IDs produce deterministic messages.
+3) Adjust artifactquality/providercommon tests that previously treated empty collect packs as
+   valid; add negative cases for empty arrays and missing document citation IDs plus a positive
+   minimal manifest.
+4) Verify runtime apply/monitor surfaces still use `ValidateCollectManifestInRoot` so invalid
+   packs fail before checkpoint/apply.
+5) Sync schema docs in `docs/APPENDIX_SCHEMAS.md`, `docs/spec/PIPELINE_SPEC.md`, examples,
+   testing docs and ADR rationale.
+
+### Interfaces
+Public schema change: `shard-pack-manifest.schema.json` now rejects empty collect
+documents/citations and empty citation binding arrays. Workspace/API schemas do not change.
+
+### Tests
+- Schema/contract test rejects `documents: []`.
+- Schema/contract test rejects `citations: []`.
+- Contract test rejects authored document with empty `citation_ids`.
+- Contract test keeps rejecting missing/empty `citations[].claim_ids` and
+  `citations[].document_ids`.
+- Artifactquality/runtime validation test proves sparse collect pack fails before apply and a
+  valid minimal pack passes.
+
+### Docs/fixtures
+- Update `schemas/shard-pack-manifest.schema.json`, `docs/APPENDIX_SCHEMAS.md`,
+  `docs/spec/PIPELINE_SPEC.md`, `docs/TESTING_STRATEGY.md`, `examples/shard-pack-manifest.example.json`
+  if needed, and affected test fixtures/golden snippets.
+
+### Acceptance
+- [x] `make contracts` passes with the stricter shard-pack schema.
+- [x] `go test ./internal/contracts ./internal/artifactquality ./internal/runtime/providercommon`
+      passes.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms `19H` reverse-link/remap behavior was not implemented early.
+- [x] Commit `19G: require collect evidence bindings`.
+
+### Progress log
+- 2026-07-13: Started `19G` after clean `19F` commit. Schema-guardian and test-fixtures rules
+  apply because this slice changes shard-pack contract validation and its regression fixtures.
+- 2026-07-13: Implemented `19G`. `shard-pack-manifest.schema.json` now requires non-empty
+  `documents[]`, `citations[]`, `documents[].citation_ids`, `citations[].claim_ids` and
+  `citations[].document_ids`; Go contract validation mirrors the minimum evidence requirement.
+  Sparse collect packs fail strict validation before checkpoint/apply, while valid minimal
+  evidence-backed packs still pass. Existing deterministic claim-binding recovery was updated to
+  recognize the new schema `minItems` wording for empty `claim_ids`; no `19H` reverse
+  `citation.document_ids` resolution/remap behavior was added. Verification passed:
+  `make contracts`, `go test ./internal/contracts ./internal/artifactquality ./internal/runtime/providercommon`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

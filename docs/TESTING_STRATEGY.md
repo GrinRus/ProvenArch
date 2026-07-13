@@ -46,6 +46,9 @@
 - artifact fixtures without live providers в required tests
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 - `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
+- collect contract fixtures must include at least one authored document and one repo-backed
+  citation; sparse `documents: []`, `citations: []`, or empty document/citation binding arrays
+  are negative fixtures, not valid minimal examples
 
 ### Smoke tests
 - CLI smoke

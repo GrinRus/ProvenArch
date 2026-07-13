@@ -176,6 +176,12 @@ func validateShardPackManifest(manifest ShardPackManifest) error {
 	if strings.TrimSpace(manifest.ArtifactRoot) == "" {
 		problems = append(problems, "artifact_root is required")
 	}
+	if len(manifest.Documents) == 0 {
+		problems = append(problems, "documents must contain at least one authored document")
+	}
+	if len(manifest.Citations) == 0 {
+		problems = append(problems, "citations must contain at least one citation")
+	}
 	problems = append(problems, validateDocumentSet(manifest.ArtifactRoot, manifest.Documents, manifest.Citations)...)
 	problems = append(problems, validateCitationSet(manifest.Citations)...)
 	if len(problems) > 0 {
@@ -333,6 +339,9 @@ func validateDocumentSet(artifactRoot string, documents []AuthoredDocument, cita
 			problems = append(problems, label+".id must be unique")
 		}
 		seen[doc.ID] = struct{}{}
+		if len(doc.CitationIDs) == 0 {
+			problems = append(problems, label+".citation_ids is required")
+		}
 		for _, citationID := range doc.CitationIDs {
 			if _, ok := citationIDs[citationID]; !ok {
 				problems = append(problems, fmt.Sprintf("%s references unknown citation_id %q", label, citationID))
