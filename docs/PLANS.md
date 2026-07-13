@@ -80,6 +80,84 @@ Task selection rules:
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
+EP-20260713-epic-19-pr1-remediation
+
+### Context
+Epic 19 is being implemented as one large draft PR on branch
+`codex/epic-19-code-quality-remediation`, with backlog slices `19A..19X` used as internal
+commit and checklist boundaries. Epic 20 remains out of scope until Epic 19 is merged into
+`main`. The first implementation pass is `19A`, because atomic persistence is the prerequisite
+for transactional promotion and reliable run lifecycle recovery.
+
+### Goals (must have)
+- [x] Add a shared atomic persistence primitive for workspace-owned files: temporary file,
+      flushed data, synced parent directory and atomic rename.
+- [x] Preserve a last-good copy for critical persisted state so malformed or partial current
+      files do not collapse into empty history.
+- [x] Stop silently ignoring run-history persistence failures.
+- [x] Move run history, shard summaries and runtime checkpoint writes onto the shared primitive
+      where the existing ownership boundary is clear.
+- [x] Add fault-injection coverage for write, sync and rename failure points.
+- [x] Keep the PR deterministic: no live provider dependency and no release matrix changes.
+- [ ] Continue PR-1 with `19B` transactional canonical promotion after `19A` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not implement `19B` transactional canonical promotion in the first pass.
+- [ ] Do not change public artifact schemas in `19A`.
+- [ ] Do not change provider selection, live matrix inputs or hosted/security scope.
+- [ ] Do not open Epic 20 work until Epic 19 is merged or explicitly rebased after merge.
+
+### Approach
+1) Add the persistence primitive in `internal/workspace` and expose it through the existing
+   `workspace.Root` boundary.
+2) Add focused unit tests for atomic write success, simulated failures and last-good recovery.
+3) Replace the highest-risk direct writes in run-history/shard-checkpoint surfaces first.
+4) Propagate persistence errors to callers where the current code drops them.
+5) Run targeted Go tests, then expand verification as the touched surface grows.
+6) Continue with `19B` only after `19A` has tests and no known crash-consistency regressions.
+
+### Files expected to change
+- `internal/workspace/fs.go`
+- `internal/workspace/*_test.go`
+- `internal/orchestrator/service_runs.go`
+- `internal/orchestrator/sharding_artifacts.go`
+- `internal/orchestrator/restart_reconcile*` if current checkpoint writes require migration
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Atomic writes never leave a partial target file after injected data-write or rename
+      failures.
+- [x] Parent directory sync failures are surfaced as errors in tests.
+- [x] A malformed current run history with a valid last-good copy recovers the last-good state
+      and records a diagnostic path instead of returning an empty history.
+- [x] Run-history persistence errors are returned or logged through existing lifecycle status
+      paths instead of being discarded.
+- [ ] Targeted packages pass under `go test`, and the full PR eventually passes
+      `make contracts`, `make test`, `make lint`, `make build`.
+
+### Risks
+- Some call sites currently use best-effort persistence during terminal cleanup; turning those
+  into hard errors must not strand active run slots.
+- Atomic rename is only atomic within the same filesystem; temp files must stay beside the
+  target.
+- Last-good files are recovery aids, not a second source of truth. Reads must prefer current
+  content when it is valid.
+
+### Progress log
+- 2026-07-13: Created branch `codex/epic-19-code-quality-remediation`; selected `19A` as the
+  first implementation slice and recorded this ExecPlan before code changes.
+- 2026-07-13: Implemented `19A` atomic workspace writes, run-history `.last-good` recovery,
+  persistence error surfacing for async queue start, fault-injection tests and docs sync.
+  Verification passed: `go test ./internal/...`, `go test ./...`, Python harness unit suite
+  (230 tests), focused `go test -race` lifecycle tests and Go build. Full `make contracts`,
+  `make test`, `make lint` and `make build` are blocked locally before repo checks by missing
+  Node.js `22.21.1` (`/opt/homebrew/bin/node` is `25.9.0`).
+- 2026-07-13: Installed exact Node.js `22.21.1` outside the repo and reran the canonical
+  `19A` gate with `ACP_NODE_TOOL_CANDIDATES`. `make contracts`, `make test`, `make lint` and
+  `make build` all pass; `make build` produced no tracked embedded-UI drift.
+
+### Plan ID
 EP-20260711-run-pinned-evidence-review
 
 ### Context

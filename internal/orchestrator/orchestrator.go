@@ -73,9 +73,11 @@ type Service struct {
 	runCancels     map[string]context.CancelFunc
 	cancelRequests map[string]struct{}
 
-	historyWorkspace workspace.Root
-	historyEnabled   bool
-	historyRetention int
+	historyWorkspace           workspace.Root
+	historyEnabled             bool
+	historyRetention           int
+	historyRecoveryDiagnostics []string
+	lastHistoryPersistenceErr  error
 
 	runLogsWorkspace workspace.Root
 	runLogsEnabled   bool

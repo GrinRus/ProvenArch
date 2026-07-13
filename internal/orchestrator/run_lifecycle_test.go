@@ -11,6 +11,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
@@ -168,6 +169,63 @@ func TestTerminalGuardPersistsFailedHistoryOnContextCancellation(t *testing.T) {
 	}
 	if item.FinishedAt == nil {
 		t.Fatal("expected finished_at")
+	}
+}
+
+func TestLoadHistoryFallsBackToLastGoodWhenCurrentIsMalformed(t *testing.T) {
+	ws := createWorkspace(t)
+	startedAt := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	service := NewService(WithHistoryWorkspace(ws))
+	if err := service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:     "run_recovered_history",
+			Pipeline:  string(PipelineInit),
+			Status:    RunStatusSucceeded,
+			StartedAt: startedAt,
+		},
+		artifacts: []Artifact{{Path: "reports/as-is/overview.md", Kind: "report", Label: "Overview"}},
+	}); err != nil {
+		t.Fatalf("store run history: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(ws.Path, runHistoryPath), []byte("{malformed current history\n"), 0o644); err != nil {
+		t.Fatalf("corrupt current history: %v", err)
+	}
+
+	recovered := NewService(WithHistoryWorkspace(ws))
+	info, ok := recovered.GetRun("run_recovered_history")
+	if !ok {
+		t.Fatalf("expected run to be loaded from last-good history")
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected recovered run status %s, got %s", RunStatusSucceeded, info.Status)
+	}
+	if len(recovered.historyRecoveryDiagnostics) == 0 {
+		t.Fatalf("expected recovery diagnostic")
+	}
+	if !strings.Contains(recovered.historyRecoveryDiagnostics[0], runHistoryPath+".last-good") {
+		t.Fatalf("expected diagnostic to name last-good path, got %v", recovered.historyRecoveryDiagnostics)
+	}
+}
+
+func TestStartAsyncRunReturnsHistoryPersistenceError(t *testing.T) {
+	ws := createWorkspace(t)
+	blockingHistoryRoot := filepath.Join(t.TempDir(), "history-root-file")
+	if err := os.WriteFile(blockingHistoryRoot, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("create blocking history root: %v", err)
+	}
+	service := NewService(WithHistoryWorkspace(workspace.Root{Path: blockingHistoryRoot}))
+
+	_, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected history persistence error")
+	}
+	if !strings.Contains(err.Error(), "persist run history") {
+		t.Fatalf("expected persist run history error, got %v", err)
 	}
 }
 
