@@ -405,22 +405,6 @@ normalize_release_mode() {
   esac
 }
 
-normalize_binary_flag() {
-  local raw="$1"
-  local name="$2"
-  case "$raw" in
-    1|true|TRUE|yes|YES|on|ON)
-      printf '1'
-      ;;
-    0|false|FALSE|no|NO|off|OFF|"")
-      printf '0'
-      ;;
-    *)
-      die "$name must be 0|1 (or boolean aliases), got '$raw'"
-      ;;
-  esac
-}
-
 array_contains() {
   local needle="$1"
   shift

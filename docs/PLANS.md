@@ -139,7 +139,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19R3` accessible async announcements after `19R2`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+- [x] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1778,8 +1780,10 @@ back to the offending inputs.
 - [x] Link repo name/source field errors with `aria-invalid` and `aria-describedby`.
 - [x] Preserve existing copy, selectors, onboarding flow and backend/API contracts.
 - [x] Cover alert, polite status and field diagnostic linkage in Vitest.
-- [ ] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+- [x] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
       review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not redesign onboarding, Review/Publish IA or stage composition.
@@ -1835,6 +1839,68 @@ only.
   linked repo field diagnostics with invalid/describedby attributes, added focused accessibility
   regression tests, regenerated embedded UI assets, and completed full DoD with exact Node
   22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s1-shell-dead-code-cleanup
+
+### Context
+`19S1` follows committed `19R3` and starts deterministic quality-gate cleanup before ShellCheck is
+enabled in `19S2`. The code audit confirms three shell/frontend-batch dead-code items:
+`DEAD-011` unused `normalize_binary_flag`, `DEAD-012` unused `run_dod_precheck_make`, and
+`DEAD-013` unused frontend status/reason assignments in active frontend E2E result paths.
+
+### Goals (must have)
+- [x] Remove the unused `normalize_binary_flag` helper from `scripts/full-run-batch-matrix.sh`.
+- [x] Remove the unused `run_dod_precheck_make` helper from `scripts/full-run-batch.sh`.
+- [x] Remove unused `frontend_status` / `frontend_reason` assignments while preserving
+      `frontend_result_summary` validation side effects.
+- [x] Verify targeted reference search no longer finds removed identifiers or assignments.
+- [x] Keep active batch/frontend result classification unchanged.
+- [ ] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1` review/commit boundary
+      is stable.
+
+### Non-goals
+- [ ] Do not enable ShellCheck yet; that is `19S2`.
+- [ ] Do not rewrite batch/matrix harness control flow.
+- [ ] Do not change release matrices, live provider requirements or frontend result taxonomy.
+- [ ] Do not remove unrelated Go/UI dead code; later `19W*`/`19X` slices cover those.
+
+### Implementation
+1) Delete `normalize_binary_flag()` from `scripts/full-run-batch-matrix.sh`.
+2) Delete `run_dod_precheck_make()` from `scripts/full-run-batch.sh`.
+3) Replace `frontend_summary` parsing assignments with a validation-only call or scoped discard
+   that keeps malformed/missing frontend result detection behavior unchanged.
+4) Run targeted reference searches for removed function names and assignment names.
+5) Run targeted bash syntax and existing script tests before full DoD.
+
+### Interfaces
+Shell cleanup only. No backend, schema, UI source, workspace, artifact or HTTP interfaces change.
+
+### Tests
+- `rg` finds no active references to `normalize_binary_flag` or `run_dod_precheck_make`.
+- `rg` finds no `frontend_status=` / `frontend_reason=` assignments in `scripts/full-run-batch.sh`.
+- Bash syntax checks pass for touched scripts.
+- Existing Python script tests pass.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; audit/backlog status is reconciled in the
+  final Epic 19 reconciliation slice.
+
+### Acceptance
+- [x] Targeted reference search and bash syntax checks pass.
+- [x] Python script tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no ShellCheck enablement, release-matrix, live-provider or unrelated
+      cleanup scope leaked into this slice.
+- [x] Commit `19S1: remove unused shell helpers`.
+
+### Progress log
+- 2026-07-14: Started `19S1` after clean `19R3` commit. Spec-first rules apply because this is a
+  focused backlog cleanup slice with explicit audit IDs and deterministic test gates.
+- 2026-07-14: Removed the confirmed unused shell helpers and frontend status/reason assignments,
+  verified reference search and bash syntax, ran Python script tests, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
