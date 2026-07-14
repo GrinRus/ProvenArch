@@ -2913,6 +2913,68 @@ describe("App", () => {
     });
   });
 
+  it("keeps an accepted start run selected when the first detail GET fails and later recovers", async () => {
+    const runID = "run-start-accepted";
+    let startCalls = 0;
+    let statusCalls = 0;
+    const runListItem = {
+      run_id: runID,
+      pipeline: "init",
+      status: "running",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: null,
+      warnings: [],
+      error_code: null,
+      error: null,
+    };
+    const recoveredStatus = {
+      ...runListItem,
+      current_step: "init.step1.collect",
+    };
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: startCalls > 0 ? [runListItem] : [] });
+      }
+      if (method === "POST" && url === "/api/pipeline/init") {
+        startCalls += 1;
+        return jsonResponse({ run_id: runID, status: "queued" });
+      }
+      if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return jsonResponse({ error: { code: "temporary", message: "status temporarily unavailable" } }, 503);
+        }
+        return jsonResponse(recoveredStatus);
+      }
+      if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
+        return jsonResponse({ run_id: runID, artifacts: [] });
+      }
+      if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
+        return jsonResponse({ run_id: runID, items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    fireEvent.click(screen.getByTestId("run-init-btn"));
+
+    await waitFor(() => expect(screen.getByTestId("run-status-run-id").textContent).toBe(runID));
+    expect(screen.getByTestId("run-status-value")).toHaveTextContent("queued");
+    expect(await screen.findByText(`Run ${runID} accepted; reconciling details failed: status temporarily unavailable`)).toBeInTheDocument();
+    expect(startCalls).toBe(1);
+
+    await waitFor(() => expect(screen.getByTestId("run-status-value")).toHaveTextContent("running"), { timeout: 4000 });
+    expect(screen.getByTestId("run-status-panel")).toHaveTextContent("Current step: init.step1.collect");
+    expect(startCalls).toBe(1);
+  }, 10_000);
+
   it("renders pending runtime permission requests for the selected run", async () => {
     const runID = "run-permissions";
     vi.stubGlobal(
@@ -3385,6 +3447,54 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("run-cancel-btn"));
     expect(await screen.findByText(`Cancel requested for ${acceptedRunID}`)).toBeInTheDocument();
   });
+
+  it("keeps an accepted cancel acknowledgement when follow-up reconciliation fails", async () => {
+    const runID = "run-cancel-reconcile";
+    let cancelCalls = 0;
+    let failedListAfterCancel = false;
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        },
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && url === `/api/pipeline/runs/${runID}/cancel`) {
+        cancelCalls += 1;
+        return jsonResponse({ status: "cancel_requested" }, 202);
+      }
+      if (cancelCalls > 0 && !failedListAfterCancel && method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        failedListAfterCancel = true;
+        return jsonResponse({ error: { code: "temporary", message: "run list temporarily unavailable" } }, 503);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await screen.findByTestId("run-status-panel");
+    fireEvent.click(screen.getByTestId("run-cancel-btn"));
+
+    expect(await screen.findByText(`Cancel requested for ${runID}; reconciling details failed: run list temporarily unavailable`)).toBeInTheDocument();
+    expect(cancelCalls).toBe(1);
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  }, 10_000);
 
   it("switches away from a missing run when cancel returns 404", async () => {
     const baseFetch = createFetchMock();

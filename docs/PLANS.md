@@ -695,6 +695,8 @@ that every remapped citation document ID resolves to the current final-run docum
       boundary is stable.
 - [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change JSON schema field names or add a new snapshot/citation schema version.
@@ -791,6 +793,8 @@ older run label.
       staged bytes; older selection must not read current canonical content.
 - [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not implement Epic 20 source-mode UI copy (`Run snapshot` / `Current workspace`) in this
@@ -876,6 +880,8 @@ request generation to update the visible panel.
 - [x] Treat unmount/selection aborts as silent cancellation, not user-visible errors.
 - [x] Continue PR-1 with `19K1` run mutation acknowledgement after `19J` review/commit boundary
       is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change backend APIs, JSON schemas, final-run-index semantics or provider/runtime
@@ -940,6 +946,87 @@ the only documentation update unless implementation changes visible loading/erro
   artifact preview and Git diff ordering while keeping the `19I` historical snapshot regression
   green. Verification passed: UI typecheck, UI Vitest `96/96`, and full DoD with exact Node
   22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19k1-run-mutation-acknowledgement
+
+### Context
+`19K1` follows committed `19J`. The UI already receives accepted `POST /api/pipeline/init|refresh`
+and `POST /api/pipeline/runs/<run_id>/cancel` responses, but follow-up detail/list/log requests
+still execute inside the same mutation try/catch. If a post-acknowledgement GET fails, the UI can
+present the accepted mutation as a failed start/cancel instead of a recoverable reconciliation
+state. This creates duplicate-action risk and hides the server-accepted `run_id`.
+
+### Goals (must have)
+- [x] Preserve an accepted start response as provisional selected run state immediately.
+- [x] Treat the first failed follow-up status/list/log request after accepted start as
+      reconciliation status, not failed mutation.
+- [x] Preserve accepted cancel acknowledgement after `202` even if follow-up list/status/log
+      reconciliation fails.
+- [x] Avoid duplicate start/cancel requests after accepted mutation acknowledgement.
+- [x] Reuse the `19J` request-gated detail loading behavior without introducing another async
+      state primitive.
+- [ ] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change backend APIs, schemas or run start/cancel response formats.
+- [ ] Do not implement Q&A provisional ordering; that remains `19K2`.
+- [ ] Do not implement manifest/editor dirty-draft safety; that remains `19L`.
+- [ ] Do not change queue semantics, active-run blocking or Epic 20 explicit queue workflow.
+
+### Implementation
+1) In `useRunActions`, split accepted mutation acknowledgement from follow-up reconciliation.
+   `handleRunPipeline` should upsert the provisional run, select it and show accepted copy before
+   any status/log/list reconciliation is attempted.
+2) Add a small internal reconciliation helper for post-start detail/list/log loading. It may set
+   `runActionStatus` to a recovery message when detail loading fails, but it must not set the
+   global mutation error or return `false` after the start POST succeeded.
+3) Apply the same boundary to cancel `202`: the accepted cancel message remains visible if
+   follow-up list/status/log loading fails.
+4) Keep existing 404 and 409 cancel handling unchanged except for making post-acknowledgement
+   detail failures recoverable.
+5) Add UI regressions where POST succeeds and the first follow-up GET fails, proving the accepted
+   run/cancel state remains selected and no duplicate mutation is sent.
+
+### Interfaces
+Frontend-only behavior change in run explorer state. HTTP, backend, schemas and public artifact
+contracts remain unchanged.
+
+### Tests
+- Start POST succeeds and first `GET /api/pipeline/runs/<run_id>` fails; UI still shows the
+  accepted provisional `run_id`, reports reconciliation status and sends only one start request.
+- Later polling/list recovery for the same `run_id` replaces provisional state with server status.
+- Cancel `202` followed by failed list/status/log reconciliation keeps `Cancel requested for
+  <run_id>` visible and sends only one cancel request.
+- Existing missing-run cancel `404`, already-terminal `409`, `19J` stale-response and `19I`
+  historical snapshot tests remain green.
+
+### Docs/fixtures
+No operator documentation, schema, example or fixture changes are expected. `docs/PLANS.md` is
+the only documentation update unless implementation changes user-facing recovery copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` mutation acknowledgement tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19K2`, `19L`, queue semantics or Epic 20 work leaked into this
+      slice.
+- [x] Commit `19K1: acknowledge accepted run mutations`.
+
+### Progress log
+- 2026-07-14: Started `19K1` after clean `19J` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend mutation acknowledgement and recovery states.
+- 2026-07-14: Implemented `19K1`. Accepted pipeline starts now upsert and select a provisional
+  run before follow-up status/log/list reconciliation, and accepted cancels preserve their
+  acknowledgement when post-acknowledgement reconciliation fails. Regression coverage proves
+  start/cancel POSTs are not duplicated and later polling reconciles the same accepted run ID.
+  During full DoD, docs-sync exposed completed `19H`-`19J` active plans without open follow-up
+  goals, so those plans now keep an explicit final-reconciliation archive goal. Verification
+  passed: UI typecheck, targeted App mutation acknowledgement tests, UI Vitest `98/98`,
+  `go test ./internal/docsync`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

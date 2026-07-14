@@ -168,31 +168,31 @@ export function useRunActions({
       setRunActionStatus("");
       clearArtifacts();
       resetRunLogs();
+      let acceptedRunID = "";
       try {
         const payload = await startPipelineRun(pipeline);
+        acceptedRunID = payload.run_id;
+        const provisionalRun = buildProvisionalRun(pipeline, payload);
         dispatch({
           type: "upsertRunListItem",
-          item: {
-            run_id: payload.run_id,
-            pipeline,
-            status: "queued",
-            started_at: new Date().toISOString(),
-            finished_at: null,
-            warnings: [],
-            error_code: null,
-            error: null,
-          },
+          item: provisionalRun,
         });
         setRunID(payload.run_id);
-        setRunStatus(null);
+        setRunStatus(provisionalRun);
+        setRunActionStatus(`Run ${payload.run_id} accepted; reconciling details.`);
         const status = await fetchRunStatus(payload.run_id);
         await fetchRunLogs(payload.run_id, true);
         if (status && finalStatuses.has(status.status)) {
           await fetchRunLogsUntilEOF(payload.run_id);
         }
         await loadRunList(100);
+        setRunActionStatus("");
         return true;
       } catch (requestError) {
+        if (acceptedRunID) {
+          setRunActionStatus(`Run ${acceptedRunID} accepted; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
+          return true;
+        }
         setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
         return false;
       } finally {
@@ -227,12 +227,16 @@ export function useRunActions({
 
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
-        await loadRunList(100);
-        const status = await fetchRunStatus(runId);
-        if (status && finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(runId);
-        } else {
-          await fetchRunLogs(runId, false);
+        try {
+          await loadRunList(100);
+          const status = await fetchRunStatus(runId);
+          if (status && finalStatuses.has(status.status)) {
+            await fetchRunLogsUntilEOF(runId);
+          } else {
+            await fetchRunLogs(runId, false);
+          }
+        } catch (requestError) {
+          setRunActionStatus(`Cancel requested for ${runId}; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
         }
         return;
       }
@@ -306,4 +310,28 @@ function activeRunResumeMessage(status: string, runID: string): string {
     return `Resumed active run ${runID}.`;
   }
   return `Selected latest completed run ${runID}.`;
+}
+
+function buildProvisionalRun(pipeline: "init" | "refresh", payload: { run_id: string; status: string }): RunStatusResponse {
+  return {
+    run_id: payload.run_id,
+    pipeline,
+    status: normalizeRunStartStatus(payload.status),
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    warnings: [],
+    error_code: null,
+    error: null,
+  };
+}
+
+function normalizeRunStartStatus(status: string): RunStatusResponse["status"] {
+  if (status === "queued" || status === "running" || status === "succeeded" || status === "failed") {
+    return status;
+  }
+  return "queued";
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
