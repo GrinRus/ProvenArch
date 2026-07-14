@@ -157,7 +157,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2`
+- [x] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2490,6 +2492,68 @@ interfaces change.
 - 2026-07-14: Removed the four legacy sharding wrappers, confirmed no remaining
   `internal/orchestrator` references, ran deterministic sharding/orchestrator tests, and completed
   full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w3-provider-argument-wrapper-cleanup
+
+### Context
+`19W3` follows committed `19W2`. `docs/BACKLOG.md` marks `DEAD-005` as provider argument wrapper
+cleanup: remove legacy default-argument entry points and keep the permission-aware builders as the
+only implementation surface. The active Claude/Qwen/Codex adapters already call
+`build*ArgsWithPermissions(...)` when no custom args are supplied.
+
+### Goals (must have)
+- [x] Remove unused `buildDefaultClaudeArgs`, `buildDefaultQwenArgs` and `buildDefaultCodexArgs`.
+- [x] Keep permission-aware builders for Claude, Qwen and Codex unchanged.
+- [x] Keep custom-argument sanitization behavior unchanged.
+- [x] Verify Claude/Qwen/Codex adapter argument tests still pass.
+- [x] Verify removed default entry point identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change provider command arguments, sandbox/permission modes or defaults.
+- [ ] Do not change provider list or runtime selection.
+- [ ] Do not change prompt contracts, recovery policy or process execution behavior.
+- [ ] Do not start `19W4` docflow compatibility cleanup in this slice.
+
+### Implementation
+1) Delete the three unused `buildDefault*Args` functions from Claude/Qwen/Codex adapters.
+2) Keep `build*ArgsWithPermissions(...)` and existing `build*ArgsWithIncludeDirectories(...)`
+   helpers because tests and explicit include-dir coverage still use them.
+3) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No backend API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtime/claudecode ./internal/runtime/qwencode ./internal/runtime/codexcode -count=1`.
+- Reference search for removed default entry point identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Three legacy provider default-argument entry points are removed without aliases/replacements.
+- [x] Permission-aware builders and custom-arg stripping paths remain unchanged.
+- [x] Claude/Qwen/Codex argument tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W4` docflow work.
+- [x] Commit `19W3: remove provider argument wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W3` after clean `19W2` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  provider argument forwarding dead surfaces only.
+- 2026-07-14: Removed the three legacy default provider argument functions, confirmed no remaining
+  `internal/runtime` references, ran Claude/Qwen/Codex adapter tests, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
