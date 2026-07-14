@@ -155,7 +155,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1`
+- [x] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2421,6 +2423,72 @@ interfaces change.
 - 2026-07-14: Replaced orchestrator runtime-draft aliases/wrappers with direct
   `runtimedrafts` imports/calls, kept orchestrator-specific draft publication helpers, verified
   removed identifiers have no `internal/orchestrator` references, and completed targeted tests plus
+  full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w2-sharding-wrapper-cleanup
+
+### Context
+`19W2` follows committed `19W1`. `docs/BACKLOG.md` marks `DEAD-004` as removal of four legacy
+sharding planner/artifact wrappers. Current code still has unused forwarding helpers around the
+canonical sharding planner input functions and taskrun path builder. This slice removes only those
+dead wrappers; active planner/scheduler/store entrypoints remain unchanged.
+
+### Goals (must have)
+- [x] Remove unused sharding planner wrappers `resolveRepoPath`, `planScopePaths` and
+      `discoverHeuristicShardPaths`.
+- [x] Remove unused sharding artifact wrapper `singleShardTaskrunPath`.
+- [x] Keep canonical `*ForInput` planner functions and active taskrun path helpers unchanged.
+- [x] Verify deterministic sharding tests still pass.
+- [x] Verify removed wrapper identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change shard planning heuristics, semantic graph discovery, path filtering or shard
+      IDs.
+- [ ] Do not change shard summary/plan JSON contracts.
+- [ ] Do not change scheduler, checkpoint replay or best-effort failure policy behavior.
+- [ ] Do not start `19W3` provider argument cleanup in this slice.
+
+### Implementation
+1) Delete the unused `pipelineExecution` forwarding methods in `sharding_planner.go`.
+2) Delete the unused `discoverHeuristicShardPaths` wrapper and keep
+   `discoverHeuristicShardPathsWithMeta` as the canonical implementation.
+3) Delete the unused `singleShardTaskrunPath` artifact helper and keep `shardTaskrunPath`.
+4) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator -run 'Shard|Sharding' -count=1`.
+- `./scripts/run-go.sh test ./internal/orchestrator -count=1`.
+- Reference search for removed wrapper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Four legacy sharding wrapper functions are removed without aliases/replacements.
+- [x] Canonical sharding planner/artifact helpers remain unchanged.
+- [x] Deterministic sharding tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W3` provider argument work.
+- [x] Commit `19W2: remove sharding wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W2` after clean `19W1` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  sharding forwarding dead surfaces only.
+- 2026-07-14: Removed the four legacy sharding wrappers, confirmed no remaining
+  `internal/orchestrator` references, ran deterministic sharding/orchestrator tests, and completed
   full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID

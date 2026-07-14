@@ -168,11 +168,6 @@ func shardTaskrunPath(runID string, stepID string, domainID string, shardID stri
 	return runtimeExecutionMetadataPath(runID, stepID, shardID)
 }
 
-func singleShardTaskrunPath(runID string, stepID string, domainID string) string {
-	_ = domainID
-	return runtimeExecutionMetadataPath(runID, stepID, "")
-}
-
 func shardTaskrunLabel(stepID string, domainID string, shardID string, singleShard bool) string {
 	if singleShard {
 		if strings.TrimSpace(domainID) != "" {
