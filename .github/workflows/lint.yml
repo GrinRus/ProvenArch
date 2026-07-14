@@ -1,4 +1,4 @@
-name: ui
+name: lint
 
 on:
   pull_request:
@@ -14,11 +14,15 @@ permissions:
   contents: read
 
 jobs:
-  ui:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: .go-version
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
@@ -29,14 +33,5 @@ jobs:
       - name: Install UI dependencies
         run: npm ci --prefix ui
 
-      - name: Run UI tests
-        run: npm run test --prefix ui -- --run
-
-      - name: Build UI
-        run: npm run build --prefix ui
-
-      - name: Verify deterministic UI build
-        run: make verify-ui-determinism
-
-      - name: Verify embedded UI bundle is fresh
-        run: make verify-ui-dist
+      - name: Run canonical lint
+        run: make lint

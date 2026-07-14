@@ -195,6 +195,10 @@ Implemented required jobs:
     tracked embedded bundle is stale
 
 Implemented additional jobs:
+- `lint`
+  - installs UI dependencies, then runs canonical `make lint`
+  - covers Go formatting, ShellCheck for production shell scripts and UI typecheck in one
+    local/CI-equivalent entrypoint
 - `golden`
   - `TestScenarioFixturesDeterministicInitPipeline`
   - `TestScenarioFixtureLayoutExists`
@@ -210,6 +214,9 @@ Implemented additional jobs:
   - `/api/workspace/validate`
   - pipeline status/artifacts/logs endpoints
   - dynamic free port + explicit fail on run polling timeout
+- `ui`
+  - runs UI tests, production build, deterministic build verification and embedded bundle
+    freshness; UI typecheck is owned by canonical `make lint` in the `lint` workflow.
 
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.

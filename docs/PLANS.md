@@ -143,7 +143,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19S3` required PR lint routing after `19S2`
+- [x] Continue PR-1 with `19S3` required PR lint routing after `19S2`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1923,8 +1925,10 @@ behavior changes.
 - [x] Verify current scripts pass ShellCheck.
 - [x] Verify an intentionally broken shell probe fails ShellCheck.
 - [x] Update testing documentation for the new lint baseline.
-- [ ] Continue PR-1 with `19S3` required PR lint routing after `19S2` review/commit boundary is
+- [x] Continue PR-1 with `19S3` required PR lint routing after `19S2` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change PR workflow routing yet; that is `19S3`.
@@ -1972,6 +1976,71 @@ interfaces change.
   narrow ShellCheck suppressions/fix for existing intentional shell idioms, verified current
   scripts plus a failing probe, and completed full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s3-required-pr-lint
+
+### Context
+`19S3` follows committed `19S2`. Canonical `make lint` now runs gofmt, ShellCheck and UI
+typecheck, but PR CI still checks those surfaces only partially and independently. The backlog goal
+is to make required PR lint call the canonical local target without adding live provider or network
+provider dependencies.
+
+### Goals (must have)
+- [x] Add a provider-free PR/push workflow that sets up Go + Node and invokes `make lint`.
+- [x] Install UI dependencies before `make lint` so the canonical UI typecheck path is used.
+- [x] Remove duplicated partial UI typecheck from the UI workflow where safe.
+- [x] Keep UI tests/build/determinism checks in the UI workflow.
+- [x] Update testing documentation to list the canonical PR lint workflow.
+- [ ] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not change branch protection settings or GitHub repository configuration.
+- [ ] Do not add live provider checks to required PR CI.
+- [ ] Do not change release workflow permissions or release evidence gates.
+- [ ] Do not change `make lint` behavior itself; that was `19S2`.
+
+### Implementation
+1) Add `.github/workflows/lint.yml` with checkout, setup-go from `.go-version`, setup-node from
+   `.node-version`, npm cache for `ui/package-lock.json`, `npm ci --prefix ui`, and `make lint`.
+2) Remove the `Typecheck UI` step from `.github/workflows/ui.yml` because canonical lint now owns
+   UI typecheck in PR CI; keep UI test/build/determinism/fresh-dist steps unchanged.
+3) Update `docs/TESTING_STRATEGY.md` implemented jobs section to include the lint workflow and
+   clarify UI workflow no longer duplicates typecheck.
+4) Validate workflow YAML parsing and local `make lint`/full DoD.
+
+### Interfaces
+CI/tooling/docs only. No backend, schema, UI runtime, workspace, artifact, HTTP or live-provider
+interfaces change.
+
+### Tests
+- YAML parse smoke passes for changed workflows.
+- `make lint` passes locally and is the command used by the new workflow.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` CI job list.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Workflow YAML parses.
+- [x] New PR lint workflow invokes canonical `make lint`.
+- [x] UI workflow no longer duplicates `npm run typecheck --prefix ui`.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live-provider, branch-protection, release-permission or unrelated CI
+      scope leaked into this slice.
+- [x] Commit `19S3: route PR lint through make lint`.
+
+### Progress log
+- 2026-07-14: Started `19S3` after clean `19S2` commit. Spec-first and docs-sync rules apply
+  because this slice changes required PR CI composition and documented testing baseline.
+- 2026-07-14: Added provider-free `lint` workflow that runs canonical `make lint`, removed
+  duplicated UI typecheck from the UI workflow while preserving tests/build/drift checks, updated
+  testing docs, verified workflow YAML parsing, and completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
