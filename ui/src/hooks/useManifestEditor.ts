@@ -13,9 +13,12 @@ type UseManifestEditorOptions = {
 export function useManifestEditor({ setBusy, setError }: UseManifestEditorOptions) {
   const [validateResult, setValidateResult] = useState<ValidateResponse | null>(null);
   const [manifestContent, setManifestContent] = useState("");
+  const [manifestStatus, setManifestStatus] = useState("");
   const [guidedRepos, dispatchGuidedRepos] = useReducer(guidedReposReducer, undefined, initialGuidedRepos);
   const [guidedDocsImportsPath, setGuidedDocsImportsPath] = useState("./docs/imports");
   const setupDirtyRef = useRef(false);
+  const manifestContentRef = useRef("");
+  const formRevisionRef = useRef(0);
 
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
@@ -32,12 +35,24 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     return Array.from(grouped.entries()).sort((left, right) => left[0].localeCompare(right[0]));
   }, [validateResult]);
 
+  function markSetupDirty() {
+    setupDirtyRef.current = true;
+    formRevisionRef.current += 1;
+    setValidateResult(null);
+    setManifestStatus("");
+  }
+
+  function isCurrentManifestSave(revision: number, content: string): boolean {
+    return formRevisionRef.current === revision && manifestContentRef.current === content;
+  }
+
   async function loadManifest() {
     try {
       const content = await loadWorkspaceManifest();
       if (setupDirtyRef.current) {
         return;
       }
+      manifestContentRef.current = content;
       setManifestContent(content);
       const guidedSetup = parseGuidedSetupFromManifest(content);
       if (guidedSetup?.repos.length) {
@@ -47,6 +62,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
         setGuidedDocsImportsPath(guidedSetup.docsImportsPath);
       }
     } catch (requestError) {
+      manifestContentRef.current = "";
       setManifestContent("");
       throw requestError;
     }
@@ -68,32 +84,28 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   }
 
   function updateGuidedRepo(id: string, patch: Partial<GuidedRepo>) {
-    setupDirtyRef.current = true;
-    setValidateResult(null);
+    markSetupDirty();
     dispatchGuidedRepos({ type: "update", id, patch });
   }
 
   function handleAddGuidedRepo() {
-    setupDirtyRef.current = true;
-    setValidateResult(null);
+    markSetupDirty();
     dispatchGuidedRepos({ type: "add" });
   }
 
   function handleRemoveGuidedRepo(id: string) {
-    setupDirtyRef.current = true;
-    setValidateResult(null);
+    markSetupDirty();
     dispatchGuidedRepos({ type: "remove", id });
   }
 
   function updateGuidedDocsImportsPath(value: string) {
-    setupDirtyRef.current = true;
-    setValidateResult(null);
+    markSetupDirty();
     setGuidedDocsImportsPath(value);
   }
 
   function updateManifestContent(value: string) {
-    setupDirtyRef.current = true;
-    setValidateResult(null);
+    markSetupDirty();
+    manifestContentRef.current = value;
     setManifestContent(value);
   }
 
@@ -161,10 +173,12 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   }
 
   function handleApplyGuidedWorkspaceSetup() {
-    setupDirtyRef.current = true;
     setError(null);
     try {
-      setManifestContent(buildManifestFromGuidedForm());
+      markSetupDirty();
+      const nextManifest = buildManifestFromGuidedForm();
+      manifestContentRef.current = nextManifest;
+      setManifestContent(nextManifest);
       setValidateResult(null);
     } catch (buildError) {
       setError(buildError instanceof Error ? buildError.message : "failed to apply guided setup");
@@ -176,10 +190,20 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     setError(null);
     try {
       const nextManifest = buildManifestFromGuidedForm();
+      markSetupDirty();
+      const saveRevision = formRevisionRef.current;
+      manifestContentRef.current = nextManifest;
       setManifestContent(nextManifest);
       await saveWorkspaceManifest(nextManifest);
-      setValidateResult(await validateWorkspaceAPI());
-      setupDirtyRef.current = false;
+      const validation = await validateWorkspaceAPI();
+      if (isCurrentManifestSave(saveRevision, nextManifest)) {
+        setValidateResult(validation);
+        setupDirtyRef.current = false;
+        setManifestStatus("Saved workspace.yaml");
+      } else {
+        setupDirtyRef.current = true;
+        setManifestStatus("Saved workspace.yaml; newer unsaved edits remain.");
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to save guided workspace setup");
     } finally {
@@ -190,10 +214,19 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   async function handleSaveManifest() {
     setBusy(true);
     setError(null);
+    const saveRevision = formRevisionRef.current;
+    const saveContent = manifestContentRef.current;
     try {
-      await saveWorkspaceManifest(manifestContent);
-      setValidateResult(await validateWorkspaceAPI());
-      setupDirtyRef.current = false;
+      await saveWorkspaceManifest(saveContent);
+      const validation = await validateWorkspaceAPI();
+      if (isCurrentManifestSave(saveRevision, saveContent)) {
+        setValidateResult(validation);
+        setupDirtyRef.current = false;
+        setManifestStatus("Saved workspace.yaml");
+      } else {
+        setupDirtyRef.current = true;
+        setManifestStatus("Saved workspace.yaml; newer unsaved edits remain.");
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to save manifest");
     } finally {
@@ -205,6 +238,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     validateResult,
     validationDiagnosticsByRepo,
     manifestContent,
+    manifestStatus,
     guidedRepos,
     guidedDocsImportsPath,
     loadManifest,

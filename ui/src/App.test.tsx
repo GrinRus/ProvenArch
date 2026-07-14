@@ -5044,6 +5044,148 @@ describe("App", () => {
     expect(saveCalls.length).toBe(1);
   });
 
+  it("keeps raw workspace.yaml edits dirty when save resolves after newer text", async () => {
+    const saveManifest = deferredResponse();
+    const savedManifests: string[] = [];
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "PUT" && url === "/api/workspace/manifest") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { content?: string };
+        savedManifests.push(body.content ?? "");
+        return saveManifest.promise;
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
+    const editor = await screen.findByLabelText("workspace.yaml content");
+    const savedDraft = 'version: 1\nrepos:\n  - name: "saved-draft"\n    path: "/tmp/saved"\n';
+    const newerDraft = 'version: 1\nrepos:\n  - name: "newer-unsaved-draft"\n    path: "/tmp/newer"\n';
+    fireEvent.change(editor, { target: { value: savedDraft } });
+    fireEvent.click(screen.getByTestId("workspace-raw-save-btn"));
+    fireEvent.change(editor, { target: { value: newerDraft } });
+
+    saveManifest.resolve(jsonResponse({ ok: true }));
+
+    expect(await screen.findByText("Saved workspace.yaml; newer unsaved edits remain.")).toBeInTheDocument();
+    expect(screen.getByLabelText("workspace.yaml content")).toHaveValue(newerDraft);
+    expect(savedManifests).toEqual([savedDraft]);
+    expect(screen.queryByText("Saved workspace.yaml", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("ignores a late baseline artifact load after another path is selected", async () => {
+    const lateOverviewLoad = deferredResponse();
+    let overviewRequested = false;
+    const baseFetch = createFetchMock({
+      artifactText: {
+        "skills/prompt-packs/qa.md": "qa prompt current\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        overviewRequested = true;
+        return lateOverviewLoad.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    await waitFor(() => expect(overviewRequested).toBe(true));
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+
+    const editor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(editor).toHaveValue("qa prompt current\n"));
+
+    lateOverviewLoad.resolve(textResponse("late overview SHOULD NOT OVERWRITE\n"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa prompt current\n");
+      expect(screen.getByLabelText("skills/prompt-packs/qa.md")).not.toHaveValue(expect.stringContaining("SHOULD NOT OVERWRITE"));
+    });
+  }, 10_000);
+
+  it("preserves dirty baseline drafts independently per selected path", async () => {
+    const fetchMock = createFetchMock({
+      artifactText: {
+        "charter/overview.md": "overview baseline\n",
+        "skills/prompt-packs/qa.md": "qa prompt baseline\n",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    const overviewEditor = await screen.findByLabelText("charter/overview.md");
+    await waitFor(() => expect(overviewEditor).toHaveValue("overview baseline\n"));
+    fireEvent.change(overviewEditor, { target: { value: "overview dirty draft\n" } });
+
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    const qaEditor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(qaEditor).toHaveValue("qa prompt baseline\n"));
+    fireEvent.change(qaEditor, { target: { value: "qa dirty draft\n" } });
+
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    expect(await screen.findByLabelText("charter/overview.md")).toHaveValue("overview dirty draft\n");
+
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    expect(await screen.findByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa dirty draft\n");
+  });
+
+  it("keeps baseline edits dirty when save resolves after newer text", async () => {
+    const saveArtifact = deferredResponse();
+    const savedArtifacts: Array<{ path: string; content: string }> = [];
+    const baseFetch = createFetchMock({
+      artifactText: {
+        "skills/prompt-packs/qa.md": "qa prompt baseline\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && url === "/api/artifacts/write") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { path?: string; content?: string };
+        savedArtifacts.push({ path: body.path ?? "", content: body.content ?? "" });
+        return saveArtifact.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    const editor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(editor).toHaveValue("qa prompt baseline\n"));
+    fireEvent.change(editor, { target: { value: "qa prompt save snapshot\n" } });
+    fireEvent.click(screen.getByRole("button", { name: /save selected baseline artifact/i }));
+    fireEvent.change(editor, { target: { value: "qa prompt newer unsaved draft\n" } });
+
+    saveArtifact.resolve(jsonResponse({ ok: true }));
+
+    expect(await screen.findByText("Saved skills/prompt-packs/qa.md; newer unsaved edits remain.")).toBeInTheDocument();
+    expect(screen.getByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa prompt newer unsaved draft\n");
+    expect(savedArtifacts).toEqual([{ path: "skills/prompt-packs/qa.md", content: "qa prompt save snapshot\n" }]);
+  }, 10_000);
+
   it("executes git-helper commit and proposal-branch actions from Charter stage", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);

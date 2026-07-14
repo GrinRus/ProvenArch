@@ -67,6 +67,7 @@ export type SourceStageProps = {
   guidedRepos: GuidedRepo[];
   guidedDocsImportsPath: string;
   manifestContent: string;
+  manifestStatus: string;
   validateResult: ValidateResponse | null;
   validationDiagnosticsByRepo: Array<[string, Diagnostic[]]>;
   doctorResult: DoctorResponse | null;
@@ -88,6 +89,7 @@ export function SourceStagePanel({
   guidedRepos,
   guidedDocsImportsPath,
   manifestContent,
+  manifestStatus,
   validateResult,
   validationDiagnosticsByRepo,
   doctorResult,
@@ -246,6 +248,7 @@ export function SourceStagePanel({
           Save raw workspace.yaml
         </button>
       </details>
+      {manifestStatus ? <p className={manifestStatus.includes("unsaved") ? "status warn" : "status ok"}>{manifestStatus}</p> : null}
       <WorkspaceValidationResult validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
       {doctorStatus ? <p className="status">{doctorStatus}</p> : null}
       {doctorResult ? <DoctorChecklist doctorResult={doctorResult} /> : null}

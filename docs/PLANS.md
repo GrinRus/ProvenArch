@@ -1050,7 +1050,9 @@ recovers.
 - [x] Keep history, selected detail and polling writes keyed so the last selected Q&A run wins.
 - [x] Disable double submit while an accepted Q&A run is reconciling or active.
 - [x] Reuse the `19J` request gate primitive instead of adding another async-state model.
-- [ ] Continue PR-1 with `19L` editor draft safety after `19K2` review/commit boundary is stable.
+- [x] Continue PR-1 with `19L` editor draft safety after `19K2` review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change pipeline start/cancel acknowledgement; that was `19K1`.
@@ -1110,6 +1112,87 @@ update unless implementation changes operator-visible recovery copy.
   delayed detail ordering and disabled double submit while accepted/active. Verification passed:
   UI typecheck, targeted App Q&A ordering tests, UI Vitest `101/101`, and full DoD with exact
   Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19l-editor-revision-safety
+
+### Context
+`19L` follows committed `19K2`. Source manifest saves and Charter baseline artifact editing still
+trust late async completions too broadly. Manifest save handlers always mark setup dirty state
+clean after `save -> validate`, even if the operator edited the form while the save was in
+flight. Baseline artifact loading uses one selected content slot: a late load for an older path
+can overwrite typed content, switching paths loses dirty drafts, and a save completion can report
+the draft clean even when the operator changed the text after save started.
+
+### Goals (must have)
+- [x] Add form revision/snapshot checks to raw manifest and guided Source save paths.
+- [x] Keep Source dirty state dirty when text/form changes after a save starts.
+- [x] Add per-path single-owner draft state for Charter/Baseline editable artifacts.
+- [x] Ignore late artifact loads for old paths or dirty newer drafts.
+- [x] Keep edits made during a deferred artifact save dirty and visible after save resolves.
+- [ ] Continue PR-1 with `19M` reproducible embedded UI build after `19L` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change Git publication, Q&A, pipeline run or queue semantics.
+- [ ] Do not change backend APIs, schemas or artifact write response formats.
+- [ ] Do not redesign Charter editor UX beyond correctness/status copy needed for stale saves.
+- [ ] Do not start Epic 20.
+
+### Implementation
+1) In `useManifestEditor`, track a monotonic form revision and current manifest content ref.
+   Every raw text edit, guided repo edit/import path edit and guided apply increments the
+   revision and marks setup dirty.
+2) Manifest save handlers capture `{revision, manifest}` before the write. After
+   `saveWorkspaceManifest` and validation return, only clear dirty state and accept validation
+   if the current revision/content still match the saved snapshot.
+3) In `useBaselineEditor`, replace single content ownership with a per-path draft map carrying
+   content, loaded content, dirty flag and revision.
+4) Baseline artifact loads capture path/load sequence and only write state if that path is still
+   selected and the draft was not edited after the load started.
+5) Baseline artifact saves capture path/content/revision and only mark the path clean when the
+   draft is unchanged at save completion; otherwise preserve newer text and show status that
+   unsaved edits remain.
+
+### Interfaces
+Frontend-only hook behavior. No HTTP, backend, schema or public artifact contract change.
+
+### Tests
+- Raw manifest edit during deferred save keeps the newer text and does not treat the newer draft
+  as clean.
+- Guided Source edit during deferred save keeps dirty state when form revision changes after save
+  starts.
+- Late baseline artifact load for path A cannot overwrite typed content for selected path B.
+- Switching baseline paths preserves each path's dirty draft content.
+- Editing a baseline artifact during deferred save preserves the newer dirty text after save
+  resolves.
+
+### Docs/fixtures
+No schema, examples or fixtures are expected. `docs/PLANS.md` is the only documentation update
+unless implementation changes operator-visible editor status copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` manifest/editor stale-write tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no Git publication, run/Q&A state, schema or Epic 20 work leaked into
+      this slice.
+- [x] Commit `19L: protect editor drafts from stale writes`.
+
+### Progress log
+- 2026-07-14: Started `19L` after clean `19K2` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend editor async-state correctness and recovery
+  status copy.
+- 2026-07-14: Implemented `19L`. Source manifest saves now capture revision/content snapshots
+  and only mark the form clean when the same draft is still current; stale completions surface
+  `newer unsaved edits remain`. Charter/Baseline editing now owns per-path drafts with
+  load/save revision guards, so late loads for old paths and save completions for superseded
+  text cannot overwrite visible operator edits. Regression coverage includes raw manifest
+  edit-during-save, late baseline load, per-path dirty draft switching and edit-during-save for
+  baseline artifacts. Verification passed: UI typecheck, targeted App stale-write tests, UI
+  Vitest `105/105`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

@@ -156,6 +156,7 @@ export default function App() {
     validateResult,
     validationDiagnosticsByRepo,
     manifestContent,
+    manifestStatus,
     baselineEditorArtifacts,
     baselineBundleWarnings,
     workspaceRootPath,
@@ -928,6 +929,7 @@ export default function App() {
           guidedRepos={guidedRepos}
           guidedDocsImportsPath={guidedDocsImportsPath}
           manifestContent={manifestContent}
+          manifestStatus={manifestStatus}
           validateResult={validateResult}
           validationDiagnosticsByRepo={validationDiagnosticsByRepo}
           doctorResult={setupDoctorResult}
