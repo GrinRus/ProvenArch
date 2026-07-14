@@ -11,6 +11,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
 type RuntimeTaskRequest struct {
@@ -167,7 +168,14 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 	auditErr := e.completeRuntimeWriteAudit(stepID, domainID, resolvedProvider, task, writeAudit)
 	if err != nil {
 		if isDraftOnlyRuntimeStep(stepID) {
-			if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+			if _, _, draftErr := runtimedrafts.ValidateRequiredManifest(
+				task.WriteRoot,
+				task.DraftFinalRoot,
+				task.RunID,
+				task.StepID,
+				task.StepContract,
+				task.ExpectedArtifacts,
+			); draftErr != nil {
 				e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
 					"task_id": task.TaskID,
 					"error":   strings.TrimSpace(draftErr.Error()),
@@ -204,7 +212,14 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		execution = acpruntime.NewExecution(task, resolvedProvider, "", "succeeded", e.clock().UTC(), nil)
 	}
 	if isDraftOnlyRuntimeStep(stepID) {
-		if _, _, draftErr := validateRequiredRuntimeDraftArtifacts(task); draftErr != nil {
+		if _, _, draftErr := runtimedrafts.ValidateRequiredManifest(
+			task.WriteRoot,
+			task.DraftFinalRoot,
+			task.RunID,
+			task.StepID,
+			task.StepContract,
+			task.ExpectedArtifacts,
+		); draftErr != nil {
 			e.logError(stepID, domainID, "runtime draft artifact validation failed", map[string]any{
 				"task_id": task.TaskID,
 				"error":   strings.TrimSpace(draftErr.Error()),

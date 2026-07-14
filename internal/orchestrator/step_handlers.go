@@ -13,6 +13,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -472,7 +473,14 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 	if err != nil {
 		return err
 	}
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	draft, _, err := runtimedrafts.ValidateRequiredManifest(
+		execution.Task.WriteRoot,
+		execution.Task.DraftFinalRoot,
+		execution.Task.RunID,
+		execution.Task.StepID,
+		execution.Task.StepContract,
+		execution.Task.ExpectedArtifacts,
+	)
 	if err != nil {
 		return err
 	}
@@ -535,7 +543,14 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 	if err != nil {
 		return err
 	}
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	draft, _, err := runtimedrafts.ValidateRequiredManifest(
+		execution.Task.WriteRoot,
+		execution.Task.DraftFinalRoot,
+		execution.Task.RunID,
+		execution.Task.StepID,
+		execution.Task.StepContract,
+		execution.Task.ExpectedArtifacts,
+	)
 	if err != nil {
 		return err
 	}

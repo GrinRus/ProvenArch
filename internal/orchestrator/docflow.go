@@ -17,6 +17,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -178,7 +179,7 @@ type DocflowBuildInput struct {
 	ResolvedRepoPaths map[string]string
 	Semantic          contracts.SemanticSnapshot
 	RenderContext     reports.ReportRenderContext
-	AsIsDraftManifest *runtimeDraftManifest
+	AsIsDraftManifest *runtimedrafts.Manifest
 	AsIsDraftRoot     string
 	DomainReports     func() (map[string]string, error)
 	DomainEnvelopes   func() []reports.DomainTaskEnvelope

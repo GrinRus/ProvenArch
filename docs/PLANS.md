@@ -2294,8 +2294,10 @@ entrypoints through a version-checking wrapper.
 - [x] Add setup-python and wrapper usage to workflows that run Python scripts/tests.
 - [x] Add regression tests for matching and wrong Python interpreter discovery.
 - [x] Update CONTRIBUTING and TESTING_STRATEGY bootstrap documentation.
-- [ ] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V` review/commit boundary
+- [x] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V` review/commit boundary
       is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not rewrite every shell heredoc that invokes `python3`; this slice pins repository test
@@ -2347,6 +2349,79 @@ matrix interfaces change.
 - 2026-07-14: Added `.python-version`, `scripts/run-python.sh`, wrapper tests, setup-python
   workflow steps and docs. Verified wrong-version fail-fast behavior and completed full DoD with
   exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w1-runtime-draft-wrapper-cleanup
+
+### Context
+`19W1` follows committed `19V`. `docs/BACKLOG.md` marks `DEAD-003` as an orchestrator
+runtime-draft cleanup: remove local forwarding wrappers and use the canonical
+`internal/runtimedrafts` package directly. The behavior must remain unchanged; this is a
+dead-surface deletion slice after the P1 backend correctness work has stabilized runtime draft
+validation and publication.
+
+### Goals (must have)
+- [x] Remove orchestrator-local runtime-draft type aliases and forwarding wrappers.
+- [x] Replace active orchestrator wrapper call sites with direct `runtimedrafts` calls.
+- [x] Keep orchestrator-specific publication helpers that copy validated draft outputs into the
+      workspace/final staging surface.
+- [x] Verify runtime-draft and orchestrator packages still pass targeted tests.
+- [x] Verify no removed runtime-draft wrapper identifiers remain.
+- [x] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change runtime draft manifest schema, validation rules or prompt contracts.
+- [ ] Do not change provider recovery behavior or artifact quality policy.
+- [ ] Do not change fake runtime draft output generation.
+- [ ] Do not start `19W2` sharding cleanup in this slice.
+
+### Implementation
+1) Convert orchestrator state/test types from `runtimeDraftManifest` and `runtimeDraftOutput` to
+   `runtimedrafts.Manifest` and `runtimedrafts.Output`.
+2) Replace `validateRequiredRuntimeDraftArtifacts(...)` call sites with
+   `runtimedrafts.ValidateRequiredManifest(...)` using the current task fields.
+3) Delete unused forwarding wrappers in `internal/orchestrator/runtime_drafts.go`:
+   manifest load/validation wrappers, required-manifest-file wrapper, required-artifacts wrapper
+   and task-validation wrapper.
+4) Keep `applyRuntimeDraftOutputs(...)` and `draftManifestHasPrefix(...)` because they contain
+   orchestrator-specific publish/index behavior rather than package forwarding.
+5) Run gofmt and focused searches for removed identifiers.
+
+### Interfaces
+Internal Go package cleanup only. No backend API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtimedrafts ./internal/orchestrator -count=1`.
+- `./scripts/run-go.sh test ./internal/runtime/providercommon ./internal/runtime/fakeruntime -count=1`
+  as regression coverage for runtime draft consumers outside orchestrator.
+- Reference search for removed wrapper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Orchestrator active call sites import and call `internal/runtimedrafts` directly.
+- [x] Removed wrapper identifiers have no remaining code references.
+- [x] Targeted runtime draft/orchestrator tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this slice is behavior-neutral dead-code cleanup and does not include
+      `19W2` sharding work.
+- [x] Commit `19W1: remove runtime draft wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W1` after clean `19V` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  forwarding dead surfaces only.
+- 2026-07-14: Replaced orchestrator runtime-draft aliases/wrappers with direct
+  `runtimedrafts` imports/calls, kept orchestrator-specific draft publication helpers, verified
+  removed identifiers have no `internal/orchestrator` references, and completed targeted tests plus
+  full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

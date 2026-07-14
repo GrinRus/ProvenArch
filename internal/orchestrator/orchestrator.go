@@ -16,6 +16,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -568,11 +569,11 @@ type pipelineSemanticDocflowState struct {
 }
 
 type pipelineDraftState struct {
-	step0DraftManifest     *runtimeDraftManifest
+	step0DraftManifest     *runtimedrafts.Manifest
 	step0DraftRoot         string
-	asIsDraftManifest      *runtimeDraftManifest
+	asIsDraftManifest      *runtimedrafts.Manifest
 	asIsDraftRoot          string
-	proposalsDraftManifest *runtimeDraftManifest
+	proposalsDraftManifest *runtimedrafts.Manifest
 	proposalsDraftRoot     string
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -622,13 +623,13 @@ func TestStageProposalDraftOutputsUpdatesFinalRunIndex(t *testing.T) {
 		},
 		pipelineDraftState: pipelineDraftState{
 			proposalsDraftRoot: draftRoot,
-			proposalsDraftManifest: &runtimeDraftManifest{
+			proposalsDraftManifest: &runtimedrafts.Manifest{
 				Version:      1,
 				RunID:        runID,
 				StepID:       "init.step4.proposals",
 				StepContract: "proposals",
 				AgentRole:    "architect",
-				Outputs: []runtimeDraftOutput{
+				Outputs: []runtimedrafts.Output{
 					{Path: "proposal.md", CanonicalPath: "proposals/runtime-recommendations.md", Kind: "proposal", Title: "Runtime Recommendations"},
 					{Path: "changelog.md", CanonicalPath: "reports/changelog/runtime-proposals.md", Kind: "changelog", Title: "Runtime Proposal Changelog"},
 				},

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -73,7 +74,14 @@ func loadStep0WizardContract(ws workspace.Root) (step0WizardContract, bool, erro
 }
 
 func (e *pipelineExecution) publishValidatedConstitutionDrafts(execution runtimeTaskExecution) error {
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	draft, _, err := runtimedrafts.ValidateRequiredManifest(
+		execution.Task.WriteRoot,
+		execution.Task.DraftFinalRoot,
+		execution.Task.RunID,
+		execution.Task.StepID,
+		execution.Task.StepContract,
+		execution.Task.ExpectedArtifacts,
+	)
 	if err != nil {
 		return err
 	}
