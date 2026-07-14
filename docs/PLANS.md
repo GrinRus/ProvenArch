@@ -147,7 +147,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T`
+- [x] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2064,8 +2066,10 @@ that fails on missing/malformed logs pagination behavior before PR merge.
 - [x] Add deterministic script tests for normal empty/non-empty pages, malformed payload,
       server/error status and invalid-cursor error handling without requiring a live ACP server.
 - [x] Update smoke baseline documentation.
-- [ ] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T` review/commit
+- [x] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change the HTTP logs endpoint contract or backend API routing.
@@ -2122,6 +2126,79 @@ interfaces change.
 - 2026-07-14: Added logs page validation to API smoke, covered helper failure paths with
   deterministic Python tests, verified the live fake-server smoke path, and completed full DoD with
   exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19u-deterministic-mock-playwright-ci
+
+### Context
+`19U` follows committed `19T`. The repository already contains seven provider-free mock Playwright
+specs under `ui/e2e/*mock*.spec.ts`, and each spec exercises console errors plus desktop/mobile
+overflow checks. The gap is that required UI CI only runs Vitest/build/determinism checks; there is
+no canonical `e2e:mock` runner, no CI step that guarantees `7 passed / 0 skipped`, and no local
+script that runs the seven scenarios explicitly without live providers.
+
+### Goals (must have)
+- [x] Add a deterministic mock Playwright config that serves the Vite UI locally and excludes live
+      specs.
+- [x] Add a canonical `e2e:mock` package script/runner that runs exactly seven named mock
+      scenarios.
+- [x] Fail when any scenario is skipped, so a broken selector/scenario gate cannot silently pass.
+- [x] Keep console-error and horizontal-overflow assertions active in the existing mock specs.
+- [x] Wire the UI workflow to run the mock Playwright gate after build/determinism checks.
+- [x] Update testing documentation for the required mock browser gate.
+- [ ] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not add live provider checks or external repository/network dependencies.
+- [ ] Do not change `e2e:live` or the live matrix harness.
+- [ ] Do not redesign the Console UI; only wire existing deterministic mock scenarios.
+- [ ] Do not introduce screenshot golden assertions in this slice.
+
+### Implementation
+1) Add `ui/playwright.mock.config.ts` with a local Vite `webServer`, Chromium project, single
+   worker, no retries and `testMatch` limited to `**/*mock.spec.ts`.
+2) Add `scripts/ui-mock-e2e.sh` that loops the seven explicit scenario names, sets
+   `UI_E2E_SCENARIO`, runs the matching `ui/e2e/<scenario>.spec.ts` file through the mock config,
+   captures list output, and fails unless all seven scenarios pass and zero skipped tests are
+   observed.
+3) Add `npm run e2e:mock --prefix ui` as the canonical package entrypoint for the script.
+4) Add the required UI workflow step after deterministic build/fresh-dist checks.
+5) Update `docs/TESTING_STRATEGY.md` implemented jobs and UI smoke baseline.
+
+### Interfaces
+Tooling/CI/docs only. No backend API, schema, TypeScript runtime contract, workspace, provider,
+release or live matrix interfaces change.
+
+### Tests
+- `npm run e2e:mock --prefix ui` reports seven passed scenarios and zero skipped.
+- A script contract test proves the scenario list stays at seven and each named spec exists.
+- Workflow YAML parses.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `npm run e2e:mock --prefix ui` completes with `7 passed / 0 skipped`.
+- [x] A missing/broken scenario selection would fail the runner.
+- [x] UI workflow invokes the canonical mock gate.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live-provider, live-harness or unrelated UI redesign scope leaked
+      into this slice.
+- [x] Commit `19U: add deterministic mock Playwright gate`.
+
+### Progress log
+- 2026-07-14: Started `19U` after clean `19T` commit. Spec-first, UI implementation QA and
+  docs-sync rules apply because this slice changes required browser QA and documented testing
+  baseline.
+- 2026-07-14: Added mock Playwright config, canonical `e2e:mock` runner, UI workflow gate and
+  contract tests for the seven explicit scenarios. Verified local `e2e:mock` as `7 passed / 0
+  skipped` after installing local Chromium, then completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

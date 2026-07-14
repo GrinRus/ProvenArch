@@ -218,7 +218,10 @@ Implemented additional jobs:
   - dynamic free port + explicit fail on run polling timeout
 - `ui`
   - runs UI tests, production build, deterministic build verification and embedded bundle
-    freshness; UI typecheck is owned by canonical `make lint` in the `lint` workflow.
+    freshness; UI typecheck is owned by canonical `make lint` in the `lint` workflow
+  - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes seven local
+    provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
+    horizontal overflow
 
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
@@ -314,6 +317,11 @@ Release workflow hardening:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
 - UI path: open workspace, validate, inspect the selected completed run evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init. `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
+- Required mock Playwright gate: `npm run e2e:mock --prefix ui` starts a local Vite UI through
+  `ui/playwright.mock.config.ts` and runs exactly seven deterministic scenarios:
+  source recovery, onboarding recovery, permission recovery, provider stream, failed-shard analysis,
+  Publish Git recovery and QA recovery. These scenarios use mocked `/api/**` responses only; live
+  providers, external repositories and network runtime checks stay out of required CI.
 - UI run logs surface:
   - compact activity drawer render
   - log polling/append without duplicates
@@ -437,7 +445,8 @@ Release workflow hardening:
 - canonical `make lint` проверяет Go formatting, ShellCheck для production `scripts/**/*.sh`
   и UI TypeScript typecheck; ShellCheck baseline — `0.11.x`, live provider/network access не
   требуется.
-- UI smoke стек: `React + Vite + Vitest + Playwright`
+- UI smoke стек: `React + Vite + Vitest + Playwright`; required `e2e:mock` is deterministic and
+  provider-free, while `e2e:live` remains a trusted-machine diagnostic/release-gate tool.
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
   - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`

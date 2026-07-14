@@ -40,3 +40,9 @@ jobs:
 
       - name: Verify embedded UI bundle is fresh
         run: make verify-ui-dist
+
+      - name: Install Playwright Chromium
+        run: ./ui/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Run mock Playwright scenarios
+        run: npm run e2e:mock --prefix ui

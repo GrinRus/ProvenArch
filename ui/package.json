@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
+    "e2e:mock": "bash ../scripts/ui-mock-e2e.sh",
     "e2e:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {
