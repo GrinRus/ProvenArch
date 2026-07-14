@@ -194,7 +194,7 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			},
 		})
 	}
-	return nil
+	return e.enrichCanonicalCards(domainIDs, teamCards)
 }
 
 func (e *pipelineExecution) prepareDomainCollect(stepID string, domainID string) (domainCollectPreparation, error) {

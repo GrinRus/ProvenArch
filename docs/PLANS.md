@@ -129,7 +129,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19N` composite release verdict gate after `19O`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19P` Step 1 card enrichment after `19N`
+- [x] Continue PR-1 with `19P` Step 1 card enrichment after `19N`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19Q` generic refresh semantic guard after `19P`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1394,8 +1396,10 @@ read-only composite-evidence verifier job.
 - [x] Add workflow regression tests for missing verifier, missing dependency, and write
       permissions appearing before verification.
 - [x] Update release runbook/docs with the workflow inputs and composite evidence gate.
-- [ ] Continue PR-1 with `19P` Step 1 card enrichment after `19N` review/commit boundary is
+- [x] Continue PR-1 with `19P` Step 1 card enrichment after `19N` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change canonical release matrices, providers, sweeps or live matrix harness.
@@ -1449,6 +1453,81 @@ schema or live harness interface changes.
   on the publishing job, and documented `ACP_RELEASE_MATRIX_ID` / `ACP_RELEASE_VERDICT_PATH`.
   Verification passed: targeted release verifier/distribution tests and full DoD with exact Node
   22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19p-step1-card-enrichment
+
+### Context
+`19P` follows committed `19N` and starts the P2 quality-hardening band. The semantic card
+enrichment implementation already exists in `internal/orchestrator/semantic_cards.go`, but Step 1
+currently finishes after loading canonical team cards and never runs the enrichment pass. That
+creates a mismatch with `docs/spec/PIPELINE_SPEC.md`: existing human-owned domain/team cards should
+receive one deterministic `## Derived (ACP Step1)` section after Step 1 semantic apply, while ACP
+must not auto-create or rename canonical cards.
+
+### Goals (must have)
+- [x] Restore exactly one Step 1 enrichment call after all domain semantic apply work completes.
+- [x] Enrich only existing canonical `charter/cards/domains/*` and `charter/cards/teams/*`.
+- [x] Keep `## Derived (ACP Step1)` idempotent across repeated init/refresh runs.
+- [x] Preserve the question path for model owner teams without a matching canonical team card.
+- [x] Cover evidence refs, related entities/services, findings/questions and coverage summaries in
+      deterministic tests.
+- [ ] Continue PR-1 with `19Q` generic refresh semantic guard after `19P` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not change public schemas, runtime provider contracts, final-run-index/citation contracts
+      or workspace manifest shape.
+- [ ] Do not auto-create, delete, rename or otherwise take ownership of human-authored canonical
+      cards.
+- [ ] Do not implement `19Q` semantic guard filtering or any Epic 20 UI behavior.
+- [ ] Do not change promotion, release, UI generated bundle or live provider matrix behavior.
+
+### Implementation
+1) In `runStepCollectByDomain`, keep the existing domain/team-card discovery and missing-card
+   questions, then call `enrichCanonicalCards(domainIDs, teamCards)` once before Step 1 returns.
+2) Preserve the existing renderer semantics: merge/replace only the managed
+   `## Derived (ACP Step1)` block and leave human-authored card content before that heading intact.
+3) Add orchestrator unit tests that seed canonical cards plus semantic model entities, findings,
+   questions and coverage, run enrichment twice, and assert the managed section is present exactly
+   once with evidence refs.
+4) Add a regression for an owner team in the semantic model that lacks a canonical team card:
+   enrichment must not create a new card and must add the existing high-priority question.
+5) Run targeted orchestrator tests, then full DoD.
+
+### Interfaces
+Internal orchestrator behavior only. No HTTP API, TypeScript, JSON schema or workspace manifest
+interfaces change.
+
+### Tests
+- Existing domain/team cards receive one `## Derived (ACP Step1)` section with related model IDs,
+  findings/questions, coverage gaps and `repo:path` evidence refs.
+- Re-running enrichment replaces the managed section instead of appending duplicates.
+- A service owned by an unknown/missing canonical team card records a deterministic question and
+  does not create `charter/cards/teams/<missing>.md`.
+- Step 1 returns enrichment errors if card reads/writes fail instead of silently skipping the
+  documented behavior.
+
+### Docs/fixtures
+- No schema/spec changes expected because this restores the existing `PIPELINE_SPEC` behavior.
+- No scenario golden refresh is expected unless existing deterministic scenario tests cover this
+  path and fail after the restored call.
+
+### Acceptance
+- [x] Targeted orchestrator tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19Q`, UI, contract, release or live-provider scope leaked into this
+      slice.
+- [x] Commit `19P: restore idempotent card enrichment`.
+
+### Progress log
+- 2026-07-14: Started `19P` after clean `19N` commit. Spec-first and test-fixtures rules apply
+  because this slice restores documented model/card behavior and must add deterministic
+  regression coverage.
+- 2026-07-14: Restored the Step 1 enrichment call, added idempotency/no-autocreate/full-pipeline
+  regression tests, and completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
