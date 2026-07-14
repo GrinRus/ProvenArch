@@ -496,7 +496,6 @@ export default function App() {
   const diagnostics = useMemo(() => [...(validateResult?.errors ?? []), ...(validateResult?.warnings ?? [])], [validateResult]);
   const validationErrors = useMemo(() => diagnostics.filter((diagnostic) => diagnostic.level === "error"), [diagnostics]);
   const doctorFailures = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "fail") ?? [], [setupDoctorResult]);
-  const doctorWarnings = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "warn") ?? [], [setupDoctorResult]);
   const artifactCount = nonDiagramArtifacts.length + diagramArtifacts.length;
   const proposalArtifacts = useMemo(
     () => nonDiagramArtifacts.filter((artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/")),

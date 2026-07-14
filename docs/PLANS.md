@@ -106,18 +106,23 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 
 ### Continuous Backlog Queue Policy
 
-The normal product backlog queue has two active post-beta programs: Epic 19 (`Code Quality Audit Remediation`) and Epic 20 (`Console UX trust, evidence workflow and IA reset`).
+The normal product backlog queue has one implementation-complete PR-1 program, Epic 19
+(`Code Quality Audit Remediation`), and one blocked post-beta program, Epic 20 (`Console UX trust,
+evidence workflow and IA reset`).
 The first selected UX engineering slice is `20A Run-pinned evidence snapshot truth` under
-`EP-20260711-run-pinned-evidence-review`. `docs/BACKLOG.md` remains the reference/acceptance
-backlog; this file selects and sequences focused active slices.
+`EP-20260711-run-pinned-evidence-review`, but Epic 20 must not start until Epic 19 is merged into
+`main`. `docs/BACKLOG.md` remains the reference/acceptance backlog; this file selects and
+sequences focused active slices.
 
 Wave 1 planning also contains Epic 21 / `EP-20260712-evidence-backed-architecture-refresh`;
 implementation has not started, and its first reviewable slice is
 `21A Architecture home + documentation quality baseline`.
 
 Allowed next workstreams:
-- `EP-20260710-code-audit-remediation-backlog` as the active Epic 19 planning track.
-- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice.
+- PR-1/Epic 19 review, push/PR and merge bookkeeping only; no additional Epic 19 engineering slice
+  remains after final reconciliation.
+- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice only after PR-1 is
+  merged into `main`.
 - Existing live-quality/release-validation plans below, only when their trusted-machine/provider prerequisites are satisfied.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
@@ -133,11 +138,10 @@ Task selection rules:
 EP-20260713-epic-19-pr1-remediation
 
 ### Context
-Epic 19 is being implemented as one large draft PR on branch
-`codex/epic-19-code-quality-remediation`, with backlog slices `19A..19X` used as internal
-commit and checklist boundaries. Epic 20 remains out of scope until Epic 19 is merged into
-`main`. The first implementation pass is `19A`, because atomic persistence is the prerequisite
-for transactional promotion and reliable run lifecycle recovery.
+Epic 19 has been implemented locally as one large draft PR on branch
+`codex/epic-19-code-quality-remediation`, with backlog slices `19A..19X` used as internal commit
+and checklist boundaries. The branch has been deliberately synced with `main` after `19X`. Epic 20
+remains out of scope until Epic 19 is merged into `main`.
 
 ### Goals (must have)
 - [x] Add a shared atomic persistence primitive for workspace-owned files: temporary file,
@@ -223,8 +227,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X`
+- [x] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X`
       review/commit boundary is stable.
+- [ ] Complete PR-1 review/push/merge into `main` before starting Epic 20.
 
 ### Non-goals
 - [ ] Do not implement `19B` transactional canonical promotion in the first pass.
@@ -3050,6 +3055,61 @@ The public TypeScript typecheck contract becomes stricter for unused locals/para
   typecheck, Vitest, deterministic mock Playwright (`7 passed / 0 skipped`), and completed full DoD
   with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`. `make build`
   regenerated `internal/api/ui_dist` for the UI source change.
+
+### Plan ID
+EP-20260714-epic-19-19z-final-reconciliation
+
+### Context
+`19Z` follows committed `19X` and reconciles PR-1 status after all Epic 19 implementation slices
+are complete. The branch has also been deliberately merged with `main`, preserving the concurrent
+workspace-health/Karpathy planning work from `main` and the complete Epic 19 slice evidence from
+this branch.
+
+### Goals (must have)
+- [x] Mark Epic 19 backlog status as implementation-complete pending PR review/merge.
+- [x] Update stakeholder status so PR-1 no longer claims the stale `19I` current-work marker.
+- [x] Preserve all `19A..19X` plan evidence and `main` active plan evidence after merge conflict
+      resolution.
+- [x] Record that Epic 20 remains blocked until PR-1 merges into `main`.
+- [ ] Keep PR-1 review/push/merge as the remaining open owner/repository coordination step.
+
+### Non-goals
+- [ ] Do not start Epic 20 in this reconciliation slice.
+- [ ] Do not run live providers or trusted-machine release gates.
+- [ ] Do not change canonical release matrices or provider lists.
+- [ ] Do not mark PR-1 as merged before it is actually merged into `main`.
+
+### Implementation
+1) Sync `docs/BACKLOG.md`, `docs/STAKEHOLDER_DOC.md` and the Epic 19 active plan status.
+2) Resolve `main` merge conflict in `docs/PLANS.md` by preserving both Epic 19 and concurrent
+   `main` active plans.
+3) Run docs-sync checks and full deterministic DoD after the merge and status updates.
+
+### Interfaces
+Documentation/status reconciliation only. No public API, schema, workspace, UI, provider or
+release interface changes.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/docsync -count=1`.
+- `git diff --check`.
+- Full deterministic DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Docs/fixtures
+- `docs/BACKLOG.md`, `docs/PLANS.md`, `docs/STAKEHOLDER_DOC.md`.
+
+### Acceptance
+- [x] Backlog/stakeholder/plan status consistently says Epic 19 is implementation-complete but
+      pending PR review/merge.
+- [x] Full DoD passes after merging `main`.
+- [x] Commit `19Z: reconcile Epic 19 completion`.
+
+### Progress log
+- 2026-07-14: Reconciled Epic 19 backlog/stakeholder/plan status, preserved both Epic 19 and
+  `main` active-plan evidence during merge conflict resolution, removed the merged unused
+  `doctorWarnings` local exposed by the new noUnused gate, regenerated `internal/api/ui_dist`, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
+
 ### Plan ID
 EP-20260623-karpathy-adoption-roadmap
 

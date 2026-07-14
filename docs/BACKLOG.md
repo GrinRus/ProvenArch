@@ -479,8 +479,9 @@ Suggested PR slices:
 
 ## Epic 19 — Code Quality Audit Remediation (Local-first MVP)
 
-Status: planned; source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at baseline
-`122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
+Status: implementation-complete on `codex/epic-19-code-quality-remediation`; PR-1 is pending
+review/merge into `main`. Source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at
+baseline `122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
 
 ### Goal
 
@@ -535,6 +536,11 @@ dependencies: `19A -> 19B`, `19C -> 19D -> 19E`, `19G -> 19H`,
   где фактическое operator-facing или testing behavior меняется;
 - завершение P1 подтверждается deterministic CI; manual live release gate выполняется
   отдельно и не блокирует review отдельных non-live slices.
+
+Implementation note: local slice commits `19A..19X` are complete, the branch has been deliberately
+synced with `main`, and the final merge gate remains `make contracts`, `make test`, `make lint`,
+`make build` on the reconciled PR branch plus normal PR review. Epic 20 must not start until PR-1
+is merged.
 
 ### Suggested PR slices
 
