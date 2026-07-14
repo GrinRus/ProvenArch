@@ -106,18 +106,23 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 
 ### Continuous Backlog Queue Policy
 
-The normal product backlog queue has two active post-beta programs: Epic 19 (`Code Quality Audit Remediation`) and Epic 20 (`Console UX trust, evidence workflow and IA reset`).
+The normal product backlog queue has one implementation-complete PR-1 program, Epic 19
+(`Code Quality Audit Remediation`), and one blocked post-beta program, Epic 20 (`Console UX trust,
+evidence workflow and IA reset`).
 The first selected UX engineering slice is `20A Run-pinned evidence snapshot truth` under
-`EP-20260711-run-pinned-evidence-review`. `docs/BACKLOG.md` remains the reference/acceptance
-backlog; this file selects and sequences focused active slices.
+`EP-20260711-run-pinned-evidence-review`, but Epic 20 must not start until Epic 19 is merged into
+`main`. `docs/BACKLOG.md` remains the reference/acceptance backlog; this file selects and
+sequences focused active slices.
 
 Wave 1 planning also contains Epic 21 / `EP-20260712-evidence-backed-architecture-refresh`;
 implementation has not started, and its first reviewable slice is
 `21A Architecture home + documentation quality baseline`.
 
 Allowed next workstreams:
-- `EP-20260710-code-audit-remediation-backlog` as the active Epic 19 planning track.
-- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice.
+- PR-1/Epic 19 review, push/PR and merge bookkeeping only; no additional Epic 19 engineering slice
+  remains after final reconciliation.
+- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice only after PR-1 is
+  merged into `main`.
 - Existing live-quality/release-validation plans below, only when their trusted-machine/provider prerequisites are satisfied.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
@@ -128,6 +133,2982 @@ Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
 - Owner-decision and trusted-host/live-release items remain explicit blockers; do not run or edit them as normal backlog tasks without the required owner/trusted-machine prerequisites.
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
+
+### Plan ID
+EP-20260713-epic-19-pr1-remediation
+
+### Context
+Epic 19 has been implemented locally as one large draft PR on branch
+`codex/epic-19-code-quality-remediation`, with backlog slices `19A..19X` used as internal commit
+and checklist boundaries. The branch has been deliberately synced with `main` after `19X`. Epic 20
+remains out of scope until Epic 19 is merged into `main`.
+
+### Goals (must have)
+- [x] Add a shared atomic persistence primitive for workspace-owned files: temporary file,
+      flushed data, synced parent directory and atomic rename.
+- [x] Preserve a last-good copy for critical persisted state so malformed or partial current
+      files do not collapse into empty history.
+- [x] Stop silently ignoring run-history persistence failures.
+- [x] Move run history, shard summaries and runtime checkpoint writes onto the shared primitive
+      where the existing ownership boundary is clear.
+- [x] Add fault-injection coverage for write, sync and rename failure points.
+- [x] Keep the PR deterministic: no live provider dependency and no release matrix changes.
+- [x] Continue PR-1 with `19B` transactional canonical promotion after `19A` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary
+      is stable.
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary
+      is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19K1` run mutation acknowledgement after `19J`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19L` editor draft safety after `19K2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19M` reproducible embedded UI build after `19L`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19O` locked contract validator tooling after `19M`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19N` composite release verdict gate after `19O`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19P` Step 1 card enrichment after `19N`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19Q` generic refresh semantic guard after `19P`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19R1` ARIA tabs controller after `19Q`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19R2` keyboard path combobox after `19R1`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19R3` accessible async announcements after `19R2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19S3` required PR lint routing after `19S2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19V` Python runtime pinning after `19U2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W5a` review diff residual cleanup after `19W4`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W5b` model store residual cleanup after `19W5a`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X`
+      review/commit boundary is stable.
+- [ ] Complete PR-1 review/push/merge into `main` before starting Epic 20.
+
+### Non-goals
+- [ ] Do not implement `19B` transactional canonical promotion in the first pass.
+- [ ] Do not change public artifact schemas in `19A`.
+- [ ] Do not change provider selection, live matrix inputs or hosted/security scope.
+- [ ] Do not open Epic 20 work until Epic 19 is merged or explicitly rebased after merge.
+
+### Approach
+1) Add the persistence primitive in `internal/workspace` and expose it through the existing
+   `workspace.Root` boundary.
+2) Add focused unit tests for atomic write success, simulated failures and last-good recovery.
+3) Replace the highest-risk direct writes in run-history/shard-checkpoint surfaces first.
+4) Propagate persistence errors to callers where the current code drops them.
+5) Run targeted Go tests, then expand verification as the touched surface grows.
+6) Continue with `19B` only after `19A` has tests and no known crash-consistency regressions.
+
+### Files expected to change
+- `internal/workspace/fs.go`
+- `internal/workspace/*_test.go`
+- `internal/orchestrator/service_runs.go`
+- `internal/orchestrator/sharding_artifacts.go`
+- `internal/orchestrator/restart_reconcile*` if current checkpoint writes require migration
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Atomic writes never leave a partial target file after injected data-write or rename
+      failures.
+- [x] Parent directory sync failures are surfaced as errors in tests.
+- [x] A malformed current run history with a valid last-good copy recovers the last-good state
+      and records a diagnostic path instead of returning an empty history.
+- [x] Run-history persistence errors are returned or logged through existing lifecycle status
+      paths instead of being discarded.
+- [x] Targeted packages pass under `go test`, and the full PR eventually passes
+      `make contracts`, `make test`, `make lint`, `make build`.
+
+### Risks
+- Some call sites currently use best-effort persistence during terminal cleanup; turning those
+  into hard errors must not strand active run slots.
+- Atomic rename is only atomic within the same filesystem; temp files must stay beside the
+  target.
+- Last-good files are recovery aids, not a second source of truth. Reads must prefer current
+  content when it is valid.
+
+### Progress log
+- 2026-07-13: Created branch `codex/epic-19-code-quality-remediation`; selected `19A` as the
+  first implementation slice and recorded this ExecPlan before code changes.
+- 2026-07-13: Implemented `19A` atomic workspace writes, run-history `.last-good` recovery,
+  persistence error surfacing for async queue start, fault-injection tests and docs sync.
+  Verification passed: `go test ./internal/...`, `go test ./...`, Python harness unit suite
+  (230 tests), focused `go test -race` lifecycle tests and Go build. Full `make contracts`,
+  `make test`, `make lint` and `make build` are blocked locally before repo checks by missing
+  Node.js `22.21.1` (`/opt/homebrew/bin/node` is `25.9.0`).
+- 2026-07-13: Installed exact Node.js `22.21.1` outside the repo and reran the canonical
+  `19A` gate with `ACP_NODE_TOOL_CANDIDATES`. `make contracts`, `make test`, `make lint` and
+  `make build` all pass; `make build` produced no tracked embedded-UI drift.
+
+### Plan ID
+EP-20260713-epic-19-19b-transactional-promotion
+
+### Context
+`19B` follows the committed `19A` atomic persistence foundation. Current docflow promotion
+copies validated staged documents into canonical `reports/*`/`proposals/*`, removes stale
+managed files, then rebuilds `model/*` and `reports/diagrams/*` directly in the live
+workspace. A mid-promotion copy/remove/model/diagram failure can therefore leave mixed
+old/new bytes visible under canonical paths.
+
+### Goals (must have)
+- [x] Make canonical promotion transactional for managed generated surfaces: prepare a complete
+      promotion generation outside canonical paths, validate it, then activate it with a journaled
+      rollback path so a failed promotion leaves either the previous complete generation or the new
+      complete generation visible, never a mixed generation.
+- [x] Continue PR-1 with `19C` async panic isolation after `19B` review/commit boundary is stable.
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change public artifact schemas, final-run-index shape or provider contracts.
+- [ ] Do not change live provider selection, release matrices or live E2E gates.
+- [ ] Do not introduce user authentication, hosted mode or security enforcement.
+- [ ] Do not refactor unrelated report/model compiler behavior beyond the promotion boundary.
+
+### Implementation
+1) Build a run-scoped promotion generation under `reports/taskruns/<run_id>/staging/` rather
+   than writing any canonical managed path directly.
+2) Populate the generation with all `finalRunIndex.CanonicalDocuments` from their staged paths,
+   rebuild `model/entities` and `model/edges` inside that generation, and compile diagrams
+   against the generated model before canonical activation.
+3) Treat managed canonical replacement surfaces as generation roots:
+   `reports/as-is`, `reports/coverage`, `reports/findings`, `reports/agent-outputs`,
+   `reports/diagrams`, `proposals`, `model/entities`, `model/edges`.
+4) Activate `reports/changelog/*` final-index draft files through the same journal as individual
+   files, while preserving existing changelog history instead of replacing the whole directory.
+5) Validate that every indexed canonical document exists in the generation and that no indexed
+   document targets an unmanaged canonical surface.
+6) Activate the generation by renaming existing managed roots to a journal backup and renaming
+   generation roots into place. On any forward activation failure, rollback processed roots in
+   reverse order before returning the error.
+7) Remove the redundant post-promotion runtime draft copy in proposals handling; draft outputs
+   are already staged into the final run index and must be activated only through the
+   transactional promotion path.
+
+### Interfaces
+No public API or schema changes. Internal-only helpers may be added to
+`internal/orchestrator/docflow_promotion.go` for promotion generation, validation, activation
+and test fault injection.
+
+### Tests
+- Existing promotion tests keep proving FAIL verdict rejection and stale managed-file removal.
+- Add failure-injection coverage across promotion copy/build/activation operations.
+- For each injected failure point, assert canonical generated surfaces remain exactly the
+  previous complete generation; when no injected failure fires, assert the new generation is
+  complete.
+- Include reports, proposals, model and diagrams in the old/new generation assertions.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md` and `docs/STAKEHOLDER_DOC.md` for transactional managed
+  promotion semantics and operator recovery expectations.
+- No schema/example/fixture sync is required because public contracts do not change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers rollback and successful activation.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no canonical writes happen before generation validation and
+      activation.
+
+### Progress log
+- 2026-07-13: Implemented `19B` transactional canonical promotion. Promotion now builds a
+  run-scoped generation, validates indexed documents, rebuilds model/diagrams in staging,
+  activates managed roots with journaled rollback, activates `reports/changelog/*` draft files
+  through per-file journal entries, removes stale artifact registry entries only after successful
+  activation, and removes the redundant post-promotion draft copy. Regression coverage injects
+  failures across copy/model/diagram/activation operations and verifies old-or-new complete
+  generation semantics. Verification passed: `go test ./internal/orchestrator`,
+  `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19c-async-panic-isolation
+
+### Context
+`19C` follows committed `19B`. Synchronous `Service.Run` currently terminalizes panic failures
+and re-panics, preserving caller-visible panic semantics. The async path starts `runWithID` in a
+goroutine and then calls `finishAsyncRun`; if the runner panics, the goroutine can skip
+`finishAsyncRun`, leave `activeRunID`/cancel state occupied, block a queued pending run, and crash
+the service process instead of recording a terminal async failure.
+
+### Goals (must have)
+- [x] Isolate async runner panics at the outer goroutine boundary so the service process stays
+      alive, the panicked run gets terminal `failed/internal_failure` history, and
+      `finishAsyncRun` always releases the slot and starts a pending run.
+- [x] Preserve synchronous `Service.Run` panic behavior: panic still propagates to the caller
+      while existing terminal history semantics remain intact.
+- [x] Continue PR-1 with `19D` shutdown coordination after `19C` review/commit boundary is stable.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change normal runtime error classification or cancellation semantics.
+- [ ] Do not change queue/debounce policy beyond releasing slots after async panic.
+- [ ] Do not change provider contracts, public schemas, UI contracts or live matrices.
+
+### Implementation
+1) Wrap only the goroutine body in `launchAsyncRun` with `defer`.
+2) Ensure the defer calls `finishAsyncRun` exactly once for every async run, including panics.
+3) Recover panics at the async goroutine boundary, terminalize the run as
+   `internal_failure`/`run failed: panic` if `runWithID` has not already done so, and do not
+   re-panic from the goroutine.
+4) Keep `runWithID` synchronous panic semantics unchanged: its existing panic guard may
+   terminalize and re-panic, so direct callers still observe a panic.
+5) Add tests for async init panic and queued pending-run continuation after the active run
+   panics.
+
+### Interfaces
+No public API/schema changes. Internal-only lifecycle helpers may be added to
+`internal/orchestrator/service_runs.go` if needed.
+
+### Tests
+- Async panic runner: `StartAsyncRun` returns a run ID, the service remains usable, run history
+  records terminal `failed/internal_failure`, and the active slot is released.
+- Active async panic with queued pending run: pending run starts after the panicked active run is
+  finalized.
+- Existing synchronous panic test remains unchanged and continues to require caller-visible panic.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`
+  only for lifecycle/recovery behavior. No fixtures or schemas change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers async panic terminalization and pending-run
+      continuation.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no synchronous panic masking and no double `finishAsyncRun`.
+
+### Progress log
+- 2026-07-13: Implemented `19C` async panic isolation. `launchAsyncRun` now wraps the outer
+  goroutine with a defer that recovers runner panics, terminalizes the run as
+  `failed/internal_failure` when needed, and always calls `finishAsyncRun` to release active
+  slots/cancel state and launch pending work. Direct `Service.Run` panic behavior remains
+  caller-visible through the existing runWithID terminal guard. Regression coverage verifies async
+  panic terminalization, service reuse after panic, pending-run continuation, and existing sync
+  re-panic semantics. Verification passed: targeted lifecycle tests, `go test ./internal/orchestrator`,
+  `go test ./internal/...`, `go test ./internal/docsync`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19d-server-owned-shutdown
+
+### Context
+`19D` follows committed `19C`. `cmd/acp run` already uses `signal.NotifyContext`, but
+`cmd/acp serve` still passes `context.Background()` into `api.Server.Serve`. API serve shutdown
+uses `http.Server.Shutdown(context.Background())`, and orchestrator `Service` has cancel maps for
+active async runs but no closed/shutdown state. A process-level signal can therefore leave active
+runs/provider processes outside a bounded service-owned shutdown path, and post-shutdown API
+mutations can still enqueue new run writes.
+
+### Goals (must have)
+- [x] Add bounded service-owned shutdown for async runs: reject new starts after shutdown,
+      cancel active run contexts, terminalize queued pending runs, release lifecycle state, and
+      wait for active terminal state until the shutdown context expires.
+- [x] Wire `api.Server.Serve` to call bounded HTTP shutdown and orchestrator shutdown on
+      context cancellation.
+- [x] Wire `cmd/acp serve` to a signal-aware context for SIGINT/SIGTERM/SIGHUP.
+- [x] Continue PR-1 with `19E` coherent service/session generation after `19D` review/commit boundary is stable.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change runtime provider selection, pipeline semantics or queue/debounce behavior
+      except at shutdown.
+- [ ] Do not redesign process execution; provider process groups remain owned by existing
+      `providercommon` command context/process-group adapters.
+- [ ] Do not change public API schemas or frontend behavior.
+
+### Implementation
+1) Add `ErrServiceClosed`, `Service.Shutdown(ctx)` and `Service.Close()` in
+   `internal/orchestrator/service_runs.go`.
+2) Add a `closed` flag under `Service.mu`; `StartAsyncRun` returns `ErrServiceClosed` once set.
+3) During shutdown, mark pending queued run as `failed/run_canceled`, cancel active run contexts,
+   and wait/poll for the active run to reach terminal state until `ctx.Done()`.
+4) Ensure `finishAsyncRun` does not launch pending work after `closed=true`.
+5) Add `api.Server.Shutdown(ctx)` and make `Serve` use a bounded timeout for both HTTP and
+   orchestrator shutdown.
+6) In `cmd/acp serve`, create `signal.NotifyContext` and pass it to `server.Serve` in both
+   launcher and workspace modes.
+
+### Interfaces
+Internal API only: `orchestrator.Service.Shutdown`, `orchestrator.Service.Close` and
+`api.Server.Shutdown`. Public HTTP/schema contracts do not change.
+
+### Tests
+- Service shutdown cancels an active blocking runner and persists terminal canceled history.
+- Service shutdown fails a queued pending run and prevents it from starting.
+- `StartAsyncRun` after shutdown returns `ErrServiceClosed`.
+- API `Serve` returns after context cancellation and calls service shutdown.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`
+  for server-owned shutdown semantics. No fixtures or schemas change.
+
+### Acceptance
+- [x] `go test ./internal/orchestrator` covers service shutdown lifecycle.
+- [x] `go test ./internal/api` covers serve-context shutdown.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms post-shutdown starts are rejected and pending work does not launch
+      after `closed=true`.
+
+### Progress log
+- 2026-07-13: Implemented `19D` server-owned shutdown. `acp serve` now passes a
+  SIGINT/SIGTERM/SIGHUP-aware context into API serving; API `Serve` performs bounded HTTP and
+  orchestrator shutdown and waits for service cleanup on context cancellation. Orchestrator
+  `Service.Shutdown`/`Close` set a closed flag, reject post-shutdown starts, cancel active run
+  contexts, terminalize queued pending runs as `run_canceled`, and prevent pending launch after
+  `closed=true`. Existing provider process-group cleanup remains driven by runtime context
+  cancellation. Verification passed: targeted orchestrator/API/docsync tests, `go test ./internal/...`,
+  and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19e-coherent-service-generation
+
+### Context
+`19E` follows committed `19D`. Launcher mode can select a workspace, select a runtime and then
+serve normal workspace-bound endpoints from one process. Current API handlers mostly read
+`workspace`, `service` and `runtimeConfig` through independent getters, while onboarding/runtime
+mutation handlers can replace session state. That leaves room for one request to observe a
+mixed generation, for runtime/profile mutations to race with active async work, and for
+onboarding/direct-mode status to report desired runtime state rather than the service generation
+that will actually handle new runs.
+
+### Goals (must have)
+- [x] Add a request-scoped immutable API session snapshot containing the selected workspace,
+      orchestrator service, runtime config and generation metadata.
+- [x] Make workspace/runtime session replacement coordinated under one server lock so handlers
+      cannot combine stale service ownership with fresh workspace/runtime state.
+- [x] Reject workspace or runtime replacement while the current service has active or queued
+      async work, returning an explicit conflict instead of silently swapping ownership.
+- [x] Make onboarding/direct-mode runtime status report the effective runtime config for the
+      current service generation.
+- [x] Preserve existing local-first MVP boundaries: no provider-list changes, hosted mode,
+      schema migration or Epic 20 UI redesign.
+- [ ] Continue PR-1 with `19F` fresh unpinned git_url resolution after `19E` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not introduce UI hot restart or process restart orchestration.
+- [ ] Do not change pipeline semantics, queue/debounce rules or provider execution behavior.
+- [ ] Do not change public artifact schemas or runtime provider IDs.
+- [ ] Do not start Epic 20 before Epic 19 is complete and merged.
+
+### Implementation
+1) Add a small `serverSessionSnapshot` value in `internal/api` and use it in request handlers
+   that need workspace/service/runtime state together.
+2) Add an orchestrator lifecycle query that reports whether a service has active or pending async
+   work without exposing mutable internals.
+3) Replace independent workspace/service/runtime reads in high-risk handlers with one snapshot
+   read, especially run start/status/log/artifact/review/Git/runtime/onboarding surfaces.
+4) Gate onboarding workspace selection and runtime selection/profile mutations with a
+   `serviceHasInFlightWork` conflict check before replacing session state or changing runtime
+   config used by future service generations.
+5) Keep direct-mode construction as a ready generation from process CLI config; launcher mode
+   creates a new generation only after a workspace has been opened and runtime selected.
+6) Update docs for the operator-visible conflict behavior only; no schema or fixture sync is
+   expected unless implementation proves a public contract change is unavoidable.
+
+### Interfaces
+No schema changes. HTTP error surface may add conflict errors such as
+`workspace_switch_conflict` or `runtime_switch_conflict` for mutations attempted during active or
+queued runs.
+
+### Tests
+- API snapshot/readback: direct-mode onboarding status reports the effective runtime config from
+  the current generation.
+- Workspace switch conflict: selecting a different workspace while an async run is active is
+  rejected and leaves the original service/run visible.
+- Runtime switch conflict: selecting a new runtime while active or pending work exists is
+  rejected and leaves effective runtime readback unchanged.
+- Race-focused coverage: concurrent polling/status reads and runtime/workspace mutation attempts
+  are safe under `go test -race ./internal/api`.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md` for
+  session-generation conflict semantics if the HTTP conflict behavior is implemented.
+- No schemas, examples or fixtures should change.
+
+### Acceptance
+- [x] Targeted `go test ./internal/api` covers snapshot/coherence conflicts.
+- [x] Race-focused `go test -race ./internal/api` passes for the new lifecycle tests.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms handlers use coherent snapshots where workspace/service/runtime state
+      must agree and no Epic 20 behavior leaked into this slice.
+
+### Progress log
+- 2026-07-13: Implemented `19E` coherent service/session generation. API handlers now take a
+  request-scoped `serverSessionSnapshot` for workspace/service/runtime state, server session
+  mutations advance a generation under one lock, onboarding workspace/runtime switches and
+  runtime profile/manifest writes return conflict while the current service has active or queued
+  async work, and direct/onboarding status reports the effective runtime config for the current
+  generation. Orchestrator exposes read-only `HasInFlightRun` for API conflict checks.
+  Regression coverage verifies workspace switch conflict, runtime switch conflict, unchanged
+  manifest on runtime profile conflict, effective runtime readback and concurrent polling/mutation
+  safety under the race detector. Verification passed: `go test ./internal/api ./internal/orchestrator`,
+  `go test -race ./internal/api`, `go test ./internal/...`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19f-fresh-git-url-resolution
+
+### Context
+`19F` follows committed `19E`. Workspace `git_url` sources are ACP-owned caches under
+`.acp/repos`, but an unpinned source can currently keep reading the previously checked-out cache
+after the remote default branch advances. That makes refresh/collect evidence stale even though
+the operator declared a remote source rather than a pinned revision. The fix must keep
+user-owned `path` checkouts non-mutating and must not change the `workspace.yaml` schema.
+
+### Goals (must have)
+- [x] For unpinned `git_url` repos, fetch the remote, resolve the remote default `HEAD`, and
+      force the ACP-owned cache to the exact resolved commit before analysis reads it.
+- [x] Preserve pinned `ref` behavior: an explicit branch/tag/SHA continues to select that ref
+      rather than the remote default `HEAD`.
+- [x] Expose the exact resolved commit SHA in resolver output and run evidence when a fetch
+      occurred.
+- [x] Keep `path` sources read-only: validation may compare refs and warn, but must not mutate
+      user checkouts.
+- [x] Add no live-network dependency; tests use local temporary repositories and bare remotes.
+- [x] Continue PR-1 with `19G` minimum collect evidence contract after `19F` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
+      review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change `workspace.yaml` schema or provider list.
+- [ ] Do not introduce a new repository credential store or hosted source resolution plane.
+- [ ] Do not start `19G` collect contract work or Epic 20 UI trust work in this slice.
+- [ ] Do not rewrite user-owned `path` repositories to configured refs.
+
+### Implementation
+1) Extend `workspace.ResolvedRepo` with optional `resolved_sha`, keeping it omitted for dry
+   validation or unresolved sources.
+2) In `resolveGitURLRepo`, after clone/fetch, resolve either the explicit `ref` or the remote
+   default `HEAD` to an exact commit SHA.
+3) For unpinned `git_url`, update the local `origin/HEAD` view from the remote default and
+   `reset --hard` the ACP-owned cache to the resolved SHA. For pinned refs, checkout the explicit
+   ref and record its resolved SHA without switching to remote default.
+4) Add resolved repo evidence to run logs after fetch-backed validation, so run artifacts/logs
+   preserve the exact source revisions used for analysis.
+5) Update TypeScript validate response typing for the optional `resolved_sha` readback; UI
+   display remains best-effort and does not become a new workflow gate in this slice.
+6) Update README, `docs/spec/WORKSPACE_SPEC.md`, `docs/ARCHITECTURE.md` and testing docs only
+   for actual source freshness/readback semantics.
+
+### Interfaces
+No schema changes. Public API readback adds optional `resolved_repos[].resolved_sha` in workspace
+validation responses when ACP fetched a `git_url` source; run logs add `source_repos` metadata
+containing the same resolved SHA evidence for execution runs.
+
+### Tests
+- Local bare remote: first unpinned resolve reads default-branch content, then after a new remote
+  default-branch commit the second resolve reads the fresh content.
+- Unpinned resolver records `resolved_sha` equal to cache `HEAD`.
+- Pinned SHA/ref remains stable after the remote default branch advances.
+- `path` source ref verification does not mutate the checkout `HEAD`.
+- Execution run logs include fetched `source_repos[].resolved_sha` evidence.
+
+### Docs/fixtures
+- Update `README.md`, `docs/spec/WORKSPACE_SPEC.md`, `docs/ARCHITECTURE.md`,
+  `docs/TESTING_STRATEGY.md` and `docs/STAKEHOLDER_DOC.md`.
+- No JSON schemas, examples, golden fixtures or live matrices change.
+
+### Acceptance
+- [x] `go test ./internal/workspace` covers git_url freshness and pinned stability.
+- [x] Targeted orchestrator/API test covers persisted run-log resolved SHA evidence.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms only ACP-owned git_url caches are reset and no user checkout mutation
+      path was introduced.
+- [x] Commit `19F: refresh unpinned git_url sources`.
+
+### Progress log
+- 2026-07-13: Started `19F` after clean `19E` commit. Backlog scope confirmed: fresh unpinned
+  `git_url` resolution, resolved SHA evidence, local bare-remote regressions and docs-only
+  source freshness sync without `workspace.yaml` schema changes.
+- 2026-07-13: Implemented `19F`. Unpinned `git_url` cache resolution now fetches the remote,
+  resolves remote default `HEAD`, force-checkouts/resets/cleans the ACP-owned cache to the exact
+  commit, and exposes `resolved_sha` in fetch-backed resolver output plus persisted run-log
+  `source_repos` evidence. Pinned SHA/ref selection remains separate from remote default, and
+  path-source ref verification remains non-mutating. Regression coverage uses only local bare
+  remotes and verifies fresh default-branch content, pinned stability, path checkout safety and
+  run-log SHA evidence. Verification passed: `go test ./internal/workspace ./internal/orchestrator`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19g-minimum-collect-evidence-contract
+
+### Context
+`19G` follows committed `19F` and must land before `19H`. The active shard-pack schema requires
+`documents`, `citations`, `documents[].citation_ids`, `citations[].claim_ids` and
+`citations[].document_ids` fields, but schema arrays can still be empty and contract validation
+does not reject authored documents without citation IDs. That lets sparse/no-evidence collect
+packets reach checkpoint/apply paths instead of the existing collect repair/terminal path.
+
+### Goals (must have)
+- [x] Make non-empty `documents[]` and `citations[]` an explicit shard-pack schema and runtime
+      contract requirement.
+- [x] Make every authored `documents[].citation_ids` array non-empty and require its values to
+      reference existing citation IDs.
+- [x] Keep existing `citations[].claim_ids` and `citations[].document_ids` non-empty behavior,
+      and mirror it at schema level with clear validation errors.
+- [x] Ensure invalid sparse collect packs fail before checkpoint/apply and continue through the
+      existing repair/terminal classification paths.
+- [x] Synchronize schema docs, examples/fixtures and tests without changing `workspace.yaml`,
+      provider list, live matrices or Epic 20 UI behavior.
+- [x] Continue PR-1 with `19H` symmetric document/citation validation after `19G`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19I` historical run artifact snapshots after `19H`
+      review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not implement `19H` reverse citation symmetry (`citation.document_ids` resolving to
+      current documents and remap checks) in this slice.
+- [ ] Do not change final-run-index or citation-index schemas.
+- [ ] Do not weaken collect repair/recovery policy or synthesize provider-authored markdown.
+- [ ] Do not require live providers or network access.
+
+### Implementation
+1) Update `schemas/shard-pack-manifest.schema.json` with `minItems: 1` for `documents`,
+   `citations`, `documents[].citation_ids`, `citations[].claim_ids` and
+   `citations[].document_ids`.
+2) Tighten `internal/contracts` semantic validation so empty documents/citations and
+   authored documents without citation IDs produce deterministic messages.
+3) Adjust artifactquality/providercommon tests that previously treated empty collect packs as
+   valid; add negative cases for empty arrays and missing document citation IDs plus a positive
+   minimal manifest.
+4) Verify runtime apply/monitor surfaces still use `ValidateCollectManifestInRoot` so invalid
+   packs fail before checkpoint/apply.
+5) Sync schema docs in `docs/APPENDIX_SCHEMAS.md`, `docs/spec/PIPELINE_SPEC.md`, examples,
+   testing docs and ADR rationale.
+
+### Interfaces
+Public schema change: `shard-pack-manifest.schema.json` now rejects empty collect
+documents/citations and empty citation binding arrays. Workspace/API schemas do not change.
+
+### Tests
+- Schema/contract test rejects `documents: []`.
+- Schema/contract test rejects `citations: []`.
+- Contract test rejects authored document with empty `citation_ids`.
+- Contract test keeps rejecting missing/empty `citations[].claim_ids` and
+  `citations[].document_ids`.
+- Artifactquality/runtime validation test proves sparse collect pack fails before apply and a
+  valid minimal pack passes.
+
+### Docs/fixtures
+- Update `schemas/shard-pack-manifest.schema.json`, `docs/APPENDIX_SCHEMAS.md`,
+  `docs/spec/PIPELINE_SPEC.md`, `docs/TESTING_STRATEGY.md`, `examples/shard-pack-manifest.example.json`
+  if needed, and affected test fixtures/golden snippets.
+
+### Acceptance
+- [x] `make contracts` passes with the stricter shard-pack schema.
+- [x] `go test ./internal/contracts ./internal/artifactquality ./internal/runtime/providercommon`
+      passes.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms `19H` reverse-link/remap behavior was not implemented early.
+- [x] Commit `19G: require collect evidence bindings`.
+
+### Progress log
+- 2026-07-13: Started `19G` after clean `19F` commit. Schema-guardian and test-fixtures rules
+  apply because this slice changes shard-pack contract validation and its regression fixtures.
+- 2026-07-13: Implemented `19G`. `shard-pack-manifest.schema.json` now requires non-empty
+  `documents[]`, `citations[]`, `documents[].citation_ids`, `citations[].claim_ids` and
+  `citations[].document_ids`; Go contract validation mirrors the minimum evidence requirement.
+  Sparse collect packs fail strict validation before checkpoint/apply, while valid minimal
+  evidence-backed packs still pass. Existing deterministic claim-binding recovery was updated to
+  recognize the new schema `minItems` wording for empty `claim_ids`; no `19H` reverse
+  `citation.document_ids` resolution/remap behavior was added. Verification passed:
+  `make contracts`, `go test ./internal/contracts ./internal/artifactquality ./internal/runtime/providercommon`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19h-symmetric-document-citation-validation
+
+### Context
+`19H` follows committed `19G`. The shard-pack schema and contract now require non-empty
+documents, citations and binding arrays, and documents already reject unknown `citation_ids`.
+However `citations[].document_ids` is still only shape-checked: it can point at an unknown
+document, and document/citation links can be one-way. During citation-index aggregation,
+document IDs are remapped to final canonical document IDs, but validation does not yet prove
+that every remapped citation document ID resolves to the current final-run document set.
+
+### Goals (must have)
+- [x] Reject shard-pack citations whose `document_ids` do not resolve to documents in the same
+      manifest.
+- [x] Reject asymmetric shard-pack bindings in both directions: a document-citation link must
+      be present in `documents[].citation_ids` and the matching `citations[].document_ids`.
+- [x] Validate the staged final citation index against the final run index after document-ID
+      remap so post-remap dangling document IDs and one-way links fail before promotion.
+- [x] Keep valid duplicate source document ID remap behavior green: duplicate shard-local IDs may
+      still map to unique final document IDs, and citation bindings must follow that remap.
+- [x] Update pipeline/schema docs and ADR rationale for symmetric evidence bindings without
+      changing provider list, `workspace.yaml`, live matrices or Epic 20 UI behavior.
+- [x] Continue PR-1 with `19I` historical run artifact snapshots after `19H` review/commit
+      boundary is stable.
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change JSON schema field names or add a new snapshot/citation schema version.
+- [ ] Do not change collect retry policy except through existing invalid-manifest
+      repair/terminal paths.
+- [ ] Do not synthesize missing provider-authored shard-pack links in collect output; only
+      orchestrator-generated `runtime-derived` final documents may be reconciled into the
+      generated citation index so generated fallback links remain reciprocal.
+- [ ] Do not implement Epic 20 snapshot UX or frontend request-state work.
+
+### Implementation
+1) Add contract-level symmetry validation in `internal/contracts/docflow.go`: build document and
+   citation lookup maps, reject unknown `citation.document_ids`, reject
+   `document.citation_ids` entries not reciprocated by the citation, and reject
+   `citation.document_ids` entries not reciprocated by the document.
+2) Keep schema JSON unchanged unless implementation proves a shape-level schema edit is needed;
+   this slice strengthens semantic contract validation.
+3) Extend staged artifact validation in `internal/orchestrator/docflow.go` so the generated
+   `citation-index.json` and `final-run-index.json` are cross-checked after document-ID remap:
+   every citation document ID must exist, every final document citation ID must exist, and the
+   links must be reciprocal.
+4) Add focused negative tests for unknown citation document ID, document-to-citation asymmetry,
+   citation-to-document asymmetry and post-remap dangling final citation document ID.
+5) Reconcile only orchestrator-generated `runtime-derived` final documents into
+   `citation-index.json` when `buildFinalRunIndex` adds fallback citation IDs, so generated
+   final docs do not create one-way links.
+6) Keep the existing duplicate-document-ID remap test green and extend it, if needed, to prove
+   remapped citation document IDs still match final canonical document IDs.
+
+### Interfaces
+No schema field changes. Public behavior changes by rejecting previously accepted semantically
+invalid shard-pack manifests and staged citation indexes with dangling/asymmetric evidence links.
+
+### Tests
+- `ParseShardPackManifest` rejects `citations[].document_ids` that reference an unknown document.
+- `ParseShardPackManifest` rejects a document listing a citation that does not list that document.
+- `ParseShardPackManifest` rejects a citation listing a document that does not list that citation.
+- `validateStagedArtifacts` rejects post-remap citation-index document IDs not present in the
+  final run index.
+- Duplicate source document ID remap remains green and produces reciprocal final document/citation
+  links.
+
+### Docs/fixtures
+- Update `docs/spec/PIPELINE_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`,
+  `docs/TESTING_STRATEGY.md` and ADR rationale for symmetric collect evidence bindings.
+- No example JSON change is expected because current examples already use reciprocal bindings.
+
+### Acceptance
+- [x] `go test ./internal/contracts ./internal/orchestrator` passes.
+- [x] `go test ./internal/...` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19I` frontend snapshot behavior or Epic 20 UX work leaked into
+      this slice.
+- [x] Commit `19H: enforce symmetric citation bindings`.
+
+### Progress log
+- 2026-07-13: Started `19H` after clean `19G` commit. Spec-first, schema-guardian and docs-sync
+  rules apply because this slice strengthens docflow contract semantics and the documented
+  pipeline evidence contract.
+- 2026-07-13: Implemented `19H`. Shard-pack validation now rejects unknown
+  `citations[].document_ids` and one-way document/citation links; staged artifact validation
+  cross-checks generated `final-run-index.json` and `citation-index.json` after document-ID
+  remap. Runtime-derived final docs generated by the orchestrator are explicitly reconciled into
+  the generated citation index so fallback citations are reciprocal without mutating
+  provider-authored shard-pack links. Regression coverage includes unknown document IDs,
+  document-to-citation asymmetry, citation-to-document asymmetry, post-remap dangling citation
+  documents and valid duplicate-ID remap. Verification passed: `go test ./internal/contracts ./internal/orchestrator`,
+  `go test ./internal/...`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19i-historical-run-artifact-snapshots
+
+### Context
+`19I` follows committed `19H`. The backend final-run index already carries
+`canonical_path` and `staged_path`, but the frontend contract keeps only `canonical_path`.
+`useRunArtifacts` converts selected-run final documents back into canonical paths and
+`handleOpenArtifact` reads those canonical paths through `/api/artifacts`. Coverage summary and
+open questions are also loaded from stable canonical paths. When a later run promotes new bytes
+to the same canonical path, selecting an older run can show current workspace bytes under the
+older run label.
+
+### Goals (must have)
+- [x] Preserve final-run-index `run_id`, `generated_at` and per-document `staged_path` in the
+      TypeScript contract.
+- [x] Keep artifact display/selection keyed by canonical label while reading selected-run bytes
+      from run-scoped `staged_path`.
+- [x] Reject mismatched final-run-index `run_id` and out-of-root `staged_path` values instead of
+      falling back to canonical bytes.
+- [x] Load coverage summary and open questions from selected-run staged documents when the
+      final-run index contains those canonical documents.
+- [x] Add deterministic UI regression with two runs sharing the same canonical path but different
+      staged bytes; older selection must not read current canonical content.
+- [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not implement Epic 20 source-mode UI copy (`Run snapshot` / `Current workspace`) in this
+      slice.
+- [ ] Do not add a new backend snapshot API or change final-run-index schema.
+- [ ] Do not solve all stale async response races; `19J` owns request-generation and abort
+      primitives.
+- [ ] Do not change Publish commit scope or Git semantics.
+
+### Implementation
+1) Extend `ui/src/lib/appContracts.ts` so final-run-index payloads include top-level `run_id`,
+   `generated_at` and required document `staged_path`.
+2) Extend `Artifact` with optional internal read metadata (`read_path`, canonical path/source
+   markers) while preserving `path` as the operator-facing canonical label used by existing UI
+   selectors.
+3) In `useRunArtifacts`, parse the selected run's final-run-index, validate `run_id` and
+   `staged_path` root, derive display artifacts from `canonical_path`, and read previews from
+   `read_path`.
+4) Make final-run-index failure fail closed for snapshot mode: do not use canonical final
+   document paths when the selected run index is corrupt, mismatched or cross-run.
+5) Load coverage/open-question content through the same selected-run final-index mapping when
+   available, with canonical fallback only for runs that have no final-run-index artifact.
+
+### Interfaces
+Frontend-only TypeScript contract extension. HTTP and JSON schemas do not change.
+
+### Tests
+- UI regression: run A and run B expose `reports/as-is/overview.md` with different staged bytes;
+  selecting A reads A staged bytes, selecting B reads B staged bytes, and canonical current bytes
+  are never displayed for either selected historical run.
+- Coverage/open-question regression: selected-run staged coverage documents override canonical
+  workspace files.
+- Existing artifact filters and proposal/publish artifact lists continue to work with canonical
+  display paths.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` and stakeholder/operator docs only for selected-run snapshot
+  preview behavior. No schema/example changes are expected.
+
+### Acceptance
+- [x] `npm --prefix ui test -- --run` passes.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] `go test ./internal/docsync` passes after docs update.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19J` request-generation primitive or Epic 20 source-mode IA
+      leaked into this slice.
+- [x] Commit `19I: read historical artifacts from run snapshots`.
+
+### Progress log
+- 2026-07-13: Started `19I` after clean `19H` commit. Spec-first, docs-sync and
+  UI-implementation-QA rules apply because this slice changes frontend artifact read behavior
+  and operator-visible Review evidence correctness.
+- 2026-07-13: Implemented `19I`. The frontend final-run-index contract now preserves
+  `run_id`, `generated_at` and document `staged_path`; Review artifacts keep canonical display
+  paths but read previews from selected-run staged paths. Final-run-index run mismatches and
+  cross-run staged paths fail closed without canonical fallback, while runs without a final index
+  keep the existing current-workspace read behavior. Coverage summary and open questions load
+  from selected-run staged documents when indexed. UI regression covers two runs sharing
+  `reports/as-is/overview.md` with different staged bytes and proves current canonical bytes are
+  not displayed. Verification passed: UI typecheck, UI Vitest `94/94`, `go test ./internal/docsync`,
+  and full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260713-epic-19-19j-request-scoped-ui-detail-state
+
+### Context
+`19J` follows committed `19I`. Review artifacts now read selected-run staged bytes, but the
+frontend still lets independent async detail requests write unkeyed state after selection changes:
+run status, logs, artifact lists, artifact previews, coverage/open questions, run review summary
+and Git diff can all be requested for run/path A and resolve after the operator has selected
+run/path B. The UI must clear stale detail state immediately and only allow the latest matching
+request generation to update the visible panel.
+
+### Goals (must have)
+- [x] Add a reusable frontend request generation / AbortController helper for abort-aware async
+      detail loading.
+- [x] Apply request-scoped state guards to run status, logs, artifacts, selected artifact preview,
+      coverage/open questions, run review summary and Git diff.
+- [x] Keep state writes keyed by the current request selection so a late response for run/path A
+      cannot update panels for run/path B.
+- [x] Clear visible detail surfaces on selection changes before replacement data lands.
+- [x] Treat unmount/selection aborts as silent cancellation, not user-visible errors.
+- [x] Continue PR-1 with `19K1` run mutation acknowledgement after `19J` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change backend APIs, JSON schemas, final-run-index semantics or provider/runtime
+      behavior.
+- [ ] Do not implement `19K1` mutation acknowledgement, `19K2` Q&A provisional ordering or
+      `19L` editor safety.
+- [ ] Do not add Epic 20 source-mode UX, Publish scope changes, IA changes or persisted approval
+      workflow.
+- [ ] Do not refactor unrelated stage layout, visual design, accessibility primitives or
+      generated contract tooling.
+
+### Implementation
+1) Add a small shared hook in `ui/src/hooks` that starts a named request generation, aborts the
+   previous generation for that surface, exposes `signal`, `requestKey`, `isCurrent()` and cleanup
+   helpers, and suppresses ordinary `AbortError`.
+2) Extend frontend API helpers where needed so existing fetches can receive an `AbortSignal`
+   without changing backend endpoints.
+3) Update `useRunActions` so selected-run status/detail loads are keyed by run ID and ignored if
+   a newer selection supersedes them.
+4) Update `useRunLogs` so reset/page/until-EOF log loads are keyed by run ID and cursor; late log
+   pages cannot merge into a different selected run.
+5) Update `useRunArtifacts` so artifact-list, coverage/open-question and preview requests have
+   independent request generations; clearing artifacts aborts all three surfaces.
+6) Update `useRunReview` and `useGitDiff` so late review-summary or diff responses cannot replace
+   newer selected-run/path state.
+7) Add targeted UI regressions using deferred fetch responses to prove A -> B switching ignores
+   late A writes while existing `19I` snapshot behavior remains green.
+
+### Interfaces
+Frontend-only hook/API-helper types. No HTTP, backend, schema or public artifact contract change.
+
+### Tests
+- Deferred selected-run A status/log/artifact responses resolving after selected-run B do not
+  update B panels.
+- Switching selected run clears stale artifact/log/review detail state before B data lands.
+- Late artifact preview for an older selected artifact cannot overwrite a newer selected artifact.
+- Late Git diff for an older run/path cannot overwrite a newer run/path diff.
+- Aborted requests during unmount or selection change do not surface user-visible errors.
+- Existing `19I` historical snapshot tests stay green.
+
+### Docs/fixtures
+No operator documentation, schema, example or fixture changes are expected. `docs/PLANS.md` is
+the only documentation update unless implementation changes visible loading/error copy.
+
+### Acceptance
+- [x] Targeted UI Vitest suite passes.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Existing `19I` snapshot regression stays green.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19K1`, `19K2`, `19L` or Epic 20 work leaked into this slice.
+- [x] Commit `19J: isolate UI detail requests`.
+
+### Progress log
+- 2026-07-13: Started `19J` after clean `19I` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice introduces a shared frontend async-state primitive and UI
+  regressions for stale request ordering.
+- 2026-07-13: Implemented `19J`. Added `useRequestGate` for request-keyed AbortController
+  ownership and applied it to selected-run status, logs, artifacts, preview, coverage/open
+  questions, review summary and Git diff. Selection changes now clear stale detail surfaces and
+  late A responses are ignored after B becomes current. Added deferred-response regressions for
+  artifact preview and Git diff ordering while keeping the `19I` historical snapshot regression
+  green. Verification passed: UI typecheck, UI Vitest `96/96`, and full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19k1-run-mutation-acknowledgement
+
+### Context
+`19K1` follows committed `19J`. The UI already receives accepted `POST /api/pipeline/init|refresh`
+and `POST /api/pipeline/runs/<run_id>/cancel` responses, but follow-up detail/list/log requests
+still execute inside the same mutation try/catch. If a post-acknowledgement GET fails, the UI can
+present the accepted mutation as a failed start/cancel instead of a recoverable reconciliation
+state. This creates duplicate-action risk and hides the server-accepted `run_id`.
+
+### Goals (must have)
+- [x] Preserve an accepted start response as provisional selected run state immediately.
+- [x] Treat the first failed follow-up status/list/log request after accepted start as
+      reconciliation status, not failed mutation.
+- [x] Preserve accepted cancel acknowledgement after `202` even if follow-up list/status/log
+      reconciliation fails.
+- [x] Avoid duplicate start/cancel requests after accepted mutation acknowledgement.
+- [x] Reuse the `19J` request-gated detail loading behavior without introducing another async
+      state primitive.
+- [x] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change backend APIs, schemas or run start/cancel response formats.
+- [ ] Do not implement Q&A provisional ordering; that remains `19K2`.
+- [ ] Do not implement manifest/editor dirty-draft safety; that remains `19L`.
+- [ ] Do not change queue semantics, active-run blocking or Epic 20 explicit queue workflow.
+
+### Implementation
+1) In `useRunActions`, split accepted mutation acknowledgement from follow-up reconciliation.
+   `handleRunPipeline` should upsert the provisional run, select it and show accepted copy before
+   any status/log/list reconciliation is attempted.
+2) Add a small internal reconciliation helper for post-start detail/list/log loading. It may set
+   `runActionStatus` to a recovery message when detail loading fails, but it must not set the
+   global mutation error or return `false` after the start POST succeeded.
+3) Apply the same boundary to cancel `202`: the accepted cancel message remains visible if
+   follow-up list/status/log loading fails.
+4) Keep existing 404 and 409 cancel handling unchanged except for making post-acknowledgement
+   detail failures recoverable.
+5) Add UI regressions where POST succeeds and the first follow-up GET fails, proving the accepted
+   run/cancel state remains selected and no duplicate mutation is sent.
+
+### Interfaces
+Frontend-only behavior change in run explorer state. HTTP, backend, schemas and public artifact
+contracts remain unchanged.
+
+### Tests
+- Start POST succeeds and first `GET /api/pipeline/runs/<run_id>` fails; UI still shows the
+  accepted provisional `run_id`, reports reconciliation status and sends only one start request.
+- Later polling/list recovery for the same `run_id` replaces provisional state with server status.
+- Cancel `202` followed by failed list/status/log reconciliation keeps `Cancel requested for
+  <run_id>` visible and sends only one cancel request.
+- Existing missing-run cancel `404`, already-terminal `409`, `19J` stale-response and `19I`
+  historical snapshot tests remain green.
+
+### Docs/fixtures
+No operator documentation, schema, example or fixture changes are expected. `docs/PLANS.md` is
+the only documentation update unless implementation changes user-facing recovery copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` mutation acknowledgement tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19K2`, `19L`, queue semantics or Epic 20 work leaked into this
+      slice.
+- [x] Commit `19K1: acknowledge accepted run mutations`.
+
+### Progress log
+- 2026-07-14: Started `19K1` after clean `19J` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend mutation acknowledgement and recovery states.
+- 2026-07-14: Implemented `19K1`. Accepted pipeline starts now upsert and select a provisional
+  run before follow-up status/log/list reconciliation, and accepted cancels preserve their
+  acknowledgement when post-acknowledgement reconciliation fails. Regression coverage proves
+  start/cancel POSTs are not duplicated and later polling reconciles the same accepted run ID.
+  During full DoD, docs-sync exposed completed `19H`-`19J` active plans without open follow-up
+  goals, so those plans now keep an explicit final-reconciliation archive goal. Verification
+  passed: UI typecheck, targeted App mutation acknowledgement tests, UI Vitest `98/98`,
+  `go test ./internal/docsync`, and full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19k2-qa-provisional-run-ordering
+
+### Context
+`19K2` follows committed `19K1`. The Ask panel still treats accepted Q&A start and follow-up
+detail/history loading as one mutation: `startQARun` clears the selected answer, waits for
+`GET /api/qa/runs/<run_id>`, and reports any post-acknowledgement failure as a failed Q&A
+request. Initial history load, manual history refresh and selected-run detail loads also use
+local cancel booleans instead of request-key ownership. A late history/detail response can
+therefore replace a newer selected Q&A run, and an accepted QA run can disappear until polling
+recovers.
+
+### Goals (must have)
+- [x] Create and select a provisional Q&A run immediately after accepted
+      `POST /api/qa/runs`.
+- [x] Treat the first failed detail/history GET after accepted Q&A start as recoverable
+      reconciliation status, not a failed submit.
+- [x] Keep history, selected detail and polling writes keyed so the last selected Q&A run wins.
+- [x] Disable double submit while an accepted Q&A run is reconciling or active.
+- [x] Reuse the `19J` request gate primitive instead of adding another async-state model.
+- [x] Continue PR-1 with `19L` editor draft safety after `19K2` review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change pipeline start/cancel acknowledgement; that was `19K1`.
+- [ ] Do not change manifest/editor draft behavior; that remains `19L`.
+- [ ] Do not change backend Q&A endpoints, schemas or response formats.
+- [ ] Do not implement Epic 20 Ask IA/source-mode changes.
+
+### Implementation
+1) Extend `qaApi` helpers so history/detail requests can receive an `AbortSignal` without
+   changing backend URLs.
+2) In `AskStagePanel`, add request gates for Q&A history and selected-detail ownership.
+   Initial history load, manual refresh, selected history row loads and accepted-start detail
+   reconciliation must only write visible state when their token is current.
+3) Build a provisional `QARunResponse` from the accepted start response plus the submitted
+   question, upsert it into history, select it and display an accepted/reconciling status before
+   detail GET.
+4) If post-acknowledgement detail/history reconciliation fails, keep the provisional run selected
+   and show a recoverable reconciliation message. The accepted submit returns without allowing a
+   second submit until the detail/polling loop owns the same run.
+5) Keep polling scoped to the currently selected active QA run, and ignore/abort stale polling
+   results after a newer selection or submission.
+
+### Interfaces
+Frontend-only helper signatures and Ask state flow. HTTP, backend, schemas and public artifact
+contracts remain unchanged.
+
+### Tests
+- Accepted Q&A start remains selected after the first detail GET fails; later polling reconciles
+  the same run ID.
+- Double submit is disabled while the accepted Q&A run is reconciling or active.
+- A delayed old history response cannot replace a newer selected/submitted Q&A run.
+- A delayed old selected-run detail response cannot overwrite a newer selected Q&A run.
+- Existing Q&A answer, failure recovery, retry and nullable-evidence tests remain green.
+
+### Docs/fixtures
+No schema, example or fixture changes are expected. `docs/PLANS.md` is the only documentation
+update unless implementation changes operator-visible recovery copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` Q&A ordering tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19L`, Git publication, queue semantics or Epic 20 work leaked
+      into this slice.
+- [x] Commit `19K2: preserve accepted QA run selection`.
+
+### Progress log
+- 2026-07-14: Started `19K2` after clean `19K1` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend Q&A async mutation ordering and recovery
+  states.
+- 2026-07-14: Implemented `19K2`. Ask now creates a provisional selected QA run immediately
+  after accepted `POST /api/qa/runs`, keeps accepted runs selected through first detail
+  reconciliation failures, and keys history, selected-detail and polling writes so late older
+  responses cannot replace the latest selection. QA history/detail helpers now accept
+  `AbortSignal`, and regression coverage proves accepted-run recovery, delayed history ordering,
+  delayed detail ordering and disabled double submit while accepted/active. Verification passed:
+  UI typecheck, targeted App Q&A ordering tests, UI Vitest `101/101`, and full DoD with exact
+  Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19l-editor-revision-safety
+
+### Context
+`19L` follows committed `19K2`. Source manifest saves and Charter baseline artifact editing still
+trust late async completions too broadly. Manifest save handlers always mark setup dirty state
+clean after `save -> validate`, even if the operator edited the form while the save was in
+flight. Baseline artifact loading uses one selected content slot: a late load for an older path
+can overwrite typed content, switching paths loses dirty drafts, and a save completion can report
+the draft clean even when the operator changed the text after save started.
+
+### Goals (must have)
+- [x] Add form revision/snapshot checks to raw manifest and guided Source save paths.
+- [x] Keep Source dirty state dirty when text/form changes after a save starts.
+- [x] Add per-path single-owner draft state for Charter/Baseline editable artifacts.
+- [x] Ignore late artifact loads for old paths or dirty newer drafts.
+- [x] Keep edits made during a deferred artifact save dirty and visible after save resolves.
+- [x] Continue PR-1 with `19M` reproducible embedded UI build after `19L` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change Git publication, Q&A, pipeline run or queue semantics.
+- [ ] Do not change backend APIs, schemas or artifact write response formats.
+- [ ] Do not redesign Charter editor UX beyond correctness/status copy needed for stale saves.
+- [ ] Do not start Epic 20.
+
+### Implementation
+1) In `useManifestEditor`, track a monotonic form revision and current manifest content ref.
+   Every raw text edit, guided repo edit/import path edit and guided apply increments the
+   revision and marks setup dirty.
+2) Manifest save handlers capture `{revision, manifest}` before the write. After
+   `saveWorkspaceManifest` and validation return, only clear dirty state and accept validation
+   if the current revision/content still match the saved snapshot.
+3) In `useBaselineEditor`, replace single content ownership with a per-path draft map carrying
+   content, loaded content, dirty flag and revision.
+4) Baseline artifact loads capture path/load sequence and only write state if that path is still
+   selected and the draft was not edited after the load started.
+5) Baseline artifact saves capture path/content/revision and only mark the path clean when the
+   draft is unchanged at save completion; otherwise preserve newer text and show status that
+   unsaved edits remain.
+
+### Interfaces
+Frontend-only hook behavior. No HTTP, backend, schema or public artifact contract change.
+
+### Tests
+- Raw manifest edit during deferred save keeps the newer text and does not treat the newer draft
+  as clean.
+- Guided Source edit during deferred save keeps dirty state when form revision changes after save
+  starts.
+- Late baseline artifact load for path A cannot overwrite typed content for selected path B.
+- Switching baseline paths preserves each path's dirty draft content.
+- Editing a baseline artifact during deferred save preserves the newer dirty text after save
+  resolves.
+
+### Docs/fixtures
+No schema, examples or fixtures are expected. `docs/PLANS.md` is the only documentation update
+unless implementation changes operator-visible editor status copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` manifest/editor stale-write tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no Git publication, run/Q&A state, schema or Epic 20 work leaked into
+      this slice.
+- [x] Commit `19L: protect editor drafts from stale writes`.
+
+### Progress log
+- 2026-07-14: Started `19L` after clean `19K2` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend editor async-state correctness and recovery
+  status copy.
+- 2026-07-14: Implemented `19L`. Source manifest saves now capture revision/content snapshots
+  and only mark the form clean when the same draft is still current; stale completions surface
+  `newer unsaved edits remain`. Charter/Baseline editing now owns per-path drafts with
+  load/save revision guards, so late loads for old paths and save completions for superseded
+  text cannot overwrite visible operator edits. Regression coverage includes raw manifest
+  edit-during-save, late baseline load, per-path dirty draft switching and edit-during-save for
+  baseline artifacts. Verification passed: UI typecheck, targeted App stale-write tests, UI
+  Vitest `105/105`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19m-deterministic-embedded-ui-bundle
+
+### Context
+`19M` follows committed `19L`. `make build` currently removes `ui/dist`, runs Vite and copies the
+result into `internal/api/ui_dist`, but CI does not prove that the committed embedded bundle is
+fresh. There is also no exact-commit double-build verifier that compares independent clean
+builds by sorted path/digest. Vite output naming is implicit, so future bundler upgrades could
+change chunk names/order without a dedicated guard.
+
+### Goals (must have)
+- [x] Make Vite output naming explicit for entry chunks, dynamic chunks and assets.
+- [x] Add an exact-commit UI build determinism verifier that builds the same ref in two
+      independent temp roots and compares sorted paths/digests.
+- [x] Add an embedded UI freshness verifier that rebuilds/copies `internal/api/ui_dist` and fails
+      if Git detects a diff.
+- [x] Wire the new verifiers into provider-free UI CI.
+- [x] Update testing/build docs for deterministic UI and stale embedded bundle checks.
+- [x] Continue PR-1 with `19O` locked contract validator tooling after `19M` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change app UI behavior or design.
+- [ ] Do not change backend APIs, schemas or live-provider requirements.
+- [ ] Do not solve contract validator lockfiles; that remains `19O`.
+- [ ] Do not make live provider checks required in PR CI.
+
+### Implementation
+1) Update `ui/vite.config.ts` with explicit deterministic `assetsDir`, `entryFileNames`,
+   `chunkFileNames` and `assetFileNames`.
+2) Add `scripts/verify-ui-deterministic-build.sh`: archive the requested Git ref into two temp
+   roots, or copy the current `WORKTREE` for pre-commit self-review, reuse installed
+   `ui/node_modules` when available, run the pinned `scripts/run-npm.sh run build --prefix ui`
+   in both roots, and compare sorted SHA-256 path manifests.
+3) Add `scripts/check-ui-dist-fresh.sh`: rebuild UI, copy `ui/dist` into `internal/api/ui_dist`
+   using the same embed path as `make build`, and fail with a diff/stat when committed embedded
+   assets are stale.
+4) Add Make targets for both checks without changing the local `make build` behavior that updates
+   embedded assets for the current slice.
+5) Update the UI workflow to run UI tests, standalone Vite build, deterministic double-build and
+   embedded bundle freshness checks after `npm ci`.
+6) Update `docs/TESTING_STRATEGY.md` and build guidance to explain local usage and CI behavior.
+
+### Interfaces
+Tooling-only changes: Make targets, CI workflow and scripts. No runtime API/schema changes.
+
+### Tests
+- `scripts/verify-ui-deterministic-build.sh HEAD` produces identical sorted path/digest manifests
+  for two clean temp roots.
+- `scripts/check-ui-dist-fresh.sh` exits zero when `internal/api/ui_dist` matches the source UI
+  build.
+- A deliberately stale embedded asset would make `scripts/check-ui-dist-fresh.sh` exit non-zero
+  in CI.
+- Existing UI tests/typecheck/build remain green.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- Update `CONTRIBUTING.md` and architecture build guidance for the new UI verification commands.
+
+### Acceptance
+- [x] `scripts/verify-ui-deterministic-build.sh WORKTREE` passes before commit; CI runs the same
+      verifier against `HEAD` through `make verify-ui-determinism`.
+- [x] `scripts/check-ui-dist-fresh.sh` passes on the current bundle state.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no UI behavior, schema, contract-toolchain or live-provider scope
+      leaked into this slice.
+- [x] Commit `19M: make embedded UI builds reproducible`.
+
+### Progress log
+- 2026-07-14: Started `19M` after clean `19L` commit. Spec-first and docs-sync rules apply
+  because this slice changes deterministic build tooling and required CI behavior.
+- 2026-07-14: Implemented explicit Vite output names, UI determinism/freshness scripts, Make
+  targets and provider-free UI workflow checks. Pre-commit targeted verification passed:
+  `scripts/verify-ui-deterministic-build.sh WORKTREE`, `make build`, and
+  `scripts/check-ui-dist-fresh.sh`.
+- 2026-07-14: Full DoD passed with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`. A docs-sync active-plan invariant was fixed by adding the same
+  final-reconciliation archive goal to completed `19L` that earlier completed slices use.
+
+### Plan ID
+EP-20260714-epic-19-19o-locked-contract-validator-toolchain
+
+### Context
+`19O` follows committed `19M` and closes the remaining release-reproducibility tooling gap before
+`19N`. The current `make contracts` target executes:
+`npm exec --yes --package=ajv-cli --package=ajv-formats --package=js-yaml ...`, which lets npm
+resolve mutable registry versions at validation time. That makes local/CI contract validation
+depend on whatever `latest` resolves to, rather than a reviewed lockfile diff.
+
+### Goals (must have)
+- [x] Add a versioned, lockfile-backed contract validator tooling package for `ajv-cli`,
+      `ajv-formats` and `js-yaml`.
+- [x] Make `make contracts` install/use that locked toolchain instead of mutable
+      `npm exec --package=...` resolution.
+- [x] Keep contract validation offline-capable after the locked package has been installed.
+- [x] Keep current schema/example/fixture validation behavior unchanged.
+- [x] Update developer/testing docs so toolchain version changes require explicit package/lockfile
+      review.
+- [x] Continue PR-1 with `19N` composite release verdict gate after `19O` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change schemas, examples, fixtures or semantic contract rules.
+- [ ] Do not change UI package dependencies or the embedded UI build.
+- [ ] Do not introduce live provider/network dependencies into required CI.
+- [ ] Do not implement release verifier behavior; that remains `19N`.
+
+### Implementation
+1) Add `tools/contracts/package.json` with exact dependency ranges for the validator CLI
+   toolchain and generate a committed `package-lock.json`.
+2) Update `Makefile` with a `CONTRACT_TOOLS_DIR` and make `contracts` run
+   `scripts/run-npm.sh ci --prefix tools/contracts` before validation, so installed versions come
+   from the lockfile.
+3) Update `scripts/validate-contracts.sh` to execute `tools/contracts/node_modules/.bin/ajv` and
+   `tools/contracts/node_modules/.bin/js-yaml` directly, so global tools are never used as a
+   fallback, and fail with a clear bootstrap message if the locked install is missing.
+4) Leave schema/example/fixture validation loops intact so positive/negative behavior does not
+   move in this slice.
+5) Update `CONTRIBUTING.md` and `docs/TESTING_STRATEGY.md` to document the locked contract
+   toolchain and explicit lockfile review requirement.
+
+### Interfaces
+Tooling-only changes: a new contract-tool npm package/lockfile, `make contracts` behavior and
+validation script bootstrap. No product HTTP/API/schema/artifact contract change.
+
+### Tests
+- `make contracts` installs the locked toolchain and validates the existing positive/negative
+  fixtures.
+- Running `scripts/validate-contracts.sh` after `tools/contracts` install works without
+  `npm exec --package` or mutable latest resolution.
+- Removing the installed tool binaries makes the script fail with a bootstrap hint rather than
+  falling back to global tools.
+- Existing full DoD remains green.
+
+### Docs/fixtures
+- Update `CONTRIBUTING.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/fixture updates expected because validator semantics are unchanged.
+
+### Acceptance
+- [x] `ACP_NODE_TOOL_CANDIDATES="$HOME/.cache/provenarch-toolchains/node-v22.21.1-darwin-arm64/bin" make contracts` passes with the locked toolchain.
+- [x] `PATH="$HOME/.cache/provenarch-toolchains/node-v22.21.1-darwin-arm64/bin:/usr/bin:/bin" scripts/validate-contracts.sh` passes after locked install by using repo-local tool binaries
+      plus only the pinned Node runtime.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no schema, fixture, UI build or release-verifier behavior leaked into
+      this slice.
+- [x] Commit `19O: lock contract validation tooling`.
+
+### Progress log
+- 2026-07-14: Started `19O` after clean `19M` commit. Spec-first and docs-sync rules apply
+  because this slice changes required contract-validation tooling and developer docs.
+- 2026-07-14: Implemented `tools/contracts` exact dependency package/lockfile, including a
+  patched `fast-json-patch` override to keep the new lockfile free of high audit advisories.
+  `make contracts` now performs lockfile-backed `npm ci` and `scripts/validate-contracts.sh`
+  executes repo-local `ajv`/`js-yaml` binaries directly instead of falling back to globals.
+  Verification passed: clean locked install, direct pinned-Node/offline script run, missing-tools
+  negative bootstrap, `npm audit --audit-level=high`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19n-composite-release-verdict-gate
+
+### Context
+`19N` follows committed `19M` and `19O`. `scripts/verify-release-verdict.py` already verifies a
+canonical `reports/release_verdict_<matrix-id>.json` plus companion
+`swe_ux_assessment_<matrix-id>.md` and `swe_artifact_quality_assessment_<matrix-id>.md`, including
+missing files, `FAIL`, matrix-id mismatch and unaccepted manual assessments. The GitHub release
+workflow still grants GoReleaser/write permissions in the publishing job without a preceding
+read-only composite-evidence verifier job.
+
+### Goals (must have)
+- [x] Add a read-only release evidence verification job that runs
+      `scripts/verify-release-verdict.py` before any GoReleaser/write-permission job can start.
+- [x] Make release publication depend on that verifier job with `needs`.
+- [x] Keep GoReleaser and provenance write permissions scoped only to the publishing job.
+- [x] Keep release verification offline: no live provider or matrix harness execution in the
+      workflow.
+- [x] Add workflow regression tests for missing verifier, missing dependency, and write
+      permissions appearing before verification.
+- [x] Update release runbook/docs with the workflow inputs and composite evidence gate.
+- [x] Continue PR-1 with `19P` Step 1 card enrichment after `19N` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change canonical release matrices, providers, sweeps or live matrix harness.
+- [ ] Do not generate live evidence in CI.
+- [ ] Do not weaken `verify-release-verdict.py` payload/manual-assessment requirements.
+- [ ] Do not implement semantic enrichment; that remains `19P`.
+
+### Implementation
+1) Split `.github/workflows/release.yml` into a read-only `verify-release-evidence` job and the
+   existing write-enabled `release` job.
+2) The verifier job checks out the exact tag commit, resolves a verdict path from either
+   `ACP_RELEASE_VERDICT_PATH` or `ACP_RELEASE_MATRIX_ID`, and runs
+   `python3 scripts/verify-release-verdict.py "$verdict_path"`.
+3) The release job keeps `contents/id-token/attestations: write`, keeps GoReleaser/attestation
+   steps unchanged, and adds `needs: verify-release-evidence`.
+4) Update release workflow tests to assert the verifier job has read-only permissions, the release
+   job depends on it, and no GoReleaser/write-permission job can run without the verifier.
+5) Update `docs/RELEASE_LIVE_E2E_RUNBOOK.md` and `docs/TESTING_STRATEGY.md` for the composite
+   gate and required evidence variables.
+
+### Interfaces
+CI/release workflow surface only: `ACP_RELEASE_VERDICT_PATH` or `ACP_RELEASE_MATRIX_ID` must point
+the release workflow at already-created evidence files in the checked-out tag. No product API,
+schema or live harness interface changes.
+
+### Tests
+- Existing `scripts/tests/verify_release_verdict_test.py` continues covering missing, `FAIL`,
+  matrix-mismatched and unaccepted SWE evidence.
+- `scripts/tests/release_distribution_test.py` covers release workflow job ordering and
+  permissions.
+- Full DoD remains green.
+
+### Docs/fixtures
+- Update `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No fixtures/schema changes expected.
+
+### Acceptance
+- [x] Targeted release verifier/distribution tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live matrix/provider, schema, UI or semantic enrichment scope leaked
+      into this slice.
+- [x] Commit `19N: require composite release verdict`.
+
+### Progress log
+- 2026-07-14: Started `19N` after clean `19O` commit. Spec-first and docs-sync rules apply
+  because this slice changes release workflow policy and release docs.
+- 2026-07-14: Implemented read-only `verify-release-evidence` workflow job, wired the
+  write-enabled `release` job through `needs`, kept GoReleaser/provenance write permissions only
+  on the publishing job, and documented `ACP_RELEASE_MATRIX_ID` / `ACP_RELEASE_VERDICT_PATH`.
+  Verification passed: targeted release verifier/distribution tests and full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19p-step1-card-enrichment
+
+### Context
+`19P` follows committed `19N` and starts the P2 quality-hardening band. The semantic card
+enrichment implementation already exists in `internal/orchestrator/semantic_cards.go`, but Step 1
+currently finishes after loading canonical team cards and never runs the enrichment pass. That
+creates a mismatch with `docs/spec/PIPELINE_SPEC.md`: existing human-owned domain/team cards should
+receive one deterministic `## Derived (ACP Step1)` section after Step 1 semantic apply, while ACP
+must not auto-create or rename canonical cards.
+
+### Goals (must have)
+- [x] Restore exactly one Step 1 enrichment call after all domain semantic apply work completes.
+- [x] Enrich only existing canonical `charter/cards/domains/*` and `charter/cards/teams/*`.
+- [x] Keep `## Derived (ACP Step1)` idempotent across repeated init/refresh runs.
+- [x] Preserve the question path for model owner teams without a matching canonical team card.
+- [x] Cover evidence refs, related entities/services, findings/questions and coverage summaries in
+      deterministic tests.
+- [x] Continue PR-1 with `19Q` generic refresh semantic guard after `19P` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change public schemas, runtime provider contracts, final-run-index/citation contracts
+      or workspace manifest shape.
+- [ ] Do not auto-create, delete, rename or otherwise take ownership of human-authored canonical
+      cards.
+- [ ] Do not implement `19Q` semantic guard filtering or any Epic 20 UI behavior.
+- [ ] Do not change promotion, release, UI generated bundle or live provider matrix behavior.
+
+### Implementation
+1) In `runStepCollectByDomain`, keep the existing domain/team-card discovery and missing-card
+   questions, then call `enrichCanonicalCards(domainIDs, teamCards)` once before Step 1 returns.
+2) Preserve the existing renderer semantics: merge/replace only the managed
+   `## Derived (ACP Step1)` block and leave human-authored card content before that heading intact.
+3) Add orchestrator unit tests that seed canonical cards plus semantic model entities, findings,
+   questions and coverage, run enrichment twice, and assert the managed section is present exactly
+   once with evidence refs.
+4) Add a regression for an owner team in the semantic model that lacks a canonical team card:
+   enrichment must not create a new card and must add the existing high-priority question.
+5) Run targeted orchestrator tests, then full DoD.
+
+### Interfaces
+Internal orchestrator behavior only. No HTTP API, TypeScript, JSON schema or workspace manifest
+interfaces change.
+
+### Tests
+- Existing domain/team cards receive one `## Derived (ACP Step1)` section with related model IDs,
+  findings/questions, coverage gaps and `repo:path` evidence refs.
+- Re-running enrichment replaces the managed section instead of appending duplicates.
+- A service owned by an unknown/missing canonical team card records a deterministic question and
+  does not create `charter/cards/teams/<missing>.md`.
+- Step 1 returns enrichment errors if card reads/writes fail instead of silently skipping the
+  documented behavior.
+
+### Docs/fixtures
+- No schema/spec changes expected because this restores the existing `PIPELINE_SPEC` behavior.
+- No scenario golden refresh is expected unless existing deterministic scenario tests cover this
+  path and fail after the restored call.
+
+### Acceptance
+- [x] Targeted orchestrator tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19Q`, UI, contract, release or live-provider scope leaked into this
+      slice.
+- [x] Commit `19P: restore idempotent card enrichment`.
+
+### Progress log
+- 2026-07-14: Started `19P` after clean `19N` commit. Spec-first and test-fixtures rules apply
+  because this slice restores documented model/card behavior and must add deterministic
+  regression coverage.
+- 2026-07-14: Restored the Step 1 enrichment call, added idempotency/no-autocreate/full-pipeline
+  regression tests, and completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19q-generic-refresh-semantic-guard
+
+### Context
+`19Q` follows committed `19P`. The current semantic guard helpers are narrow and effectively
+unreachable: refresh collect apply stores provider semantic entities directly, while the helper set
+contains a domain-specific off-topic term list and a power-domain whitelist. The backlog decision is
+to preserve the documented refresh guard, but make it generic: runtime/provider metadata and
+off-scope semantic candidates are filtered or marked by deterministic diagnostics without a hidden
+domain whitelist.
+
+### Goals (must have)
+- [x] Activate refresh-only semantic guard logic in `refresh.step1.collect` before model apply and
+      before shard packs feed staged final indexes.
+- [x] Filter runtime/provider/process metadata candidates generically from the semantic model.
+- [x] Filter explicit off-scope candidates whose repo evidence does not match the assigned refresh
+      repo scopes.
+- [x] Emit deterministic diagnostic findings/warnings for every filtered candidate class.
+- [x] Preserve legitimate same-repo/same-domain entities and leave init collect behavior unchanged.
+- [x] Document the generic policy in architecture/ADR without schema or provider-list changes.
+- [x] Continue PR-1 with `19R1` ARIA tabs controller after `19Q` review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not add or change shard-pack, final-index, citation-index or workspace schemas.
+- [ ] Do not introduce a domain/business-term blacklist, whitelist or special-case corpus.
+- [ ] Do not change provider prompts, live matrix inputs, release gates or required CI live checks.
+- [ ] Do not implement accessibility slices `19R1..19R3`.
+
+### Implementation
+1) Replace the unused narrow helper cluster in `semantic_utils.go` with a generic
+   `guardRefreshCollectSemantic(stepID, task, semantic)` function.
+2) The guard is a no-op unless `stepID == refresh.step1.collect`.
+3) Runtime metadata detection uses generic runtime/process markers from entity type/id/name/tags
+   and runtime artifact evidence paths; it does not inspect product-domain words.
+4) Off-scope detection uses task repo scopes versus semantic provenance evidence repos. A candidate
+   with explicit evidence outside the assigned scopes is filtered; a same-scope candidate survives.
+5) Edges that reference filtered entities are dropped; findings/questions tied only to filtered
+   IDs are dropped; deterministic diagnostic findings are appended to the guarded semantic snapshot.
+6) Apply the guarded semantic snapshot before `e.shardPacks` append and before `model.Store` apply,
+   so promoted model/final indexes use the same filtered data.
+
+### Interfaces
+Internal orchestrator behavior and docs only. No public API, schema, workspace manifest, TypeScript
+contract or provider list changes.
+
+### Tests
+- Refresh collect filters runtime/provider metadata entities and emits deterministic diagnostics.
+- Refresh collect filters explicit off-scope repo-evidence candidates and drops edges tied to them.
+- Legitimate same-scope refresh entities survive.
+- Init collect with the same semantic payload is unchanged.
+- Apply path uses the guarded semantic snapshot before model apply and shard-pack aggregation.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md` refresh semantic guard wording.
+- Add ADR rationale for generic evidence-scope policy and no hidden domain whitelist.
+- No schema/example/golden fixture changes expected.
+
+### Acceptance
+- [x] Targeted orchestrator semantic guard tests pass.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no schema, live matrix, provider-list, UI accessibility or Epic 20 scope
+      leaked into this slice.
+- [x] Commit `19Q: generalize refresh semantic guard`.
+
+### Progress log
+- 2026-07-14: Started `19Q` after clean `19P` commit. Spec-first, test-fixtures and docs-sync
+  rules apply because this slice changes documented semantic behavior and regression coverage.
+- 2026-07-14: Replaced the narrow/unreached refresh helper cluster with an active generic
+  evidence-scope guard, added pure/apply-path tests, documented architecture/ADR rationale, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r1-accessible-tabs-controller
+
+### Context
+`19R1` follows committed `19Q` and starts the accessibility primitives band. The UI already has a
+shared `TabNav` component used by Analysis, Review, Proposal and Publish surfaces, but it only sets
+`role="tab"` / `aria-selected`. It does not implement roving tabindex, Arrow/Home/End keyboard
+navigation, or stable `tab` -> `tabpanel` relationships. Epic 20 will reuse this primitive, so the
+fix should be centralized rather than duplicated per stage.
+
+### Goals (must have)
+- [x] Add reusable roving-tabindex keyboard behavior to `TabNav`.
+- [x] Support ArrowLeft/ArrowRight/ArrowUp/ArrowDown plus Home/End.
+- [x] Expose stable tab and tabpanel IDs through a small shared helper.
+- [x] Wire current `TabNav` consumers to matching active tabpanel relationships without changing
+      user-visible IA or tab labels.
+- [x] Cover keyboard navigation, single tabbable tab, and aria-controls/labelledby links in Vitest.
+- [x] Continue PR-1 with `19R2` keyboard path combobox after `19R1` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not redesign Review/Publish IA; that remains Epic 20.
+- [ ] Do not implement path combobox keyboard behavior; that remains `19R2`.
+- [ ] Do not add async alert/live-region behavior; that remains `19R3`.
+- [ ] Do not introduce a new UI library or change backend/API contracts.
+
+### Implementation
+1) Extend `ui/src/components/TabNav.tsx` with an `idBase` prop, exported tab/panel ID helpers,
+   roving `tabIndex`, and keyboard focus/selection handling.
+2) Add `tabPanelProps(idBase, value)` helper so consumers use one source of truth for
+   `role="tabpanel"`, `id` and `aria-labelledby`.
+3) Update existing `TabNav` call sites in `StagePanels.tsx` with stable `idBase` values and wrap
+   active tab content/filter result regions with matching tabpanel props.
+4) Add focused component tests for keyboard navigation and ARIA relationships, and keep existing
+   App tests/selectors stable.
+
+### Interfaces
+Frontend-only component API change. No backend, schema, workspace, artifact or public HTTP
+interfaces change.
+
+### Tests
+- Only the selected tab has `tabIndex=0`; inactive tabs have `tabIndex=-1`.
+- Arrow/Home/End keys move focus and selected value deterministically.
+- Each tab has `aria-controls` pointing at the active panel ID; each active panel has
+  `role="tabpanel"` and `aria-labelledby` pointing back to the selected tab.
+- Existing Review/Publish/Analysis tab tests remain green.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility contract is captured by
+  tests and the shared primitive.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted TabNav/App Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19R2`, `19R3`, backend, schema or Epic 20 IA scope leaked into this
+      slice.
+- [x] Commit `19R1: add accessible tabs controller`.
+
+### Progress log
+- 2026-07-14: Started `19R1` after clean `19Q` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes shared UI interaction and accessibility behavior.
+- 2026-07-14: Added roving-tabindex keyboard support, stable tab/panel helpers, wired current
+  `TabNav` consumers to active tabpanels, added focused Vitest coverage, regenerated embedded UI
+  assets, and completed targeted UI tests plus full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r2-keyboard-path-combobox
+
+### Context
+`19R2` follows committed `19R1` and continues the accessibility primitives band. The onboarding
+local path picker already exposes `role="combobox"` and renders suggestion buttons in a listbox,
+but keyboard users cannot move through suggestions, select one with Enter, close with Escape, or
+observe an active descendant. The fix should stay inside the existing `LocalPathCombobox` surface
+and keep pointer selection behavior unchanged.
+
+### Goals (must have)
+- [x] Add active option state for local path suggestions.
+- [x] Wire `aria-activedescendant` from the input to the active option.
+- [x] Support ArrowDown/ArrowUp navigation with wraparound.
+- [x] Support Enter selection of the active option and Escape close/clear active option.
+- [x] Preserve pointer selection parity and existing onboarding `onSelect` side effects.
+- [x] Cover keyboard-only selection, Escape close and active descendant behavior in Vitest.
+- [x] Continue PR-1 with `19R3` accessible async announcements after `19R2` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change onboarding/source API contracts or path suggestion payloads.
+- [ ] Do not change run/Q&A/editor async state; those were `19J..19L`.
+- [ ] Do not add async alert/live-region behavior; that remains `19R3`.
+- [ ] Do not redesign onboarding layout, path suggestion ranking or source validation.
+
+### Implementation
+1) Extend `LocalPathCombobox` with `activeIndex`, stable option IDs and active-option reset rules
+   when the popover closes, suggestions change or the input value changes.
+2) Add input `onKeyDown` handling for ArrowDown, ArrowUp, Enter and Escape. Arrow keys open the
+   popover and move the active option; Enter applies the active suggestion through the same
+   `onChange`/`onSelect` path as pointer clicks; Escape closes without selecting.
+3) Add `aria-activedescendant` only while the popover is open and an active option exists, and mark
+   the active option with a visual/semantic selected state.
+4) Keep existing focus/blur timeout behavior, loading/error helper copy and pointer `onMouseDown`
+   behavior intact.
+5) Add focused component tests with mocked path-suggestion API and no backend/schema changes.
+
+### Interfaces
+Frontend-only component behavior change. No backend, schema, workspace, artifact, HTTP or
+TypeScript app-contract payload changes.
+
+### Tests
+- Keyboard-only ArrowDown + Enter selects a suggestion, calls `onChange`, and invokes `onSelect`
+  with the selected item.
+- ArrowUp/ArrowDown update `aria-activedescendant` and wrap through suggestions predictably.
+- Escape closes the popup and removes `aria-activedescendant` without selecting.
+- Pointer click still selects the clicked suggestion and closes the popup.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility behavior is enforced by
+  focused component tests.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted `LocalPathCombobox` Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19R3`, backend, schema or Epic 20 IA scope leaked into this slice.
+- [x] Commit `19R2: make path combobox keyboard accessible`.
+
+### Progress log
+- 2026-07-14: Started `19R2` after clean `19R1` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes keyboard/focus behavior in an existing onboarding control.
+- 2026-07-14: Added active option state, `aria-activedescendant`, ArrowUp/Down wraparound,
+  Enter/Escape handling, pointer parity coverage, regenerated embedded UI assets, and completed
+  targeted UI tests plus full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r3-accessible-async-announcements
+
+### Context
+`19R3` follows committed `19R2` and completes the Epic 19 accessibility primitives band. The UI
+has scattered `.status`, `.error-text` and `.error-banner` messages for onboarding validation,
+doctor checks, first-run start and path-suggestion loading/error states. These messages are visible
+but not consistently announced to assistive technology, and repo field diagnostics are not linked
+back to the offending inputs.
+
+### Goals (must have)
+- [x] Add a shared async status primitive for assertive error alerts and polite progress/success
+      announcements.
+- [x] Use the primitive for onboarding top-level errors, source validation status, readiness status,
+      first-run status and local path suggestion helper states.
+- [x] Link repo name/source field errors with `aria-invalid` and `aria-describedby`.
+- [x] Preserve existing copy, selectors, onboarding flow and backend/API contracts.
+- [x] Cover alert, polite status and field diagnostic linkage in Vitest.
+- [x] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not redesign onboarding, Review/Publish IA or stage composition.
+- [ ] Do not change validation/doctor API payloads or backend behavior.
+- [ ] Do not implement global toast infrastructure, destructive confirmations or Epic 20 dialogs.
+- [ ] Do not change path combobox keyboard behavior beyond helper announcement wiring.
+
+### Implementation
+1) Add `AsyncStatusMessage` in a shared component file. Error tone uses `role="alert"` /
+   assertive semantics; progress/success/info/warning tones use polite `role="status"` semantics.
+2) Replace onboarding top-level `error-banner`, source validation result, doctor result and
+   first-run status messages with the shared primitive while preserving existing class names and
+   text.
+3) Extend `LocalPathCombobox` with optional `invalid`/`describedBy` props and announce its helper
+   text through the shared primitive.
+4) In onboarding repo rows, derive diagnostics per row, add stable diagnostics IDs, wire local
+   repo-name and repo-source errors to `aria-invalid` / `aria-describedby`, and keep diagnostic
+   text visible.
+5) Add focused component tests for alert semantics, polite live status and field-linked
+   diagnostics.
+
+### Interfaces
+Frontend-only component behavior change. No backend, schema, workspace, artifact, HTTP or
+TypeScript app-contract payload changes. `LocalPathCombobox` receives optional internal UI props
+only.
+
+### Tests
+- Error messages render as assertive alerts.
+- Progress/success messages render as polite statuses.
+- Repo name/source inputs with local diagnostics have `aria-invalid="true"` and
+  `aria-describedby` pointing to visible diagnostic text.
+- Local path combobox helper errors are announced while preserving existing keyboard tests.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility contract is enforced by
+  focused component tests.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted accessibility primitive/onboarding/combobox Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no backend, schema, Epic 20 IA or `19S*` cleanup scope leaked into this
+      slice.
+- [x] Commit `19R3: announce async UI state accessibly`.
+
+### Progress log
+- 2026-07-14: Started `19R3` after clean `19R2` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes shared UI announcement semantics and field accessibility.
+- 2026-07-14: Added shared async status announcements, wired onboarding/path-combobox statuses,
+  linked repo field diagnostics with invalid/describedby attributes, added focused accessibility
+  regression tests, regenerated embedded UI assets, and completed full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s1-shell-dead-code-cleanup
+
+### Context
+`19S1` follows committed `19R3` and starts deterministic quality-gate cleanup before ShellCheck is
+enabled in `19S2`. The code audit confirms three shell/frontend-batch dead-code items:
+`DEAD-011` unused `normalize_binary_flag`, `DEAD-012` unused `run_dod_precheck_make`, and
+`DEAD-013` unused frontend status/reason assignments in active frontend E2E result paths.
+
+### Goals (must have)
+- [x] Remove the unused `normalize_binary_flag` helper from `scripts/full-run-batch-matrix.sh`.
+- [x] Remove the unused `run_dod_precheck_make` helper from `scripts/full-run-batch.sh`.
+- [x] Remove unused `frontend_status` / `frontend_reason` assignments while preserving
+      `frontend_result_summary` validation side effects.
+- [x] Verify targeted reference search no longer finds removed identifiers or assignments.
+- [x] Keep active batch/frontend result classification unchanged.
+- [x] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not enable ShellCheck yet; that is `19S2`.
+- [ ] Do not rewrite batch/matrix harness control flow.
+- [ ] Do not change release matrices, live provider requirements or frontend result taxonomy.
+- [ ] Do not remove unrelated Go/UI dead code; later `19W*`/`19X` slices cover those.
+
+### Implementation
+1) Delete `normalize_binary_flag()` from `scripts/full-run-batch-matrix.sh`.
+2) Delete `run_dod_precheck_make()` from `scripts/full-run-batch.sh`.
+3) Replace `frontend_summary` parsing assignments with a validation-only call or scoped discard
+   that keeps malformed/missing frontend result detection behavior unchanged.
+4) Run targeted reference searches for removed function names and assignment names.
+5) Run targeted bash syntax and existing script tests before full DoD.
+
+### Interfaces
+Shell cleanup only. No backend, schema, UI source, workspace, artifact or HTTP interfaces change.
+
+### Tests
+- `rg` finds no active references to `normalize_binary_flag` or `run_dod_precheck_make`.
+- `rg` finds no `frontend_status=` / `frontend_reason=` assignments in `scripts/full-run-batch.sh`.
+- Bash syntax checks pass for touched scripts.
+- Existing Python script tests pass.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; audit/backlog status is reconciled in the
+  final Epic 19 reconciliation slice.
+
+### Acceptance
+- [x] Targeted reference search and bash syntax checks pass.
+- [x] Python script tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no ShellCheck enablement, release-matrix, live-provider or unrelated
+      cleanup scope leaked into this slice.
+- [x] Commit `19S1: remove unused shell helpers`.
+
+### Progress log
+- 2026-07-14: Started `19S1` after clean `19R3` commit. Spec-first rules apply because this is a
+  focused backlog cleanup slice with explicit audit IDs and deterministic test gates.
+- 2026-07-14: Removed the confirmed unused shell helpers and frontend status/reason assignments,
+  verified reference search and bash syntax, ran Python script tests, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s2-shellcheck-lint
+
+### Context
+`19S2` follows committed `19S1`. The audit requires canonical `make lint` to run ShellCheck for
+production shell scripts before PR lint routing is changed in `19S3`. A current full ShellCheck pass
+finds only intentional indirect trap callbacks (`SC2329`) and one assignment-export idiom
+(`SC2163`), so this slice can add the gate with narrow documented suppressions and no harness
+behavior changes.
+
+### Goals (must have)
+- [x] Add ShellCheck invocation to canonical `make lint` for production `scripts/**/*.sh`.
+- [x] Require ShellCheck availability with an actionable local setup error.
+- [x] Keep suppressions narrow and documented for trap callbacks and intentional assignment export.
+- [x] Verify current scripts pass ShellCheck.
+- [x] Verify an intentionally broken shell probe fails ShellCheck.
+- [x] Update testing documentation for the new lint baseline.
+- [x] Continue PR-1 with `19S3` required PR lint routing after `19S2` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change PR workflow routing yet; that is `19S3`.
+- [ ] Do not refactor batch/matrix shell logic beyond ShellCheck-required suppressions.
+- [ ] Do not add live provider or network dependencies to required CI.
+- [ ] Do not change release matrices, runtime behavior or shell script taxonomy.
+
+### Implementation
+1) Define a deterministic `SHELL_FILES` list in `Makefile` from production `scripts/*.sh` files.
+2) Add ShellCheck availability check and `shellcheck $(SHELL_FILES)` to `make lint`.
+3) Add documented `SC2329` suppressions for trap callback helper chains and fix/suppress the
+   assignment export idiom without changing semantics.
+4) Update `docs/TESTING_STRATEGY.md` to state that canonical lint includes gofmt, ShellCheck and
+   UI typecheck.
+5) Run current ShellCheck and a temporary failing probe to prove the gate catches shell defects.
+
+### Interfaces
+Tooling/docs only. No backend, schema, UI runtime, workspace, artifact, HTTP or live-provider
+interfaces change.
+
+### Tests
+- `make lint` fails if `shellcheck` is missing.
+- `shellcheck $(find scripts -name '*.sh')` passes on the current tree.
+- A temporary script with a ShellCheck violation fails ShellCheck.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` canonical lint baseline.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Targeted ShellCheck pass and failing probe pass.
+- [x] `make lint` runs ShellCheck and UI typecheck.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19S3`, live-provider, release-matrix or unrelated shell refactor
+      scope leaked into this slice.
+- [x] Commit `19S2: add ShellCheck to lint`.
+
+### Progress log
+- 2026-07-14: Started `19S2` after clean `19S1` commit. Spec-first and docs-sync rules apply
+  because this slice changes canonical lint behavior and documented testing baseline.
+- 2026-07-14: Added ShellCheck to canonical `make lint`, documented the testing baseline, added
+  narrow ShellCheck suppressions/fix for existing intentional shell idioms, verified current
+  scripts plus a failing probe, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s3-required-pr-lint
+
+### Context
+`19S3` follows committed `19S2`. Canonical `make lint` now runs gofmt, ShellCheck and UI
+typecheck, but PR CI still checks those surfaces only partially and independently. The backlog goal
+is to make required PR lint call the canonical local target without adding live provider or network
+provider dependencies.
+
+### Goals (must have)
+- [x] Add a provider-free PR/push workflow that sets up Go + Node and invokes `make lint`.
+- [x] Install UI dependencies before `make lint` so the canonical UI typecheck path is used.
+- [x] Remove duplicated partial UI typecheck from the UI workflow where safe.
+- [x] Keep UI tests/build/determinism checks in the UI workflow.
+- [x] Update testing documentation to list the canonical PR lint workflow.
+- [x] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change branch protection settings or GitHub repository configuration.
+- [ ] Do not add live provider checks to required PR CI.
+- [ ] Do not change release workflow permissions or release evidence gates.
+- [ ] Do not change `make lint` behavior itself; that was `19S2`.
+
+### Implementation
+1) Add `.github/workflows/lint.yml` with checkout, setup-go from `.go-version`, setup-node from
+   `.node-version`, npm cache for `ui/package-lock.json`, `npm ci --prefix ui`, and `make lint`.
+2) Remove the `Typecheck UI` step from `.github/workflows/ui.yml` because canonical lint now owns
+   UI typecheck in PR CI; keep UI test/build/determinism/fresh-dist steps unchanged.
+3) Update `docs/TESTING_STRATEGY.md` implemented jobs section to include the lint workflow and
+   clarify UI workflow no longer duplicates typecheck.
+4) Validate workflow YAML parsing and local `make lint`/full DoD.
+
+### Interfaces
+CI/tooling/docs only. No backend, schema, UI runtime, workspace, artifact, HTTP or live-provider
+interfaces change.
+
+### Tests
+- YAML parse smoke passes for changed workflows.
+- `make lint` passes locally and is the command used by the new workflow.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` CI job list.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Workflow YAML parses.
+- [x] New PR lint workflow invokes canonical `make lint`.
+- [x] UI workflow no longer duplicates `npm run typecheck --prefix ui`.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live-provider, branch-protection, release-permission or unrelated CI
+      scope leaked into this slice.
+- [x] Commit `19S3: route PR lint through make lint`.
+
+### Progress log
+- 2026-07-14: Started `19S3` after clean `19S2` commit. Spec-first and docs-sync rules apply
+  because this slice changes required PR CI composition and documented testing baseline.
+- 2026-07-14: Added provider-free `lint` workflow that runs canonical `make lint`, removed
+  duplicated UI typecheck from the UI workflow while preserving tests/build/drift checks, updated
+  testing docs, verified workflow YAML parsing, and completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19t-logs-smoke-coverage
+
+### Context
+`19T` follows committed `19S3`. The backend logs endpoint already has Go coverage for cursor,
+limit, missing run and mixed event/runtime-output payloads, but required API smoke currently only
+touches status, artifacts, run list and cancel. The backlog asks for provider-free smoke coverage
+that fails on missing/malformed logs pagination behavior before PR merge.
+
+### Goals (must have)
+- [x] Extend `scripts/smoke-api.sh` to request run logs with explicit `cursor` and `limit`.
+- [x] Validate logs response shape: matching `run_id`, array `items`, integer `next_cursor`,
+      boolean `eof`, per-item cursor/message/kind and legal runtime stream values.
+- [x] Validate pagination by fetching a second page from the first page `next_cursor`.
+- [x] Validate invalid cursor returns `400 invalid_cursor`.
+- [x] Add deterministic script tests for normal empty/non-empty pages, malformed payload,
+      server/error status and invalid-cursor error handling without requiring a live ACP server.
+- [x] Update smoke baseline documentation.
+- [x] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change the HTTP logs endpoint contract or backend API routing.
+- [ ] Do not add live-provider, external-network or hosted dependencies to required smoke.
+- [ ] Do not change UI log rendering; that was covered by earlier UI slices.
+- [ ] Do not change release workflows or release evidence gates.
+
+### Implementation
+1) Refactor `scripts/smoke-api.sh` into reusable helper functions plus a `main` entrypoint guarded
+   by a lib-only environment variable for deterministic tests.
+2) Add helpers that validate HTTP status/error code and logs JSON payloads with Python, failing on
+   malformed shape, stale `run_id`, bad cursor progression, unknown `kind`, illegal `stream`, empty
+   messages or non-boolean `eof`.
+3) In the live smoke path, after the run succeeds and artifacts are fetched, request
+   `/api/pipeline/runs/<run_id>/logs?cursor=0&limit=2`, then request a second page from
+   `next_cursor`, and assert invalid cursor `-1` returns `400 invalid_cursor`.
+4) Add `scripts/tests/smoke_api_logs_test.py` that sources the shell helpers in lib-only mode and
+   covers empty/non-empty success, malformed payload, non-2xx status, wrong error code and invalid
+   cursor validation.
+5) Update `docs/TESTING_STRATEGY.md` smoke baseline to state that API smoke validates logs
+   cursor/limit pagination and invalid params.
+
+### Interfaces
+Script/test/docs only. No schema, backend API, TypeScript, workspace, artifact, provider or release
+interfaces change.
+
+### Tests
+- `python3 -m unittest scripts.tests.smoke_api_logs_test`.
+- `bash -n scripts/smoke-api.sh`.
+- `shellcheck scripts/smoke-api.sh`.
+- `bash ./scripts/smoke-api.sh` under the fake runtime smoke environment.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Smoke validates first and second logs pages for the started run.
+- [x] Smoke fails on malformed logs payloads.
+- [x] Smoke fails on 5xx/non-2xx logs responses.
+- [x] Smoke validates invalid cursor as `400 invalid_cursor`.
+- [x] Script unit tests pass.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no backend contract, live-provider or unrelated CI scope leaked into
+      this slice.
+- [x] Commit `19T: smoke test run logs pagination`.
+
+### Progress log
+- 2026-07-14: Started `19T` after clean `19S3` commit. Spec-first and docs-sync rules apply
+  because this slice changes required smoke coverage and documented testing baseline.
+- 2026-07-14: Added logs page validation to API smoke, covered helper failure paths with
+  deterministic Python tests, verified the live fake-server smoke path, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19u-deterministic-mock-playwright-ci
+
+### Context
+`19U` follows committed `19T`. The repository already contains seven provider-free mock Playwright
+specs under `ui/e2e/*mock*.spec.ts`, and each spec exercises console errors plus desktop/mobile
+overflow checks. The gap is that required UI CI only runs Vitest/build/determinism checks; there is
+no canonical `e2e:mock` runner, no CI step that guarantees `7 passed / 0 skipped`, and no local
+script that runs the seven scenarios explicitly without live providers.
+
+### Goals (must have)
+- [x] Add a deterministic mock Playwright config that serves the Vite UI locally and excludes live
+      specs.
+- [x] Add a canonical `e2e:mock` package script/runner that runs exactly seven named mock
+      scenarios.
+- [x] Fail when any scenario is skipped, so a broken selector/scenario gate cannot silently pass.
+- [x] Keep console-error and horizontal-overflow assertions active in the existing mock specs.
+- [x] Wire the UI workflow to run the mock Playwright gate after build/determinism checks.
+- [x] Update testing documentation for the required mock browser gate.
+- [x] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not add live provider checks or external repository/network dependencies.
+- [ ] Do not change `e2e:live` or the live matrix harness.
+- [ ] Do not redesign the Console UI; only wire existing deterministic mock scenarios.
+- [ ] Do not introduce screenshot golden assertions in this slice.
+
+### Implementation
+1) Add `ui/playwright.mock.config.ts` with a local Vite `webServer`, Chromium project, single
+   worker, no retries and `testMatch` limited to `**/*mock.spec.ts`.
+2) Add `scripts/ui-mock-e2e.sh` that loops the seven explicit scenario names, sets
+   `UI_E2E_SCENARIO`, runs the matching `ui/e2e/<scenario>.spec.ts` file through the mock config,
+   captures list output, and fails unless all seven scenarios pass and zero skipped tests are
+   observed.
+3) Add `npm run e2e:mock --prefix ui` as the canonical package entrypoint for the script.
+4) Add the required UI workflow step after deterministic build/fresh-dist checks.
+5) Update `docs/TESTING_STRATEGY.md` implemented jobs and UI smoke baseline.
+
+### Interfaces
+Tooling/CI/docs only. No backend API, schema, TypeScript runtime contract, workspace, provider,
+release or live matrix interfaces change.
+
+### Tests
+- `npm run e2e:mock --prefix ui` reports seven passed scenarios and zero skipped.
+- A script contract test proves the scenario list stays at seven and each named spec exists.
+- Workflow YAML parses.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `npm run e2e:mock --prefix ui` completes with `7 passed / 0 skipped`.
+- [x] A missing/broken scenario selection would fail the runner.
+- [x] UI workflow invokes the canonical mock gate.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live-provider, live-harness or unrelated UI redesign scope leaked
+      into this slice.
+- [x] Commit `19U: add deterministic mock Playwright gate`.
+
+### Progress log
+- 2026-07-14: Started `19U` after clean `19T` commit. Spec-first, UI implementation QA and
+  docs-sync rules apply because this slice changes required browser QA and documented testing
+  baseline.
+- 2026-07-14: Added mock Playwright config, canonical `e2e:mock` runner, UI workflow gate and
+  contract tests for the seven explicit scenarios. Verified local `e2e:mock` as `7 passed / 0
+  skipped` after installing local Chromium, then completed full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19u2-ui-v8-coverage-baseline
+
+### Context
+`19U2` follows committed `19U`. Vitest unit coverage is currently runnable only through the normal
+test command, so there is no locked V8 coverage provider, deterministic coverage output or recorded
+informational baseline that includes all `ui/src` files. This slice is explicitly optional and must
+not become a hard quality threshold gate.
+
+### Goals (must have)
+- [x] Lock `@vitest/coverage-v8` in `ui/package.json`/`ui/package-lock.json` at the Vitest version.
+- [x] Add a canonical UI coverage script that emits deterministic text and JSON summaries.
+- [x] Configure coverage to include all `ui/src` files and exclude tests/setup type-only noise.
+- [x] Record current line/statement/function/branch percentages as informational baseline only.
+- [x] Update testing documentation for the optional coverage baseline.
+- [ ] Continue PR-1 with `19V` Python runtime pinning after `19U2` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not make coverage thresholds fail required CI in this slice.
+- [ ] Do not add Playwright/browser coverage coupling.
+- [ ] Do not change UI runtime behavior or test assertions.
+- [ ] Do not change backend, schema, provider or live matrix behavior.
+
+### Implementation
+1) Install/lock `@vitest/coverage-v8` matching the repository's Vitest version.
+2) Extend `ui/vite.config.ts` test coverage config with provider `v8`, text/json reporters,
+   deterministic output directory and `include: ["src/**/*.{ts,tsx}"]`.
+3) Add `coverage` package script that runs Vitest coverage in one-shot mode.
+4) Add a lightweight Python contract test that confirms the script/dependency/config remain wired.
+5) Run coverage once, capture the summary percentages in `docs/TESTING_STRATEGY.md`, and keep them
+   informational.
+
+### Interfaces
+UI tooling/docs only. No backend API, schema, workspace, artifact, provider, Playwright or release
+interfaces change.
+
+### Tests
+- `npm run coverage --prefix ui` completes after clean install state and writes text/json coverage.
+- `python3 -m unittest scripts/tests/ui_coverage_contract_test.py`.
+- `npm run typecheck --prefix ui`.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `@vitest/coverage-v8` is locked and version changes require package/lockfile diff.
+- [x] Coverage includes all `ui/src` files.
+- [x] Coverage summary is deterministic enough for local comparison and emits JSON.
+- [x] No coverage thresholds gate CI.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no Playwright, runtime behavior or hard-threshold scope leaked into
+      this slice.
+- [x] Commit `19U2: add deterministic UI coverage baseline`.
+
+### Progress log
+- 2026-07-14: Started `19U2` after clean `19U` commit. Spec-first and docs-sync rules apply
+  because this slice changes UI test tooling and documented testing baseline.
+- 2026-07-14: Locked `@vitest/coverage-v8`, added `npm run coverage --prefix ui`, configured
+  V8 text/JSON coverage over `ui/src`, recorded the informational baseline
+  (`85.36/77.03/88.54/85.22` statements/branches/functions/lines), ignored generated coverage
+  artifacts, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19v-python-runtime-pinning
+
+### Context
+`19V` follows committed `19U2`. Python tests and release verifier scripts currently use bare
+`python3`; required CI does not install a repo-declared Python version, so the Python script/test
+surface can drift across developer machines and runners. The current green local baseline is
+Python `3.10.8`, so this slice pins that exact version and routes repository-owned Python test
+entrypoints through a version-checking wrapper.
+
+### Goals (must have)
+- [x] Add `.python-version` with the exact supported Python version.
+- [x] Add `scripts/run-python.sh` that discovers only the required Python version and fails before
+      running commands when no matching interpreter is available.
+- [x] Route `make test` Python unittest discovery through the wrapper.
+- [x] Add setup-python and wrapper usage to workflows that run Python scripts/tests.
+- [x] Add regression tests for matching and wrong Python interpreter discovery.
+- [x] Update CONTRIBUTING and TESTING_STRATEGY bootstrap documentation.
+- [x] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not rewrite every shell heredoc that invokes `python3`; this slice pins repository test
+      and workflow entrypoints, not provider-authored runtime commands.
+- [ ] Do not add Python package dependency management.
+- [ ] Do not change release evidence semantics or live provider gates.
+- [ ] Do not change Go/Node version policy.
+
+### Implementation
+1) Add `.python-version` containing `3.10.8`.
+2) Add `scripts/run-python.sh` modeled after `scripts/run-go.sh`, supporting `ACP_PYTHON_BIN` and
+   `ACP_PYTHON_TOOL_CANDIDATES` for local/toolchain overrides.
+3) Add `PYTHON ?= ./scripts/run-python.sh` to `Makefile` and use it for Python unittest discovery.
+4) Update backend/release workflows with pinned `actions/setup-python` configured from
+   `.python-version`; route Python commands through `./scripts/run-python.sh`.
+5) Add `scripts/tests/run_python_test.py` for correct/wrong version behavior.
+6) Update docs to state Python `3.10.8` is required for tests/scripts.
+
+### Interfaces
+Tooling/CI/docs only. No backend API, schema, UI runtime, provider, workspace, artifact or release
+matrix interfaces change.
+
+### Tests
+- `python3 -m unittest scripts/tests/run_python_test.py`.
+- Wrong interpreter fixture fails before the requested command runs.
+- Correct interpreter fixture runs normally.
+- Workflow YAML parses.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `CONTRIBUTING.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `.python-version` is present and workflows read it.
+- [x] Makefile Python tests use `scripts/run-python.sh`.
+- [x] Wrong Python version fails before unittest discovery.
+- [x] Correct Python version runs script tests.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no provider/live/runtime behavior scope leaked into this slice.
+- [x] Commit `19V: pin Python test runtime`.
+
+### Progress log
+- 2026-07-14: Started `19V` after clean `19U2` commit. Spec-first and docs-sync rules apply
+  because this slice changes developer/CI runtime bootstrap and documented testing baseline.
+- 2026-07-14: Added `.python-version`, `scripts/run-python.sh`, wrapper tests, setup-python
+  workflow steps and docs. Verified wrong-version fail-fast behavior and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w1-runtime-draft-wrapper-cleanup
+
+### Context
+`19W1` follows committed `19V`. `docs/BACKLOG.md` marks `DEAD-003` as an orchestrator
+runtime-draft cleanup: remove local forwarding wrappers and use the canonical
+`internal/runtimedrafts` package directly. The behavior must remain unchanged; this is a
+dead-surface deletion slice after the P1 backend correctness work has stabilized runtime draft
+validation and publication.
+
+### Goals (must have)
+- [x] Remove orchestrator-local runtime-draft type aliases and forwarding wrappers.
+- [x] Replace active orchestrator wrapper call sites with direct `runtimedrafts` calls.
+- [x] Keep orchestrator-specific publication helpers that copy validated draft outputs into the
+      workspace/final staging surface.
+- [x] Verify runtime-draft and orchestrator packages still pass targeted tests.
+- [x] Verify no removed runtime-draft wrapper identifiers remain.
+- [x] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change runtime draft manifest schema, validation rules or prompt contracts.
+- [ ] Do not change provider recovery behavior or artifact quality policy.
+- [ ] Do not change fake runtime draft output generation.
+- [ ] Do not start `19W2` sharding cleanup in this slice.
+
+### Implementation
+1) Convert orchestrator state/test types from `runtimeDraftManifest` and `runtimeDraftOutput` to
+   `runtimedrafts.Manifest` and `runtimedrafts.Output`.
+2) Replace `validateRequiredRuntimeDraftArtifacts(...)` call sites with
+   `runtimedrafts.ValidateRequiredManifest(...)` using the current task fields.
+3) Delete unused forwarding wrappers in `internal/orchestrator/runtime_drafts.go`:
+   manifest load/validation wrappers, required-manifest-file wrapper, required-artifacts wrapper
+   and task-validation wrapper.
+4) Keep `applyRuntimeDraftOutputs(...)` and `draftManifestHasPrefix(...)` because they contain
+   orchestrator-specific publish/index behavior rather than package forwarding.
+5) Run gofmt and focused searches for removed identifiers.
+
+### Interfaces
+Internal Go package cleanup only. No backend API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtimedrafts ./internal/orchestrator -count=1`.
+- `./scripts/run-go.sh test ./internal/runtime/providercommon ./internal/runtime/fakeruntime -count=1`
+  as regression coverage for runtime draft consumers outside orchestrator.
+- Reference search for removed wrapper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Orchestrator active call sites import and call `internal/runtimedrafts` directly.
+- [x] Removed wrapper identifiers have no remaining code references.
+- [x] Targeted runtime draft/orchestrator tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this slice is behavior-neutral dead-code cleanup and does not include
+      `19W2` sharding work.
+- [x] Commit `19W1: remove runtime draft wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W1` after clean `19V` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  forwarding dead surfaces only.
+- 2026-07-14: Replaced orchestrator runtime-draft aliases/wrappers with direct
+  `runtimedrafts` imports/calls, kept orchestrator-specific draft publication helpers, verified
+  removed identifiers have no `internal/orchestrator` references, and completed targeted tests plus
+  full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w2-sharding-wrapper-cleanup
+
+### Context
+`19W2` follows committed `19W1`. `docs/BACKLOG.md` marks `DEAD-004` as removal of four legacy
+sharding planner/artifact wrappers. Current code still has unused forwarding helpers around the
+canonical sharding planner input functions and taskrun path builder. This slice removes only those
+dead wrappers; active planner/scheduler/store entrypoints remain unchanged.
+
+### Goals (must have)
+- [x] Remove unused sharding planner wrappers `resolveRepoPath`, `planScopePaths` and
+      `discoverHeuristicShardPaths`.
+- [x] Remove unused sharding artifact wrapper `singleShardTaskrunPath`.
+- [x] Keep canonical `*ForInput` planner functions and active taskrun path helpers unchanged.
+- [x] Verify deterministic sharding tests still pass.
+- [x] Verify removed wrapper identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change shard planning heuristics, semantic graph discovery, path filtering or shard
+      IDs.
+- [ ] Do not change shard summary/plan JSON contracts.
+- [ ] Do not change scheduler, checkpoint replay or best-effort failure policy behavior.
+- [ ] Do not start `19W3` provider argument cleanup in this slice.
+
+### Implementation
+1) Delete the unused `pipelineExecution` forwarding methods in `sharding_planner.go`.
+2) Delete the unused `discoverHeuristicShardPaths` wrapper and keep
+   `discoverHeuristicShardPathsWithMeta` as the canonical implementation.
+3) Delete the unused `singleShardTaskrunPath` artifact helper and keep `shardTaskrunPath`.
+4) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator -run 'Shard|Sharding' -count=1`.
+- `./scripts/run-go.sh test ./internal/orchestrator -count=1`.
+- Reference search for removed wrapper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Four legacy sharding wrapper functions are removed without aliases/replacements.
+- [x] Canonical sharding planner/artifact helpers remain unchanged.
+- [x] Deterministic sharding tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W3` provider argument work.
+- [x] Commit `19W2: remove sharding wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W2` after clean `19W1` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  sharding forwarding dead surfaces only.
+- 2026-07-14: Removed the four legacy sharding wrappers, confirmed no remaining
+  `internal/orchestrator` references, ran deterministic sharding/orchestrator tests, and completed
+  full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w3-provider-argument-wrapper-cleanup
+
+### Context
+`19W3` follows committed `19W2`. `docs/BACKLOG.md` marks `DEAD-005` as provider argument wrapper
+cleanup: remove legacy default-argument entry points and keep the permission-aware builders as the
+only implementation surface. The active Claude/Qwen/Codex adapters already call
+`build*ArgsWithPermissions(...)` when no custom args are supplied.
+
+### Goals (must have)
+- [x] Remove unused `buildDefaultClaudeArgs`, `buildDefaultQwenArgs` and `buildDefaultCodexArgs`.
+- [x] Keep permission-aware builders for Claude, Qwen and Codex unchanged.
+- [x] Keep custom-argument sanitization behavior unchanged.
+- [x] Verify Claude/Qwen/Codex adapter argument tests still pass.
+- [x] Verify removed default entry point identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change provider command arguments, sandbox/permission modes or defaults.
+- [ ] Do not change provider list or runtime selection.
+- [ ] Do not change prompt contracts, recovery policy or process execution behavior.
+- [ ] Do not start `19W4` docflow compatibility cleanup in this slice.
+
+### Implementation
+1) Delete the three unused `buildDefault*Args` functions from Claude/Qwen/Codex adapters.
+2) Keep `build*ArgsWithPermissions(...)` and existing `build*ArgsWithIncludeDirectories(...)`
+   helpers because tests and explicit include-dir coverage still use them.
+3) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No backend API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtime/claudecode ./internal/runtime/qwencode ./internal/runtime/codexcode -count=1`.
+- Reference search for removed default entry point identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Three legacy provider default-argument entry points are removed without aliases/replacements.
+- [x] Permission-aware builders and custom-arg stripping paths remain unchanged.
+- [x] Claude/Qwen/Codex argument tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W4` docflow work.
+- [x] Commit `19W3: remove provider argument wrappers`.
+
+### Progress log
+- 2026-07-14: Started `19W3` after clean `19W2` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  provider argument forwarding dead surfaces only.
+- 2026-07-14: Removed the three legacy default provider argument functions, confirmed no remaining
+  `internal/runtime` references, ran Claude/Qwen/Codex adapter tests, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w4-docflow-compatibility-helper-cleanup
+
+### Context
+`19W4` follows committed `19W3`. `docs/BACKLOG.md` marks `DEAD-006` as docflow compatibility
+helper cleanup: two local orchestrator helpers have been superseded by the artifact-quality layer.
+Current docflow already calls `artifactquality.HasRepoSpecificCitationSurface(...)` and
+`artifactquality.IsGenericRuntimeSummaryCitation(...)` directly; the remaining local helpers are
+unused wrappers.
+
+### Goals (must have)
+- [x] Remove unused `manifestHasRepoSpecificCitationSurface`.
+- [x] Remove unused `isGenericRuntimeSummaryCitation`.
+- [x] Keep the artifact-quality package as the only implementation surface for those checks.
+- [x] Verify docflow and artifact-quality tests still pass.
+- [x] Verify removed helper identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W5a` review diff residual cleanup after `19W4` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change artifact-quality warning semantics or wording.
+- [ ] Do not change final/citation index generation.
+- [ ] Do not change docflow rendering, promotion or collect manifest validation.
+- [ ] Do not start `19W5a` package-local residual cleanup in this slice.
+
+### Implementation
+1) Delete the two unused docflow wrapper functions.
+2) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator ./internal/artifactquality -count=1`.
+- Reference search for removed helper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Two local docflow compatibility helpers are removed without aliases/replacements.
+- [x] Existing artifact-quality direct calls remain unchanged.
+- [x] Docflow and artifact-quality tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5a` work.
+- [x] Commit `19W4: remove docflow compatibility helpers`.
+
+### Progress log
+- 2026-07-14: Started `19W4` after clean `19W3` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  docflow compatibility dead surfaces only.
+- 2026-07-14: Removed the two unused docflow compatibility helpers, confirmed no remaining
+  references, ran orchestrator/artifact-quality tests, and completed full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5a-review-diff-residual-cleanup
+
+### Context
+`19W5a` follows committed `19W4`. The `DEAD-007` package-local residual track starts in
+`internal/api/review_diff.go`. Current API Git diff tests initialize repositories through
+`initGitWorkspaceForDiffTest`; the production file still contains an unused `ensureGitDiffTestRepo`
+helper that duplicates test-only setup behavior.
+
+### Goals (must have)
+- [x] Remove unused `ensureGitDiffTestRepo` from `internal/api/review_diff.go`.
+- [x] Keep Git diff endpoint behavior and test helpers unchanged.
+- [x] Verify API/review diff tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5b` model store residual cleanup after `19W5a` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change Git diff response shape, filtering, binary handling or hunk parsing.
+- [ ] Do not move test helpers between packages.
+- [ ] Do not change Git commit/proposal branch endpoints.
+- [ ] Do not start `19W5b` model store cleanup in this slice.
+
+### Implementation
+1) Delete `ensureGitDiffTestRepo`.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/api -run 'GitDiff|RunReview' -count=1`.
+- `./scripts/run-go.sh test ./internal/api -count=1`.
+- Reference search for `ensureGitDiffTestRepo` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Review diff residual helper is removed without alias/replacement.
+- [x] API Git diff/run review tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5b` work.
+- [x] Commit `19W5a: remove review diff residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5a` after clean `19W4` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  API dead helper only.
+- 2026-07-14: Removed unused `ensureGitDiffTestRepo`, confirmed no remaining references, ran
+  targeted API Git diff/run review tests plus full API package tests, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5b-model-store-residual-cleanup
+
+### Context
+`19W5b` follows committed `19W5a`. The model store package-local residual is the unused
+`Store.removeFile` helper in `internal/model/store.go`; current model store behavior writes and
+lists entity/edge YAML files but has no active delete path.
+
+### Goals (must have)
+- [x] Remove unused `Store.removeFile`.
+- [x] Keep model store apply/list behavior unchanged.
+- [x] Verify model store/golden tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not add model deletion behavior.
+- [ ] Do not change entity/edge ID normalization, collision remapping or owner-team validation.
+- [ ] Do not change YAML layout or schema.
+- [ ] Do not start `19W5c` orchestrator quality cleanup in this slice.
+
+### Implementation
+1) Delete the unused `Store.removeFile` method.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/model -count=1`.
+- Reference search for `removeFile` in `internal/model` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Model store residual helper is removed without alias/replacement.
+- [x] Model store tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5c` work.
+- [x] Commit `19W5b: remove model store residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5b` after clean `19W5a` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  model store dead helper only.
+- 2026-07-14: Removed unused `Store.removeFile`, confirmed no remaining references, ran model
+  store tests, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5c-orchestrator-quality-residual-cleanup
+
+### Context
+`19W5c` follows committed `19W5b`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+package-local residual at `internal/orchestrator/quality.go:241`. In the current tree this is the
+unused `assessLiveReportSurfaceWarnings` wrapper; active code and tests call
+`assessLiveReportSurfaceSignals` directly.
+
+### Goals (must have)
+- [x] Remove unused `assessLiveReportSurfaceWarnings`.
+- [x] Keep run quality summary generation and artifact-quality signal behavior unchanged.
+- [x] Verify orchestrator quality tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change artifact-quality signal thresholds, messages or ordering.
+- [ ] Do not change report render context behavior or run warning synthesis.
+- [ ] Do not change runtime recovery counters or failure classification.
+- [ ] Do not start `19W5d` reports compiler cleanup in this slice.
+
+### Implementation
+1) Delete the unused `assessLiveReportSurfaceWarnings` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator -run 'AssessLiveReportSurfaceSignals|RuntimeDiagnosticCounters|AssessRunArtifactInventory' -count=1`.
+- `./scripts/run-go.sh test ./internal/orchestrator -count=1`.
+- Reference search for `assessLiveReportSurfaceWarnings` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Orchestrator quality residual helper is removed without alias/replacement.
+- [x] Targeted orchestrator quality tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5d` work.
+- [x] Commit `19W5c: remove orchestrator quality residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5c` after clean `19W5b` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  orchestrator quality dead helper only.
+- 2026-07-14: Removed unused `assessLiveReportSurfaceWarnings`, confirmed no remaining code
+  references in `internal/orchestrator`, ran targeted orchestrator quality tests and full
+  orchestrator package tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5d-reports-compiler-residual-cleanup
+
+### Context
+`19W5d` follows committed `19W5c`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+package-local residual at `internal/reports/compiler.go:266`. In the current tree this is the
+unused `writeStringList` helper; active coverage rendering uses `writeStringListWithFallback`.
+
+### Goals (must have)
+- [x] Remove unused `writeStringList`.
+- [x] Keep report compiler output unchanged.
+- [x] Verify reports compiler tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change coverage/findings/changelog markdown content.
+- [ ] Do not change incomplete-analysis fallback wording.
+- [ ] Do not change report artifact paths, labels or kinds.
+- [ ] Do not start `19W5e` prompt-contract cleanup in this slice.
+
+### Implementation
+1) Delete the unused `writeStringList` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/reports -count=1`.
+- Reference search for `writeStringList` confirms only `writeStringListWithFallback` remains as an
+  active helper.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Reports compiler residual helper is removed without alias/replacement.
+- [x] Reports compiler tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5e` work.
+- [x] Commit `19W5d: remove reports compiler residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5d` after clean `19W5c` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  reports compiler dead helper only.
+- 2026-07-14: Removed unused `writeStringList`, confirmed the active
+  `writeStringListWithFallback` helper remains unchanged, ran reports compiler tests, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5e-prompt-contract-residual-cleanup
+
+### Context
+`19W5e` follows committed `19W5d` and closes the `DEAD-007` package-local residual track.
+`docs/CODE_AUDIT_2026-07-10.md` identifies the residual at
+`internal/runtime/promptcontract/collect_repair.go:213`. In the current tree this is the unused
+`firstNonEmpty` helper; collect repair prompt composition uses explicit path/evidence selection
+logic instead.
+
+### Goals (must have)
+- [x] Remove unused `firstNonEmpty`.
+- [x] Keep collect manifest and collect artifact-pair repair prompts unchanged.
+- [x] Verify prompt-contract tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change collect repair prompt wording, evidence ranking or fallback behavior.
+- [ ] Do not change runtime draft validation or repair retry policy.
+- [ ] Do not change schemas, fixtures or live-provider gates.
+- [ ] Do not start `19X` UI dead-surface cleanup in this slice.
+
+### Implementation
+1) Delete the unused `firstNonEmpty` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtime/promptcontract -count=1`.
+- Reference search for `firstNonEmpty` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Prompt-contract residual helper is removed without alias/replacement.
+- [x] Prompt-contract tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include `19X`
+      work.
+- [x] Commit `19W5e: remove prompt contract residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5e` after clean `19W5d` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  prompt-contract dead helper only.
+- 2026-07-14: Removed unused `firstNonEmpty`, confirmed no remaining code references, ran
+  prompt-contract tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19x-ui-dead-surface-cleanup
+
+### Context
+`19X` follows committed `19W5e` and closes the UI dead-surface cleanup group
+(`DEAD-008`, `DEAD-009`, `DEAD-010`). A strict TypeScript probe with
+`--noUnusedLocals --noUnusedParameters` still reports the original `DEAD-008` entries:
+`Diagnostic` in `App.tsx`, `issueCount` in `AnalysisRunProgress`, and `nonDiagramArtifacts` in
+`ReviewEvidenceWorkbench`. Reference search also confirms the legacy synchronous QA wrapper
+(`QAAskResponse`, `QAAskRawResponse`, `askArchitectureQuestion`) and hook facade cleanup members
+(`clearRunReviewSummary`, `clearGitDiff`, `selectedDiffPath`, `setSelectedDiffPath`) have no active
+consumers outside internal propagation.
+
+### Goals (must have)
+- [x] Remove the unused `Diagnostic` import from `App.tsx`.
+- [x] Remove unused `issueCount` and `nonDiagramArtifacts` props/call-site wiring from
+      `StagePanels.tsx`.
+- [x] Remove the legacy synchronous QA ask client surface from `qaApi.ts`.
+- [x] Remove unused run-review/Git-diff facade cleanup members from hook return surfaces.
+- [x] Enable TypeScript `noUnusedLocals` and `noUnusedParameters` so these regressions fail
+      canonical UI typecheck.
+- [x] Keep request-gated run review, Git diff, async QA and artifact review behavior unchanged.
+- [x] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change Review/Publish IA, Git publication semantics or Epic 20 UX scope.
+- [ ] Do not remove active `Diagnostic` type consumers in validation/onboarding/editor surfaces.
+- [ ] Do not change API endpoints or backend QA compatibility.
+- [ ] Do not refactor StagePanels beyond deleting confirmed dead props/surfaces.
+
+### Implementation
+1) Remove `Diagnostic` from `App.tsx` imports.
+2) Remove `issueCount` from `AnalysisRunProgress` props and call site.
+3) Remove `nonDiagramArtifacts` from `ReviewEvidenceWorkbench` props and call site.
+4) Delete `QAAskResponse`, `QAAskRawResponse`, and `askArchitectureQuestion` from `qaApi.ts`.
+5) Stop returning unused cleanup members from `useRunReview`, `useGitDiff`, and `useRunExplorer`;
+   keep internal request abort/clear behavior where it is actively used.
+6) Add `noUnusedLocals` and `noUnusedParameters` to `ui/tsconfig.json`.
+
+### Interfaces
+Frontend-only cleanup. No backend API, schema, workspace, provider or release interface changes.
+The public TypeScript typecheck contract becomes stricter for unused locals/parameters.
+
+### Tests
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run typecheck --prefix ui`.
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run test --prefix ui -- --run`.
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run e2e:mock --prefix ui`.
+- Reference search for removed UI identifiers shows no active source consumers.
+- Full DoD remains green.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or fixtures should change.
+
+### Acceptance
+- [x] `noUnusedLocals`/`noUnusedParameters` are enabled and UI typecheck passes.
+- [x] Legacy synchronous QA client and unused hook facade members are removed.
+- [x] UI Vitest and deterministic mock Playwright pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is dead-surface deletion only and does not include Epic 20 UX
+      changes.
+- [x] Commit `19X: remove UI dead surfaces`.
+
+### Progress log
+- 2026-07-14: Started `19X` after clean `19W5e` commit. Using `ui-implementation-qa` for UI
+  implementation and verification. No schema/model-fixture/docs-visible behavior skill is required
+  because the slice deletes confirmed frontend dead surfaces and tightens typecheck only.
+- 2026-07-14: Removed the unused `Diagnostic` import, stale `AnalysisRunProgress.issueCount` and
+  `ReviewEvidenceWorkbench.nonDiagramArtifacts` props, legacy synchronous QA ask wrapper, and
+  unused run-review/Git-diff facade members. Enabled `noUnusedLocals`/`noUnusedParameters`, ran UI
+  typecheck, Vitest, deterministic mock Playwright (`7 passed / 0 skipped`), and completed full DoD
+  with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`. `make build`
+  regenerated `internal/api/ui_dist` for the UI source change.
+
+### Plan ID
+EP-20260714-epic-19-19z-final-reconciliation
+
+### Context
+`19Z` follows committed `19X` and reconciles PR-1 status after all Epic 19 implementation slices
+are complete. The branch has also been deliberately merged with `main`, preserving the concurrent
+workspace-health/Karpathy planning work from `main` and the complete Epic 19 slice evidence from
+this branch.
+
+### Goals (must have)
+- [x] Mark Epic 19 backlog status as implementation-complete pending PR review/merge.
+- [x] Update stakeholder status so PR-1 no longer claims the stale `19I` current-work marker.
+- [x] Preserve all `19A..19X` plan evidence and `main` active plan evidence after merge conflict
+      resolution.
+- [x] Record that Epic 20 remains blocked until PR-1 merges into `main`.
+- [ ] Keep PR-1 review/push/merge as the remaining open owner/repository coordination step.
+
+### Non-goals
+- [ ] Do not start Epic 20 in this reconciliation slice.
+- [ ] Do not run live providers or trusted-machine release gates.
+- [ ] Do not change canonical release matrices or provider lists.
+- [ ] Do not mark PR-1 as merged before it is actually merged into `main`.
+
+### Implementation
+1) Sync `docs/BACKLOG.md`, `docs/STAKEHOLDER_DOC.md` and the Epic 19 active plan status.
+2) Resolve `main` merge conflict in `docs/PLANS.md` by preserving both Epic 19 and concurrent
+   `main` active plans.
+3) Run docs-sync checks and full deterministic DoD after the merge and status updates.
+
+### Interfaces
+Documentation/status reconciliation only. No public API, schema, workspace, UI, provider or
+release interface changes.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/docsync -count=1`.
+- `git diff --check`.
+- Full deterministic DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Docs/fixtures
+- `docs/BACKLOG.md`, `docs/PLANS.md`, `docs/STAKEHOLDER_DOC.md`.
+
+### Acceptance
+- [x] Backlog/stakeholder/plan status consistently says Epic 19 is implementation-complete but
+      pending PR review/merge.
+- [x] Full DoD passes after merging `main`.
+- [x] Commit `19Z: reconcile Epic 19 completion`.
+
+### Progress log
+- 2026-07-14: Reconciled Epic 19 backlog/stakeholder/plan status, preserved both Epic 19 and
+  `main` active-plan evidence during merge conflict resolution, removed the merged unused
+  `doctorWarnings` local exposed by the new noUnused gate, regenerated `internal/api/ui_dist`, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
 
 ### Plan ID
 EP-20260623-karpathy-adoption-roadmap
@@ -325,7 +3306,6 @@ canonical `reports/health/*` artifacts in this slice.
 
 ### Progress log
 - 2026-07-10: Implemented K2a read-only workspace health snapshot, API endpoint, Readiness/right-inspector UI surface and docs sync. Focused Go/UI checks and full Go suite passed; canonical `make contracts|test|lint|build` remains blocked on this host until Node.js 22.21.1 is available.
-
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
 

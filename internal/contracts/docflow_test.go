@@ -86,7 +86,15 @@ func TestParseShardPackManifestRejectsUnknownCitationReference(t *testing.T) {
       "status": "staged"
     }
   ],
-  "citations": [],
+  "citations": [
+    {
+      "id": "cite.other",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.domain.payments"]
+    }
+  ],
   "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
@@ -101,6 +109,290 @@ func TestParseShardPackManifestRejectsUnknownCitationReference(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown citation_id") {
 		t.Fatalf("expected unknown citation_id error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsUnknownCitationDocumentReference(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [
+    {
+      "id": "doc.domain.payments",
+      "kind": "agent-output",
+      "title": "Payments",
+      "path": "domain-report.md",
+      "canonical_path": "reports/agent-outputs/domains/payments.md",
+      "topics": ["domain.payments"],
+      "citation_ids": ["cite.payments.readme"],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.missing"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "unknown document_id") {
+		t.Fatalf("expected unknown document_id error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsDocumentCitationAsymmetry(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "agent-output",
+      "title": "Payments Overview",
+      "path": "payments-overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "topics": ["domain.payments"],
+      "citation_ids": ["cite.payments.readme"],
+      "status": "staged"
+    },
+    {
+      "id": "doc.payments.config",
+      "kind": "agent-output",
+      "title": "Payments Config",
+      "path": "payments-config.md",
+      "canonical_path": "reports/as-is/payments/config.md",
+      "topics": ["domain.payments"],
+      "citation_ids": ["cite.payments.readme"],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.payments.config"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "citation does not list document_id") {
+		t.Fatalf("expected document/citation symmetry error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsCitationDocumentAsymmetry(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "agent-output",
+      "title": "Payments Overview",
+      "path": "payments-overview.md",
+      "canonical_path": "reports/as-is/payments/overview.md",
+      "topics": ["domain.payments"],
+      "citation_ids": ["cite.payments.config"],
+      "status": "staged"
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.config",
+      "repo": "payments-service",
+      "path": "config.yaml",
+      "claim_ids": ["claim.config"],
+      "document_ids": ["doc.payments.overview"]
+    },
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.readme"],
+      "document_ids": ["doc.payments.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "document does not list citation_id") {
+		t.Fatalf("expected citation/document symmetry error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsEmptyDocuments(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "primary",
+      "path": "README.md",
+      "claim_ids": ["claim.payments"],
+      "document_ids": ["doc.domain.payments"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "documents") {
+		t.Fatalf("expected documents minimum error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsEmptyCitations(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [
+    {
+      "id": "doc.domain.payments",
+      "kind": "agent-output",
+      "title": "Payments",
+      "path": "domain-report.md",
+      "canonical_path": "reports/agent-outputs/domains/payments.md",
+      "topics": ["domain.payments"],
+      "citation_ids": ["cite.payments.readme"]
+    }
+  ],
+  "citations": [],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "citations") {
+		t.Fatalf("expected citations minimum error, got %v", err)
+	}
+}
+
+func TestParseShardPackManifestRejectsDocumentWithoutCitationIDs(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{
+  "version": 1,
+  "run_id": "run-1",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-service",
+  "agent_role": "shard-analyst",
+  "artifact_root": "/tmp/run-1/shard",
+  "documents": [
+    {
+      "id": "doc.domain.payments",
+      "kind": "agent-output",
+      "title": "Payments",
+      "path": "domain-report.md",
+      "canonical_path": "reports/agent-outputs/domains/payments.md",
+      "topics": ["domain.payments"],
+      "citation_ids": []
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "payments-service",
+      "path": "README.md",
+      "claim_ids": ["claim.1"],
+      "document_ids": ["doc.domain.payments"]
+    }
+  ],
+  "semantic": {
+    "coverage": {"observed": [], "missing": [], "notes": []},
+    "questions": [],
+    "entities": [],
+    "edges": [],
+    "findings": []
+  }
+}`)
+	_, err := ParseShardPackManifest(raw)
+	if err == nil {
+		t.Fatalf("expected shard manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "citation_ids") {
+		t.Fatalf("expected citation_ids minimum error, got %v", err)
 	}
 }
 

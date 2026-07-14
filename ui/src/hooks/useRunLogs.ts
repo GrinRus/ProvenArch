@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchJSON } from "../lib/api";
 import { formatTimestamp, runLogsPageLimit } from "../lib/runState";
 import type { RunLogEntry, RunLogsResponse } from "../lib/appContracts";
+import { isAbortError, useRequestGate } from "./useRequestGate";
 
 type UseRunLogsOptions = {
   runId: string | null;
@@ -18,6 +19,17 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
   const [runLogsStatus, setRunLogsStatus] = useState("");
   const [runLogsViewMode, setRunLogsViewMode] = useState<RunLogsViewMode>("line");
   const [runLogsMode, setRunLogsMode] = useState<RunLogsMode>("all");
+  const runLogsCursorRef = useRef(runLogsCursor);
+  const runLogsEOFRef = useRef(runLogsEOF);
+  const logsRequest = useRequestGate("run-logs");
+
+  useEffect(() => {
+    runLogsCursorRef.current = runLogsCursor;
+  }, [runLogsCursor]);
+
+  useEffect(() => {
+    runLogsEOFRef.current = runLogsEOF;
+  }, [runLogsEOF]);
 
   const runLogTaskrunPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -60,6 +72,7 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
   }, [filteredRunLogs, runLogsViewMode]);
 
   function resetRunLogs() {
+    logsRequest.abort();
     setRunLogs([]);
     setRunLogsCursor(0);
     setRunLogsEOF(false);
@@ -89,33 +102,63 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
     if (!id) {
       return null;
     }
-    const cursor = reset ? 0 : runLogsCursor;
-    if (!reset && runLogsEOF) {
+    const cursor = reset ? 0 : runLogsCursorRef.current;
+    if (!reset && runLogsEOFRef.current) {
       return null;
     }
-    const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`);
-    mergeRunLogsPayload(payload, reset, cursor);
-    return payload;
+    const token = logsRequest.begin(`${id}:${reset ? "reset" : "page"}:${cursor}`);
+    try {
+      const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`, {
+        signal: token.signal,
+      });
+      if (!logsRequest.isCurrent(token)) {
+        return null;
+      }
+      mergeRunLogsPayload(payload, reset, cursor);
+      return payload;
+    } catch (error) {
+      if (isAbortError(error) || !logsRequest.isCurrent(token)) {
+        return null;
+      }
+      throw error;
+    } finally {
+      logsRequest.finish(token);
+    }
   }
 
   async function fetchRunLogsUntilEOF(id: string) {
     if (!id) {
       return;
     }
+    const token = logsRequest.begin(`${id}:until-eof`);
     let cursor = 0;
     let reset = true;
-    for (let page = 0; page < 25; page += 1) {
-      const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`);
-      mergeRunLogsPayload(payload, reset, cursor);
-      if (payload.eof) {
+    try {
+      for (let page = 0; page < 25; page += 1) {
+        const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`, {
+          signal: token.signal,
+        });
+        if (!logsRequest.isCurrent(token)) {
+          return;
+        }
+        mergeRunLogsPayload(payload, reset, cursor);
+        if (payload.eof) {
+          return;
+        }
+        const nextCursor = payload.next_cursor ?? cursor;
+        if (nextCursor <= cursor) {
+          return;
+        }
+        cursor = nextCursor;
+        reset = false;
+      }
+    } catch (error) {
+      if (isAbortError(error) || !logsRequest.isCurrent(token)) {
         return;
       }
-      const nextCursor = payload.next_cursor ?? cursor;
-      if (nextCursor <= cursor) {
-        return;
-      }
-      cursor = nextCursor;
-      reset = false;
+      throw error;
+    } finally {
+      logsRequest.finish(token);
     }
   }
 

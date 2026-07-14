@@ -24,11 +24,18 @@ jobs:
         with:
           go-version-file: .go-version
 
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: .python-version
+
+      - name: Install script test dependencies
+        run: python -m pip install PyYAML==6.0.3
+
       - name: Run Go tests
         run: go test ./...
 
       - name: Run script tests
-        run: python3 -m unittest discover -s scripts/tests -p '*_test.py'
+        run: ./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'
 
       - name: Run coordinator stress check
         run: make test-stress

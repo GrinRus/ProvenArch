@@ -26,14 +26,15 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
-| Code quality audit remediation | planned (Epic 19) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; local frontend security hardening remains Wave 1+ non-goal |
+| Code quality audit remediation | implementation-complete (Epic 19 / PR-1 pending review+merge) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: PR-1 branch `codex/epic-19-code-quality-remediation` has completed local slices `19A..19X`, including crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | planned (post-beta; Epic 20, `20A` selected) | `docs/BACKLOG.md` defines the dependency-ordered corrective program; `docs/PLANS.md` selects immutable run-pinned evidence review as the first P0 slice. Current Console V2 remains the implemented beta baseline until each slice is accepted. |
 | Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17
-- follow-up: 19 active (quality remediation without hosted/frontend-security scope expansion);
-  20 active (post-beta UX/UI trust program; first selected slice is `20A`)
+- follow-up: 19 implementation-complete pending PR review/merge (quality remediation without
+  hosted/frontend-security scope expansion); 20 active (post-beta UX/UI trust program; first
+  selected slice is `20A`)
 - out of MVP: 12, 13, 21 (planned Wave 1)
 
 ---
@@ -66,6 +67,7 @@ Epic matrix:
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
 - ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
 - в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
+- пока есть active или queued run, смена workspace/runner и runtime profile mutations возвращают явный conflict; UI/API должны продолжать показывать effective runtime текущей service generation до terminal state.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:
@@ -99,7 +101,7 @@ Epic matrix:
 - `workspace.yaml` валидируется по отдельному schema-contract и хранит только repo sources + `docs.imports_path`.
 - В `workspace.yaml` хранятся локальные пути к продуктовым репозиториям и/или GitHub/GitLab URL.
 - `repos[].analysis.role` удалён из active contract; workspace manifest хранит только source metadata и optional `analysis.include/exclude`.
-- Если указан `git_url`, clone/fetch выполняется через локальный `git` на устройстве пользователя или в runner-контексте CI.
+- Если указан `git_url`, clone/fetch выполняется через локальный `git` на устройстве пользователя или в runner-контексте CI; unpinned source перед анализом refresh-ится на exact remote default `HEAD` SHA в ACP-owned cache, а пользовательские `path` checkout-ы не изменяются.
 - В `docs/imports/` лежат вручную импортированные документы (например, выгрузки из Confluence).
 - Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не конфигурируется через manifest и считается fixed MVP convention.
 
@@ -303,7 +305,7 @@ arch-workspace/
    - управляет шагами pipeline  
    - готовит контекст и PromptPack перед запуском каждого шага  
    - загружает baseline bundle agents/skills/prompts из workspace  
-   - разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner  
+   - разрешает repo sources (`path`/`git_url`) в локальные checkout перед анализом через системный `git` текущего пользователя/runner; для unpinned `git_url` фиксирует exact resolved SHA в run evidence
    - принимает только required step artifacts + runtime execution metadata и сохраняет их в workspace
    - работает в interactive local mode и non-interactive CI mode
    - вызывается как напрямую пользователем, так и из CI/CD trigger flows
@@ -481,6 +483,7 @@ Wizard из блоков-шаблонов:
 - результатом остаются те же git-tracked артефакты workspace  
 - если данных недостаточно, job не придумывает ответ, а пишет gaps/questions/coverage
 - одновременно активен только один run на workspace; debounce window 5 минут, policy `last event wins`
+- workspace/runtime session replacement и runtime profile writes запрещены во время active/pending work, чтобы queued/running analysis всегда оставался привязан к одной service generation
 - internal API trigger допустим только как optional trusted local/private deployment mode и не является обязательной CI/CD поверхностью MVP
 
 ### 10.3. Позже (после MVP)

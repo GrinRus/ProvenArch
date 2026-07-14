@@ -167,10 +167,6 @@ func (a claudeAdapter) UnavailableMarkers() []string {
 	return providercommon.DefaultUnavailableMarkers()
 }
 
-func buildDefaultClaudeArgs(task acpruntime.Task, prompt string) []string {
-	return buildClaudeArgsWithIncludeDirectories(acpruntime.ResolveHeadlessIncludeDirectories(task), prompt)
-}
-
 func buildClaudeArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
 	return buildClaudeArgsWithPermissions(includeDirs, prompt, acpruntime.DefaultPermissions())
 }

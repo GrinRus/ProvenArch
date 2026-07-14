@@ -111,6 +111,9 @@ acp serve
 ```
 
 Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
+`acp serve` обрабатывает SIGINT/SIGTERM/SIGHUP через bounded shutdown: HTTP listener
+останавливается gracefully, active runtime run получает context cancellation, queued pending
+runs завершаются как canceled, а новые async starts после shutdown отклоняются.
 
 В onboarding UI:
 
@@ -350,7 +353,11 @@ arch-workspace/
 
 Repository sources могут быть local checkout paths или GitHub/GitLab-style `git_url`.
 Для `git_url` ACP использует local `git` command и auth context текущего пользователя
-или CI runner. ACP не хранит отдельные repository credentials.
+или CI runner. Непривязанный `git_url` (`ref` не задан) перед каждым анализом fetch-ится
+в ACP-owned cache under `.acp/repos`, затем cache force-reset-ится на exact commit remote
+default `HEAD`; resolved commit SHA возвращается в fetch-backed resolver/run evidence. Если
+`ref` задан, он продолжает выбирать эту ветку/тег/SHA вместо remote default. ACP не хранит
+отдельные repository credentials и не изменяет пользовательские `path` checkout-ы.
 
 Imported documents, например выгрузки из Confluence, живут под `docs.imports_path` by default.
 Optional `<docs.imports_path>/index.yaml` может хранить metadata импортированных файлов:

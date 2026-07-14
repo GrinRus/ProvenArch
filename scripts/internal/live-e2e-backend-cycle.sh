@@ -105,7 +105,7 @@ if [[ ! "$RUN_LOGS_MAX_RUNS" =~ ^[1-9][0-9]*$ ]]; then
   echo "RUN_LOGS_MAX_RUNS must be a positive integer, got: $RUN_LOGS_MAX_RUNS" >&2
   exit 1
 fi
-if ! acp_ensure_no_legacy_env_set; then
+if ! acp_ensure_no_legacy_env_set ""; then
   exit 1
 fi
 EXPECTED_RUNS=$((ITERATIONS * 4))

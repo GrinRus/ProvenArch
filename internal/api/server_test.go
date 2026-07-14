@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,6 +44,77 @@ func TestHealthEndpoint(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", response.StatusCode)
 	}
+}
+
+func TestServeContextCancellationShutsDownService(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	service := server.getService()
+	ws := server.getWorkspace()
+	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      ws,
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	address := freeTCPAddress(t)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(ctx, address)
+	}()
+	waitForHTTPHealth(t, "http://"+address+"/api/health", 2*time.Second)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("serve returned error after context cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("serve did not stop after context cancellation")
+	}
+
+	info, ok := service.GetRun(runID)
+	if !ok {
+		t.Fatalf("expected run %q", runID)
+	}
+	if info.Status != orchestrator.RunStatusFailed || info.ErrorCode != "run_canceled" {
+		t.Fatalf("expected service shutdown to cancel active run, got status=%s code=%q", info.Status, info.ErrorCode)
+	}
+}
+
+func freeTCPAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free TCP address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close free TCP listener: %v", err)
+	}
+	return address
+}
+
+func waitForHTTPHealth(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		response, err := http.Get(url)
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server did not become healthy at %s before timeout", url)
 }
 
 func TestSystemInfoEndpointReturnsBuildMetadataBeforeWorkspaceSelection(t *testing.T) {
@@ -241,6 +313,234 @@ func TestLauncherWorkspaceManifestAndRuntimeSelection(t *testing.T) {
 	defer validateResponse.Body.Close()
 	if validateResponse.StatusCode != http.StatusOK {
 		t.Fatalf("expected workspace validate 200 after manifest save, got %d", validateResponse.StatusCode)
+	}
+}
+
+func TestOnboardingWorkspaceSwitchConflictsWithActiveRun(t *testing.T) {
+	t.Parallel()
+
+	server := NewLauncherServer(testServerRuntimeConfig(), func(ws workspace.Root, config ServerRuntimeConfig) *orchestrator.Service {
+		return orchestrator.NewService(
+			orchestrator.WithHistoryWorkspace(ws),
+			orchestrator.WithRunner(cancellableDelayedRunner{delay: 5 * time.Second}),
+		)
+	})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "arch-workspace")
+	repoPath := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+
+	workspaceResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, workspacePath))
+	defer workspaceResponse.Body.Close()
+	if workspaceResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected workspace selection 200, got %d", workspaceResponse.StatusCode)
+	}
+	manifest := fmt.Sprintf("version: 1\nrepos:\n  - name: sample\n    path: %q\n", repoPath)
+	manifestResponse := postJSONWithMethod(t, http.MethodPut, httpServer.URL+"/api/workspace/manifest", fmt.Sprintf(`{"content":%q}`, manifest))
+	defer manifestResponse.Body.Close()
+	if manifestResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected manifest save 200, got %d", manifestResponse.StatusCode)
+	}
+
+	service := server.getService()
+	runID, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      server.getWorkspace(),
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start active run: %v", err)
+	}
+	if !service.HasInFlightRun() {
+		t.Fatalf("expected active run to be visible before workspace switch")
+	}
+
+	secondWorkspacePath := filepath.Join(root, "second-arch-workspace")
+	switchResponse := postJSON(t, httpServer.URL+"/api/onboarding/workspace", fmt.Sprintf(`{"path":%q,"create":true}`, secondWorkspacePath))
+	defer switchResponse.Body.Close()
+	if switchResponse.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(switchResponse.Body)
+		t.Fatalf("expected workspace switch conflict 409, got %d body=%s", switchResponse.StatusCode, string(body))
+	}
+	if code := decodeErrorCode(t, switchResponse); code != "workspace_switch_conflict" {
+		t.Fatalf("expected workspace_switch_conflict, got %q", code)
+	}
+	if server.getWorkspace().Path != workspacePath {
+		t.Fatalf("expected original workspace to remain selected, got %q", server.getWorkspace().Path)
+	}
+	if _, ok := server.getService().GetRun(runID); !ok {
+		t.Fatalf("expected active run %q to remain on original service", runID)
+	}
+}
+
+func TestOnboardingRuntimeSwitchConflictsWithActiveRun(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	service := server.getService()
+	if _, err := service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      server.getWorkspace(),
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	}); err != nil {
+		t.Fatalf("start active run: %v", err)
+	}
+
+	response := postJSON(t, httpServer.URL+"/api/onboarding/runtime", `{"runtime":"headless","runtime_provider":"qwen-code"}`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected runtime switch conflict 409, got %d body=%s", response.StatusCode, string(body))
+	}
+	if code := decodeErrorCode(t, response); code != "runtime_switch_conflict" {
+		t.Fatalf("expected runtime_switch_conflict, got %q", code)
+	}
+
+	statusResponse, err := http.Get(httpServer.URL + "/api/onboarding/status")
+	if err != nil {
+		t.Fatalf("GET /api/onboarding/status: %v", err)
+	}
+	defer statusResponse.Body.Close()
+	var status struct {
+		Runtime struct {
+			Runtime         string `json:"runtime"`
+			RuntimeProvider string `json:"runtime_provider"`
+		} `json:"runtime"`
+	}
+	if err := json.NewDecoder(statusResponse.Body).Decode(&status); err != nil {
+		t.Fatalf("decode onboarding status: %v", err)
+	}
+	if status.Runtime.Runtime != acpruntime.RuntimeModeFake || status.Runtime.RuntimeProvider != string(acpruntime.ProviderClaudeCode) {
+		t.Fatalf("expected effective runtime to remain fake/claude-code, got %+v", status.Runtime)
+	}
+}
+
+func TestRuntimeProfileMutationConflictsWithActiveRun(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	beforeManifest, err := os.ReadFile(filepath.Join(server.getWorkspace().Path, workspace.ManifestFileName))
+	if err != nil {
+		t.Fatalf("read manifest before mutation: %v", err)
+	}
+	if _, err := server.getService().StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      server.getWorkspace(),
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	}); err != nil {
+		t.Fatalf("start active run: %v", err)
+	}
+
+	response := postJSONWithMethod(t, http.MethodPut, httpServer.URL+"/api/runtime/execution", `{"execution":{"strategy":"parallel"}}`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected runtime profile conflict 409, got %d body=%s", response.StatusCode, string(body))
+	}
+	if code := decodeErrorCode(t, response); code != "runtime_profile_conflict" {
+		t.Fatalf("expected runtime_profile_conflict, got %q", code)
+	}
+	afterManifest, err := os.ReadFile(filepath.Join(server.getWorkspace().Path, workspace.ManifestFileName))
+	if err != nil {
+		t.Fatalf("read manifest after mutation: %v", err)
+	}
+	if string(afterManifest) != string(beforeManifest) {
+		t.Fatalf("expected runtime profile conflict not to mutate manifest\nbefore:\n%s\nafter:\n%s", string(beforeManifest), string(afterManifest))
+	}
+}
+
+func TestConcurrentPollingAndSessionMutationConflictIsRaceSafe(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	if _, err := server.getService().StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace:      server.getWorkspace(),
+		Pipeline:       orchestrator.PipelineInit,
+		NonInteractive: true,
+	}); err != nil {
+		t.Fatalf("start active run: %v", err)
+	}
+
+	errCh := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		go func() {
+			resp, err := http.Get(httpServer.URL + "/api/pipeline/runs")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				errCh <- fmt.Errorf("GET runs status=%d", resp.StatusCode)
+				return
+			}
+			errCh <- nil
+		}()
+		go func() {
+			resp, err := http.Get(httpServer.URL + "/api/runtime/profile")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				errCh <- fmt.Errorf("GET runtime profile status=%d", resp.StatusCode)
+				return
+			}
+			errCh <- nil
+		}()
+		go func() {
+			resp, err := http.Post(httpServer.URL+"/api/onboarding/runtime", "application/json", strings.NewReader(`{"runtime":"headless","runtime_provider":"qwen-code"}`))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusConflict {
+				errCh <- fmt.Errorf("POST runtime status=%d", resp.StatusCode)
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	for i := 0; i < 24; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -4248,6 +4548,19 @@ func postJSONWithMethod(t *testing.T, method string, url string, body string) *h
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
 	return response
+}
+
+func decodeErrorCode(t *testing.T, response *http.Response) string {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	return payload.Error.Code
 }
 
 func writeHeadlessRunnerStub(t *testing.T, runtimeName string) string {

@@ -174,13 +174,6 @@ func boundRuntimeShardID(slug string) string {
 	return prefix + "-" + hash
 }
 
-func (e *pipelineExecution) resolveRepoPath(scope string) string {
-	return resolveRepoPathForInput(ShardPlanInput{
-		Workspace:         e.workspace,
-		ResolvedRepoPaths: e.resolvedRepoPaths,
-	}, scope)
-}
-
 func resolveRepoPathForInput(input ShardPlanInput, scope string) string {
 	repoPath := strings.TrimSpace(input.ResolvedRepoPaths[scope])
 	repo, ok := lookupManifestRepo(input.Workspace.Manifest.Repos, scope)
@@ -194,13 +187,6 @@ func resolveRepoPathForInput(input ShardPlanInput, scope string) string {
 		}
 	}
 	return strings.TrimSpace(repoPath)
-}
-
-func (e *pipelineExecution) planScopePaths(scope string) ([]string, []string) {
-	return planScopePathsForInput(ShardPlanInput{
-		Workspace:         e.workspace,
-		ResolvedRepoPaths: e.resolvedRepoPaths,
-	}, scope)
 }
 
 func planScopePathsForInput(input ShardPlanInput, scope string) ([]string, []string) {
@@ -241,14 +227,6 @@ func lookupManifestRepo(repos []workspace.RepoSource, name string) (workspace.Re
 		}
 	}
 	return workspace.RepoSource{}, false
-}
-
-func discoverHeuristicShardPaths(repoPath string) ([]string, error) {
-	result, err := discoverHeuristicShardPathsWithMeta(repoPath)
-	if err != nil {
-		return nil, err
-	}
-	return result.Paths, nil
 }
 
 func discoverHeuristicShardPathsWithMeta(repoPath string) (heuristicShardDiscoveryResult, error) {

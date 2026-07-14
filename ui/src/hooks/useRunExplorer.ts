@@ -58,11 +58,11 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     () => [runId ?? "", runStatus?.status ?? "", runStatus?.current_step ?? "", runLogs.length, artifacts.length].join("|"),
     [artifacts.length, runId, runLogs.length, runStatus?.current_step, runStatus?.status],
   );
-  const { runReviewSummary, runReviewStatus, fetchRunReviewSummary, clearRunReviewSummary } = useRunReview({
+  const { runReviewSummary, runReviewStatus, fetchRunReviewSummary } = useRunReview({
     runId,
     pollSignal: reviewPollSignal,
   });
-  const { gitDiff, gitDiffStatus, selectedDiffPath, setSelectedDiffPath, loadGitDiff, clearGitDiff } = gitDiffState;
+  const { gitDiff, gitDiffStatus, loadGitDiff } = gitDiffState;
 
   const setRunID = useCallback((nextRunID: string | null) => dispatch({ type: "setRunID", runId: nextRunID }), []);
   const setRunStatus = useCallback(
@@ -161,13 +161,9 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     runReviewStatus,
     gitDiff,
     gitDiffStatus,
-    selectedDiffPath,
     bootstrapRuns,
     fetchRunReviewSummary,
     loadGitDiff,
-    clearRunReviewSummary,
-    clearGitDiff,
-    setSelectedDiffPath,
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,

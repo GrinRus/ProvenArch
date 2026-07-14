@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -195,7 +195,7 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 			},
 		})
 	}
-	return nil
+	return e.enrichCanonicalCards(domainIDs, teamCards)
 }
 
 func (e *pipelineExecution) prepareDomainCollect(stepID string, domainID string) (domainCollectPreparation, error) {
@@ -473,7 +473,14 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 	if err != nil {
 		return err
 	}
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	draft, _, err := runtimedrafts.ValidateRequiredManifest(
+		execution.Task.WriteRoot,
+		execution.Task.DraftFinalRoot,
+		execution.Task.RunID,
+		execution.Task.StepID,
+		execution.Task.StepContract,
+		execution.Task.ExpectedArtifacts,
+	)
 	if err != nil {
 		return err
 	}
@@ -536,7 +543,14 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 	if err != nil {
 		return err
 	}
-	draft, _, err := validateRequiredRuntimeDraftArtifacts(execution.Task)
+	draft, _, err := runtimedrafts.ValidateRequiredManifest(
+		execution.Task.WriteRoot,
+		execution.Task.DraftFinalRoot,
+		execution.Task.RunID,
+		execution.Task.StepID,
+		execution.Task.StepContract,
+		execution.Task.ExpectedArtifacts,
+	)
 	if err != nil {
 		return err
 	}
@@ -556,34 +570,6 @@ func (e *pipelineExecution) runStepProposals(ctx context.Context, stepID string)
 		e.logInfo(stepID, "", "promoting validated staged artifacts", nil)
 		if err := e.promoteValidatedArtifacts(); err != nil {
 			return err
-		}
-		if e.proposalsDraftManifest != nil {
-			if draftManifestHasPrefix(e.proposalsDraftManifest, "proposals/") && e.finalRunIndex != nil {
-				removed := draftManifestCanonicalPathsWithPrefix(e.proposalsDraftManifest, "proposals/")
-				for _, canonicalPath := range removed {
-					target, resolveErr := e.workspace.Resolve(canonicalPath)
-					if resolveErr != nil {
-						return resolveErr
-					}
-					if removeErr := os.Remove(target); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-						return fmt.Errorf("remove deterministic proposal %q: %w", canonicalPath, removeErr)
-					}
-				}
-				e.removeArtifactsByPath(removed...)
-			}
-			artifacts, err := applyRuntimeDraftOutputs(
-				e.workspace,
-				e.proposalsDraftRoot,
-				*e.proposalsDraftManifest,
-				"",
-				func(target string) bool {
-					return strings.HasPrefix(target, "proposals/") || strings.HasPrefix(target, "reports/changelog/")
-				},
-			)
-			if err != nil {
-				return err
-			}
-			e.addArtifacts(artifacts...)
 		}
 	} else if e.renderContext().IsIncomplete() || len(e.partialFailures) > 0 || e.findingsSkipped {
 		e.addWarning(fmt.Sprintf("%s: canonical promotion skipped because validator verdict is missing", e.stepStatus.CurrentStep))
@@ -688,6 +674,22 @@ func (e *pipelineExecution) stageProposalDraftOutputsForFinalIndex() error {
 	)
 	if err != nil {
 		return err
+	}
+	citationIndex, citationChanged := reconcileRuntimeDerivedCitationDocuments(*e.citationIndex, finalRunIndex)
+	if citationChanged {
+		citationRaw, err := json.MarshalIndent(citationIndex, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal citation index with proposal drafts: %w", err)
+		}
+		citationRaw = append(citationRaw, '\n')
+		if err := stageRoot.WriteFile(citationIndexFile, citationRaw); err != nil {
+			return err
+		}
+		parsedCitationIndex, err := contracts.ParseCitationIndex(citationRaw)
+		if err != nil {
+			return err
+		}
+		e.citationIndex = &parsedCitationIndex
 	}
 	finalIndexRaw, err := json.MarshalIndent(finalRunIndex, "", "  ")
 	if err != nil {

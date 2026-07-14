@@ -624,7 +624,8 @@ func shouldRetryCollectManifestShapeCleanup(err error) bool {
 	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
 		return true
 	}
-	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") {
+	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") ||
+		isSchemaMinItemsFieldFailure(detail, "claim_ids") || isSchemaMinItemsFieldFailure(detail, "document_ids") {
 		return true
 	}
 	if strings.Contains(detail, "documents") && strings.Contains(detail, "citation_ids") && strings.Contains(detail, "references") {
@@ -709,13 +710,23 @@ func isCollectManifestCitationClaimBindingFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	detail := err.Error()
+	detail := strings.ToLower(err.Error())
 	if strings.Contains(detail, "repo evidence path") ||
 		strings.Contains(detail, "process-contaminated") ||
 		strings.Contains(detail, "process contaminated") {
 		return false
 	}
-	return strings.Contains(detail, ".claim_ids is required")
+	return strings.Contains(detail, ".claim_ids is required") || isSchemaMinItemsFieldFailure(detail, "claim_ids")
+}
+
+func isSchemaMinItemsFieldFailure(detail string, field string) bool {
+	detail = strings.ToLower(strings.TrimSpace(detail))
+	field = strings.ToLower(strings.TrimSpace(field))
+	if detail == "" || field == "" {
+		return false
+	}
+	return strings.Contains(detail, "/"+field) &&
+		(strings.Contains(detail, "minitems") || strings.Contains(detail, "minimum 1 items required"))
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {

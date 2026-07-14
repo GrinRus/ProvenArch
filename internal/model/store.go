@@ -188,17 +188,6 @@ func (s Store) writeYAML(relPath string, payload any) error {
 	return s.workspace.WriteFile(relPath, content)
 }
 
-func (s Store) removeFile(relPath string) error {
-	abs, err := s.workspace.Resolve(relPath)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove %q: %w", relPath, err)
-	}
-	return nil
-}
-
 func collectIncomingTeamIDs(entities []contracts.Entity) map[string]struct{} {
 	ids := map[string]struct{}{}
 	for _, entity := range entities {

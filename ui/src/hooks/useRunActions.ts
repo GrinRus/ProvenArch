@@ -5,6 +5,7 @@ import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
 import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
 import type { RunExplorerAction } from "../lib/runExplorerState";
 import { finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
+import { isAbortError, useRequestGate } from "./useRequestGate";
 import { useRunUpdatePolling } from "./useRunUpdatePolling";
 
 type RunActionsContext = {
@@ -25,7 +26,7 @@ type RunActionsContext = {
   fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
   clearArtifacts: () => void;
   fetchArtifacts: (runId: string) => Promise<void>;
-  loadCoverageArtifacts: () => Promise<void>;
+  loadCoverageArtifacts: (runId?: string) => Promise<void>;
 };
 
 export function useRunActions({
@@ -48,6 +49,8 @@ export function useRunActions({
   fetchArtifacts,
   loadCoverageArtifacts,
 }: RunActionsContext) {
+  const runStatusRequest = useRequestGate("run-status");
+
   const loadRunList = useCallback(
     async (limit = 100): Promise<RunListItem[]> => {
       const payload = await listPipelineRuns(limit);
@@ -60,18 +63,31 @@ export function useRunActions({
 
   const fetchRunStatus = useCallback(
     async (id: string, allowMissing = false): Promise<RunStatusResponse | null> => {
-      const typed = await getPipelineRunStatus(id, allowMissing);
-      if (!typed) {
-        return null;
+      const token = runStatusRequest.begin(`${id}:${allowMissing ? "allow-missing" : "strict"}`);
+      try {
+        const typed = await getPipelineRunStatus(id, allowMissing, { signal: token.signal });
+        if (!runStatusRequest.isCurrent(token)) {
+          return null;
+        }
+        if (!typed) {
+          return null;
+        }
+        setRunStatus(typed);
+        if (finalStatuses.has(typed.status)) {
+          await fetchArtifacts(id);
+          await loadCoverageArtifacts(id);
+        }
+        return typed;
+      } catch (error) {
+        if (isAbortError(error) || !runStatusRequest.isCurrent(token)) {
+          return null;
+        }
+        throw error;
+      } finally {
+        runStatusRequest.finish(token);
       }
-      setRunStatus(typed);
-      if (finalStatuses.has(typed.status)) {
-        await fetchArtifacts(id);
-        await loadCoverageArtifacts();
-      }
-      return typed;
     },
-    [fetchArtifacts, loadCoverageArtifacts, setRunStatus]
+    [fetchArtifacts, loadCoverageArtifacts, runStatusRequest, setRunStatus]
   );
 
   const handleSelectRun = useCallback(
@@ -84,6 +100,7 @@ export function useRunActions({
       try {
         setRunActionStatus("");
         setRunID(id);
+        setRunStatus(null);
         resetRunLogs();
         clearArtifacts();
         const status = await fetchRunStatus(id);
@@ -151,30 +168,31 @@ export function useRunActions({
       setRunActionStatus("");
       clearArtifacts();
       resetRunLogs();
+      let acceptedRunID = "";
       try {
         const payload = await startPipelineRun(pipeline);
+        acceptedRunID = payload.run_id;
+        const provisionalRun = buildProvisionalRun(pipeline, payload);
         dispatch({
           type: "upsertRunListItem",
-          item: {
-            run_id: payload.run_id,
-            pipeline,
-            status: "queued",
-            started_at: new Date().toISOString(),
-            finished_at: null,
-            warnings: [],
-            error_code: null,
-            error: null,
-          },
+          item: provisionalRun,
         });
         setRunID(payload.run_id);
+        setRunStatus(provisionalRun);
+        setRunActionStatus(`Run ${payload.run_id} accepted; reconciling details.`);
         const status = await fetchRunStatus(payload.run_id);
         await fetchRunLogs(payload.run_id, true);
         if (status && finalStatuses.has(status.status)) {
           await fetchRunLogsUntilEOF(payload.run_id);
         }
         await loadRunList(100);
+        setRunActionStatus("");
         return true;
       } catch (requestError) {
+        if (acceptedRunID) {
+          setRunActionStatus(`Run ${acceptedRunID} accepted; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
+          return true;
+        }
         setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
         return false;
       } finally {
@@ -209,12 +227,16 @@ export function useRunActions({
 
       if (response.status === 202) {
         setRunActionStatus(`Cancel requested for ${runId}`);
-        await loadRunList(100);
-        const status = await fetchRunStatus(runId);
-        if (status && finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(runId);
-        } else {
-          await fetchRunLogs(runId, false);
+        try {
+          await loadRunList(100);
+          const status = await fetchRunStatus(runId);
+          if (status && finalStatuses.has(status.status)) {
+            await fetchRunLogsUntilEOF(runId);
+          } else {
+            await fetchRunLogs(runId, false);
+          }
+        } catch (requestError) {
+          setRunActionStatus(`Cancel requested for ${runId}; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
         }
         return;
       }
@@ -288,4 +310,28 @@ function activeRunResumeMessage(status: string, runID: string): string {
     return `Resumed active run ${runID}.`;
   }
   return `Selected latest completed run ${runID}.`;
+}
+
+function buildProvisionalRun(pipeline: "init" | "refresh", payload: { run_id: string; status: string }): RunStatusResponse {
+  return {
+    run_id: payload.run_id,
+    pipeline,
+    status: normalizeRunStartStatus(payload.status),
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    warnings: [],
+    error_code: null,
+    error: null,
+  };
+}
+
+function normalizeRunStartStatus(status: string): RunStatusResponse["status"] {
+  if (status === "queued" || status === "running" || status === "succeeded" || status === "failed") {
+    return status;
+  }
+  return "queued";
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }

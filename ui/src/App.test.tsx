@@ -49,6 +49,14 @@ function textResponse(body: string, status = 200): Response {
   });
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 function createFetchMock(state: FetchMockState = {}) {
   const runID = state.runID ?? "run-1";
   const runLogs = state.runLogs ?? {
@@ -1857,6 +1865,46 @@ describe("App", () => {
         },
         artifactText: {
           "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/reports/as-is/overview.md": "# As-is overview\n",
+          "reports/taskruns/run-1/staging/final/reports/diagrams/c4-context.mmd": "flowchart LR\n  A --> B\n",
+          "reports/taskruns/run-1/staging/final/proposals/proposal-payments/proposal.md": "# Payments proposal\n",
+          "reports/taskruns/run-1/staging/final/reports/changelog/2026-04-03.md": "# Iteration changelog\n",
+          "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
+            version: 1,
+            run_id: "run-1",
+            pipeline: "init",
+            generated_at: "2026-04-03T12:00:00Z",
+            canonical_documents: [
+              {
+                id: "doc.overview",
+                kind: "report",
+                title: "As-is overview",
+                canonical_path: "reports/as-is/overview.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+              {
+                id: "doc.diagram",
+                kind: "diagram",
+                title: "C4 context",
+                canonical_path: "reports/diagrams/c4-context.mmd",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/diagrams/c4-context.mmd",
+              },
+              {
+                id: "doc.proposal",
+                kind: "proposal",
+                title: "Payments proposal",
+                canonical_path: "proposals/proposal-payments/proposal.md",
+                staged_path: "reports/taskruns/run-1/staging/final/proposals/proposal-payments/proposal.md",
+              },
+              {
+                id: "doc.changelog",
+                kind: "changelog",
+                title: "Iteration changelog",
+                canonical_path: "reports/changelog/2026-04-03.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/changelog/2026-04-03.md",
+              },
+            ],
+          }),
         },
       }),
     );
@@ -2021,7 +2069,7 @@ describe("App", () => {
     expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Payments changelog");
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded.");
+    await waitFor(() => expect(screen.getByTestId("proposal-preview-panel")).toHaveTextContent("Workspace Git diff loaded."));
     expect(screen.getByTestId("git-diff-view")).toHaveTextContent("reports/coverage/summary.md");
 
     fireEvent.click(screen.getByRole("button", { name: "Review in Publish" }));
@@ -2164,8 +2212,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff");
-    expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded.");
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff"));
+    await waitFor(() => expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded."));
     expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
 
     fireEvent.click(screen.getByRole("button", { name: "Load full workspace diff" }));
@@ -2270,6 +2318,9 @@ describe("App", () => {
           "proposals/proposal-baseline/proposal.md": "# Proposal\n",
           "reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
           "reports/coverage/open-questions.md": "",
+          "reports/taskruns/run-1/staging/final/reports/as-is/overview.md": "# As-is overview\n",
+          "reports/taskruns/run-1/staging/final/proposals/proposal-baseline/proposal.md": "# Proposal\n",
+          "reports/taskruns/run-1/staging/final/reports/changelog/2026-05-31-run-1.md": "# Run changelog\n- Proposal package compiled.\n",
           "reports/taskruns/run-1/staging/final/final-run-index.json": JSON.stringify({
             version: 1,
             run_id: "run-1",
@@ -2282,6 +2333,20 @@ describe("App", () => {
                 title: "As-is overview",
                 canonical_path: "reports/as-is/overview.md",
                 staged_path: "reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+              },
+              {
+                id: "doc.proposal-baseline",
+                kind: "proposal",
+                title: "Baseline proposal",
+                canonical_path: "proposals/proposal-baseline/proposal.md",
+                staged_path: "reports/taskruns/run-1/staging/final/proposals/proposal-baseline/proposal.md",
+              },
+              {
+                id: "doc.run-changelog",
+                kind: "changelog",
+                title: "Run changelog",
+                canonical_path: "reports/changelog/2026-05-31-run-1.md",
+                staged_path: "reports/taskruns/run-1/staging/final/reports/changelog/2026-05-31-run-1.md",
               },
             ],
           }),
@@ -2474,8 +2539,224 @@ describe("App", () => {
         body: JSON.stringify({ question: "Who owns payments?" }),
       }),
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
+
+  it("keeps an accepted Q&A run selected when the first detail GET fails and later recovers", async () => {
+    const runID = "qa-start-accepted";
+    let startCalls = 0;
+    let detailCalls = 0;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "POST" && url === "/api/qa/runs") {
+        startCalls += 1;
+        return jsonResponse({ run_id: runID, status: "queued" }, 202);
+      }
+      if (method === "GET" && url === `/api/qa/runs/${runID}`) {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return jsonResponse({ error: { code: "temporary", message: "qa detail temporarily unavailable" } }, 503);
+        }
+        return jsonResponse({
+          run_id: runID,
+          pipeline: "qa",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:03Z",
+          finished_at: "2026-04-03T12:00:04Z",
+          question: "Who owns payments?",
+          current_step: "qa.ask",
+          runtime_provider: "claude-code",
+          provider: "fake",
+          answer: "Recovered Q&A answer for payments ownership.",
+          citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
+          unresolved: [],
+          confidence: 0.87,
+          generated_at: "2026-04-03T12:00:04Z",
+        });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(runID);
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent("queued");
+    });
+    expect(screen.getByTestId("qa-ask-btn")).toBeDisabled();
+    expect(await screen.findByText(`Q&A run ${runID} accepted; reconciling details failed: qa detail temporarily unavailable`)).toBeInTheDocument();
+    expect(startCalls).toBe(1);
+
+    await waitFor(() => expect(screen.getByTestId("qa-answer")).toHaveTextContent("Recovered Q&A answer for payments ownership."), { timeout: 4000 });
+    expect(screen.getByTestId("qa-run-status")).toHaveTextContent("succeeded");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 87%");
+    expect(startCalls).toBe(1);
+  }, 10_000);
+
+  it("keeps the accepted Q&A run selected when an older history response resolves late", async () => {
+    const oldRun = {
+      run_id: "qa-old-history",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T11:00:00Z",
+      finished_at: "2026-04-03T11:00:01Z",
+      question: "Old history question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: "Old history answer SHOULD NOT SELECT",
+      citations: [],
+      unresolved: [],
+      confidence: 0.5,
+      generated_at: "2026-04-03T11:00:01Z",
+    };
+    const newRunID = "qa-new-history";
+    const lateHistory = deferredResponse();
+    let historyCalls = 0;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        historyCalls += 1;
+        if (historyCalls === 1) {
+          return lateHistory.promise;
+        }
+        return jsonResponse({ items: [oldRun] });
+      }
+      if (method === "POST" && url === "/api/qa/runs") {
+        return jsonResponse({ run_id: newRunID, status: "queued" }, 202);
+      }
+      if (method === "GET" && url === `/api/qa/runs/${newRunID}`) {
+        return jsonResponse({
+          run_id: newRunID,
+          pipeline: "qa",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:03Z",
+          finished_at: "2026-04-03T12:00:04Z",
+          question: "New history question",
+          current_step: "qa.ask",
+          provider: "fake",
+          answer: "New accepted answer remains selected.",
+          citations: [],
+          unresolved: [],
+          confidence: 0.93,
+          generated_at: "2026-04-03T12:00:04Z",
+        });
+      }
+      if (method === "GET" && url === `/api/qa/runs/${oldRun.run_id}`) {
+        return jsonResponse(oldRun);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "New history question" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("New accepted answer remains selected.");
+    lateHistory.resolve(jsonResponse({ items: [oldRun] }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRunID);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New accepted answer remains selected.");
+      expect(screen.getByTestId("qa-answer")).not.toHaveTextContent("SHOULD NOT SELECT");
+      expect(screen.getByTestId("qa-run-history")).toHaveTextContent("New history question");
+    });
+  }, 10_000);
+
+  it("ignores a late Q&A detail response after a newer history run is selected", async () => {
+    const lateOldDetail = deferredResponse();
+    const oldRun = {
+      run_id: "qa-old-detail",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T11:00:00Z",
+      finished_at: "2026-04-03T11:00:01Z",
+      question: "Old detail question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: null,
+      citations: [],
+      unresolved: [],
+      confidence: 0.1,
+      generated_at: "2026-04-03T11:00:01Z",
+    };
+    const newRun = {
+      run_id: "qa-new-detail",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: "2026-04-03T12:00:01Z",
+      question: "New detail question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: "New selected detail remains visible.",
+      citations: [],
+      unresolved: [],
+      confidence: 0.9,
+      generated_at: "2026-04-03T12:00:01Z",
+    };
+    let oldDetailRequested = false;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        return jsonResponse({ items: [oldRun, newRun] });
+      }
+      if (method === "GET" && url === `/api/qa/runs/${oldRun.run_id}`) {
+        oldDetailRequested = true;
+        return lateOldDetail.promise;
+      }
+      if (method === "GET" && url === `/api/qa/runs/${newRun.run_id}`) {
+        return jsonResponse(newRun);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    await waitFor(() => expect(oldDetailRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /New detail question/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRun.run_id);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New selected detail remains visible.");
+    });
+
+    lateOldDetail.resolve(
+      jsonResponse({
+        ...oldRun,
+        answer: "Old delayed detail SHOULD NOT SHOW",
+        confidence: 0.99,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRun.run_id);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New selected detail remains visible.");
+      expect(screen.getByTestId("qa-answer")).not.toHaveTextContent("SHOULD NOT SHOW");
+    });
+  }, 10_000);
 
   it("renders Q&A failure recovery and retries the original question", async () => {
     const fetchMock = createFetchMock({
@@ -2924,6 +3205,68 @@ describe("App", () => {
       expect(rawOnly).not.toContain("[EVENT]");
     });
   });
+
+  it("keeps an accepted start run selected when the first detail GET fails and later recovers", async () => {
+    const runID = "run-start-accepted";
+    let startCalls = 0;
+    let statusCalls = 0;
+    const runListItem = {
+      run_id: runID,
+      pipeline: "init",
+      status: "running",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: null,
+      warnings: [],
+      error_code: null,
+      error: null,
+    };
+    const recoveredStatus = {
+      ...runListItem,
+      current_step: "init.step1.collect",
+    };
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({ items: startCalls > 0 ? [runListItem] : [] });
+      }
+      if (method === "POST" && url === "/api/pipeline/init") {
+        startCalls += 1;
+        return jsonResponse({ run_id: runID, status: "queued" });
+      }
+      if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return jsonResponse({ error: { code: "temporary", message: "status temporarily unavailable" } }, 503);
+        }
+        return jsonResponse(recoveredStatus);
+      }
+      if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
+        return jsonResponse({ run_id: runID, artifacts: [] });
+      }
+      if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
+        return jsonResponse({ run_id: runID, items: [], next_cursor: 0, eof: true });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    fireEvent.click(screen.getByTestId("run-init-btn"));
+
+    await waitFor(() => expect(screen.getByTestId("run-status-run-id").textContent).toBe(runID));
+    expect(screen.getByTestId("run-status-value")).toHaveTextContent("queued");
+    expect(await screen.findByText(`Run ${runID} accepted; reconciling details failed: status temporarily unavailable`)).toBeInTheDocument();
+    expect(startCalls).toBe(1);
+
+    await waitFor(() => expect(screen.getByTestId("run-status-value")).toHaveTextContent("running"), { timeout: 4000 });
+    expect(screen.getByTestId("run-status-panel")).toHaveTextContent("Current step: init.step1.collect");
+    expect(startCalls).toBe(1);
+  }, 10_000);
 
   it("renders pending runtime permission requests for the selected run", async () => {
     const runID = "run-permissions";
@@ -3398,6 +3741,54 @@ describe("App", () => {
     expect(await screen.findByText(`Cancel requested for ${acceptedRunID}`)).toBeInTheDocument();
   });
 
+  it("keeps an accepted cancel acknowledgement when follow-up reconciliation fails", async () => {
+    const runID = "run-cancel-reconcile";
+    let cancelCalls = 0;
+    let failedListAfterCancel = false;
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "refresh.step2.asis_docs",
+          warnings: [],
+          error_code: null,
+          error: null,
+        },
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "POST" && url === `/api/pipeline/runs/${runID}/cancel`) {
+        cancelCalls += 1;
+        return jsonResponse({ status: "cancel_requested" }, 202);
+      }
+      if (cancelCalls > 0 && !failedListAfterCancel && method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        failedListAfterCancel = true;
+        return jsonResponse({ error: { code: "temporary", message: "run list temporarily unavailable" } }, 503);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    await screen.findByTestId("run-status-panel");
+    fireEvent.click(screen.getByTestId("run-cancel-btn"));
+
+    expect(await screen.findByText(`Cancel requested for ${runID}; reconciling details failed: run list temporarily unavailable`)).toBeInTheDocument();
+    expect(cancelCalls).toBe(1);
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  }, 10_000);
+
   it("switches away from a missing run when cancel returns 404", async () => {
     const baseFetch = createFetchMock();
     let canceled = false;
@@ -3659,6 +4050,147 @@ describe("App", () => {
     });
   });
 
+  it("reads historical Review artifacts from selected-run staged paths", async () => {
+    const baseFetch = createFetchMock();
+    const finalIndexPath = (runID: string) => `reports/taskruns/${runID}/staging/final/final-run-index.json`;
+    const stagedOverviewPath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/as-is/overview.md`;
+    const stagedCoveragePath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/coverage/summary.md`;
+    const stagedQuestionsPath = (runID: string) => `reports/taskruns/${runID}/staging/final/reports/coverage/open-questions.md`;
+    const finalIndex = (runID: string) => ({
+      version: 1,
+      run_id: runID,
+      pipeline: "refresh",
+      generated_at: "2026-04-03T12:02:30Z",
+      citation_index_path: `reports/taskruns/${runID}/staging/final/citation-index.json`,
+      canonical_documents: [
+        {
+          id: "doc.overview",
+          kind: "report",
+          title: `${runID} overview`,
+          canonical_path: "reports/as-is/overview.md",
+          staged_path: stagedOverviewPath(runID),
+        },
+        {
+          id: "doc.coverage",
+          kind: "report",
+          title: `${runID} coverage`,
+          canonical_path: "reports/coverage/summary.md",
+          staged_path: stagedCoveragePath(runID),
+        },
+        {
+          id: "doc.questions",
+          kind: "report",
+          title: `${runID} questions`,
+          canonical_path: "reports/coverage/open-questions.md",
+          staged_path: stagedQuestionsPath(runID),
+        },
+      ],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          items: [
+            {
+              run_id: "run-old",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:02:00Z",
+              finished_at: "2026-04-03T12:02:30Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+            {
+              run_id: "run-new",
+              pipeline: "refresh",
+              status: "succeeded",
+              started_at: "2026-04-03T12:01:00Z",
+              finished_at: "2026-04-03T12:01:30Z",
+              warnings: [],
+              error_code: null,
+              error: null,
+            },
+          ],
+        });
+      }
+
+      for (const runID of ["run-old", "run-new"]) {
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
+          return jsonResponse({
+            run_id: runID,
+            pipeline: "refresh",
+            status: "succeeded",
+            started_at: "2026-04-03T12:02:00Z",
+            finished_at: "2026-04-03T12:02:30Z",
+            warnings: [],
+            error_code: null,
+            error: null,
+          });
+        }
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
+          return jsonResponse({
+            run_id: runID,
+            artifacts: [{ path: finalIndexPath(runID), kind: "taskrun", label: "Final run index" }],
+          });
+        }
+        if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
+          return jsonResponse({ run_id: runID, items: [], next_cursor: 0, eof: true });
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(finalIndexPath(runID))}`) {
+          return jsonResponse(finalIndex(runID));
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedOverviewPath(runID))}`) {
+          return textResponse(runID === "run-old" ? "# Old snapshot overview\n" : "# New snapshot overview\n");
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedCoveragePath(runID))}`) {
+          return textResponse(runID === "run-old" ? "Old snapshot coverage\n" : "New snapshot coverage\n");
+        }
+        if (method === "GET" && url === `/api/artifacts?path=${encodeURIComponent(stagedQuestionsPath(runID))}`) {
+          return textResponse(runID === "run-old" ? "- Old snapshot question\n" : "- New snapshot question\n");
+        }
+      }
+
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fas-is%2Foverview.md") {
+        return textResponse("# Current canonical overview SHOULD NOT SHOW\n");
+      }
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fcoverage%2Fsummary.md") {
+        return textResponse("Current canonical coverage SHOULD NOT SHOW\n");
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/overview.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# Old snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("Current canonical");
+      expect(screen.getByTestId("coverage-summary-content").textContent ?? "").toContain("Old snapshot coverage");
+    });
+
+    fireEvent.click(screen.getByTestId("stage-analysis"));
+    fireEvent.click(screen.getByRole("button", { name: "run-new" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
+    });
+
+    fireEvent.click(screen.getByTestId("stage-review"));
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/overview.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old snapshot overview");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("Current canonical");
+      expect(screen.getByTestId("coverage-summary-content").textContent ?? "").toContain("New snapshot coverage");
+    });
+  });
+
   it("clears a stale selected artifact when switching to a different run", async () => {
     const baseFetch = createFetchMock();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -3783,6 +4315,154 @@ describe("App", () => {
       expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("# Old artifact");
     });
   });
+
+  it("ignores a late artifact preview response after a newer artifact is selected", async () => {
+    const runID = "run-preview-race";
+    const lateOldPreview = deferredResponse();
+    let oldPreviewRequested = false;
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [
+            { path: "reports/as-is/old.md", kind: "report", label: "Old delayed artifact" },
+            { path: "reports/as-is/new.md", kind: "report", label: "New current artifact" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/as-is/new.md": "# New artifact\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url === "/api/artifacts?path=reports%2Fas-is%2Fold.md") {
+        oldPreviewRequested = true;
+        return lateOldPreview.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
+    await waitFor(() => expect(oldPreviewRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/new\.md/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+    });
+
+    lateOldPreview.resolve(textResponse("# Old delayed artifact SHOULD NOT SHOW\n"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("run-artifact-selected-path").textContent).toBe("reports/as-is/new.md");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").toContain("# New artifact");
+      expect(screen.getByTestId("run-artifact-content").textContent ?? "").not.toContain("SHOULD NOT SHOW");
+    });
+  }, 10_000);
+
+  it("ignores a late Git diff response after a newer artifact path is selected", async () => {
+    const runID = "run-diff-race";
+    const lateOldDiff = deferredResponse();
+    let oldDiffRequested = false;
+    const diffPayload = (path: string, marker: string) => ({
+      ok: true,
+      workspace: "/tmp/workspace",
+      run_id: runID,
+      step_id: null,
+      selected_path: path,
+      selected_file: {
+        path,
+        folder: "reports/as-is",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+      files: [
+        {
+          path,
+          folder: "reports/as-is",
+          status: "modified",
+          additions: 1,
+          deletions: 0,
+          binary: false,
+        },
+      ],
+      folders: [{ folder: "reports/as-is", files: 1, additions: 1, deletions: 0 }],
+      hunks: [
+        {
+          header: "@@ -1 +1 @@",
+          lines: [{ kind: "add", new_line: 1, content: marker }],
+        },
+      ],
+      message: marker,
+      empty: false,
+    });
+    const baseFetch = createFetchMock({
+      runID,
+      runStarted: true,
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [
+            { path: "reports/as-is/old.md", kind: "report", label: "Old diff artifact" },
+            { path: "reports/as-is/new.md", kind: "report", label: "New diff artifact" },
+          ],
+        },
+      },
+      artifactText: {
+        "reports/as-is/old.md": "# Old artifact\n",
+        "reports/as-is/new.md": "# New artifact\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.startsWith("/api/git/diff")) {
+        const parsed = new URL(url, "http://localhost");
+        const selectedPath = parsed.searchParams.get("path") ?? "";
+        if (selectedPath === "reports/as-is/old.md") {
+          oldDiffRequested = true;
+          return lateOldDiff.promise;
+        }
+        if (selectedPath === "reports/as-is/new.md") {
+          return jsonResponse(diffPayload(selectedPath, "New diff content"));
+        }
+        return jsonResponse(diffPayload(selectedPath || "reports/as-is/default.md", "Default diff content"));
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-review"));
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
+    await waitFor(() => expect(oldDiffRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/new\.md/i }));
+    fireEvent.click(within(screen.getByTestId("evidence-preview-tabs")).getByRole("tab", { name: "Diff" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("reports/as-is/new.md");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("New diff content");
+    });
+
+    lateOldDiff.resolve(jsonResponse(diffPayload("reports/as-is/old.md", "Old diff content SHOULD NOT SHOW")));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("reports/as-is/new.md");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("New diff content");
+      expect(screen.getByTestId("git-diff-view").textContent ?? "").not.toContain("SHOULD NOT SHOW");
+    });
+  }, 10_000);
 
   it("renders failed run status with warnings and error details for partial live state", async () => {
     const runID = "run-partial-failed";
@@ -4440,6 +5120,148 @@ describe("App", () => {
     const saveCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/artifacts/write");
     expect(saveCalls.length).toBe(1);
   });
+
+  it("keeps raw workspace.yaml edits dirty when save resolves after newer text", async () => {
+    const saveManifest = deferredResponse();
+    const savedManifests: string[] = [];
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "PUT" && url === "/api/workspace/manifest") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { content?: string };
+        savedManifests.push(body.content ?? "");
+        return saveManifest.promise;
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+
+    fireEvent.click(screen.getByText("Advanced workspace.yaml editor"));
+    const editor = await screen.findByLabelText("workspace.yaml content");
+    const savedDraft = 'version: 1\nrepos:\n  - name: "saved-draft"\n    path: "/tmp/saved"\n';
+    const newerDraft = 'version: 1\nrepos:\n  - name: "newer-unsaved-draft"\n    path: "/tmp/newer"\n';
+    fireEvent.change(editor, { target: { value: savedDraft } });
+    fireEvent.click(screen.getByTestId("workspace-raw-save-btn"));
+    fireEvent.change(editor, { target: { value: newerDraft } });
+
+    saveManifest.resolve(jsonResponse({ ok: true }));
+
+    expect(await screen.findByText("Saved workspace.yaml; newer unsaved edits remain.")).toBeInTheDocument();
+    expect(screen.getByLabelText("workspace.yaml content")).toHaveValue(newerDraft);
+    expect(savedManifests).toEqual([savedDraft]);
+    expect(screen.queryByText("Saved workspace.yaml", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("ignores a late baseline artifact load after another path is selected", async () => {
+    const lateOverviewLoad = deferredResponse();
+    let overviewRequested = false;
+    const baseFetch = createFetchMock({
+      artifactText: {
+        "skills/prompt-packs/qa.md": "qa prompt current\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url === "/api/artifacts?path=charter%2Foverview.md") {
+        overviewRequested = true;
+        return lateOverviewLoad.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    await waitFor(() => expect(overviewRequested).toBe(true));
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+
+    const editor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(editor).toHaveValue("qa prompt current\n"));
+
+    lateOverviewLoad.resolve(textResponse("late overview SHOULD NOT OVERWRITE\n"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa prompt current\n");
+      expect(screen.getByLabelText("skills/prompt-packs/qa.md")).not.toHaveValue(expect.stringContaining("SHOULD NOT OVERWRITE"));
+    });
+  }, 10_000);
+
+  it("preserves dirty baseline drafts independently per selected path", async () => {
+    const fetchMock = createFetchMock({
+      artifactText: {
+        "charter/overview.md": "overview baseline\n",
+        "skills/prompt-packs/qa.md": "qa prompt baseline\n",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    const overviewEditor = await screen.findByLabelText("charter/overview.md");
+    await waitFor(() => expect(overviewEditor).toHaveValue("overview baseline\n"));
+    fireEvent.change(overviewEditor, { target: { value: "overview dirty draft\n" } });
+
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    const qaEditor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(qaEditor).toHaveValue("qa prompt baseline\n"));
+    fireEvent.change(qaEditor, { target: { value: "qa dirty draft\n" } });
+
+    fireEvent.change(select, { target: { value: "charter/overview.md" } });
+    expect(await screen.findByLabelText("charter/overview.md")).toHaveValue("overview dirty draft\n");
+
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    expect(await screen.findByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa dirty draft\n");
+  });
+
+  it("keeps baseline edits dirty when save resolves after newer text", async () => {
+    const saveArtifact = deferredResponse();
+    const savedArtifacts: Array<{ path: string; content: string }> = [];
+    const baseFetch = createFetchMock({
+      artifactText: {
+        "skills/prompt-packs/qa.md": "qa prompt baseline\n",
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && url === "/api/artifacts/write") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { path?: string; content?: string };
+        savedArtifacts.push({ path: body.path ?? "", content: body.content ?? "" });
+        return saveArtifact.promise;
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-charter"));
+
+    const select = await screen.findByLabelText(/select artifact/i);
+    fireEvent.change(select, { target: { value: "skills/prompt-packs/qa.md" } });
+    const editor = await screen.findByLabelText("skills/prompt-packs/qa.md");
+    await waitFor(() => expect(editor).toHaveValue("qa prompt baseline\n"));
+    fireEvent.change(editor, { target: { value: "qa prompt save snapshot\n" } });
+    fireEvent.click(screen.getByRole("button", { name: /save selected baseline artifact/i }));
+    fireEvent.change(editor, { target: { value: "qa prompt newer unsaved draft\n" } });
+
+    saveArtifact.resolve(jsonResponse({ ok: true }));
+
+    expect(await screen.findByText("Saved skills/prompt-packs/qa.md; newer unsaved edits remain.")).toBeInTheDocument();
+    expect(screen.getByLabelText("skills/prompt-packs/qa.md")).toHaveValue("qa prompt newer unsaved draft\n");
+    expect(savedArtifacts).toEqual([{ path: "skills/prompt-packs/qa.md", content: "qa prompt save snapshot\n" }]);
+  }, 10_000);
 
   it("executes git-helper commit and proposal-branch actions from Charter stage", async () => {
     const fetchMock = createFetchMock();

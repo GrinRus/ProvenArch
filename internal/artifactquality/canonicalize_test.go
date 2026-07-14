@@ -706,11 +706,11 @@ func TestValidateCollectManifestAcceptsGeneratedRepoRootSuffixAlias(t *testing.T
 	}
 }
 
-func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t *testing.T) {
+func TestValidateCollectManifestRejectsSparseEvidencePackWithoutAutofill(t *testing.T) {
 	t.Parallel()
 
 	writeRoot := t.TempDir()
-	raw := []byte(`{
+	sparse := []byte(`{
   "version": 1,
   "run_id": "run-1",
   "step_id": "refresh.step1.collect",
@@ -727,12 +727,30 @@ func TestValidateCollectManifestRejectsMissingRequiredMetadataWithoutAutofill(t 
     "findings": []
   }
 }`)
-	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), sparse, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 
+	if err := ValidateCollectManifestInRoot(writeRoot); err == nil {
+		t.Fatalf("expected sparse collect manifest to fail strict validation")
+	} else if !strings.Contains(err.Error(), "documents") && !strings.Contains(err.Error(), "citations") {
+		t.Fatalf("expected documents/citations validation error, got %v", err)
+	}
+
+	payload := validCollectManifestPayload()
+	delete(payload, "domain_id")
+	delete(payload, "repo_scopes")
+	delete(payload, "path_scopes")
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write valid manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\nREADME.md identifies the scoped surface.\n")
 	if err := ValidateCollectManifestInRoot(writeRoot); err != nil {
-		t.Fatalf("expected valid manifest without optional repo/path/domain metadata to pass: %v", err)
+		t.Fatalf("expected minimal evidence-backed manifest without optional repo/path/domain metadata to pass: %v", err)
 	}
 
 	missingRunID := strings.Replace(string(raw), `"run_id": "run-1",`, `"run_id": "",`, 1)
@@ -750,26 +768,14 @@ func TestValidateCollectManifestRejectsUnknownTopLevelFieldWithoutRewrite(t *tes
 	t.Parallel()
 
 	writeRoot := t.TempDir()
-	raw := []byte(`{
-  "version": 1,
-  "run_id": "run-1",
-  "step_id": "refresh.step1.collect",
-  "shard_id": "payments",
-  "agent_role": "shard-analyst",
-  "artifact_root": "reports/taskruns/run-1/staging/shards/payments",
-  "unknown_runtime_wrapper": true,
-  "documents": [],
-  "citations": [],
-  "semantic": {
-    "coverage": {"observed": [], "missing": [], "notes": []},
-    "questions": [],
-    "entities": [],
-    "edges": [],
-    "findings": []
-  }
-}`)
+	payload := validCollectManifestPayload()
+	payload["unknown_runtime_wrapper"] = true
+	raw, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
 	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
-	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+	if err := os.WriteFile(manifestPath, append(raw, '\n'), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 
@@ -783,7 +789,7 @@ func TestValidateCollectManifestRejectsUnknownTopLevelFieldWithoutRewrite(t *tes
 	if err != nil {
 		t.Fatalf("read manifest after validation: %v", err)
 	}
-	if string(after) != string(raw) {
+	if string(after) != string(append(raw, '\n')) {
 		t.Fatalf("expected strict validation not to rewrite manifest")
 	}
 }

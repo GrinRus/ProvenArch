@@ -644,6 +644,17 @@ python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.js
 
 Скрипт проверяет уже созданный release-mode `release_verdict_<matrix-id>.json`: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Затем он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
+GitHub tag release workflow применяет тот же verifier как отдельный read-only job до GoReleaser:
+
+- задайте `ACP_RELEASE_MATRIX_ID=<matrix-id>` в environment/repository variables, чтобы workflow
+  проверил `reports/release_verdict_<matrix-id>.json`; либо
+- задайте `ACP_RELEASE_VERDICT_PATH=reports/release_verdict_<matrix-id>.json`, если нужен явный
+  путь.
+
+Если verifier не находит `PASS` machine verdict или оба matching accepted SWE reports, publishing
+job с `contents/id-token/attestations: write` не стартует. Workflow не запускает live matrix и не
+создаёт release evidence; evidence должно быть создано заранее на trusted machine по этому runbook.
+
 Дополнительные для triage:
 - `/tmp/provenarch-test_arch_project/runs/<batch-id>/<provider>/runN/*`
 - `backend-run-classifications.tsv`

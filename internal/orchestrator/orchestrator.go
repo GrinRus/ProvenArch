@@ -16,6 +16,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
+	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -54,6 +55,7 @@ const (
 var (
 	ErrRunNotFound      = errors.New("run not found")
 	ErrRunNotCancelable = errors.New("run not cancelable")
+	ErrServiceClosed    = errors.New("service is shut down")
 )
 
 type Service struct {
@@ -68,14 +70,17 @@ type Service struct {
 	runs           map[string]*runRecord
 	runIDSequence  int
 	debounceWindow time.Duration
+	closed         bool
 	activeRunID    string
 	pendingRun     *pendingRun
 	runCancels     map[string]context.CancelFunc
 	cancelRequests map[string]struct{}
 
-	historyWorkspace workspace.Root
-	historyEnabled   bool
-	historyRetention int
+	historyWorkspace           workspace.Root
+	historyEnabled             bool
+	historyRetention           int
+	historyRecoveryDiagnostics []string
+	lastHistoryPersistenceErr  error
 
 	runLogsWorkspace workspace.Root
 	runLogsEnabled   bool
@@ -457,6 +462,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		"permissions_approval_channel": resolvedPermissions.Effective.ApprovalChannel,
 		"step_providers":               execution.stepProviders.StringMap(),
 		"repo_scopes":                  execution.repoScopes(),
+		"source_repos":                 resolvedSourceRepoEvidence(validation.ResolvedRepos),
 		"timeout_step_sec":             resolvedTimeouts.Effective.StepTimeoutSec,
 		"timeout_hb_sec":               resolvedTimeouts.Effective.HeartbeatSec,
 	})
@@ -563,11 +569,11 @@ type pipelineSemanticDocflowState struct {
 }
 
 type pipelineDraftState struct {
-	step0DraftManifest     *runtimeDraftManifest
+	step0DraftManifest     *runtimedrafts.Manifest
 	step0DraftRoot         string
-	asIsDraftManifest      *runtimeDraftManifest
+	asIsDraftManifest      *runtimedrafts.Manifest
 	asIsDraftRoot          string
-	proposalsDraftManifest *runtimeDraftManifest
+	proposalsDraftManifest *runtimedrafts.Manifest
 	proposalsDraftRoot     string
 }
 
@@ -757,6 +763,23 @@ func collectRepoScopes(repos []workspace.RepoSource) []string {
 	}
 	sort.Strings(scopes)
 	return scopes
+}
+
+func resolvedSourceRepoEvidence(repos []workspace.ResolvedRepo) []workspace.ResolvedRepo {
+	out := make([]workspace.ResolvedRepo, 0, len(repos))
+	for _, repo := range repos {
+		if strings.TrimSpace(repo.Name) == "" {
+			continue
+		}
+		out = append(out, workspace.ResolvedRepo{
+			Name:        strings.TrimSpace(repo.Name),
+			Source:      strings.TrimSpace(repo.Source),
+			Path:        strings.TrimSpace(repo.Path),
+			Ref:         strings.TrimSpace(repo.Ref),
+			ResolvedSHA: strings.TrimSpace(repo.ResolvedSHA),
+		})
+	}
+	return out
 }
 
 func (e *pipelineExecution) repoScopes() []string {

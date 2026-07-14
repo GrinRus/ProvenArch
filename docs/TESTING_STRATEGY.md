@@ -45,6 +45,11 @@
 - pipeline runs на synthetic repos и fixture workspaces
 - artifact fixtures without live providers в required tests
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
+- `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
+- collect contract fixtures must include at least one authored document and one repo-backed
+  citation; sparse `documents: []`, `citations: []`, empty document/citation binding arrays,
+  unknown citation document IDs, and one-way document/citation bindings are negative fixtures,
+  not valid minimal examples
 
 ### Smoke tests
 - CLI smoke
@@ -107,6 +112,12 @@ Baseline scenario set:
 - async lifecycle operability:
   - `CancelRun` для pending run даёт immediate terminal `failed` + `error_code=run_canceled`
   - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
+  - workspace-owned persistence использует fault-injection tests для atomic write failure points: before write, before rename и parent directory sync; failed writes must not leave partial current JSON or stale temp files
+  - run-history persistence пишет `.last-good`; service startup recovers from malformed current `reports/taskruns/run-history.json` when the last-good copy is valid and records a recovery diagnostic path
+  - async run panic isolation covers terminal `failed/internal_failure` history, service survival after a panicking runner, active-slot/cancel cleanup and pending-run continuation; direct `Service.Run` panic tests continue to require caller-visible re-panic
+  - server-owned shutdown tests cover active run context cancellation, queued pending run `run_canceled` terminalization without runner start, post-shutdown `ErrServiceClosed`, and API `Serve` context cancellation waiting for orchestrator shutdown
+  - coherent API session generation tests cover request-scoped workspace/service/runtime snapshots, direct/onboarding effective runtime readback, `409` conflicts for workspace switch/runtime switch/runtime profile mutation during active async work, unchanged manifest on conflict, and concurrent polling plus mutation attempts under `go test -race ./internal/api`
+  - initial async run queueing returns a history persistence error before launching the background run when `run-history.json` cannot be written
   - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
   - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - runtime timeout control:
@@ -127,7 +138,8 @@ Baseline scenario set:
 - frontend report tests фиксируют, что `frontend_e2e_matrix_<batch-id>.md` для `runtime_run_failed` содержит runtime details (`run_id`, `last_run_status`, `error_code`, `current_step`, screenshot count/result directory) без изменения summary status taxonomy.
 - docflow builder seam:
   - staged artifacts, citation index, final run index and semantic snapshot remain characterization-covered before promotion
-  - promotion still copies only the validated final set into canonical `reports/*`/`proposals/*` and rebuilds derived `model/*`
+  - promotion builds a complete run-scoped generation, validates indexed files, activates managed canonical roots with journaled rollback, and regression tests inject failures across copy/model/diagram/activation operations to prove canonical state is either the previous complete generation or the new complete generation
+  - `reports/changelog/*` draft files are activated through the journaled file path while preserving existing changelog history; stale managed artifact registry entries are removed only after successful activation
 - UI route-shell seams:
   - stage-based console seams (`AppShell`/`StageRail`/`StagePanels`/`ActivityDrawer`) receive grouped `model/actions`, while run selection, stale artifact clearing, logs polling, Ask evidence and stable stage `data-testid` controls remain covered by UI tests
 - docs truth-sync gate проверяет:
@@ -161,11 +173,13 @@ Toolchain policy:
 Implemented required jobs:
 - `contracts`
   - `make contracts`
+  - locked validator toolchain from `tools/contracts/package-lock.json`; required CI must not
+    resolve mutable `latest` packages during validation
   - schema validation
   - parse examples/fixtures
 - `backend`
   - `go test ./...`
-  - `python3 -m unittest discover -s scripts/tests -p '*_test.py'`
+  - `./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
   - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
   - `make test-stress` (coordinator debounce/queue regression loop)
@@ -175,8 +189,16 @@ Implemented required jobs:
   - `./scripts/run-npm.sh run typecheck --prefix ui`
   - `./scripts/run-npm.sh run test --prefix ui -- --run`
   - `./scripts/run-npm.sh run build --prefix ui`
+  - `make verify-ui-determinism` builds the exact checked-out commit in two independent
+    temp roots and compares sorted `ui/dist` path/digest manifests
+  - `make verify-ui-dist` rebuilds and re-embeds `internal/api/ui_dist`, then fails if the
+    tracked embedded bundle is stale
 
 Implemented additional jobs:
+- `lint`
+  - installs UI dependencies, then runs canonical `make lint`
+  - covers Go formatting, ShellCheck for production shell scripts and UI typecheck in one
+    local/CI-equivalent entrypoint
 - `golden`
   - `TestScenarioFixturesDeterministicInitPipeline`
   - `TestScenarioFixtureLayoutExists`
@@ -190,8 +212,19 @@ Implemented additional jobs:
 - `smoke-api`
   - `acp serve --workspace ... --runtime fake`
   - `/api/workspace/validate`
-  - pipeline status/artifacts/logs endpoints
+  - pipeline status/artifacts endpoints
+  - run logs endpoint with explicit `cursor`/`limit`, second-page pagination and invalid cursor
+    response validation
   - dynamic free port + explicit fail on run polling timeout
+- `ui`
+  - runs UI tests, production build, deterministic build verification and embedded bundle
+    freshness; UI typecheck is owned by canonical `make lint` in the `lint` workflow
+  - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes seven local
+    provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
+    horizontal overflow
+  - optional local coverage is available through `npm run coverage --prefix ui`; it uses locked
+    `@vitest/coverage-v8`, includes all `ui/src` implementation files and writes ignored
+    `ui/coverage/coverage-summary.json` / `coverage-final.json`
 
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
@@ -200,6 +233,10 @@ Security/advisory workflows:
 
 Release workflow hardening:
 - tag-only release workflow uses job-level write permissions, an explicit `github-release` environment, pinned actions, timeouts, and provenance/SBOM artifact generation.
+- tag release publication is split behind a read-only `verify-release-evidence` job that runs
+  `scripts/verify-release-verdict.py` against `ACP_RELEASE_VERDICT_PATH` or
+  `ACP_RELEASE_MATRIX_ID`; the write-enabled GoReleaser/provenance job has
+  `needs: verify-release-evidence`.
 - GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 
@@ -208,10 +245,14 @@ Release workflow hardening:
 - invalid `workspace.yaml`
 - valid docs-first contracts (`shard-pack-manifest`, `final-run-index`, `citation-index`, `validator-verdict`)
 - negative docs-first contract cases (missing citations, duplicate claim/topic ids, broken topic refs)
-- docflow index assembly with repeated provider-authored document ids across distinct canonical paths; final/citation indexes must remap them to globally unique canonical document ids
+- docflow index assembly with repeated provider-authored document ids across distinct canonical paths; final/citation indexes must remap them to globally unique canonical document ids and keep citation/document links reciprocal after remap
 - valid persisted runtime execution metadata
 - invalid runtime execution metadata
 - invalid artifact contracts (`shard-pack-manifest`, `validator-verdict`, draft manifests)
+- UI Review regression covers two selected runs with identical canonical artifact paths but
+  different staged bytes; historical Review preview, coverage and questions must read the
+  selected run's `reports/taskruns/<run_id>/staging/final/...` bytes rather than current
+  canonical workspace files.
 - runtime draft manifest metadata: optional `updated_at` is accepted, while legacy/envelope fields such as `repo_scopes`, `compatibility`, `generated_at`, `pipeline`, output aliases such as `logical_path`, or `proposals[]` remain invalid
 - strict collect validation:
   - artifact-root-prefixed, absolute, missing-file, directory and hidden provider/tool `documents[].path` (`.qwen/`, `.claude/`, `.codex/`, `.git/`, `node_modules/`) fail-ятся без rewrite
@@ -270,13 +311,20 @@ Release workflow hardening:
 - pipeline endpoints не принимают `workspace_path`
 - run logs endpoint:
   - `GET /api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
-  - pagination + invalid params + run_not_found
+  - required API smoke validates first page, second page from `next_cursor`, payload shape,
+    non-2xx/malformed failure handling and `400 invalid_cursor`
+  - deeper Go/API coverage keeps invalid params + run_not_found cases
   - structured failure diagnostics в `fields` (`stdout_snippet`/`stderr_snippet`, `task_id`, `provider`, counters)
   - mixed wire-shape (`kind=event|runtime_output`, optional `stream=stdout|stderr`)
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
 - UI path: open workspace, validate, inspect the selected completed run evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init. `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
+- Required mock Playwright gate: `npm run e2e:mock --prefix ui` starts a local Vite UI through
+  `ui/playwright.mock.config.ts` and runs exactly seven deterministic scenarios:
+  source recovery, onboarding recovery, permission recovery, provider stream, failed-shard analysis,
+  Publish Git recovery and QA recovery. These scenarios use mocked `/api/**` responses only; live
+  providers, external repositories and network runtime checks stay out of required CI.
 - UI run logs surface:
   - compact activity drawer render
   - log polling/append without duplicates
@@ -383,6 +431,9 @@ Release workflow hardening:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
 - tracked generated artifacts policy:
   - `internal/api/ui_dist/*` и `fixtures/scenarios/*/golden/readable/*` остаются versioned в git как часть baseline/release surface
+  - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
+    the embedded bundle and `make verify-ui-dist` to prove the committed bundle matches the
+    current Vite output.
   - controlled snapshot refresh:
   - `ACP_UPDATE_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
 
@@ -390,8 +441,22 @@ Release workflow hardening:
 
 - Public product APIs и schema contracts этим документом не меняются
 - для schema validation в CI используется Draft 2020-12 compatible validator
+- contract validation tools (`ajv-cli`, `ajv-formats`, `js-yaml`) live in
+  `tools/contracts`; version changes require an explicit `package.json`/`package-lock.json`
+  review and `make contracts` must run from the lockfile-backed install.
+- Python tooling runtime is pinned by `.python-version` (`3.10.8`). Required CI installs it via
+  `actions/setup-python`, and Makefile/script-test entrypoints use `scripts/run-python.sh` so a
+  wrong interpreter fails before Python suites or verifier scripts run.
 - основной backend test loop предполагает `go test`
-- UI smoke стек: `React + Vite + Vitest + Playwright`
+- canonical `make lint` проверяет Go formatting, ShellCheck для production `scripts/**/*.sh`
+  и UI TypeScript typecheck; ShellCheck baseline — `0.11.x`, live provider/network access не
+  требуется.
+- UI smoke стек: `React + Vite + Vitest + Playwright`; required `e2e:mock` is deterministic and
+  provider-free, while `e2e:live` remains a trusted-machine diagnostic/release-gate tool.
+- UI V8 coverage baseline is informational only, not a required CI threshold. Baseline from
+  `2026-07-14` (`npm run coverage --prefix ui`): statements `85.36%` (`3220/3772`), branches
+  `77.03%` (`3200/4154`), functions `88.54%` (`812/917`), lines `85.22%` (`3087/3622`). Future
+  threshold ratchets should only move upward and must be explicit package/config/docs changes.
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
   - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`
@@ -405,8 +470,10 @@ Release workflow hardening:
 - `make bootstrap`
 - `make contracts`
 - `make test`
-- `make lint`
+- `make lint` (gofmt + ShellCheck + UI typecheck)
 - `make build`
+- `make verify-ui-determinism`
+- `make verify-ui-dist`
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
 - `./scripts/full-run-batch.sh`

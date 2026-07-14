@@ -280,7 +280,7 @@ PY
     UI_INIT_POLL_TIMEOUT_SEC="$DEFAULT_UI_INIT_POLL_TIMEOUT_SEC"
   fi
 }
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   if [[ -n "$SERVER_PID" ]]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true

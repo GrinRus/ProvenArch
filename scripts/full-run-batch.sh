@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317,SC2329 # Signal/trap callbacks and their helpers are invoked indirectly via trap handlers.
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -1043,15 +1044,6 @@ run_frontend_live_e2e() {
   return 0
 }
 
-run_dod_precheck_make() {
-  local -a env_cmd=("env")
-  local key
-  for key in "${TIMEOUT_PRECHECK_UNSET_KEYS[@]}"; do
-    env_cmd+=("-u" "$key")
-  done
-  "${env_cmd[@]}" make contracts test lint build
-}
-
 run_precheck_command_with_timeout() {
   local label="$1"
   local timeout_sec="$2"
@@ -1846,9 +1838,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
     output_dir="$(frontend_live_output_dir "$provider")"
     frontend_result=0
     run_frontend_live_e2e "$provider" "$backend_run_dir" "$output_dir" "$frontend_run_index" || frontend_result=$?
-    frontend_summary="$(frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME")"
-    frontend_status="${frontend_summary%%$'\t'*}"
-    frontend_reason="${frontend_summary#*$'\t'}"
+    frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" >/dev/null
     if [[ "$frontend_result" != "0" ]]; then
       frontend_failures=$((frontend_failures + 1))
     fi
@@ -1863,9 +1853,7 @@ for provider in "${SELECTED_PROVIDERS[@]}"; do
       output_dir="$(frontend_live_output_dir "$provider" "$i")"
       frontend_result=0
       run_frontend_live_e2e "$provider" "$BATCH_ROOT/$provider/run${i}" "$output_dir" "$i" || frontend_result=$?
-      frontend_summary="$(frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME")"
-      frontend_status="${frontend_summary%%$'\t'*}"
-      frontend_reason="${frontend_summary#*$'\t'}"
+      frontend_result_summary "$output_dir/$FRONTEND_LIVE_RESULT_FILENAME" >/dev/null
       if [[ "$frontend_result" != "0" ]]; then
         frontend_failures=$((frontend_failures + 1))
       fi

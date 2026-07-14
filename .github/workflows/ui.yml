@@ -29,11 +29,20 @@ jobs:
       - name: Install UI dependencies
         run: npm ci --prefix ui
 
-      - name: Typecheck UI
-        run: npm run typecheck --prefix ui
-
       - name: Run UI tests
         run: npm run test --prefix ui -- --run
 
       - name: Build UI
         run: npm run build --prefix ui
+
+      - name: Verify deterministic UI build
+        run: make verify-ui-determinism
+
+      - name: Verify embedded UI bundle is fresh
+        run: make verify-ui-dist
+
+      - name: Install Playwright Chromium
+        run: ./ui/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Run mock Playwright scenarios
+        run: npm run e2e:mock --prefix ui

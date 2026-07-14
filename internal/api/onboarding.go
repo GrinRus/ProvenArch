@@ -45,7 +45,10 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 	ws, err := workspace.Open(workspacePath)
 	if err != nil {
 		if errors.Is(err, workspace.ErrManifestMissing) {
-			s.setDraftWorkspace(workspacePath)
+			if err := s.setDraftWorkspace(workspacePath); err != nil {
+				writeError(writer, http.StatusConflict, "workspace_switch_conflict", err.Error())
+				return
+			}
 			_ = recordOnboardingRecentWorkspace(workspacePath, time.Now())
 			writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
 			return
@@ -61,8 +64,12 @@ func (s *Server) handleOnboardingWorkspace(writer http.ResponseWriter, request *
 		writeError(writer, http.StatusBadRequest, "workspace_baseline_failed", err.Error())
 		return
 	}
-	s.attachWorkspace(ws)
-	if service := s.getService(); service != nil {
+	service, err := s.attachWorkspace(ws)
+	if err != nil {
+		writeError(writer, http.StatusConflict, "workspace_switch_conflict", err.Error())
+		return
+	}
+	if service != nil {
 		service.ReconcileStaleRunsAfterRestart()
 	}
 	_ = recordOnboardingRecentWorkspace(workspacePath, time.Now())
@@ -116,23 +123,25 @@ func (s *Server) handleOnboardingRuntime(writer http.ResponseWriter, request *ht
 		writeError(writer, http.StatusBadRequest, "runtime_provider_invalid", err.Error())
 		return
 	}
-	s.setRuntimeConfig(ServerRuntimeConfig{
+	if _, err := s.setRuntimeConfig(ServerRuntimeConfig{
 		Mode:           mode,
 		Provider:       provider,
 		ProviderSource: providerSource,
-	})
+	}); err != nil {
+		writeError(writer, http.StatusConflict, "runtime_switch_conflict", err.Error())
+		return
+	}
 	writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
 }
 
 func (s *Server) onboardingStatusPayload() map[string]any {
-	s.mu.RLock()
-	workspacePath := s.workspacePath
-	workspaceSelected := s.workspaceSelected
-	workspaceReady := workspaceSelected && s.workspace.Path != "" && s.service != nil
-	runtimeConfig := s.runtimeConfig
-	runtimeSelected := s.runtimeSelected
-	launcherMode := s.launcherMode
-	s.mu.RUnlock()
+	snapshot := s.sessionSnapshot()
+	workspacePath := snapshot.WorkspacePath
+	workspaceSelected := snapshot.WorkspaceSelected
+	workspaceReady := snapshot.ready()
+	runtimeConfig := snapshot.RuntimeConfig
+	runtimeSelected := snapshot.RuntimeSelected
+	launcherMode := snapshot.LauncherMode
 
 	return map[string]any{
 		"ok":                 true,

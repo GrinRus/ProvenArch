@@ -1,24 +1,28 @@
 GO ?= ./scripts/run-go.sh
 NPM ?= ./scripts/run-npm.sh
+PYTHON ?= ./scripts/run-python.sh
 UI_DIR := ui
+CONTRACT_TOOLS_DIR := tools/contracts
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
+SHELL_FILES := $(shell find scripts -name '*.sh' -type f 2>/dev/null | sort)
 RUNTIME ?= fake
 REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
 STRESS_TEST ?= TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow
 
-.PHONY: bootstrap contracts test test-stress lint build run-backend run-ui quickstart-local
+.PHONY: bootstrap contracts test test-stress lint build verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 
 bootstrap:
 	$(GO) mod tidy
 	$(NPM) ci --prefix $(UI_DIR)
 
 contracts:
-	$(NPM) exec --yes --package=ajv-cli --package=ajv-formats --package=js-yaml -- bash ./scripts/validate-contracts.sh
+	$(NPM) ci --prefix $(CONTRACT_TOOLS_DIR) --ignore-scripts --audit=false --fund=false
+	ACP_CONTRACT_TOOLS_BIN="$(CURDIR)/$(CONTRACT_TOOLS_DIR)/node_modules/.bin" bash ./scripts/validate-contracts.sh
 
 test: contracts
 	$(GO) test ./...
-	python3 -m unittest discover -s scripts/tests -p '*_test.py'
+	$(PYTHON) -m unittest discover -s scripts/tests -p '*_test.py'
 	$(NPM) run test --prefix $(UI_DIR) -- --run
 
 test-stress:
@@ -37,6 +41,8 @@ lint:
 		echo "$$fmt_files"; \
 		exit 1; \
 	fi
+	@command -v shellcheck >/dev/null 2>&1 || (echo "shellcheck is required for make lint. Install ShellCheck 0.11.x or newer." >&2; exit 1)
+	shellcheck $(SHELL_FILES)
 	$(NPM) run typecheck --prefix $(UI_DIR)
 
 build:
@@ -48,6 +54,12 @@ build:
 	cp ui/dist/index.html internal/api/ui_dist/index.html
 	mkdir -p ./bin
 	$(GO) build -o ./bin/acp ./cmd/acp
+
+verify-ui-determinism:
+	bash ./scripts/verify-ui-deterministic-build.sh HEAD
+
+verify-ui-dist:
+	bash ./scripts/check-ui-dist-fresh.sh
 
 run-backend:
 	@test -n "$(WORKSPACE)" || (echo "Set WORKSPACE=/abs/path/to/arch-workspace"; exit 1)

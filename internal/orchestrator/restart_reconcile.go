@@ -27,17 +27,39 @@ func (s *Service) loadHistory() {
 	content, err := s.historyWorkspace.ReadFile(runHistoryPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return
+			content, err = s.historyWorkspace.ReadLastGoodFile(runHistoryPath)
+			if err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					s.addHistoryRecoveryDiagnostic(fmt.Sprintf("load run history last-good failed: %v", err))
+				}
+				return
+			}
+			s.addHistoryRecoveryDiagnostic(fmt.Sprintf("recovered run history from %s", runHistoryPath+".last-good"))
+		} else {
+			lastGood, lastGoodErr := s.historyWorkspace.ReadLastGoodFile(runHistoryPath)
+			if lastGoodErr != nil {
+				s.addHistoryRecoveryDiagnostic(fmt.Sprintf("load run history failed: %v", err))
+				return
+			}
+			content = lastGood
+			s.addHistoryRecoveryDiagnostic(fmt.Sprintf("recovered run history from %s after read failure: %v", runHistoryPath+".last-good", err))
 		}
-		return
 	}
 
-	var snapshot runHistorySnapshot
-	if err := json.Unmarshal(content, &snapshot); err != nil {
-		return
-	}
-	if snapshot.Version != runHistoryVersion {
-		return
+	snapshot, err := parseRunHistorySnapshot(content)
+	if err != nil {
+		lastGood, lastGoodErr := s.historyWorkspace.ReadLastGoodFile(runHistoryPath)
+		if lastGoodErr != nil {
+			s.addHistoryRecoveryDiagnostic(fmt.Sprintf("parse run history failed: %v", err))
+			return
+		}
+		recoveredSnapshot, recoveredErr := parseRunHistorySnapshot(lastGood)
+		if recoveredErr != nil {
+			s.addHistoryRecoveryDiagnostic(fmt.Sprintf("parse run history and last-good failed: current=%v last_good=%v", err, recoveredErr))
+			return
+		}
+		snapshot = recoveredSnapshot
+		s.addHistoryRecoveryDiagnostic(fmt.Sprintf("recovered run history from %s after invalid current: %v", runHistoryPath+".last-good", err))
 	}
 
 	for _, item := range snapshot.Items {
@@ -47,6 +69,25 @@ func (s *Service) loadHistory() {
 		}
 		s.runs[record.info.RunID] = &record
 	}
+}
+
+func parseRunHistorySnapshot(content []byte) (runHistorySnapshot, error) {
+	var snapshot runHistorySnapshot
+	if err := json.Unmarshal(content, &snapshot); err != nil {
+		return runHistorySnapshot{}, fmt.Errorf("decode run history: %w", err)
+	}
+	if snapshot.Version != runHistoryVersion {
+		return runHistorySnapshot{}, fmt.Errorf("unsupported run history version %d", snapshot.Version)
+	}
+	return snapshot, nil
+}
+
+func (s *Service) addHistoryRecoveryDiagnostic(message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	s.historyRecoveryDiagnostics = append(s.historyRecoveryDiagnostics, message)
 }
 
 func (s *Service) recoverStaleRunsAfterRestart() {
@@ -97,7 +138,7 @@ func (s *Service) recoverStaleRunsAfterRestart() {
 		})
 	}
 	if len(reconciledRuns) > 0 {
-		s.persistHistoryLocked()
+		_ = s.persistHistoryLocked()
 	}
 	if resumeTarget != nil {
 		s.activeRunID = resumeTarget.runID

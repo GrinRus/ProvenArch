@@ -11,7 +11,8 @@ export async function loadBaselineBundleAPI(): Promise<BaselineBundleResponse> {
 }
 
 export async function loadWorkspaceHealthAPI(): Promise<WorkspaceHealthResponse> {
-  return fetchJSON<WorkspaceHealthResponse>("/api/workspace/health");
+  const payload = await fetchJSON<Partial<WorkspaceHealthResponse>>("/api/workspace/health");
+  return normalizeWorkspaceHealthResponse(payload);
 }
 
 export async function loadArtifactText(path: string): Promise<string | null> {
@@ -61,4 +62,21 @@ export async function createProposalBranch(name: string): Promise<{ branch: stri
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
+}
+
+function normalizeWorkspaceHealthResponse(payload: Partial<WorkspaceHealthResponse> | null | undefined): WorkspaceHealthResponse {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const summary = payload?.summary ?? { info: 0, warning: 0, error: 0 };
+  const status = payload?.status === "warn" || payload?.status === "fail" ? payload.status : "pass";
+  return {
+    version: typeof payload?.version === "number" ? payload.version : 1,
+    generated_at: typeof payload?.generated_at === "string" ? payload.generated_at : "",
+    status,
+    summary: {
+      info: typeof summary.info === "number" ? summary.info : 0,
+      warning: typeof summary.warning === "number" ? summary.warning : 0,
+      error: typeof summary.error === "number" ? summary.error : 0,
+    },
+    items,
+  };
 }

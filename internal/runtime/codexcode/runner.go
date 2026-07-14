@@ -176,11 +176,6 @@ func (a codexAdapter) UnavailableMarkers() []string {
 	return providercommon.DefaultUnavailableMarkers()
 }
 
-func buildDefaultCodexArgs(task acpruntime.Task) []string {
-	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
-	return buildCodexArgsWithIncludeDirectories(cwd, acpruntime.ResolveHeadlessIncludeDirectories(task))
-}
-
 func buildCodexArgsWithIncludeDirectories(cwd string, includeDirs []string) []string {
 	return buildCodexArgsWithPermissions(cwd, includeDirs, acpruntime.DefaultPermissions())
 }

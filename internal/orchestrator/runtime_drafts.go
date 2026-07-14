@@ -7,65 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-type runtimeDraftManifest = runtimedrafts.Manifest
-type runtimeDraftOutput = runtimedrafts.Output
-
-func loadRuntimeDraftManifest(root string, filename string) (runtimeDraftManifest, []byte, error) {
-	return runtimedrafts.Load(root, filename)
-}
-
-func loadValidatedRuntimeDraftManifest(root string, draftRoot string, filename string) (runtimeDraftManifest, []byte, error) {
-	manifest, raw, err := loadRuntimeDraftManifest(root, filename)
-	if err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	if err := validateRuntimeDraftOutputsExist(draftRoot, manifest); err != nil {
-		return runtimeDraftManifest{}, nil, err
-	}
-	return manifest, raw, nil
-}
-
-func validateRuntimeDraftManifest(manifest runtimeDraftManifest) error {
-	return runtimedrafts.ValidateManifest(manifest)
-}
-
-func validateRuntimeDraftOutputsExist(draftRoot string, manifest runtimeDraftManifest) error {
-	return runtimedrafts.ValidateOutputsExist(draftRoot, manifest)
-}
-
-func requiredRuntimeDraftManifestFile(stepID string) string {
-	return runtimedrafts.ManifestFileForStep(stepID)
-}
-
-func validateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimeDraftManifest, []byte, error) {
-	return runtimedrafts.ValidateRequiredManifest(
-		task.WriteRoot,
-		task.DraftFinalRoot,
-		task.RunID,
-		task.StepID,
-		task.StepContract,
-		task.ExpectedArtifacts,
-	)
-}
-
-func validateRuntimeDraftManifestForTask(task acpruntime.Task, manifest runtimeDraftManifest) error {
-	return runtimedrafts.ValidateManifestForTask(
-		manifest,
-		task.RunID,
-		task.StepID,
-		task.StepContract,
-	)
-}
-
 func applyRuntimeDraftOutputs(
 	target workspace.Root,
 	draftRoot string,
-	manifest runtimeDraftManifest,
+	manifest runtimedrafts.Manifest,
 	stagePrefix string,
 	allow func(string) bool,
 ) ([]Artifact, error) {
@@ -107,7 +56,7 @@ func applyRuntimeDraftOutputs(
 	return artifacts, nil
 }
 
-func draftManifestHasPrefix(manifest *runtimeDraftManifest, prefix string) bool {
+func draftManifestHasPrefix(manifest *runtimedrafts.Manifest, prefix string) bool {
 	if manifest == nil {
 		return false
 	}
@@ -117,18 +66,4 @@ func draftManifestHasPrefix(manifest *runtimeDraftManifest, prefix string) bool 
 		}
 	}
 	return false
-}
-
-func draftManifestCanonicalPathsWithPrefix(manifest *runtimeDraftManifest, prefix string) []string {
-	if manifest == nil {
-		return nil
-	}
-	paths := make([]string, 0, len(manifest.Outputs))
-	for _, output := range manifest.Outputs {
-		canonicalPath := filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath)))
-		if strings.HasPrefix(canonicalPath, prefix) {
-			paths = append(paths, canonicalPath)
-		}
-	}
-	return paths
 }

@@ -263,18 +263,6 @@ func filterEntitiesByType(entities []contracts.Entity, entityType string) []cont
 	return filtered
 }
 
-func writeStringList(builder *strings.Builder, title string, values []string) {
-	builder.WriteString(fmt.Sprintf("## %s\n\n", title))
-	if len(values) == 0 {
-		builder.WriteString("None.\n\n")
-		return
-	}
-	for _, value := range values {
-		builder.WriteString(fmt.Sprintf("- %s\n", value))
-	}
-	builder.WriteString("\n")
-}
-
 func writeStringListWithFallback(builder *strings.Builder, title string, values []string, fallback string) {
 	builder.WriteString(fmt.Sprintf("## %s\n\n", title))
 	if len(values) == 0 {

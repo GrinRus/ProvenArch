@@ -65,6 +65,7 @@ for go_bin in "${candidate_bins[@]}"; do
     fi
     continue
   fi
+  # shellcheck disable=SC2093 # This wrapper intentionally hands off to the selected Go binary.
   exec "$go_bin" "$@"
 done
 
@@ -78,7 +79,9 @@ if [[ -n "$required_go_version" ]]; then
 fi
 
 if [[ -n "$first_available" ]]; then
+  # shellcheck disable=SC2093 # This wrapper intentionally hands off to the selected Go binary.
   exec "$first_available" "$@"
 fi
 
+# shellcheck disable=SC2093 # This wrapper intentionally hands off to Go.
 exec go "$@"

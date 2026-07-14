@@ -289,6 +289,19 @@ async function installFailedShardMock(page: Page): Promise<void> {
       return;
     }
 
+    if (method === "GET" && url.pathname === "/api/workspace/health") {
+      await route.fulfill({
+        ...json({
+          version: 1,
+          generated_at: "2026-04-03T12:00:07Z",
+          status: "pass",
+          summary: { info: 0, warning: 0, error: 0 },
+          items: [],
+        }),
+      });
+      return;
+    }
+
     if (method === "POST" && url.pathname === "/api/workspace/validate") {
       await route.fulfill({
         ...json({

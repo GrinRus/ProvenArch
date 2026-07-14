@@ -7,10 +7,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/promptcontract"
 )
 
-func buildDefaultQwenArgs(task acpruntime.Task, prompt string) []string {
-	return buildQwenArgsWithIncludeDirectories(acpruntime.ResolveHeadlessIncludeDirectories(task), prompt)
-}
-
 func buildQwenArgsWithIncludeDirectories(includeDirs []string, prompt string) []string {
 	return buildQwenArgsWithPermissions(includeDirs, prompt, acpruntime.DefaultPermissions())
 }

@@ -94,6 +94,144 @@ repos:
 	if _, err := os.Stat(filepath.Join(resolved[0].Path, ".git")); err != nil {
 		t.Fatalf("expected cloned git repository in cache: %v", err)
 	}
+	if strings.TrimSpace(resolved[0].ResolvedSHA) == "" {
+		t.Fatalf("expected resolved SHA for fetched git_url repo: %+v", resolved[0])
+	}
+}
+
+func TestResolveRepoSourcesGitURLUnpinnedRefreshesRemoteDefaultHead(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for resolver tests")
+	}
+
+	tmp := t.TempDir()
+	sourceRepo := filepath.Join(tmp, "source-repo")
+	bareRepo := filepath.Join(tmp, "remote.git")
+	if err := os.MkdirAll(sourceRepo, 0o755); err != nil {
+		t.Fatalf("create source repo: %v", err)
+	}
+
+	runGit(t, tmp, "init", "--bare", bareRepo)
+	runGit(t, bareRepo, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGit(t, sourceRepo, "init", "-b", "main")
+	runGit(t, sourceRepo, "config", "user.email", "acp@example.local")
+	runGit(t, sourceRepo, "config", "user.name", "ACP")
+	runGit(t, sourceRepo, "remote", "add", "origin", bareRepo)
+	firstSHA := commitFile(t, sourceRepo, "README.md", "# source v1\n", "init")
+	runGit(t, sourceRepo, "push", "-u", "origin", "main")
+
+	workspaceRoot := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	writeManifestFile(t, workspaceRoot, `
+version: 1
+repos:
+  - name: source-repo
+    git_url: `+bareRepo+`
+`)
+
+	ws, err := Open(workspaceRoot)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	resolved, diagnostics := ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != firstSHA {
+		t.Fatalf("expected first resolved SHA %s, got %s", firstSHA, got)
+	}
+	assertFileContent(t, filepath.Join(resolved[0].Path, "README.md"), "# source v1\n")
+
+	secondSHA := commitFile(t, sourceRepo, "README.md", "# source v2\n", "update")
+	runGit(t, sourceRepo, "push", "origin", "main")
+
+	resolved, diagnostics = ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != secondSHA {
+		t.Fatalf("expected refreshed resolved SHA %s, got %s", secondSHA, got)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, resolved[0].Path, "rev-parse", "--verify", "HEAD^{commit}")); got != secondSHA {
+		t.Fatalf("expected cache HEAD %s, got %s", secondSHA, got)
+	}
+	assertFileContent(t, filepath.Join(resolved[0].Path, "README.md"), "# source v2\n")
+}
+
+func TestResolveRepoSourcesGitURLPinnedSHAStaysStableWhenDefaultAdvances(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for resolver tests")
+	}
+
+	tmp := t.TempDir()
+	sourceRepo := filepath.Join(tmp, "source-repo")
+	bareRepo := filepath.Join(tmp, "remote.git")
+	if err := os.MkdirAll(sourceRepo, 0o755); err != nil {
+		t.Fatalf("create source repo: %v", err)
+	}
+
+	runGit(t, tmp, "init", "--bare", bareRepo)
+	runGit(t, bareRepo, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGit(t, sourceRepo, "init", "-b", "main")
+	runGit(t, sourceRepo, "config", "user.email", "acp@example.local")
+	runGit(t, sourceRepo, "config", "user.name", "ACP")
+	runGit(t, sourceRepo, "remote", "add", "origin", bareRepo)
+	pinnedSHA := commitFile(t, sourceRepo, "README.md", "# source v1\n", "init")
+	runGit(t, sourceRepo, "push", "-u", "origin", "main")
+
+	workspaceRoot := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	writeManifestFile(t, workspaceRoot, `
+version: 1
+repos:
+  - name: source-repo
+    git_url: `+bareRepo+`
+    ref: `+pinnedSHA+`
+`)
+
+	ws, err := Open(workspaceRoot)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	resolved, diagnostics := ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != pinnedSHA {
+		t.Fatalf("expected pinned resolved SHA %s, got %s", pinnedSHA, got)
+	}
+
+	advancedSHA := commitFile(t, sourceRepo, "README.md", "# source v2\n", "update")
+	runGit(t, sourceRepo, "push", "origin", "main")
+	if advancedSHA == pinnedSHA {
+		t.Fatalf("expected distinct advanced commit")
+	}
+
+	resolved, diagnostics = ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != pinnedSHA {
+		t.Fatalf("expected pinned SHA to remain %s after default advanced to %s, got %s", pinnedSHA, advancedSHA, got)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, resolved[0].Path, "rev-parse", "--verify", "HEAD^{commit}")); got != pinnedSHA {
+		t.Fatalf("expected cache HEAD to stay pinned at %s, got %s", pinnedSHA, got)
+	}
+	assertFileContent(t, filepath.Join(resolved[0].Path, "README.md"), "# source v1\n")
 }
 
 func TestResolveRepoSourcesPathRefFallbackToOriginAndHeadMismatchWarning(t *testing.T) {
@@ -171,6 +309,59 @@ repos:
 	}
 	if !hasHeadMismatchWarning {
 		t.Fatalf("expected workspace.repo.ref.head_mismatch warning, got %+v", diagnostics)
+	}
+}
+
+func TestResolveRepoSourcesPathRefVerificationDoesNotMutateCheckout(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for resolver tests")
+	}
+
+	tmp := t.TempDir()
+	repoPath := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("create repo path: %v", err)
+	}
+	runGit(t, repoPath, "init", "-b", "main")
+	runGit(t, repoPath, "config", "user.email", "acp@example.local")
+	runGit(t, repoPath, "config", "user.name", "ACP")
+	mainSHA := commitFile(t, repoPath, "README.md", "# main\n", "init")
+	runGit(t, repoPath, "checkout", "-b", "work")
+	workSHA := commitFile(t, repoPath, "work.txt", "work\n", "work")
+	if workSHA == mainSHA {
+		t.Fatalf("expected distinct work commit")
+	}
+
+	workspaceRoot := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+	writeManifestFile(t, workspaceRoot, `
+version: 1
+repos:
+  - name: sample
+    path: `+repoPath+`
+    ref: main
+`)
+
+	ws, err := Open(workspaceRoot)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	before := strings.TrimSpace(runGitOutput(t, repoPath, "rev-parse", "--verify", "HEAD^{commit}"))
+	resolved, diagnostics := ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: false, VerifyRefs: true})
+	after := strings.TrimSpace(runGitOutput(t, repoPath, "rev-parse", "--verify", "HEAD^{commit}"))
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if before != workSHA || after != workSHA {
+		t.Fatalf("path source checkout mutated or unexpected HEAD: before=%s after=%s work=%s", before, after, workSHA)
+	}
+	if !hasResolverDiagnosticCode(diagnostics, "workspace.repo.ref.head_mismatch") {
+		t.Fatalf("expected head mismatch warning, got %+v", diagnostics)
 	}
 }
 
@@ -448,10 +639,50 @@ func (g *recordingGitExecutor) Run(_ context.Context, dir string, args ...string
 	if strings.TrimSpace(dir) != "" {
 		g.callDirs = append(g.callDirs, dir)
 	}
+	if len(args) >= 4 && args[0] == "ls-remote" && args[1] == "--symref" {
+		return "ref: refs/heads/main\tHEAD\ndeadbeef\tHEAD", nil
+	}
+	if len(args) >= 4 && args[0] == "symbolic-ref" {
+		return "origin/main", nil
+	}
 	if args[0] == "rev-parse" {
 		return "deadbeef", nil
 	}
 	return "", nil
+}
+
+func commitFile(t *testing.T, repoPath string, relPath string, content string, message string) string {
+	t.Helper()
+	absPath := filepath.Join(repoPath, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		t.Fatalf("create commit file dir: %v", err)
+	}
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write commit file: %v", err)
+	}
+	runGit(t, repoPath, "add", relPath)
+	runGit(t, repoPath, "commit", "-m", message)
+	return strings.TrimSpace(runGitOutput(t, repoPath, "rev-parse", "--verify", "HEAD^{commit}"))
+}
+
+func assertNoResolverErrors(t *testing.T, diagnostics []Diagnostic) {
+	t.Helper()
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Level == DiagnosticError {
+			t.Fatalf("unexpected resolver error diagnostics: %+v", diagnostics)
+		}
+	}
+}
+
+func assertFileContent(t *testing.T, path string, want string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if got := string(content); got != want {
+		t.Fatalf("unexpected content for %s: got %q want %q", path, got, want)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
@@ -462,4 +693,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v failed: %v (%s)", args, err, string(output))
 	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v (%s)", args, err, string(output))
+	}
+	return strings.TrimSpace(string(output))
 }

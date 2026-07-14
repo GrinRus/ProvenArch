@@ -6,6 +6,7 @@ export type LoadGitDiffOptions = {
   folder?: string;
   runId?: string | null;
   stepId?: string | null;
+  signal?: AbortSignal;
 };
 
 export async function loadWorkspaceGitDiff(options: LoadGitDiffOptions = {}): Promise<GitDiffResponse> {
@@ -23,5 +24,5 @@ export async function loadWorkspaceGitDiff(options: LoadGitDiffOptions = {}): Pr
     query.set("step_id", options.stepId);
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  return fetchJSON<GitDiffResponse>(`/api/git/diff${suffix}`);
+  return fetchJSON<GitDiffResponse>(`/api/git/diff${suffix}`, { signal: options.signal });
 }

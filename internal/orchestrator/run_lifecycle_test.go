@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
@@ -133,6 +135,182 @@ func TestRunWithIDTerminalGuardPersistsFailedHistoryOnPanic(t *testing.T) {
 	}
 }
 
+func TestAsyncRunPanicIsTerminalAndDoesNotEscapeGoroutine(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(panicRunner{}),
+		WithHistoryWorkspace(ws),
+		WithClock(func() time.Time {
+			return time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+		}),
+	)
+
+	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+
+	info := waitForRunTerminalInfo(t, service, runID, 2*time.Second)
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected failed async panic run, got %s", info.Status)
+	}
+	if info.ErrorCode != "internal_failure" {
+		t.Fatalf("expected internal_failure error code, got %q", info.ErrorCode)
+	}
+	if !strings.Contains(info.Error, "run panic") {
+		t.Fatalf("expected run panic error, got %q", info.Error)
+	}
+
+	nextRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("service should accept a new run after async panic: %v", err)
+	}
+	if nextRunID == runID {
+		t.Fatalf("expected distinct follow-up run id")
+	}
+	waitForRunTerminalInfo(t, service, nextRunID, 2*time.Second)
+}
+
+func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	releaseFirst := make(chan struct{})
+	runner := &panicFirstThenReturnRunner{releaseFirst: releaseFirst}
+	service := NewService(
+		WithRunner(runner),
+		WithHistoryWorkspace(ws),
+		WithDebounceWindow(time.Minute),
+		WithClock(func() time.Time {
+			return time.Date(2026, 7, 13, 12, 30, 0, 0, time.UTC)
+		}),
+	)
+
+	firstRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start first async run: %v", err)
+	}
+	waitForRunnerCalls(t, runner, 1, time.Second)
+	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("queue pending async run: %v", err)
+	}
+	if secondRunID == firstRunID {
+		t.Fatalf("expected distinct pending run id")
+	}
+
+	close(releaseFirst)
+	firstInfo := waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
+	if firstInfo.Status != RunStatusFailed || firstInfo.ErrorCode != "internal_failure" {
+		t.Fatalf("expected first run failed/internal_failure, got status=%s code=%q", firstInfo.Status, firstInfo.ErrorCode)
+	}
+	waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	if calls := runner.callCount(); calls < 2 {
+		t.Fatalf("expected pending run to start after panic; runner calls=%d", calls)
+	}
+}
+
+func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(blockingRunner{release: make(chan struct{})}),
+		WithHistoryWorkspace(ws),
+	)
+	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown service: %v", err)
+	}
+	info := waitForRunTerminalInfo(t, service, runID, 2*time.Second)
+	if info.Status != RunStatusFailed {
+		t.Fatalf("expected shutdown-canceled run to fail, got %s", info.Status)
+	}
+	if info.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected %s, got %q", runErrorCodeCanceled, info.ErrorCode)
+	}
+
+	_, err = service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if !errors.Is(err, ErrServiceClosed) {
+		t.Fatalf("expected ErrServiceClosed after shutdown, got %v", err)
+	}
+}
+
+func TestServiceShutdownFailsPendingRunWithoutStartingIt(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &countingBlockingRunner{release: make(chan struct{})}
+	service := NewService(
+		WithRunner(runner),
+		WithHistoryWorkspace(ws),
+		WithDebounceWindow(time.Minute),
+	)
+	firstRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start first async run: %v", err)
+	}
+	waitForRunnerCalls(t, runner, 1, time.Second)
+	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("queue pending run: %v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := service.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown service: %v", err)
+	}
+	waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
+	secondInfo := waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	if secondInfo.Status != RunStatusFailed || secondInfo.ErrorCode != runErrorCodeCanceled {
+		t.Fatalf("expected pending run failed/%s, got status=%s code=%q", runErrorCodeCanceled, secondInfo.Status, secondInfo.ErrorCode)
+	}
+	if calls := runner.callCount(); calls != 1 {
+		t.Fatalf("expected only active run to start before shutdown, calls=%d", calls)
+	}
+}
+
 func TestTerminalGuardPersistsFailedHistoryOnContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +349,63 @@ func TestTerminalGuardPersistsFailedHistoryOnContextCancellation(t *testing.T) {
 	}
 }
 
+func TestLoadHistoryFallsBackToLastGoodWhenCurrentIsMalformed(t *testing.T) {
+	ws := createWorkspace(t)
+	startedAt := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	service := NewService(WithHistoryWorkspace(ws))
+	if err := service.storeRun(runRecord{
+		info: RunInfo{
+			RunID:     "run_recovered_history",
+			Pipeline:  string(PipelineInit),
+			Status:    RunStatusSucceeded,
+			StartedAt: startedAt,
+		},
+		artifacts: []Artifact{{Path: "reports/as-is/overview.md", Kind: "report", Label: "Overview"}},
+	}); err != nil {
+		t.Fatalf("store run history: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(ws.Path, runHistoryPath), []byte("{malformed current history\n"), 0o644); err != nil {
+		t.Fatalf("corrupt current history: %v", err)
+	}
+
+	recovered := NewService(WithHistoryWorkspace(ws))
+	info, ok := recovered.GetRun("run_recovered_history")
+	if !ok {
+		t.Fatalf("expected run to be loaded from last-good history")
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected recovered run status %s, got %s", RunStatusSucceeded, info.Status)
+	}
+	if len(recovered.historyRecoveryDiagnostics) == 0 {
+		t.Fatalf("expected recovery diagnostic")
+	}
+	if !strings.Contains(recovered.historyRecoveryDiagnostics[0], runHistoryPath+".last-good") {
+		t.Fatalf("expected diagnostic to name last-good path, got %v", recovered.historyRecoveryDiagnostics)
+	}
+}
+
+func TestStartAsyncRunReturnsHistoryPersistenceError(t *testing.T) {
+	ws := createWorkspace(t)
+	blockingHistoryRoot := filepath.Join(t.TempDir(), "history-root-file")
+	if err := os.WriteFile(blockingHistoryRoot, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatalf("create blocking history root: %v", err)
+	}
+	service := NewService(WithHistoryWorkspace(workspace.Root{Path: blockingHistoryRoot}))
+
+	_, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err == nil {
+		t.Fatalf("expected history persistence error")
+	}
+	if !strings.Contains(err.Error(), "persist run history") {
+		t.Fatalf("expected persist run history error, got %v", err)
+	}
+}
+
 func TestClassifyExecutionErrorMapsPlainContextFailures(t *testing.T) {
 	t.Parallel()
 
@@ -191,6 +426,35 @@ func (panicRunner) Run(context.Context, acpruntime.Task) (acpruntime.Result, err
 	panic("boom")
 }
 
+type panicFirstThenReturnRunner struct {
+	releaseFirst <-chan struct{}
+	mu           sync.Mutex
+	calls        int
+}
+
+func (runner *panicFirstThenReturnRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	runner.mu.Lock()
+	runner.calls++
+	call := runner.calls
+	runner.mu.Unlock()
+
+	if call == 1 {
+		select {
+		case <-ctx.Done():
+			return acpruntime.Result{}, ctx.Err()
+		case <-runner.releaseFirst:
+			panic("boom")
+		}
+	}
+	return acpruntime.Result{}, nil
+}
+
+func (runner *panicFirstThenReturnRunner) callCount() int {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.calls
+}
+
 type blockingRunner struct {
 	release <-chan struct{}
 }
@@ -202,6 +466,42 @@ func (runner blockingRunner) Run(ctx context.Context, _ acpruntime.Task) (acprun
 	case <-runner.release:
 		return acpruntime.Result{}, nil
 	}
+}
+
+type countingBlockingRunner struct {
+	release <-chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (runner *countingBlockingRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	runner.mu.Lock()
+	runner.calls++
+	runner.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return acpruntime.Result{}, ctx.Err()
+	case <-runner.release:
+		return acpruntime.Result{}, nil
+	}
+}
+
+func (runner *countingBlockingRunner) callCount() int {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.calls
+}
+
+func waitForRunnerCalls(t *testing.T, runner interface{ callCount() int }, minCalls int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if runner.callCount() >= minCalls {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("runner did not reach %d calls before timeout; calls=%d", minCalls, runner.callCount())
 }
 
 func waitForRunTerminalInfo(t *testing.T, service *Service, runID string, timeout time.Duration) RunInfo {

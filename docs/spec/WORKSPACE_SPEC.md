@@ -44,6 +44,9 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `path` означает локально доступный checkout
 - `git_url` означает remote source, который ACP разрешает через локальный `git` context пользователя/runner
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
+- для `git_url` без `ref` ACP перед pipeline execution делает fetch, определяет remote default `HEAD` и force-reset-ит только ACP-owned cache под `.acp/repos` на exact resolved commit SHA
+- resolved SHA для fetch-backed `git_url` возвращается в `resolved_repos[].resolved_sha` и сохраняется в run evidence; dry validation может не заполнять это поле
+- для `git_url` с `ref` выбранный ref остаётся source of truth и не заменяется remote default `HEAD`
 - `analysis.role` удалён из active contract; manifest с этим полем считается invalid breaking legacy input
 - для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
 - verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`

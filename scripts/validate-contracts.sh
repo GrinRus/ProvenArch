@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd))"
+cd "$repo_root"
+
+contract_tools_bin="${ACP_CONTRACT_TOOLS_BIN:-$repo_root/tools/contracts/node_modules/.bin}"
+
+require_contract_tool() {
+  local tool="$1"
+  local tool_path="$contract_tools_bin/$tool"
+  if [[ ! -x "$tool_path" ]]; then
+    echo "Missing contract validation tool: $tool" >&2
+    echo "Run: ./scripts/run-npm.sh ci --prefix tools/contracts --ignore-scripts --audit=false --fund=false" >&2
+    exit 1
+  fi
+}
+
+require_contract_tool ajv
+require_contract_tool js-yaml
+
+ajv_bin="$contract_tools_bin/ajv"
+js_yaml_bin="$contract_tools_bin/js-yaml"
+
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -19,13 +40,13 @@ for entry in "${workspace_cases[@]}"; do
   expectation="${entry##*:}"
   json_file="$tmpdir/$(basename "$file").json"
 
-  js-yaml "$file" > "$json_file"
+  "$js_yaml_bin" "$file" > "$json_file"
 
   if [[ "$expectation" == "valid" ]]; then
-    ajv validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file"
+    "$ajv_bin" validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file"
   else
     invalid_log="$tmpdir/$(basename "$file").invalid.log"
-    if ajv validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file" >"$invalid_log" 2>&1; then
+    if "$ajv_bin" validate --spec=draft2020 -c ajv-formats -s schemas/workspace.schema.json -d "$json_file" >"$invalid_log" 2>&1; then
       echo "Expected invalid fixture to fail: $file"
       cat "$invalid_log"
       exit 1
@@ -45,5 +66,5 @@ docs_first_contracts=(
 for entry in "${docs_first_contracts[@]}"; do
   schema="${entry%%:*}"
   sample="${entry##*:}"
-  ajv validate --spec=draft2020 -c ajv-formats -s "$schema" -d "$sample"
+  "$ajv_bin" validate --spec=draft2020 -c ajv-formats -s "$schema" -d "$sample"
 done
