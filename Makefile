@@ -3,6 +3,7 @@ NPM ?= ./scripts/run-npm.sh
 UI_DIR := ui
 CONTRACT_TOOLS_DIR := tools/contracts
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
+SHELL_FILES := $(shell find scripts -name '*.sh' -type f 2>/dev/null | sort)
 RUNTIME ?= fake
 REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
@@ -39,6 +40,8 @@ lint:
 		echo "$$fmt_files"; \
 		exit 1; \
 	fi
+	@command -v shellcheck >/dev/null 2>&1 || (echo "shellcheck is required for make lint. Install ShellCheck 0.11.x or newer." >&2; exit 1)
+	shellcheck $(SHELL_FILES)
 	$(NPM) run typecheck --prefix $(UI_DIR)
 
 build:

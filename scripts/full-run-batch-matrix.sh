@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329 # Signal/trap callbacks and their helpers are invoked indirectly via trap handlers.
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -1415,7 +1416,7 @@ PY
     cd "$PROVENARCH_ROOT"
     if [[ "${#MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
       for assignment in "${MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}"; do
-        export "$assignment"
+        export "${assignment?}"
       done
     fi
     acp_build_timeout_env_assignments

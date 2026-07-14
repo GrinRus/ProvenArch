@@ -141,7 +141,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1`
+- [x] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19S3` required PR lint routing after `19S2`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1856,8 +1858,10 @@ enabled in `19S2`. The code audit confirms three shell/frontend-batch dead-code 
       `frontend_result_summary` validation side effects.
 - [x] Verify targeted reference search no longer finds removed identifiers or assignments.
 - [x] Keep active batch/frontend result classification unchanged.
-- [ ] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1` review/commit boundary
+- [x] Continue PR-1 with `19S2` ShellCheck in canonical lint after `19S1` review/commit boundary
       is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not enable ShellCheck yet; that is `19S2`.
@@ -1901,6 +1905,73 @@ Shell cleanup only. No backend, schema, UI source, workspace, artifact or HTTP i
 - 2026-07-14: Removed the confirmed unused shell helpers and frontend status/reason assignments,
   verified reference search and bash syntax, ran Python script tests, and completed full DoD with
   exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19s2-shellcheck-lint
+
+### Context
+`19S2` follows committed `19S1`. The audit requires canonical `make lint` to run ShellCheck for
+production shell scripts before PR lint routing is changed in `19S3`. A current full ShellCheck pass
+finds only intentional indirect trap callbacks (`SC2329`) and one assignment-export idiom
+(`SC2163`), so this slice can add the gate with narrow documented suppressions and no harness
+behavior changes.
+
+### Goals (must have)
+- [x] Add ShellCheck invocation to canonical `make lint` for production `scripts/**/*.sh`.
+- [x] Require ShellCheck availability with an actionable local setup error.
+- [x] Keep suppressions narrow and documented for trap callbacks and intentional assignment export.
+- [x] Verify current scripts pass ShellCheck.
+- [x] Verify an intentionally broken shell probe fails ShellCheck.
+- [x] Update testing documentation for the new lint baseline.
+- [ ] Continue PR-1 with `19S3` required PR lint routing after `19S2` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not change PR workflow routing yet; that is `19S3`.
+- [ ] Do not refactor batch/matrix shell logic beyond ShellCheck-required suppressions.
+- [ ] Do not add live provider or network dependencies to required CI.
+- [ ] Do not change release matrices, runtime behavior or shell script taxonomy.
+
+### Implementation
+1) Define a deterministic `SHELL_FILES` list in `Makefile` from production `scripts/*.sh` files.
+2) Add ShellCheck availability check and `shellcheck $(SHELL_FILES)` to `make lint`.
+3) Add documented `SC2329` suppressions for trap callback helper chains and fix/suppress the
+   assignment export idiom without changing semantics.
+4) Update `docs/TESTING_STRATEGY.md` to state that canonical lint includes gofmt, ShellCheck and
+   UI typecheck.
+5) Run current ShellCheck and a temporary failing probe to prove the gate catches shell defects.
+
+### Interfaces
+Tooling/docs only. No backend, schema, UI runtime, workspace, artifact, HTTP or live-provider
+interfaces change.
+
+### Tests
+- `make lint` fails if `shellcheck` is missing.
+- `shellcheck $(find scripts -name '*.sh')` passes on the current tree.
+- A temporary script with a ShellCheck violation fails ShellCheck.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md` canonical lint baseline.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Targeted ShellCheck pass and failing probe pass.
+- [x] `make lint` runs ShellCheck and UI typecheck.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19S3`, live-provider, release-matrix or unrelated shell refactor
+      scope leaked into this slice.
+- [x] Commit `19S2: add ShellCheck to lint`.
+
+### Progress log
+- 2026-07-14: Started `19S2` after clean `19S1` commit. Spec-first and docs-sync rules apply
+  because this slice changes canonical lint behavior and documented testing baseline.
+- 2026-07-14: Added ShellCheck to canonical `make lint`, documented the testing baseline, added
+  narrow ShellCheck suppressions/fix for existing intentional shell idioms, verified current
+  scripts plus a failing probe, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

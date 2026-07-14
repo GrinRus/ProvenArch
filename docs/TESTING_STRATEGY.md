@@ -423,6 +423,9 @@ Release workflow hardening:
   `tools/contracts`; version changes require an explicit `package.json`/`package-lock.json`
   review and `make contracts` must run from the lockfile-backed install.
 - основной backend test loop предполагает `go test`
+- canonical `make lint` проверяет Go formatting, ShellCheck для production `scripts/**/*.sh`
+  и UI TypeScript typecheck; ShellCheck baseline — `0.11.x`, live provider/network access не
+  требуется.
 - UI smoke стек: `React + Vite + Vitest + Playwright`
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
@@ -437,7 +440,7 @@ Release workflow hardening:
 - `make bootstrap`
 - `make contracts`
 - `make test`
-- `make lint`
+- `make lint` (gofmt + ShellCheck + UI typecheck)
 - `make build`
 - `make verify-ui-determinism`
 - `make verify-ui-dist`
