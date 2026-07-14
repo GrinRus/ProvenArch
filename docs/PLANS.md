@@ -163,7 +163,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W5a` review diff residual cleanup after `19W4`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W5b` model store residual cleanup after `19W5a`
+- [x] Continue PR-1 with `19W5b` model store residual cleanup after `19W5a`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2678,6 +2680,63 @@ interfaces change.
 - 2026-07-14: Removed unused `ensureGitDiffTestRepo`, confirmed no remaining references, ran
   targeted API Git diff/run review tests plus full API package tests, and completed full DoD with
   exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5b-model-store-residual-cleanup
+
+### Context
+`19W5b` follows committed `19W5a`. The model store package-local residual is the unused
+`Store.removeFile` helper in `internal/model/store.go`; current model store behavior writes and
+lists entity/edge YAML files but has no active delete path.
+
+### Goals (must have)
+- [x] Remove unused `Store.removeFile`.
+- [x] Keep model store apply/list behavior unchanged.
+- [x] Verify model store/golden tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not add model deletion behavior.
+- [ ] Do not change entity/edge ID normalization, collision remapping or owner-team validation.
+- [ ] Do not change YAML layout or schema.
+- [ ] Do not start `19W5c` orchestrator quality cleanup in this slice.
+
+### Implementation
+1) Delete the unused `Store.removeFile` method.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/model -count=1`.
+- Reference search for `removeFile` in `internal/model` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Model store residual helper is removed without alias/replacement.
+- [x] Model store tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5c` work.
+- [x] Commit `19W5b: remove model store residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5b` after clean `19W5a` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  model store dead helper only.
+- 2026-07-14: Removed unused `Store.removeFile`, confirmed no remaining references, ran model
+  store tests, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
