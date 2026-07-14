@@ -28,7 +28,6 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 		})
 		return runtimeTaskExecution{}, err
 	}
-	e.shardPacks = append(e.shardPacks, manifest)
 	if artifactquality.CollectManifestBootstrapOnly(manifest, collectManifestDocumentTexts(task.WriteRoot, manifest.Documents)) {
 		warning := fmt.Sprintf(
 			"artifact_quality: collect shard %s retained unchanged bootstrap first-action artifacts; provider did not enrich repository evidence",
@@ -41,6 +40,19 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 			"warning":  warning,
 		})
 	}
+	guardedSemantic, guardWarnings := guardRefreshCollectSemantic(stepID, task, manifest.Semantic)
+	if len(guardWarnings) > 0 {
+		for _, warning := range guardWarnings {
+			e.addWarning(warning)
+			e.logWarn(stepID, domainID, "refresh semantic guard filtered candidate", map[string]any{
+				"task_id":  task.TaskID,
+				"shard_id": task.ShardID,
+				"warning":  warning,
+			})
+		}
+		manifest.Semantic = guardedSemantic
+	}
+	e.shardPacks = append(e.shardPacks, manifest)
 
 	applyReport, err := e.store.ApplySemanticSnapshot(contracts.SemanticSnapshot{
 		Entities: manifest.Semantic.Entities,

@@ -131,7 +131,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19P` Step 1 card enrichment after `19N`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19Q` generic refresh semantic guard after `19P`
+- [x] Continue PR-1 with `19Q` generic refresh semantic guard after `19P`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19R1` ARIA tabs controller after `19Q`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1472,8 +1474,10 @@ must not auto-create or rename canonical cards.
 - [x] Preserve the question path for model owner teams without a matching canonical team card.
 - [x] Cover evidence refs, related entities/services, findings/questions and coverage summaries in
       deterministic tests.
-- [ ] Continue PR-1 with `19Q` generic refresh semantic guard after `19P` review/commit boundary is
+- [x] Continue PR-1 with `19Q` generic refresh semantic guard after `19P` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change public schemas, runtime provider contracts, final-run-index/citation contracts
@@ -1528,6 +1532,80 @@ interfaces change.
 - 2026-07-14: Restored the Step 1 enrichment call, added idempotency/no-autocreate/full-pipeline
   regression tests, and completed full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19q-generic-refresh-semantic-guard
+
+### Context
+`19Q` follows committed `19P`. The current semantic guard helpers are narrow and effectively
+unreachable: refresh collect apply stores provider semantic entities directly, while the helper set
+contains a domain-specific off-topic term list and a power-domain whitelist. The backlog decision is
+to preserve the documented refresh guard, but make it generic: runtime/provider metadata and
+off-scope semantic candidates are filtered or marked by deterministic diagnostics without a hidden
+domain whitelist.
+
+### Goals (must have)
+- [x] Activate refresh-only semantic guard logic in `refresh.step1.collect` before model apply and
+      before shard packs feed staged final indexes.
+- [x] Filter runtime/provider/process metadata candidates generically from the semantic model.
+- [x] Filter explicit off-scope candidates whose repo evidence does not match the assigned refresh
+      repo scopes.
+- [x] Emit deterministic diagnostic findings/warnings for every filtered candidate class.
+- [x] Preserve legitimate same-repo/same-domain entities and leave init collect behavior unchanged.
+- [x] Document the generic policy in architecture/ADR without schema or provider-list changes.
+- [ ] Continue PR-1 with `19R1` ARIA tabs controller after `19Q` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not add or change shard-pack, final-index, citation-index or workspace schemas.
+- [ ] Do not introduce a domain/business-term blacklist, whitelist or special-case corpus.
+- [ ] Do not change provider prompts, live matrix inputs, release gates or required CI live checks.
+- [ ] Do not implement accessibility slices `19R1..19R3`.
+
+### Implementation
+1) Replace the unused narrow helper cluster in `semantic_utils.go` with a generic
+   `guardRefreshCollectSemantic(stepID, task, semantic)` function.
+2) The guard is a no-op unless `stepID == refresh.step1.collect`.
+3) Runtime metadata detection uses generic runtime/process markers from entity type/id/name/tags
+   and runtime artifact evidence paths; it does not inspect product-domain words.
+4) Off-scope detection uses task repo scopes versus semantic provenance evidence repos. A candidate
+   with explicit evidence outside the assigned scopes is filtered; a same-scope candidate survives.
+5) Edges that reference filtered entities are dropped; findings/questions tied only to filtered
+   IDs are dropped; deterministic diagnostic findings are appended to the guarded semantic snapshot.
+6) Apply the guarded semantic snapshot before `e.shardPacks` append and before `model.Store` apply,
+   so promoted model/final indexes use the same filtered data.
+
+### Interfaces
+Internal orchestrator behavior and docs only. No public API, schema, workspace manifest, TypeScript
+contract or provider list changes.
+
+### Tests
+- Refresh collect filters runtime/provider metadata entities and emits deterministic diagnostics.
+- Refresh collect filters explicit off-scope repo-evidence candidates and drops edges tied to them.
+- Legitimate same-scope refresh entities survive.
+- Init collect with the same semantic payload is unchanged.
+- Apply path uses the guarded semantic snapshot before model apply and shard-pack aggregation.
+
+### Docs/fixtures
+- Update `docs/ARCHITECTURE.md` refresh semantic guard wording.
+- Add ADR rationale for generic evidence-scope policy and no hidden domain whitelist.
+- No schema/example/golden fixture changes expected.
+
+### Acceptance
+- [x] Targeted orchestrator semantic guard tests pass.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no schema, live matrix, provider-list, UI accessibility or Epic 20 scope
+      leaked into this slice.
+- [x] Commit `19Q: generalize refresh semantic guard`.
+
+### Progress log
+- 2026-07-14: Started `19Q` after clean `19P` commit. Spec-first, test-fixtures and docs-sync
+  rules apply because this slice changes documented semantic behavior and regression coverage.
+- 2026-07-14: Replaced the narrow/unreached refresh helper cluster with an active generic
+  evidence-scope guard, added pure/apply-path tests, documented architecture/ADR rationale, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

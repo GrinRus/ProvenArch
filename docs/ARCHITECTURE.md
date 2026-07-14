@@ -141,7 +141,7 @@
    - обязательный human gate перед publish отсутствует; после успешных compile/validator gates promotion происходит автоматически
    - Валидирует только required step artifacts и persisted runtime execution metadata, а не semantic stdout payload
    - Нормализует canonical top-level `questions`/`coverage` (dedupe/canonicalization) без ingestion из legacy operations
-   - Применяет semantic guard для refresh-taskruns: фильтрует placeholder/off-topic артефакты в `refresh.step1.collect`, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
+   - Применяет semantic guard для refresh-taskruns: в `refresh.step1.collect` до model apply и staged index aggregation фильтрует runtime/provider/process metadata и explicit off-scope semantic candidates по repo-evidence scope, добавляет deterministic diagnostic findings/warnings без доменного blacklist/whitelist, добавляет deterministic fallback finding при owner-gap в `refresh.step3.findings`, канонизирует/дедуплицирует coverage/question semantics
    - Поддерживает derived model layer: `model/*` rebuild-ится из `final run index + citation index` после успешного promotion
    - Не auto-create/rename canonical domain/team cards и не разрешает runtime напрямую писать в `charter/*`
    - Для incomplete/failed terminal paths materialize-ит fallback markdown surfaces без promotion approved set
