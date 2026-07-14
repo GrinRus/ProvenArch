@@ -167,7 +167,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
+- [x] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2799,6 +2801,65 @@ interfaces change.
   references in `internal/orchestrator`, ran targeted orchestrator quality tests and full
   orchestrator package tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5d-reports-compiler-residual-cleanup
+
+### Context
+`19W5d` follows committed `19W5c`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+package-local residual at `internal/reports/compiler.go:266`. In the current tree this is the
+unused `writeStringList` helper; active coverage rendering uses `writeStringListWithFallback`.
+
+### Goals (must have)
+- [x] Remove unused `writeStringList`.
+- [x] Keep report compiler output unchanged.
+- [x] Verify reports compiler tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change coverage/findings/changelog markdown content.
+- [ ] Do not change incomplete-analysis fallback wording.
+- [ ] Do not change report artifact paths, labels or kinds.
+- [ ] Do not start `19W5e` prompt-contract cleanup in this slice.
+
+### Implementation
+1) Delete the unused `writeStringList` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/reports -count=1`.
+- Reference search for `writeStringList` confirms only `writeStringListWithFallback` remains as an
+  active helper.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Reports compiler residual helper is removed without alias/replacement.
+- [x] Reports compiler tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5e` work.
+- [x] Commit `19W5d: remove reports compiler residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5d` after clean `19W5c` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  reports compiler dead helper only.
+- 2026-07-14: Removed unused `writeStringList`, confirmed the active
+  `writeStringListWithFallback` helper remains unchanged, ran reports compiler tests, and
+  completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
+  `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
