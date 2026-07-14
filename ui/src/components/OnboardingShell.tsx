@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
@@ -130,7 +131,11 @@ export function OnboardingShell({
           </div>
         </div>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? (
+          <AsyncStatusMessage tone="error" className="error-banner">
+            {error}
+          </AsyncStatusMessage>
+        ) : null}
 
         <OnboardingProgressSummaryPanel summary={progressSummary} />
 
@@ -159,7 +164,11 @@ export function OnboardingShell({
             <button type="button" onClick={onSelectWorkspace} disabled={busy || !workspacePath.trim()} data-testid="onboarding-workspace-save">
               {createWorkspace ? "Create or open workspace" : "Open workspace"}
             </button>
-            {status?.workspace_selected ? <p className="status">Selected: {status.workspace}</p> : null}
+            {status?.workspace_selected ? (
+              <AsyncStatusMessage tone="success" className="status">
+                Selected: {status.workspace}
+              </AsyncStatusMessage>
+            ) : null}
             <RecentWorkspacesList recentWorkspaces={recentWorkspaces} busy={busy} onOpen={onOpenRecentWorkspace} onForget={onForgetRecentWorkspace} />
           </section>
 
@@ -171,67 +180,87 @@ export function OnboardingShell({
                 <p className="hint">Add one or more repositories from Git URL or local checkout path.</p>
               </div>
             </div>
-            {guidedRepos.map((repo, index) => (
-              <div className="onboarding-repo-row" key={repo.id}>
-                <div className="repo-row-title">
-                  <strong>Repo {index + 1}</strong>
-                  <button type="button" className="inline-danger" onClick={() => onRemoveRepo(repo.id)} disabled={busy || guidedRepos.length <= 1}>
-                    Remove
-                  </button>
-                </div>
-                <div className="repo-field-grid">
-                  <div className="field">
-                    <label htmlFor={`onboardingRepoName-${repo.id}`}>Name</label>
-                    <input id={`onboardingRepoName-${repo.id}`} value={repo.name} onChange={(event) => onRepoChange(repo.id, { name: event.target.value })} />
+            {guidedRepos.map((repo, index) => {
+              const diagnostics = repoDiagnosticsByID.get(repo.id) ?? [];
+              const diagnosticsID = repoDiagnosticsID(repo.id);
+              const nameInvalid = hasRepoNameError(diagnostics);
+              const sourceInvalid = hasRepoSourceError(diagnostics);
+              return (
+                <div className="onboarding-repo-row" key={repo.id}>
+                  <div className="repo-row-title">
+                    <strong>Repo {index + 1}</strong>
+                    <button type="button" className="inline-danger" onClick={() => onRemoveRepo(repo.id)} disabled={busy || guidedRepos.length <= 1}>
+                      Remove
+                    </button>
                   </div>
-                  <div className="field">
-                    <label htmlFor={`onboardingRepoMode-${repo.id}`}>Source type</label>
-                    <select
-                      id={`onboardingRepoMode-${repo.id}`}
-                      value={repo.mode}
-                      onChange={(event) => onRepoChange(repo.id, { mode: event.target.value as RepoSourceMode })}
-                    >
-                      <option value="git_url">GitHub/GitLab URL</option>
-                      <option value="path">Local folder</option>
-                    </select>
-                  </div>
-                  {repo.mode === "path" ? (
-                    <LocalPathCombobox
-                      id={`onboardingRepoSource-${repo.id}`}
-                      label="Local checkout path"
-                      kind="repo"
-                      value={repo.path}
-                      testID={`onboarding-repo-path-combobox-${repo.id}`}
-                      onChange={(value) => onRepoChange(repo.id, { path: value })}
-                      onSelect={(suggestion) => {
-                        const patch: Partial<GuidedRepo> = { path: suggestion.path };
-                        if (!repo.name.trim()) {
-                          patch.name = repoNameFromPath(suggestion.path);
-                        }
-                        onRepoChange(repo.id, patch);
-                      }}
-                    />
-                  ) : (
-                    <div className="field is-wide">
-                      <label htmlFor={`onboardingRepoSource-${repo.id}`}>Repository URL</label>
-                      <input id={`onboardingRepoSource-${repo.id}`} value={repo.git_url} onChange={(event) => onRepoChange(repo.id, { git_url: event.target.value })} />
+                  <div className="repo-field-grid">
+                    <div className="field">
+                      <label htmlFor={`onboardingRepoName-${repo.id}`}>Name</label>
+                      <input
+                        id={`onboardingRepoName-${repo.id}`}
+                        value={repo.name}
+                        aria-invalid={nameInvalid || undefined}
+                        aria-describedby={nameInvalid ? diagnosticsID : undefined}
+                        onChange={(event) => onRepoChange(repo.id, { name: event.target.value })}
+                      />
                     </div>
-                  )}
-                  <div className="field">
-                    <label htmlFor={`onboardingRepoRef-${repo.id}`}>ref optional</label>
-                    <input id={`onboardingRepoRef-${repo.id}`} value={repo.ref} onChange={(event) => onRepoChange(repo.id, { ref: event.target.value })} />
+                    <div className="field">
+                      <label htmlFor={`onboardingRepoMode-${repo.id}`}>Source type</label>
+                      <select
+                        id={`onboardingRepoMode-${repo.id}`}
+                        value={repo.mode}
+                        onChange={(event) => onRepoChange(repo.id, { mode: event.target.value as RepoSourceMode })}
+                      >
+                        <option value="git_url">GitHub/GitLab URL</option>
+                        <option value="path">Local folder</option>
+                      </select>
+                    </div>
+                    {repo.mode === "path" ? (
+                      <LocalPathCombobox
+                        id={`onboardingRepoSource-${repo.id}`}
+                        label="Local checkout path"
+                        kind="repo"
+                        value={repo.path}
+                        invalid={sourceInvalid}
+                        describedBy={sourceInvalid ? diagnosticsID : undefined}
+                        testID={`onboarding-repo-path-combobox-${repo.id}`}
+                        onChange={(value) => onRepoChange(repo.id, { path: value })}
+                        onSelect={(suggestion) => {
+                          const patch: Partial<GuidedRepo> = { path: suggestion.path };
+                          if (!repo.name.trim()) {
+                            patch.name = repoNameFromPath(suggestion.path);
+                          }
+                          onRepoChange(repo.id, patch);
+                        }}
+                      />
+                    ) : (
+                      <div className="field is-wide">
+                        <label htmlFor={`onboardingRepoSource-${repo.id}`}>Repository URL</label>
+                        <input
+                          id={`onboardingRepoSource-${repo.id}`}
+                          value={repo.git_url}
+                          aria-invalid={sourceInvalid || undefined}
+                          aria-describedby={sourceInvalid ? diagnosticsID : undefined}
+                          onChange={(event) => onRepoChange(repo.id, { git_url: event.target.value })}
+                        />
+                      </div>
+                    )}
+                    <div className="field">
+                      <label htmlFor={`onboardingRepoRef-${repo.id}`}>ref optional</label>
+                      <input id={`onboardingRepoRef-${repo.id}`} value={repo.ref} onChange={(event) => onRepoChange(repo.id, { ref: event.target.value })} />
+                    </div>
                   </div>
+                  <RepoAnalysisScopeFields
+                    repoId={`onboarding-${repo.id}`}
+                    include={repo.analysis_include}
+                    exclude={repo.analysis_exclude}
+                    onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
+                    onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
+                  />
+                  <RepoDiagnostics id={diagnosticsID} diagnostics={diagnostics} />
                 </div>
-                <RepoAnalysisScopeFields
-                  repoId={`onboarding-${repo.id}`}
-                  include={repo.analysis_include}
-                  exclude={repo.analysis_exclude}
-                  onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
-                  onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
-                />
-                <RepoDiagnostics diagnostics={repoDiagnosticsByID.get(repo.id) ?? []} />
-              </div>
-            ))}
+              );
+            })}
             <div className="field">
               <label htmlFor="onboardingDocsImportsPath">docs.imports_path</label>
               <input id="onboardingDocsImportsPath" value={guidedDocsImportsPath} onChange={(event) => onDocsImportsPathChange(event.target.value)} />
@@ -244,7 +273,11 @@ export function OnboardingShell({
                 Save and validate sources
               </button>
             </div>
-            {validateResult ? <p className={validateResult.ok ? "status" : "error-text"}>{validateResult.ok ? "Sources validated." : "Sources need fixes."}</p> : null}
+            {validateResult ? (
+              <AsyncStatusMessage tone={validateResult.ok ? "success" : "error"} className={validateResult.ok ? "status" : "error-text"}>
+                {validateResult.ok ? "Sources validated." : "Sources need fixes."}
+              </AsyncStatusMessage>
+            ) : null}
           </section>
 
           <section className="onboarding-card" data-testid="onboarding-runner-step">
@@ -278,7 +311,11 @@ export function OnboardingShell({
                 Check readiness
               </button>
             </div>
-            {doctorResult ? <p className={doctorResult.ok ? "status" : "error-text"}>{doctorResult.ok ? "Runner and local readiness passed." : "Readiness has blockers."}</p> : null}
+            {doctorResult ? (
+              <AsyncStatusMessage tone={doctorResult.ok ? "success" : "error"} className={doctorResult.ok ? "status" : "error-text"}>
+                {doctorResult.ok ? "Runner and local readiness passed." : "Readiness has blockers."}
+              </AsyncStatusMessage>
+            ) : null}
             {showRunnerRecovery ? (
               <OnboardingRunnerRecovery
                 setupRuntime={setupRuntime}
@@ -334,7 +371,11 @@ export function OnboardingShell({
               </p>
             )}
             {canEnterConsole && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
-            {firstRunStatus ? <p className="status">{firstRunStatus}</p> : null}
+            {firstRunStatus ? (
+              <AsyncStatusMessage tone="progress" className="status">
+                {firstRunStatus}
+              </AsyncStatusMessage>
+            ) : null}
           </section>
         </div>
       </section>
@@ -453,20 +494,42 @@ function repoNameFromPath(pathValue: string): string {
   return parts[parts.length - 1] || "repo";
 }
 
-function RepoDiagnostics({ diagnostics }: { diagnostics: Diagnostic[] }) {
+function RepoDiagnostics({ id, diagnostics }: { id: string; diagnostics: Diagnostic[] }) {
   if (diagnostics.length === 0) {
     return null;
   }
   return (
-    <div className="diagnostic-list" data-testid="onboarding-repo-diagnostics">
+    <div className="diagnostic-list" id={id} data-testid="onboarding-repo-diagnostics">
       {diagnostics.map((diagnostic, index) => (
-        <p className={diagnostic.level === "error" ? "status err" : "status warn"} key={`${diagnostic.code}-${diagnostic.message}-${index}`}>
+        <AsyncStatusMessage
+          className={diagnostic.level === "error" ? "status err" : "status warn"}
+          key={`${diagnostic.code}-${diagnostic.message}-${index}`}
+          tone={diagnostic.level === "error" ? "error" : "warning"}
+        >
           {diagnostic.level === "error" ? "Error" : "Warning"} [{diagnostic.code}]: {diagnostic.message}
           {diagnostic.suggestion ? <span> Next: {diagnostic.suggestion}</span> : null}
-        </p>
+        </AsyncStatusMessage>
       ))}
     </div>
   );
+}
+
+function repoDiagnosticsID(repoID: string): string {
+  return `onboardingRepoDiagnostics-${repoID}`;
+}
+
+function hasRepoNameError(diagnostics: Diagnostic[]): boolean {
+  return diagnostics.some((diagnostic) => diagnostic.level === "error" && diagnostic.code.startsWith("repo_name"));
+}
+
+function hasRepoSourceError(diagnostics: Diagnostic[]): boolean {
+  return diagnostics.some((diagnostic) => {
+    if (diagnostic.level !== "error") {
+      return false;
+    }
+    const code = diagnostic.code.toLowerCase();
+    return code.includes("repo_path") || code.includes("repo_git_url") || code.includes("repo_source") || code.includes("source");
+  });
 }
 
 function OnboardingDoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {

@@ -51,6 +51,7 @@ async function openSuggestions() {
 
 describe("LocalPathCombobox", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(loadOnboardingPathSuggestions).mockResolvedValue({
       ok: true,
       kind: "workspace",
@@ -112,5 +113,18 @@ describe("LocalPathCombobox", () => {
     expect(screen.getByRole("combobox", { name: "Workspace path" })).toHaveValue("/work/provenarch");
     expect(onSelect).toHaveBeenCalledWith(suggestions[1]);
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("announces suggestion failures and links helper text to the input", async () => {
+    vi.mocked(loadOnboardingPathSuggestions).mockRejectedValueOnce(new Error("unavailable"));
+    render(<PathComboboxHarness />);
+
+    const input = screen.getByRole("combobox", { name: "Workspace path" });
+    fireEvent.focus(input);
+
+    await screen.findByText("Suggestions unavailable. Typed path still works.");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveAttribute("id", "workspace-path-helper");
+    expect(input).toHaveAttribute("aria-describedby", "workspace-path-helper");
   });
 });

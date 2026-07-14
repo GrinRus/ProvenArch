@@ -137,7 +137,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19R2` keyboard path combobox after `19R1`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19R3` accessible async announcements after `19R2`
+- [x] Continue PR-1 with `19R3` accessible async announcements after `19R2`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1702,8 +1704,10 @@ and keep pointer selection behavior unchanged.
 - [x] Support Enter selection of the active option and Escape close/clear active option.
 - [x] Preserve pointer selection parity and existing onboarding `onSelect` side effects.
 - [x] Cover keyboard-only selection, Escape close and active descendant behavior in Vitest.
-- [ ] Continue PR-1 with `19R3` accessible async announcements after `19R2` review/commit
+- [x] Continue PR-1 with `19R3` accessible async announcements after `19R2` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change onboarding/source API contracts or path suggestion payloads.
@@ -1755,6 +1759,82 @@ TypeScript app-contract payload changes.
   Enter/Escape handling, pointer parity coverage, regenerated embedded UI assets, and completed
   targeted UI tests plus full DoD with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r3-accessible-async-announcements
+
+### Context
+`19R3` follows committed `19R2` and completes the Epic 19 accessibility primitives band. The UI
+has scattered `.status`, `.error-text` and `.error-banner` messages for onboarding validation,
+doctor checks, first-run start and path-suggestion loading/error states. These messages are visible
+but not consistently announced to assistive technology, and repo field diagnostics are not linked
+back to the offending inputs.
+
+### Goals (must have)
+- [x] Add a shared async status primitive for assertive error alerts and polite progress/success
+      announcements.
+- [x] Use the primitive for onboarding top-level errors, source validation status, readiness status,
+      first-run status and local path suggestion helper states.
+- [x] Link repo name/source field errors with `aria-invalid` and `aria-describedby`.
+- [x] Preserve existing copy, selectors, onboarding flow and backend/API contracts.
+- [x] Cover alert, polite status and field diagnostic linkage in Vitest.
+- [ ] Continue PR-1 with `19S1` confirmed shell dead-code cleanup after `19R3`
+      review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not redesign onboarding, Review/Publish IA or stage composition.
+- [ ] Do not change validation/doctor API payloads or backend behavior.
+- [ ] Do not implement global toast infrastructure, destructive confirmations or Epic 20 dialogs.
+- [ ] Do not change path combobox keyboard behavior beyond helper announcement wiring.
+
+### Implementation
+1) Add `AsyncStatusMessage` in a shared component file. Error tone uses `role="alert"` /
+   assertive semantics; progress/success/info/warning tones use polite `role="status"` semantics.
+2) Replace onboarding top-level `error-banner`, source validation result, doctor result and
+   first-run status messages with the shared primitive while preserving existing class names and
+   text.
+3) Extend `LocalPathCombobox` with optional `invalid`/`describedBy` props and announce its helper
+   text through the shared primitive.
+4) In onboarding repo rows, derive diagnostics per row, add stable diagnostics IDs, wire local
+   repo-name and repo-source errors to `aria-invalid` / `aria-describedby`, and keep diagnostic
+   text visible.
+5) Add focused component tests for alert semantics, polite live status and field-linked
+   diagnostics.
+
+### Interfaces
+Frontend-only component behavior change. No backend, schema, workspace, artifact, HTTP or
+TypeScript app-contract payload changes. `LocalPathCombobox` receives optional internal UI props
+only.
+
+### Tests
+- Error messages render as assertive alerts.
+- Progress/success messages render as polite statuses.
+- Repo name/source inputs with local diagnostics have `aria-invalid="true"` and
+  `aria-describedby` pointing to visible diagnostic text.
+- Local path combobox helper errors are announced while preserving existing keyboard tests.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility contract is enforced by
+  focused component tests.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted accessibility primitive/onboarding/combobox Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no backend, schema, Epic 20 IA or `19S*` cleanup scope leaked into this
+      slice.
+- [x] Commit `19R3: announce async UI state accessibly`.
+
+### Progress log
+- 2026-07-14: Started `19R3` after clean `19R2` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes shared UI announcement semantics and field accessibility.
+- 2026-07-14: Added shared async status announcements, wired onboarding/path-combobox statuses,
+  linked repo field diagnostics with invalid/describedby attributes, added focused accessibility
+  regression tests, regenerated embedded UI assets, and completed full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

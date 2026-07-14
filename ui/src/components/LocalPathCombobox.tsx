@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { OnboardingPathSuggestion } from "../lib/appContracts";
 import { loadOnboardingPathSuggestions } from "../lib/onboardingApi";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 
 type LocalPathComboboxProps = {
   id: string;
@@ -10,14 +11,17 @@ type LocalPathComboboxProps = {
   value: string;
   placeholder?: string;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
   testID?: string;
   onChange: (value: string) => void;
   onSelect?: (suggestion: OnboardingPathSuggestion) => void;
 };
 
-export function LocalPathCombobox({ id, label, kind, value, placeholder, disabled, testID, onChange, onSelect }: LocalPathComboboxProps) {
+export function LocalPathCombobox({ id, label, kind, value, placeholder, disabled, invalid, describedBy, testID, onChange, onSelect }: LocalPathComboboxProps) {
   const generatedID = useId();
   const listboxID = `${id || generatedID}-suggestions`;
+  const helperID = `${id || generatedID}-helper`;
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<OnboardingPathSuggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -90,6 +94,7 @@ export function LocalPathCombobox({ id, label, kind, value, placeholder, disable
     }
     return "";
   }, [items.length, open, status]);
+  const describedByIDs = [describedBy, helperText ? helperID : ""].filter(Boolean).join(" ") || undefined;
 
   const selectSuggestion = (item: OnboardingPathSuggestion) => {
     if (blurTimer.current !== null) {
@@ -131,6 +136,8 @@ export function LocalPathCombobox({ id, label, kind, value, placeholder, disable
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-activedescendant={activeOptionID}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedByIDs}
         onBlur={() => {
           if (blurTimer.current !== null) {
             window.clearTimeout(blurTimer.current);
@@ -198,7 +205,11 @@ export function LocalPathCombobox({ id, label, kind, value, placeholder, disable
               </button>
             );
           })}
-          {helperText ? <p className={status === "error" ? "path-combobox-helper is-error" : "path-combobox-helper"}>{helperText}</p> : null}
+          {helperText ? (
+            <AsyncStatusMessage id={helperID} tone={status === "error" ? "error" : status === "loading" ? "progress" : "info"} className={status === "error" ? "path-combobox-helper is-error" : "path-combobox-helper"}>
+              {helperText}
+            </AsyncStatusMessage>
+          ) : null}
         </div>
       ) : null}
     </div>
