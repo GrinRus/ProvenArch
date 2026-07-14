@@ -1064,21 +1064,20 @@ trap 'on_matrix_signal INT' INT
 trap 'on_matrix_signal HUP' HUP
 trap 'on_matrix_exit $?' EXIT
 
-if ! python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" <<'PY'
+if ! python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" "$PROVENARCH_ROOT/scripts" <<'PY'
 import sys
 from pathlib import Path
-
-try:
-    import yaml  # type: ignore
-except Exception as exc:
-    raise SystemExit(f"PyYAML is required for parsing matrix file: {exc}")
 
 matrix_path = Path(sys.argv[1]).resolve()
 out_path = Path(sys.argv[2]).resolve()
 release_mode_raw = str(sys.argv[3]).strip().lower()
 release_mode = release_mode_raw in {"1", "true", "yes", "on"}
 timeout_profile_path = Path(sys.argv[4]).resolve()
-payload = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
+scripts_dir = Path(sys.argv[5]).resolve()
+sys.path.insert(0, str(scripts_dir))
+from yaml_compat import load_yaml_file
+
+payload = load_yaml_file(matrix_path)
 allowed_timeout_profiles = {"short-window", "medium-window", "extended-window"}
 
 if isinstance(payload, dict):
