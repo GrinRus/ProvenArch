@@ -22,7 +22,6 @@ import {
   runtimeStepProviderOrder,
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
-  type Diagnostic,
   type GuidedRepo,
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,

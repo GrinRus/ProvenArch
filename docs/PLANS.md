@@ -171,7 +171,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e`
+- [x] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2921,6 +2923,83 @@ interfaces change.
 - 2026-07-14: Removed unused `firstNonEmpty`, confirmed no remaining code references, ran
   prompt-contract tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19x-ui-dead-surface-cleanup
+
+### Context
+`19X` follows committed `19W5e` and closes the UI dead-surface cleanup group
+(`DEAD-008`, `DEAD-009`, `DEAD-010`). A strict TypeScript probe with
+`--noUnusedLocals --noUnusedParameters` still reports the original `DEAD-008` entries:
+`Diagnostic` in `App.tsx`, `issueCount` in `AnalysisRunProgress`, and `nonDiagramArtifacts` in
+`ReviewEvidenceWorkbench`. Reference search also confirms the legacy synchronous QA wrapper
+(`QAAskResponse`, `QAAskRawResponse`, `askArchitectureQuestion`) and hook facade cleanup members
+(`clearRunReviewSummary`, `clearGitDiff`, `selectedDiffPath`, `setSelectedDiffPath`) have no active
+consumers outside internal propagation.
+
+### Goals (must have)
+- [x] Remove the unused `Diagnostic` import from `App.tsx`.
+- [x] Remove unused `issueCount` and `nonDiagramArtifacts` props/call-site wiring from
+      `StagePanels.tsx`.
+- [x] Remove the legacy synchronous QA ask client surface from `qaApi.ts`.
+- [x] Remove unused run-review/Git-diff facade cleanup members from hook return surfaces.
+- [x] Enable TypeScript `noUnusedLocals` and `noUnusedParameters` so these regressions fail
+      canonical UI typecheck.
+- [x] Keep request-gated run review, Git diff, async QA and artifact review behavior unchanged.
+- [x] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X` review/commit
+      boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change Review/Publish IA, Git publication semantics or Epic 20 UX scope.
+- [ ] Do not remove active `Diagnostic` type consumers in validation/onboarding/editor surfaces.
+- [ ] Do not change API endpoints or backend QA compatibility.
+- [ ] Do not refactor StagePanels beyond deleting confirmed dead props/surfaces.
+
+### Implementation
+1) Remove `Diagnostic` from `App.tsx` imports.
+2) Remove `issueCount` from `AnalysisRunProgress` props and call site.
+3) Remove `nonDiagramArtifacts` from `ReviewEvidenceWorkbench` props and call site.
+4) Delete `QAAskResponse`, `QAAskRawResponse`, and `askArchitectureQuestion` from `qaApi.ts`.
+5) Stop returning unused cleanup members from `useRunReview`, `useGitDiff`, and `useRunExplorer`;
+   keep internal request abort/clear behavior where it is actively used.
+6) Add `noUnusedLocals` and `noUnusedParameters` to `ui/tsconfig.json`.
+
+### Interfaces
+Frontend-only cleanup. No backend API, schema, workspace, provider or release interface changes.
+The public TypeScript typecheck contract becomes stricter for unused locals/parameters.
+
+### Tests
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run typecheck --prefix ui`.
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run test --prefix ui -- --run`.
+- `ACP_NODE_TOOL_CANDIDATES=... ./scripts/run-npm.sh run e2e:mock --prefix ui`.
+- Reference search for removed UI identifiers shows no active source consumers.
+- Full DoD remains green.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or fixtures should change.
+
+### Acceptance
+- [x] `noUnusedLocals`/`noUnusedParameters` are enabled and UI typecheck passes.
+- [x] Legacy synchronous QA client and unused hook facade members are removed.
+- [x] UI Vitest and deterministic mock Playwright pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is dead-surface deletion only and does not include Epic 20 UX
+      changes.
+- [x] Commit `19X: remove UI dead surfaces`.
+
+### Progress log
+- 2026-07-14: Started `19X` after clean `19W5e` commit. Using `ui-implementation-qa` for UI
+  implementation and verification. No schema/model-fixture/docs-visible behavior skill is required
+  because the slice deletes confirmed frontend dead surfaces and tightens typecheck only.
+- 2026-07-14: Removed the unused `Diagnostic` import, stale `AnalysisRunProgress.issueCount` and
+  `ReviewEvidenceWorkbench.nonDiagramArtifacts` props, legacy synchronous QA ask wrapper, and
+  unused run-review/Git-diff facade members. Enabled `noUnusedLocals`/`noUnusedParameters`, ran UI
+  typecheck, Vitest, deterministic mock Playwright (`7 passed / 0 skipped`), and completed full DoD
+  with exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`. `make build`
+  regenerated `internal/api/ui_dist` for the UI source change.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

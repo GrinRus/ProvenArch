@@ -7,7 +7,6 @@ import { isAbortError, useRequestGate } from "./useRequestGate";
 export function useGitDiff() {
   const [gitDiff, setGitDiff] = useState<GitDiffResponse | null>(null);
   const [gitDiffStatus, setGitDiffStatus] = useState("");
-  const [selectedDiffPath, setSelectedDiffPath] = useState("");
   const diffRequest = useRequestGate("git-diff");
 
   const loadGitDiff = useCallback(async (options: LoadGitDiffOptions = {}) => {
@@ -20,7 +19,6 @@ export function useGitDiff() {
         return null;
       }
       setGitDiff(payload);
-      setSelectedDiffPath(payload.selected_file?.path ?? payload.selected_path ?? options.path ?? "");
       setGitDiffStatus(payload.empty ? "No workspace Git changes." : "");
       return payload;
     } catch (error) {
@@ -34,20 +32,10 @@ export function useGitDiff() {
     }
   }, [diffRequest]);
 
-  const clearGitDiff = useCallback(() => {
-    diffRequest.abort();
-    setGitDiff(null);
-    setGitDiffStatus("");
-    setSelectedDiffPath("");
-  }, [diffRequest]);
-
   return {
     gitDiff,
     gitDiffStatus,
-    selectedDiffPath,
-    setSelectedDiffPath,
     loadGitDiff,
-    clearGitDiff,
   };
 }
 

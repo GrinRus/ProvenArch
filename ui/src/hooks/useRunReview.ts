@@ -50,16 +50,9 @@ export function useRunReview({ runId, pollSignal }: UseRunReviewOptions) {
     void fetchRunReviewSummary(runId, true);
   }, [fetchRunReviewSummary, pollSignal, runId]);
 
-  function clearRunReviewSummary() {
-    reviewRequest.abort();
-    setRunReviewSummary(null);
-    setRunReviewStatus("");
-  }
-
   return {
     runReviewSummary,
     runReviewStatus,
     fetchRunReviewSummary,
-    clearRunReviewSummary,
   };
 }

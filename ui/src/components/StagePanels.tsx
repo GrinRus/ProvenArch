@@ -1435,7 +1435,6 @@ export function AnalysisStagePanel({
         warningCount={warningCount}
         errorCount={errorCount}
         stepTimeline={stepTimeline}
-        issueCount={issueRows.length}
         blockerCount={blockerRows.length}
         onReviewBlocker={handleReviewBlocker}
       />
@@ -1546,7 +1545,6 @@ function AnalysisRunProgress({
   warningCount,
   errorCount,
   stepTimeline,
-  issueCount,
   blockerCount,
   onReviewBlocker,
 }: {
@@ -1556,7 +1554,6 @@ function AnalysisRunProgress({
   warningCount: number;
   errorCount: number;
   stepTimeline: AnalysisStep[];
-  issueCount: number;
   blockerCount: number;
   onReviewBlocker: () => void;
 }) {
@@ -3193,7 +3190,6 @@ export function ReviewStagePanel({
               overviewArtifact={overviewArtifact}
               findingsArtifact={findingsArtifact}
               artifactGroups={artifactGroups}
-              nonDiagramArtifacts={nonDiagramArtifacts}
               diagramArtifacts={diagramArtifacts}
               selectedArtifact={selectedArtifact}
               selectedArtifactContent={selectedArtifactContent}
@@ -3385,7 +3381,6 @@ function ReviewEvidenceWorkbench({
   overviewArtifact,
   findingsArtifact,
   artifactGroups,
-  nonDiagramArtifacts,
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
@@ -3406,7 +3401,6 @@ function ReviewEvidenceWorkbench({
   overviewArtifact?: Artifact;
   findingsArtifact?: Artifact;
   artifactGroups: ArtifactGroup[];
-  nonDiagramArtifacts: Artifact[];
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
