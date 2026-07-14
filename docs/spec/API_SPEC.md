@@ -198,6 +198,53 @@ Body: отсутствует.
 - `workspace.repo.ref.resolved_via_remote` (warning, `ref` разрешён через `origin/*`)
 - `workspace.repo.ref.head_mismatch` (warning, локальный `HEAD` отличается от ожидаемого `ref`)
 
+### GET `/api/workspace/health`
+Возвращает read-only health snapshot по уже опубликованным workspace artifacts.
+Endpoint вычисляет отчет на запрос, не пишет `reports/health/*`, не запускает runtime
+provider и не блокирует run/review/publish/Q&A flows.
+
+Initial K2a checks:
+- observation provenance в `model/entities/*.yaml` и `model/edges/*.yaml` без evidence;
+- `reports/agent-outputs/domains/*.md` без matching `charter/cards/domains/<domain-id>.md`;
+- `proposals/*/proposal.md` без review sections `Evidence`, `Citations`, `Unresolved`/`Open questions`;
+- количество unresolved questions в `reports/coverage/open-questions.md` как info item.
+
+**200**
+```json
+{
+  "version": 1,
+  "generated_at": "2026-07-10T00:00:00Z",
+  "status": "warn",
+  "summary": {
+    "info": 1,
+    "warning": 1,
+    "error": 0
+  },
+  "items": [
+    {
+      "id": "model.observation.missing_evidence",
+      "severity": "warning",
+      "title": "Observation entity \"svc.payments\" has no evidence",
+      "path": "model/entities/svc.payments.yaml",
+      "related_paths": []
+    }
+  ]
+}
+```
+
+`status`:
+- `pass` — health findings отсутствуют;
+- `warn` — есть advisory warnings/info, но это не promotion gate;
+- `fail` — scanner нашел health item severity `error`, например malformed model YAML. HTTP status при этом остается `200`, потому что это состояние workspace artifacts, а не ошибка API lifecycle.
+
+`items[].severity`:
+- `info`
+- `warning`
+- `error`
+
+**500**
+- `workspace_health_failed`
+
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
 

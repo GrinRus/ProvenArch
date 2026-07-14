@@ -28,6 +28,8 @@ PROVIDER_UNAVAILABLE_MARKERS = (
 )
 
 ARTIFACT_SMOKE_SENTINEL_TEXT = "ACP_ARTIFACT_SMOKE_READY"
+DEFAULT_CODEX_MODEL = "gpt-5.5"
+DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
 CODEX_RUNTIME_DISABLE_ARGS = (
     "--disable", "plugins",
     "--disable", "remote_plugin",
@@ -78,27 +80,23 @@ def resolve_profile(script_path: Path) -> tuple[dict[str, object], str]:
     return json.loads(json_raw), line_raw
 
 
-def parse_codex_model_from_config(config_text: str) -> str:
-    for raw_line in (config_text or "").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = re.match(r'^model\s*=\s*["\']([^"\']+)["\']\s*$', line)
-        if match:
-            return match.group(1).strip()
-    return ""
+def live_codex_model() -> str:
+    return os.environ.get("ACP_CODEX_MODEL", DEFAULT_CODEX_MODEL).strip()
 
 
-def read_codex_config_text() -> str:
-    codex_home = os.environ.get("CODEX_HOME", "").strip()
-    if codex_home:
-        path = Path(codex_home).expanduser() / "config.toml"
-    else:
-        path = Path.home() / ".codex" / "config.toml"
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
+def live_codex_reasoning_effort() -> str:
+    return os.environ.get("ACP_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT).strip()
+
+
+def codex_model_args() -> list[str]:
+    args: list[str] = []
+    model = live_codex_model()
+    effort = live_codex_reasoning_effort()
+    if model:
+        args.extend(["--model", model])
+    if effort:
+        args.extend(["-c", f'model_reasoning_effort="{effort}"'])
+    return args
 
 
 def parse_semver_tuple(version_line: str) -> tuple[int, int, int] | None:
@@ -109,7 +107,8 @@ def parse_semver_tuple(version_line: str) -> tuple[int, int, int] | None:
 
 
 def codex_model_version_blocker(version_line: str, config_text: str | None = None) -> str:
-    model = parse_codex_model_from_config(config_text if config_text is not None else read_codex_config_text())
+    _ = config_text
+    model = live_codex_model()
     if not model.startswith("gpt-5.5"):
         return ""
     parsed = parse_semver_tuple(version_line)
@@ -157,6 +156,7 @@ def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
             "--json",
             "--color",
             "never",
+            *codex_model_args(),
             *CODEX_RUNTIME_DISABLE_ARGS,
             "--skip-git-repo-check",
             "--sandbox",
@@ -202,6 +202,7 @@ def artifact_smoke_invocation(provider: str, sentinel_path: Path) -> tuple[list[
             "--json",
             "--color",
             "never",
+            *codex_model_args(),
             *CODEX_RUNTIME_DISABLE_ARGS,
             "--skip-git-repo-check",
             "--sandbox",
@@ -585,6 +586,8 @@ def main() -> int:
             "codex": {
                 "path": args.codex_path,
                 "version_line": args.codex_version_line,
+                "model": live_codex_model(),
+                "reasoning_effort": live_codex_reasoning_effort(),
             },
         },
     }

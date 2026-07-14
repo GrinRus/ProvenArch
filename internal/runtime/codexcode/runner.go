@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -184,6 +185,9 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 		"exec",
 		"--json",
 		"--color", "never",
+	}
+	args = appendCodexModelArgs(args)
+	args = append(args,
 		"--disable", "plugins",
 		"--disable", "remote_plugin",
 		"--disable", "plugin_sharing",
@@ -194,7 +198,7 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 		"--ignore-user-config",
 		"--ignore-rules",
 		"--skip-git-repo-check",
-	}
+	)
 	if strings.TrimSpace(permissions.Mode) == acpruntime.PermissionModeManaged {
 		args = append(args, "--sandbox", "workspace-write")
 	} else {
@@ -210,6 +214,16 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 		args = append(args, "--add-dir", dir)
 	}
 	args = append(args, "--ephemeral", "-")
+	return args
+}
+
+func appendCodexModelArgs(args []string) []string {
+	if model := strings.TrimSpace(os.Getenv("ACP_CODEX_MODEL")); model != "" {
+		args = append(args, "--model", model)
+	}
+	if effort := strings.TrimSpace(os.Getenv("ACP_CODEX_REASONING_EFFORT")); effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(effort))
+	}
 	return args
 }
 

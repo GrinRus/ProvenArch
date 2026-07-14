@@ -29,6 +29,7 @@ import {
   type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
   type SystemVersionResponse,
+  type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
@@ -40,6 +41,7 @@ import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
+import { loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 
 export default function App() {
   const [activeStage, setActiveStage] = useState<StageId>("source");
@@ -64,6 +66,9 @@ export default function App() {
   const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
   const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
+  const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
+  const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [workspaceHealthError, setWorkspaceHealthError] = useState("");
 
   const runtimeSettings = useRuntimeSettings({
     setBusy,
@@ -258,6 +263,7 @@ export default function App() {
     if (options.validateWorkspace) {
       await handleValidateWorkspace();
     }
+    void refreshWorkspaceHealth();
   }
 
   function syncOnboardingStatus(status: OnboardingStatusResponse) {
@@ -385,6 +391,28 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function refreshWorkspaceHealth() {
+    setWorkspaceHealthStatus("loading");
+    setWorkspaceHealthError("");
+    try {
+      const report = await loadWorkspaceHealthAPI();
+      setWorkspaceHealthReport(report);
+      setWorkspaceHealthStatus("loaded");
+      return report;
+    } catch (requestError) {
+      setWorkspaceHealthReport(null);
+      setWorkspaceHealthStatus("error");
+      setWorkspaceHealthError(requestError instanceof Error ? requestError.message : "workspace health scan failed");
+      return null;
+    }
+  }
+
+  async function handleValidateWorkspaceWithHealth() {
+    const validation = await handleValidateWorkspace();
+    await refreshWorkspaceHealth();
+    return validation;
   }
 
   function clearFirstRunReadiness() {
@@ -624,31 +652,26 @@ export default function App() {
     return refs;
   }, [diagramArtifacts, nonDiagramArtifacts, selectedArtifact]);
 
-  const workspaceHealth = useMemo<InspectorItem[]>(
-    () => [
-      {
-        severity: validateResult?.ok ? "ok" : validateResult ? "error" : "info",
-        label: "Workspace validation",
-        detail: validateResult ? (validateResult.ok ? "workspace.yaml is valid" : "workspace.yaml has validation errors") : "not checked yet",
-      },
-      {
-        severity: "info",
-        label: "Repo sources",
-        detail: `${validateResult?.resolved_repos?.length ?? guidedRepos.length} configured`,
-      },
-      {
-        severity: doctorWarnings.length > 0 ? "warn" : setupDoctorResult?.ok ? "ok" : "info",
-        label: "Local doctor",
-        detail: setupDoctorResult ? setupDoctorResult.summary : "not checked yet",
-      },
-      {
-        severity: "info",
-        label: "Docs imports",
-        detail: guidedDocsImportsPath || "./docs/imports",
-      },
-    ],
-    [doctorWarnings.length, guidedDocsImportsPath, guidedRepos.length, setupDoctorResult, validateResult],
-  );
+  const workspaceHealth = useMemo<InspectorItem[]>(() => {
+    if (workspaceHealthStatus === "loading") {
+      return [{ severity: "info", label: "Workspace health", detail: "scan running" }];
+    }
+    if (workspaceHealthStatus === "error") {
+      return [{ severity: "error", label: "Workspace health scan failed", detail: workspaceHealthError || "scan failed" }];
+    }
+    if (!workspaceHealthReport) {
+      return [];
+    }
+    if (workspaceHealthReport.items.length === 0) {
+      return [{ severity: "ok", label: "No health findings", detail: "Workspace health scan found no advisory issues." }];
+    }
+    return workspaceHealthReport.items.map((item) => ({
+      severity: workspaceHealthSeverity(item.severity),
+      label: item.id,
+      detail: item.title,
+      path: item.path,
+    }));
+  }, [workspaceHealthError, workspaceHealthReport, workspaceHealthStatus]);
 
   const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
 
@@ -960,11 +983,15 @@ export default function App() {
           selectedRunError={runStatus?.error}
           onSetupRuntimeChange={handleSetupRuntimeChange}
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
-          onValidateWorkspace={() => void handleValidateWorkspace()}
+          onValidateWorkspace={() => void handleValidateWorkspaceWithHealth()}
           onCheckDoctor={() => void handleSetupDoctorCheck()}
           onRunFirstAnalysis={() => void handleSetupFirstRun("analysis")}
           runtimeSettingsPanel={runtimeSettingsPanel}
           artifactCount={artifactCount}
+          workspaceHealthReport={workspaceHealthReport}
+          workspaceHealthStatus={workspaceHealthStatus}
+          workspaceHealthError={workspaceHealthError}
+          onRefreshWorkspaceHealth={() => void refreshWorkspaceHealth()}
           runtimeTimeoutEffective={runtimeTimeoutEffective}
           runtimeExecutionEffective={runtimeExecutionEffective}
           runtimePermissionEffective={runtimePermissionEffective}
@@ -1164,6 +1191,17 @@ function formatPermissionBlockerDetail(request: RuntimePermissionRequest): strin
   const reason = request.reason || request.decision?.message;
   const reasonDetail = reason ? ` Reason: ${reason}` : "";
   return `${step} paused for ${decision}${rule}.${target}${reasonDetail}`;
+}
+
+function workspaceHealthSeverity(severity: string): InspectorItem["severity"] {
+  switch (severity) {
+    case "error":
+      return "error";
+    case "warning":
+      return "warn";
+    default:
+      return "info";
+  }
 }
 
 function deriveNextAction(

@@ -66,6 +66,30 @@ export type BaselineBundleResponse = {
   manifest?: BaselineBundleManifest;
 };
 
+export type WorkspaceHealthSeverity = "info" | "warning" | "error";
+
+export type WorkspaceHealthStatus = "pass" | "warn" | "fail";
+
+export type WorkspaceHealthItem = {
+  id: string;
+  severity: WorkspaceHealthSeverity;
+  title: string;
+  path?: string;
+  related_paths: string[];
+};
+
+export type WorkspaceHealthResponse = {
+  version: number;
+  generated_at: string;
+  status: WorkspaceHealthStatus;
+  summary: {
+    info: number;
+    warning: number;
+    error: number;
+  };
+  items: WorkspaceHealthItem[];
+};
+
 export type RunStartResponse = {
   run_id: string;
   status: string;

@@ -28,18 +28,19 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
 | Code quality audit remediation | in progress (Epic 19 / PR-1) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: crash consistency, lifecycle, contracts, UI correctness/accessibility and deterministic CI; PR-1 has committed `19A` atomic persistence/run-history last-good recovery, `19B` transactional canonical promotion, `19C` async panic isolation, `19D` server-owned shutdown, `19E` coherent API session generation, `19F` fresh unpinned `git_url` resolution, `19G` minimum collect evidence bindings and `19H` symmetric citation/document validation. Current `19I` work pins historical Review artifact reads to selected-run staged bytes. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | planned (post-beta; Epic 20, `20A` selected) | `docs/BACKLOG.md` defines the dependency-ordered corrective program; `docs/PLANS.md` selects immutable run-pinned evidence review as the first P0 slice. Current Console V2 remains the implemented beta baseline until each slice is accepted. |
+| Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17
 - follow-up: 19 active (quality remediation without hosted/frontend-security scope expansion);
   20 active (post-beta UX/UI trust program; first selected slice is `20A`)
-- out of MVP: 12, 13
+- out of MVP: 12, 13, 21 (planned Wave 1)
 
 ---
 
 ## 1. Краткое резюме
 
-Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит и поддерживает **as-is архитектуру** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
+Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит **evidence-backed as-is architecture workspace** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. Текущий `refresh` повторно собирает этот workspace; impact-aware selective maintenance запланирован в Wave 1. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
 
 **В MVP мы сознательно делаем local-first режим**: пользователь разворачивает сервис локально, локально же у него доступны checkout-папки и/или GitHub/GitLab URL, а все git-операции идут через локальный `git` и уже настроенный доступ пользователя. Документы лежат в workspace (например, вручную выгруженные из Confluence). Это снижает барьер внедрения и откладывает вопросы безопасности/комплаенса на Wave 1+.
 
@@ -290,7 +291,7 @@ arch-workspace/
    - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
    - wizard summary, domain/team card overview, baseline prompt bundle status и charter baseline recovery для “Конституции” в `Charter`
    - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state и source validation recovery для blocking repo/source diagnostics
-   - readiness validation, summary cards, provider readiness recovery, doctor checklist и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
+   - readiness validation, summary cards, provider readiness recovery, doctor checklist, read-only workspace health snapshot и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
    - редактор baseline skills/prompts (с версионированием через git)  
    - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
    - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
@@ -510,6 +511,7 @@ Wizard из блоков-шаблонов:
 - git-based branching (commit + proposal branch)
 
 ### Wave 1 (после MVP)
+- evidence-backed architecture home и impact-aware incremental refresh с explainable no-op
 - интеграции с внешними источниками (Confluence/Jira/Notion/etc)  
 - autodocs integration  
 - manager-агенты по Jira/resource skew  

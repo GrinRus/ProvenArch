@@ -23,6 +23,7 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimeprofile"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
+	"github.com/GrinRus/ProvenArch/internal/workspacehealth"
 )
 
 type Server struct {
@@ -117,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/recent-workspaces/forget", s.handleOnboardingRecentWorkspaceForget)
 	mux.HandleFunc("/api/system/info", s.handleSystemInfo)
 	mux.HandleFunc("/api/system/doctor", s.handleSystemDoctor)
+	mux.HandleFunc("/api/workspace/health", s.handleWorkspaceHealth)
 	mux.HandleFunc("/api/workspace/validate", s.handleWorkspaceValidate)
 	mux.HandleFunc("/api/workspace/bundle", s.handleWorkspaceBundle)
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
@@ -488,6 +490,20 @@ func (s *Server) handleWorkspaceValidate(writer http.ResponseWriter, request *ht
 		"warnings":       report.Warnings,
 		"resolved_repos": report.ResolvedRepos,
 	})
+}
+
+func (s *Server) handleWorkspaceHealth(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		writeMethodNotAllowed(writer, http.MethodGet)
+		return
+	}
+
+	report, err := workspacehealth.Scan(request.Context(), s.getWorkspace(), workspacehealth.Options{})
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "workspace_health_failed", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, report)
 }
 
 func (s *Server) handleWorkspaceBundle(writer http.ResponseWriter, request *http.Request) {
