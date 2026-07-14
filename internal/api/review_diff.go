@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -783,12 +782,4 @@ func runGitRaw(ctx context.Context, repoPath string, args ...string) (string, er
 		return "", fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return string(output), nil
-}
-
-func ensureGitDiffTestRepo(ctx context.Context, root string) error {
-	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
-		return nil
-	}
-	_, err := runGit(ctx, root, "init")
-	return err
 }
