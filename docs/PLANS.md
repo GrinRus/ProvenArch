@@ -151,7 +151,11 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19V` Python runtime pinning after `19U2`
+- [x] Continue PR-1 with `19V` Python runtime pinning after `19U2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W2` sharding wrapper cleanup after `19W1`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2271,6 +2275,78 @@ interfaces change.
   (`85.36/77.03/88.54/85.22` statements/branches/functions/lines), ignored generated coverage
   artifacts, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19v-python-runtime-pinning
+
+### Context
+`19V` follows committed `19U2`. Python tests and release verifier scripts currently use bare
+`python3`; required CI does not install a repo-declared Python version, so the Python script/test
+surface can drift across developer machines and runners. The current green local baseline is
+Python `3.10.8`, so this slice pins that exact version and routes repository-owned Python test
+entrypoints through a version-checking wrapper.
+
+### Goals (must have)
+- [x] Add `.python-version` with the exact supported Python version.
+- [x] Add `scripts/run-python.sh` that discovers only the required Python version and fails before
+      running commands when no matching interpreter is available.
+- [x] Route `make test` Python unittest discovery through the wrapper.
+- [x] Add setup-python and wrapper usage to workflows that run Python scripts/tests.
+- [x] Add regression tests for matching and wrong Python interpreter discovery.
+- [x] Update CONTRIBUTING and TESTING_STRATEGY bootstrap documentation.
+- [ ] Continue PR-1 with `19W1` runtime-draft wrapper cleanup after `19V` review/commit boundary
+      is stable.
+
+### Non-goals
+- [ ] Do not rewrite every shell heredoc that invokes `python3`; this slice pins repository test
+      and workflow entrypoints, not provider-authored runtime commands.
+- [ ] Do not add Python package dependency management.
+- [ ] Do not change release evidence semantics or live provider gates.
+- [ ] Do not change Go/Node version policy.
+
+### Implementation
+1) Add `.python-version` containing `3.10.8`.
+2) Add `scripts/run-python.sh` modeled after `scripts/run-go.sh`, supporting `ACP_PYTHON_BIN` and
+   `ACP_PYTHON_TOOL_CANDIDATES` for local/toolchain overrides.
+3) Add `PYTHON ?= ./scripts/run-python.sh` to `Makefile` and use it for Python unittest discovery.
+4) Update backend/release workflows with pinned `actions/setup-python` configured from
+   `.python-version`; route Python commands through `./scripts/run-python.sh`.
+5) Add `scripts/tests/run_python_test.py` for correct/wrong version behavior.
+6) Update docs to state Python `3.10.8` is required for tests/scripts.
+
+### Interfaces
+Tooling/CI/docs only. No backend API, schema, UI runtime, provider, workspace, artifact or release
+matrix interfaces change.
+
+### Tests
+- `python3 -m unittest scripts/tests/run_python_test.py`.
+- Wrong interpreter fixture fails before the requested command runs.
+- Correct interpreter fixture runs normally.
+- Workflow YAML parses.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `CONTRIBUTING.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `.python-version` is present and workflows read it.
+- [x] Makefile Python tests use `scripts/run-python.sh`.
+- [x] Wrong Python version fails before unittest discovery.
+- [x] Correct Python version runs script tests.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no provider/live/runtime behavior scope leaked into this slice.
+- [x] Commit `19V: pin Python test runtime`.
+
+### Progress log
+- 2026-07-14: Started `19V` after clean `19U2` commit. Spec-first and docs-sync rules apply
+  because this slice changes developer/CI runtime bootstrap and documented testing baseline.
+- 2026-07-14: Added `.python-version`, `scripts/run-python.sh`, wrapper tests, setup-python
+  workflow steps and docs. Verified wrong-version fail-fast behavior and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

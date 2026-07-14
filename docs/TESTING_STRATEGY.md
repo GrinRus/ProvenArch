@@ -179,7 +179,7 @@ Implemented required jobs:
   - parse examples/fixtures
 - `backend`
   - `go test ./...`
-  - `python3 -m unittest discover -s scripts/tests -p '*_test.py'`
+  - `./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
   - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
   - `make test-stress` (coordinator debounce/queue regression loop)
@@ -444,6 +444,9 @@ Release workflow hardening:
 - contract validation tools (`ajv-cli`, `ajv-formats`, `js-yaml`) live in
   `tools/contracts`; version changes require an explicit `package.json`/`package-lock.json`
   review and `make contracts` must run from the lockfile-backed install.
+- Python tooling runtime is pinned by `.python-version` (`3.10.8`). Required CI installs it via
+  `actions/setup-python`, and Makefile/script-test entrypoints use `scripts/run-python.sh` so a
+  wrong interpreter fails before Python suites or verifier scripts run.
 - основной backend test loop предполагает `go test`
 - canonical `make lint` проверяет Go formatting, ShellCheck для production `scripts/**/*.sh`
   и UI TypeScript typecheck; ShellCheck baseline — `0.11.x`, live provider/network access не

@@ -1,5 +1,6 @@
 GO ?= ./scripts/run-go.sh
 NPM ?= ./scripts/run-npm.sh
+PYTHON ?= ./scripts/run-python.sh
 UI_DIR := ui
 CONTRACT_TOOLS_DIR := tools/contracts
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
@@ -21,7 +22,7 @@ contracts:
 
 test: contracts
 	$(GO) test ./...
-	python3 -m unittest discover -s scripts/tests -p '*_test.py'
+	$(PYTHON) -m unittest discover -s scripts/tests -p '*_test.py'
 	$(NPM) run test --prefix $(UI_DIR) -- --run
 
 test-stress:

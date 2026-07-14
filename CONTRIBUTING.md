@@ -8,7 +8,10 @@ ACP — **AI-native** и **spec-first** проект.
 3) Относитесь к `schemas/*` и `docs/spec/*` как к контрактам
 
 ## Local bootstrap
-- Требуемый стек: Go exact version из `.go-version`, Node exact version из `.node-version`, npm 10.x, Git
+- Требуемый стек: Go exact version из `.go-version`, Node exact version из `.node-version`,
+  Python exact version из `.python-version`, npm 10.x, Git.
+- Репозиторные Python tests/scripts запускайте через `./scripts/run-python.sh`; wrapper fail-fast
+  остановит suite до запуска, если найденный `python3` не совпадает с `.python-version`.
 - `go.mod` остаётся на language compatibility level `go 1.20`; не используйте это как разрешение собирать release устаревшим Go toolchain.
 - Установите зависимости: `make bootstrap`
 - Contract validation uses a separate locked npm toolchain in `tools/contracts`. `make contracts`

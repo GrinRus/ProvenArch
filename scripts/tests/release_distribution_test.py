@@ -141,6 +141,25 @@ class ReleaseDistributionTest(unittest.TestCase):
                     self.assertEqual(".go-version", with_config.get("go-version-file"))
                     self.assertNotIn("go-version", with_config)
 
+    def test_python_workflows_use_repository_python_version_file(self) -> None:
+        workflow_names = (
+            "backend.yml",
+            "release.yml",
+        )
+
+        for workflow_name in workflow_names:
+            with self.subTest(workflow=workflow_name):
+                setup_python_steps = [
+                    step
+                    for step in self._workflow_steps(workflow_name)
+                    if step.get("uses", "").startswith("actions/setup-python@")
+                ]
+                self.assertTrue(setup_python_steps, workflow_name)
+                for step in setup_python_steps:
+                    with_config = step.get("with", {})
+                    self.assertEqual(".python-version", with_config.get("python-version-file"))
+                    self.assertNotIn("python-version", with_config)
+
     def test_dependency_review_workflow_uses_known_pinned_action_release(self) -> None:
         steps = list(self._workflow_steps("dependency-review.yml"))
         review_step = next(
