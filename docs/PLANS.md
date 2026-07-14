@@ -133,7 +133,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19Q` generic refresh semantic guard after `19P`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19R1` ARIA tabs controller after `19Q`
+- [x] Continue PR-1 with `19R1` ARIA tabs controller after `19Q`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19R2` keyboard path combobox after `19R1`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1553,7 +1555,9 @@ domain whitelist.
 - [x] Emit deterministic diagnostic findings/warnings for every filtered candidate class.
 - [x] Preserve legitimate same-repo/same-domain entities and leave init collect behavior unchanged.
 - [x] Document the generic policy in architecture/ADR without schema or provider-list changes.
-- [ ] Continue PR-1 with `19R1` ARIA tabs controller after `19Q` review/commit boundary is stable.
+- [x] Continue PR-1 with `19R1` ARIA tabs controller after `19Q` review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not add or change shard-pack, final-index, citation-index or workspace schemas.
@@ -1606,6 +1610,76 @@ contract or provider list changes.
   evidence-scope guard, added pure/apply-path tests, documented architecture/ADR rationale, and
   completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
   `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r1-accessible-tabs-controller
+
+### Context
+`19R1` follows committed `19Q` and starts the accessibility primitives band. The UI already has a
+shared `TabNav` component used by Analysis, Review, Proposal and Publish surfaces, but it only sets
+`role="tab"` / `aria-selected`. It does not implement roving tabindex, Arrow/Home/End keyboard
+navigation, or stable `tab` -> `tabpanel` relationships. Epic 20 will reuse this primitive, so the
+fix should be centralized rather than duplicated per stage.
+
+### Goals (must have)
+- [x] Add reusable roving-tabindex keyboard behavior to `TabNav`.
+- [x] Support ArrowLeft/ArrowRight/ArrowUp/ArrowDown plus Home/End.
+- [x] Expose stable tab and tabpanel IDs through a small shared helper.
+- [x] Wire current `TabNav` consumers to matching active tabpanel relationships without changing
+      user-visible IA or tab labels.
+- [x] Cover keyboard navigation, single tabbable tab, and aria-controls/labelledby links in Vitest.
+- [ ] Continue PR-1 with `19R2` keyboard path combobox after `19R1` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not redesign Review/Publish IA; that remains Epic 20.
+- [ ] Do not implement path combobox keyboard behavior; that remains `19R2`.
+- [ ] Do not add async alert/live-region behavior; that remains `19R3`.
+- [ ] Do not introduce a new UI library or change backend/API contracts.
+
+### Implementation
+1) Extend `ui/src/components/TabNav.tsx` with an `idBase` prop, exported tab/panel ID helpers,
+   roving `tabIndex`, and keyboard focus/selection handling.
+2) Add `tabPanelProps(idBase, value)` helper so consumers use one source of truth for
+   `role="tabpanel"`, `id` and `aria-labelledby`.
+3) Update existing `TabNav` call sites in `StagePanels.tsx` with stable `idBase` values and wrap
+   active tab content/filter result regions with matching tabpanel props.
+4) Add focused component tests for keyboard navigation and ARIA relationships, and keep existing
+   App tests/selectors stable.
+
+### Interfaces
+Frontend-only component API change. No backend, schema, workspace, artifact or public HTTP
+interfaces change.
+
+### Tests
+- Only the selected tab has `tabIndex=0`; inactive tabs have `tabIndex=-1`.
+- Arrow/Home/End keys move focus and selected value deterministically.
+- Each tab has `aria-controls` pointing at the active panel ID; each active panel has
+  `role="tabpanel"` and `aria-labelledby` pointing back to the selected tab.
+- Existing Review/Publish/Analysis tab tests remain green.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility contract is captured by
+  tests and the shared primitive.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted TabNav/App Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19R2`, `19R3`, backend, schema or Epic 20 IA scope leaked into this
+      slice.
+- [x] Commit `19R1: add accessible tabs controller`.
+
+### Progress log
+- 2026-07-14: Started `19R1` after clean `19Q` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes shared UI interaction and accessibility behavior.
+- 2026-07-14: Added roving-tabindex keyboard support, stable tab/panel helpers, wired current
+  `TabNav` consumers to active tabpanels, added focused Vitest coverage, regenerated embedded UI
+  assets, and completed targeted UI tests plus full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

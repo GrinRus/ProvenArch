@@ -5,7 +5,7 @@ import { BaselineGitPanel } from "./BaselineGitPanel";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
-import { TabNav } from "./TabNav";
+import { TabNav, tabPanelProps } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
 import { isAbortError, useRequestGate } from "../hooks/useRequestGate";
@@ -2264,6 +2264,7 @@ function AnalysisStepReview({
           <TabNav
             ariaLabel="Step review tabs"
             className="step-review-tabs"
+            idBase="analysis-step-tabs"
             testId="analysis-step-tabs"
             value={view}
             onChange={(tab) => {
@@ -2275,7 +2276,7 @@ function AnalysisStepReview({
             options={(["artifacts", "logs", "evidence", "diff"] as const).map((tab) => ({ id: tab, label: capitalize(tab), testId: `analysis-step-tab-${tab}` }))}
           />
 
-          <div className="step-review-body">
+          <div className="step-review-body" {...tabPanelProps("analysis-step-tabs", view)}>
             {view === "artifacts" ? (
               selectedStep && selectedStep.artifact_paths.length > 0 ? (
                 <ul className="compact-list">
@@ -3171,6 +3172,7 @@ export function ReviewStagePanel({
         <TabNav
           ariaLabel="Review views"
           className="review-tabs"
+          idBase="review-tabs"
           testId="review-tabs"
           value={reviewView}
           onChange={setReviewView}
@@ -3179,32 +3181,34 @@ export function ReviewStagePanel({
             { id: "domain-map", label: "Domain map", testId: "review-view-domain-map-tab" },
           ]}
         />
-        {reviewView === "domain-map" ? (
-          <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
-        ) : (
-          <ReviewEvidenceWorkbench
-            coverageSummary={coverageSummary}
-            openQuestions={openQuestions}
-            openQuestionCount={openQuestionCount}
-            trustStatus={trustStatus}
-            overviewArtifact={overviewArtifact}
-            findingsArtifact={findingsArtifact}
-            artifactGroups={artifactGroups}
-            nonDiagramArtifacts={nonDiagramArtifacts}
-            diagramArtifacts={diagramArtifacts}
-            selectedArtifact={selectedArtifact}
-            selectedArtifactContent={selectedArtifactContent}
-            selectedArtifactIsMermaid={selectedArtifactIsMermaid}
-            selectedArtifactIsLoading={selectedArtifactIsLoading}
-            runLogs={runLogs}
-            reviewSummary={reviewSummary}
-            reviewQueue={reviewQueue}
-            gitDiff={gitDiff}
-            gitDiffStatus={gitDiffStatus}
-            onLoadGitDiff={onLoadGitDiff}
-            onOpenArtifact={onOpenArtifact}
-          />
-        )}
+        <div {...tabPanelProps("review-tabs", reviewView)}>
+          {reviewView === "domain-map" ? (
+            <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
+          ) : (
+            <ReviewEvidenceWorkbench
+              coverageSummary={coverageSummary}
+              openQuestions={openQuestions}
+              openQuestionCount={openQuestionCount}
+              trustStatus={trustStatus}
+              overviewArtifact={overviewArtifact}
+              findingsArtifact={findingsArtifact}
+              artifactGroups={artifactGroups}
+              nonDiagramArtifacts={nonDiagramArtifacts}
+              diagramArtifacts={diagramArtifacts}
+              selectedArtifact={selectedArtifact}
+              selectedArtifactContent={selectedArtifactContent}
+              selectedArtifactIsMermaid={selectedArtifactIsMermaid}
+              selectedArtifactIsLoading={selectedArtifactIsLoading}
+              runLogs={runLogs}
+              reviewSummary={reviewSummary}
+              reviewQueue={reviewQueue}
+              gitDiff={gitDiff}
+              gitDiffStatus={gitDiffStatus}
+              onLoadGitDiff={onLoadGitDiff}
+              onOpenArtifact={onOpenArtifact}
+            />
+          )}
+        </div>
       </section>
     </div>
   );
@@ -3465,6 +3469,7 @@ function ReviewEvidenceWorkbench({
             <TabNav
               ariaLabel="Review artifact filters"
               className="artifact-filter-tabs"
+              idBase="review-artifact-filters"
               testId="review-artifact-filters"
               value={artifactFilter}
               onChange={(filter) => {
@@ -3473,37 +3478,39 @@ function ReviewEvidenceWorkbench({
               }}
               options={REVIEW_ARTIFACT_FILTERS}
             />
-            {visibleArtifactGroups.length === 0 ? (
-              <p className="hint">
-                {artifactGroups.length === 0
-                  ? "No selected-run artifacts yet. Run Analysis before evidence review."
-                  : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
-              </p>
-            ) : (
-              <div className="artifact-group-list" data-testid="results-artifacts-panel">
-                {visibleArtifactGroups.map((group) => (
-                  <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
-                    <div className="artifact-group-heading">
-                      <h3>{group.name}</h3>
-                      <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
-                    </div>
-                    <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
-                      {group.artifacts.map((artifact) => (
-                        <li key={`${artifact.kind}-${artifact.path}`}>
-                          <ArtifactPathButton
-                            path={artifact.path}
-                            label={artifact.label}
-                            kind={artifact.kind}
-                            selected={artifact.path === selectedArtifact}
-                            onOpenArtifact={onOpenArtifact}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
-              </div>
-            )}
+            <div {...tabPanelProps("review-artifact-filters", artifactFilter)}>
+              {visibleArtifactGroups.length === 0 ? (
+                <p className="hint">
+                  {artifactGroups.length === 0
+                    ? "No selected-run artifacts yet. Run Analysis before evidence review."
+                    : `No ${reviewArtifactFilterLabel(artifactFilter).toLowerCase()} artifacts are available in this run.`}
+                </p>
+              ) : (
+                <div className="artifact-group-list" data-testid="results-artifacts-panel">
+                  {visibleArtifactGroups.map((group) => (
+                    <section key={group.name} className={`artifact-group ${reviewArtifactGroupCategory(group.name)}`}>
+                      <div className="artifact-group-heading">
+                        <h3>{group.name}</h3>
+                        <span>{reviewArtifactGroupCategoryLabel(group.name)}</span>
+                      </div>
+                      <ul data-testid={group.name === "reports/diagrams" ? "run-diagrams-list" : undefined}>
+                        {group.artifacts.map((artifact) => (
+                          <li key={`${artifact.kind}-${artifact.path}`}>
+                            <ArtifactPathButton
+                              path={artifact.path}
+                              label={artifact.label}
+                              kind={artifact.kind}
+                              selected={artifact.path === selectedArtifact}
+                              onOpenArtifact={onOpenArtifact}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </details>
       </aside>
@@ -3521,70 +3528,73 @@ function ReviewEvidenceWorkbench({
         <TabNav
           ariaLabel="Artifact workbench tabs"
           className="evidence-preview-tabs"
+          idBase="evidence-preview-tabs"
           testId="evidence-preview-tabs"
           value={evidenceView}
           onChange={setEvidenceView}
           options={(["preview", "diff", "evidence", "logs"] as const).map((tab) => ({ id: tab, label: capitalize(tab) }))}
         />
-        {evidenceView === "preview" ? (
-          selectedArtifactIsMermaid ? (
-            <div data-testid="run-diagram-content-panel">
-              <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-              {selectedArtifactIsLoading ? (
-                <p className="hint">Loading diagram...</p>
+        <div {...tabPanelProps("evidence-preview-tabs", evidenceView)}>
+          {evidenceView === "preview" ? (
+            selectedArtifactIsMermaid ? (
+              <div data-testid="run-diagram-content-panel">
+                <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
+                {selectedArtifactIsLoading ? (
+                  <p className="hint">Loading diagram...</p>
+                ) : (
+                  <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
+                    <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
+                  </Suspense>
+                )}
+              </div>
+            ) : (
+              <div data-testid="run-artifact-content-panel">
+                <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
+                <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
+              </div>
+            )
+          ) : null}
+          {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}
+          {evidenceView === "evidence" ? (
+            <div className="review-tab-summary">
+              <h3>Decision evidence</h3>
+              <dl className="compact-defs">
+                <div>
+                  <dt>Selected artifact</dt>
+                  <dd>{selectedArtifact || "none"}</dd>
+                </div>
+                <div>
+                  <dt>Current run</dt>
+                  <dd>{reviewSummary?.run_id || "none selected"}</dd>
+                </div>
+                <div>
+                  <dt>Review queue</dt>
+                  <dd>{reviewQueue.length} item(s)</dd>
+                </div>
+              </dl>
+              <p className="hint">{reviewDecisionSummary(trustStatus, openQuestionCount)}</p>
+            </div>
+          ) : null}
+          {evidenceView === "logs" ? (
+            <div className="review-tab-summary">
+              <h3>Related logs</h3>
+              {runLogs.length === 0 ? (
+                <p className="empty-state">No logs are loaded for the selected run.</p>
               ) : (
-                <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                  <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                </Suspense>
+                <ul className="compact-list">
+                  {runLogs.slice(-8).map((entry) => (
+                    <li key={`review-log-${entry.cursor}`}>
+                      <span>
+                        {entry.level.toUpperCase()} · {entry.step_id || "run"}
+                      </span>
+                      <code>{entry.message}</code>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-          ) : (
-            <div data-testid="run-artifact-content-panel">
-              <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-              <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-            </div>
-          )
-        ) : null}
-        {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}
-        {evidenceView === "evidence" ? (
-          <div className="review-tab-summary">
-            <h3>Decision evidence</h3>
-            <dl className="compact-defs">
-              <div>
-                <dt>Selected artifact</dt>
-                <dd>{selectedArtifact || "none"}</dd>
-              </div>
-              <div>
-                <dt>Current run</dt>
-                <dd>{reviewSummary?.run_id || "none selected"}</dd>
-              </div>
-              <div>
-                <dt>Review queue</dt>
-                <dd>{reviewQueue.length} item(s)</dd>
-              </div>
-            </dl>
-            <p className="hint">{reviewDecisionSummary(trustStatus, openQuestionCount)}</p>
-          </div>
-        ) : null}
-        {evidenceView === "logs" ? (
-          <div className="review-tab-summary">
-            <h3>Related logs</h3>
-            {runLogs.length === 0 ? (
-              <p className="empty-state">No logs are loaded for the selected run.</p>
-            ) : (
-              <ul className="compact-list">
-                {runLogs.slice(-8).map((entry) => (
-                  <li key={`review-log-${entry.cursor}`}>
-                    <span>
-                      {entry.level.toUpperCase()} · {entry.step_id || "run"}
-                    </span>
-                    <code>{entry.message}</code>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </section>
 
       <aside className="review-intel" id="review-trust" data-testid="review-citation-coverage">
@@ -4243,6 +4253,7 @@ export function ProposalsStagePanel({
           <TabNav
             ariaLabel="Proposal review tabs"
             className="proposal-preview-tabs"
+            idBase="proposal-preview-tabs"
             testId="proposal-preview-tabs"
             value={proposalView}
             onChange={setProposalView}
@@ -4250,14 +4261,14 @@ export function ProposalsStagePanel({
           />
 
           {proposalView === "preview" ? (
-            <div className="proposal-tab-panel">
+            <div className="proposal-tab-panel" {...tabPanelProps("proposal-preview-tabs", proposalView)}>
               <h3>{selectedProposalArtifact?.path || "Select a proposal artifact"}</h3>
               <pre>{selectedProposalArtifact ? (selectedProposalIsLoading ? "Loading proposal..." : selectedArtifactContent || "No preview content returned.") : "Select a proposal, ADR, RFC or checklist artifact from the package list."}</pre>
             </div>
           ) : null}
 
           {proposalView === "evidence" ? (
-            <div className="proposal-tab-panel">
+            <div className="proposal-tab-panel" {...tabPanelProps("proposal-preview-tabs", proposalView)}>
               <h3>Linked evidence</h3>
               {proposalReview.evidenceArtifacts.length === 0 ? (
                 <p className="hint">No findings, coverage or as-is evidence artifacts are available in the selected run.</p>
@@ -4274,7 +4285,7 @@ export function ProposalsStagePanel({
           ) : null}
 
           {proposalView === "changelog" ? (
-            <div className="proposal-tab-panel">
+            <div className="proposal-tab-panel" {...tabPanelProps("proposal-preview-tabs", proposalView)}>
               <h3>Changelog</h3>
               {proposalReview.changelogArtifacts.length === 0 ? (
                 <p className="hint">No changelog artifact is available yet. Keep this as a publication blocker or generate proposals again.</p>
@@ -4291,14 +4302,14 @@ export function ProposalsStagePanel({
           ) : null}
 
           {proposalView === "diff" ? (
-            <div className="proposal-tab-panel">
+            <div className="proposal-tab-panel" {...tabPanelProps("proposal-preview-tabs", proposalView)}>
               <h3>Diff preview</h3>
               <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} />
             </div>
           ) : null}
 
           {proposalView === "logs" ? (
-            <div className="proposal-tab-panel">
+            <div className="proposal-tab-panel" {...tabPanelProps("proposal-preview-tabs", proposalView)}>
               <h3>Run logs</h3>
               {runLogs.length === 0 ? (
                 <p className="empty-state">No logs are loaded for the selected run.</p>
@@ -5366,68 +5377,72 @@ export function PublishStagePanel({
           <TabNav
             ariaLabel="Publish artifact filters"
             className="artifact-filter-tabs"
+            idBase="publish-artifact-filters"
             testId="publish-artifact-filters"
             value={artifactFilter}
             onChange={setArtifactFilter}
             options={PUBLISH_ARTIFACT_FILTERS}
           />
-          {visibleChangedFiles.length ? (
-            <div className="publish-artifact-list compact" role="list" aria-label="changed workspace files">
-              {visibleChangedFiles.slice(0, 16).map((file) => (
-                <div key={file.path} role="listitem">
-                  <button
-                    type="button"
-                    className={`publish-artifact-row${selectedDiffFilePath === file.path ? " is-selected" : ""}`}
-                    onClick={() => {
-                      setPublishView("diff");
-                      onLoadGitDiff({ path: file.path });
-                    }}
-                    aria-pressed={selectedDiffFilePath === file.path}
-                  >
-                    <span>{file.path}</span>
-                    <code>
-                      {file.status} · +{file.additions}/-{file.deletions}
-                    </code>
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {filteredPublishArtifacts.length === 0 ? (
-            <p className="empty-state" data-testid="publish-artifact-filter-empty">
-              {publishArtifacts.length === 0
-                ? "No selected-run artifacts are available for publication preview."
-                : `No ${publishArtifactFilterLabel(artifactFilter).toLowerCase()} artifact refs are available in this publication view.`}
-            </p>
-          ) : (
-            <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
-              {filteredPublishArtifacts.slice(0, 12).map((artifact) => (
-                <div key={artifact.path} role="listitem">
-                  <button
-                    type="button"
-                    className={`publish-artifact-row${activePreviewPath === artifact.path ? " is-selected" : ""}`}
-                    onClick={() => handleSelectPublishArtifact(artifact.path)}
-                    aria-pressed={activePreviewPath === artifact.path}
-                  >
-                    <span>{artifact.label || artifact.path}</span>
-                    <code>{artifact.path}</code>
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div {...tabPanelProps("publish-artifact-filters", artifactFilter)}>
+            {visibleChangedFiles.length ? (
+              <div className="publish-artifact-list compact" role="list" aria-label="changed workspace files">
+                {visibleChangedFiles.slice(0, 16).map((file) => (
+                  <div key={file.path} role="listitem">
+                    <button
+                      type="button"
+                      className={`publish-artifact-row${selectedDiffFilePath === file.path ? " is-selected" : ""}`}
+                      onClick={() => {
+                        setPublishView("diff");
+                        onLoadGitDiff({ path: file.path });
+                      }}
+                      aria-pressed={selectedDiffFilePath === file.path}
+                    >
+                      <span>{file.path}</span>
+                      <code>
+                        {file.status} · +{file.additions}/-{file.deletions}
+                      </code>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {filteredPublishArtifacts.length === 0 ? (
+              <p className="empty-state" data-testid="publish-artifact-filter-empty">
+                {publishArtifacts.length === 0
+                  ? "No selected-run artifacts are available for publication preview."
+                  : `No ${publishArtifactFilterLabel(artifactFilter).toLowerCase()} artifact refs are available in this publication view.`}
+              </p>
+            ) : (
+              <div className="publish-artifact-list" role="list" aria-label="publish artifact preview list">
+                {filteredPublishArtifacts.slice(0, 12).map((artifact) => (
+                  <div key={artifact.path} role="listitem">
+                    <button
+                      type="button"
+                      className={`publish-artifact-row${activePreviewPath === artifact.path ? " is-selected" : ""}`}
+                      onClick={() => handleSelectPublishArtifact(artifact.path)}
+                      aria-pressed={activePreviewPath === artifact.path}
+                    >
+                      <span>{artifact.label || artifact.path}</span>
+                      <code>{artifact.path}</code>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="publish-preview-panel" id="publish-preview-panel" data-testid="publish-preview-panel">
           <TabNav
             ariaLabel="Publish preview tabs"
             className="publish-preview-tabs"
+            idBase="publish-preview-tabs"
             testId="publish-preview-tabs"
             value={publishView}
             onChange={setPublishView}
             options={(["preview", "diff", "evidence", "changelog"] as const).map((view) => ({ id: view, label: publishTabLabel(view) }))}
           />
-          <div className="publish-tab-panel" data-testid="publish-tab-panel">
+          <div className="publish-tab-panel" data-testid="publish-tab-panel" {...tabPanelProps("publish-preview-tabs", publishView)}>
             {publishView === "preview" ? (
               <div className="publish-selected-preview" data-testid="publish-selected-preview">
                 <h2>Selected artifact preview</h2>
