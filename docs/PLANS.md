@@ -165,7 +165,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W5b` model store residual cleanup after `19W5a`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
+- [x] Continue PR-1 with `19W5c` orchestrator quality residual cleanup after `19W5b`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2737,6 +2739,66 @@ interfaces change.
 - 2026-07-14: Removed unused `Store.removeFile`, confirmed no remaining references, ran model
   store tests, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5c-orchestrator-quality-residual-cleanup
+
+### Context
+`19W5c` follows committed `19W5b`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+package-local residual at `internal/orchestrator/quality.go:241`. In the current tree this is the
+unused `assessLiveReportSurfaceWarnings` wrapper; active code and tests call
+`assessLiveReportSurfaceSignals` directly.
+
+### Goals (must have)
+- [x] Remove unused `assessLiveReportSurfaceWarnings`.
+- [x] Keep run quality summary generation and artifact-quality signal behavior unchanged.
+- [x] Verify orchestrator quality tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
+      review/commit boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change artifact-quality signal thresholds, messages or ordering.
+- [ ] Do not change report render context behavior or run warning synthesis.
+- [ ] Do not change runtime recovery counters or failure classification.
+- [ ] Do not start `19W5d` reports compiler cleanup in this slice.
+
+### Implementation
+1) Delete the unused `assessLiveReportSurfaceWarnings` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator -run 'AssessLiveReportSurfaceSignals|RuntimeDiagnosticCounters|AssessRunArtifactInventory' -count=1`.
+- `./scripts/run-go.sh test ./internal/orchestrator -count=1`.
+- Reference search for `assessLiveReportSurfaceWarnings` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Orchestrator quality residual helper is removed without alias/replacement.
+- [x] Targeted orchestrator quality tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5d` work.
+- [x] Commit `19W5c: remove orchestrator quality residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5c` after clean `19W5b` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  orchestrator quality dead helper only.
+- 2026-07-14: Removed unused `assessLiveReportSurfaceWarnings`, confirmed no remaining code
+  references in `internal/orchestrator`, ran targeted orchestrator quality tests and full
+  orchestrator package tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

@@ -238,15 +238,6 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
 }
 
-func assessLiveReportSurfaceWarnings(ws workspace.Root, ctx reports.ReportRenderContext, status RunStatus) []string {
-	signals := assessLiveReportSurfaceSignals(ws, ctx, status, nil, runQualityTotals{})
-	warnings := make([]string, 0, len(signals))
-	for _, signal := range signals {
-		warnings = append(warnings, signal.Message)
-	}
-	return normalizeOrderedUniqueStrings(warnings)
-}
-
 func runtimeRecoveryQualitySignals(counters runtimeRecoveryCounters, partialFailureCount int) []runQualitySignal {
 	signals := []runQualitySignal{}
 	if counters.RepairAttempts >= 2 {
