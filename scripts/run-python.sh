@@ -75,6 +75,7 @@ for python_bin in "${candidate_bins[@]}"; do
     fi
     continue
   fi
+  # shellcheck disable=SC2093 # This wrapper intentionally hands off to the selected Python binary.
   exec "$python_bin" "$@"
 done
 
@@ -88,7 +89,9 @@ if [[ -n "$required_python_version" ]]; then
 fi
 
 if [[ -n "$first_available" ]]; then
+  # shellcheck disable=SC2093 # This wrapper intentionally hands off to the selected Python binary.
   exec "$first_available" "$@"
 fi
 
+# shellcheck disable=SC2093 # This wrapper intentionally hands off to Python.
 exec python3 "$@"

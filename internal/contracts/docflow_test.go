@@ -284,7 +284,15 @@ func TestParseShardPackManifestRejectsEmptyDocuments(t *testing.T) {
   "agent_role": "shard-analyst",
   "artifact_root": "/tmp/run-1/shard",
   "documents": [],
-  "citations": [],
+  "citations": [
+    {
+      "id": "cite.payments.readme",
+      "repo": "primary",
+      "path": "README.md",
+      "claim_ids": ["claim.payments"],
+      "document_ids": ["doc.domain.payments"]
+    }
+  ],
   "semantic": {
     "coverage": {"observed": [], "missing": [], "notes": []},
     "questions": [],
