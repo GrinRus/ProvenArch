@@ -966,8 +966,10 @@ state. This creates duplicate-action risk and hides the server-accepted `run_id`
 - [x] Avoid duplicate start/cancel requests after accepted mutation acknowledgement.
 - [x] Reuse the `19J` request-gated detail loading behavior without introducing another async
       state primitive.
-- [ ] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1` review/commit
+- [x] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change backend APIs, schemas or run start/cancel response formats.
@@ -1027,6 +1029,87 @@ the only documentation update unless implementation changes user-facing recovery
   passed: UI typecheck, targeted App mutation acknowledgement tests, UI Vitest `98/98`,
   `go test ./internal/docsync`, and full DoD with exact Node 22.21.1: `make contracts`,
   `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19k2-qa-provisional-run-ordering
+
+### Context
+`19K2` follows committed `19K1`. The Ask panel still treats accepted Q&A start and follow-up
+detail/history loading as one mutation: `startQARun` clears the selected answer, waits for
+`GET /api/qa/runs/<run_id>`, and reports any post-acknowledgement failure as a failed Q&A
+request. Initial history load, manual history refresh and selected-run detail loads also use
+local cancel booleans instead of request-key ownership. A late history/detail response can
+therefore replace a newer selected Q&A run, and an accepted QA run can disappear until polling
+recovers.
+
+### Goals (must have)
+- [x] Create and select a provisional Q&A run immediately after accepted
+      `POST /api/qa/runs`.
+- [x] Treat the first failed detail/history GET after accepted Q&A start as recoverable
+      reconciliation status, not a failed submit.
+- [x] Keep history, selected detail and polling writes keyed so the last selected Q&A run wins.
+- [x] Disable double submit while an accepted Q&A run is reconciling or active.
+- [x] Reuse the `19J` request gate primitive instead of adding another async-state model.
+- [ ] Continue PR-1 with `19L` editor draft safety after `19K2` review/commit boundary is stable.
+
+### Non-goals
+- [ ] Do not change pipeline start/cancel acknowledgement; that was `19K1`.
+- [ ] Do not change manifest/editor draft behavior; that remains `19L`.
+- [ ] Do not change backend Q&A endpoints, schemas or response formats.
+- [ ] Do not implement Epic 20 Ask IA/source-mode changes.
+
+### Implementation
+1) Extend `qaApi` helpers so history/detail requests can receive an `AbortSignal` without
+   changing backend URLs.
+2) In `AskStagePanel`, add request gates for Q&A history and selected-detail ownership.
+   Initial history load, manual refresh, selected history row loads and accepted-start detail
+   reconciliation must only write visible state when their token is current.
+3) Build a provisional `QARunResponse` from the accepted start response plus the submitted
+   question, upsert it into history, select it and display an accepted/reconciling status before
+   detail GET.
+4) If post-acknowledgement detail/history reconciliation fails, keep the provisional run selected
+   and show a recoverable reconciliation message. The accepted submit returns without allowing a
+   second submit until the detail/polling loop owns the same run.
+5) Keep polling scoped to the currently selected active QA run, and ignore/abort stale polling
+   results after a newer selection or submission.
+
+### Interfaces
+Frontend-only helper signatures and Ask state flow. HTTP, backend, schemas and public artifact
+contracts remain unchanged.
+
+### Tests
+- Accepted Q&A start remains selected after the first detail GET fails; later polling reconciles
+  the same run ID.
+- Double submit is disabled while the accepted Q&A run is reconciling or active.
+- A delayed old history response cannot replace a newer selected/submitted Q&A run.
+- A delayed old selected-run detail response cannot overwrite a newer selected Q&A run.
+- Existing Q&A answer, failure recovery, retry and nullable-evidence tests remain green.
+
+### Docs/fixtures
+No schema, example or fixture changes are expected. `docs/PLANS.md` is the only documentation
+update unless implementation changes operator-visible recovery copy.
+
+### Acceptance
+- [x] Targeted `ui/src/App.test.tsx` Q&A ordering tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19L`, Git publication, queue semantics or Epic 20 work leaked
+      into this slice.
+- [x] Commit `19K2: preserve accepted QA run selection`.
+
+### Progress log
+- 2026-07-14: Started `19K2` after clean `19K1` commit. Spec-first and UI-implementation-QA
+  rules apply because this slice changes frontend Q&A async mutation ordering and recovery
+  states.
+- 2026-07-14: Implemented `19K2`. Ask now creates a provisional selected QA run immediately
+  after accepted `POST /api/qa/runs`, keeps accepted runs selected through first detail
+  reconciliation failures, and keys history, selected-detail and polling writes so late older
+  responses cannot replace the latest selection. QA history/detail helpers now accept
+  `AbortSignal`, and regression coverage proves accepted-run recovery, delayed history ordering,
+  delayed detail ordering and disabled double submit while accepted/active. Verification passed:
+  UI typecheck, targeted App Q&A ordering tests, UI Vitest `101/101`, and full DoD with exact
+  Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

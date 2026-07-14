@@ -2462,8 +2462,224 @@ describe("App", () => {
         body: JSON.stringify({ question: "Who owns payments?" }),
       }),
     );
-    expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
+
+  it("keeps an accepted Q&A run selected when the first detail GET fails and later recovers", async () => {
+    const runID = "qa-start-accepted";
+    let startCalls = 0;
+    let detailCalls = 0;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        return jsonResponse({ items: [] });
+      }
+      if (method === "POST" && url === "/api/qa/runs") {
+        startCalls += 1;
+        return jsonResponse({ run_id: runID, status: "queued" }, 202);
+      }
+      if (method === "GET" && url === `/api/qa/runs/${runID}`) {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return jsonResponse({ error: { code: "temporary", message: "qa detail temporarily unavailable" } }, 503);
+        }
+        return jsonResponse({
+          run_id: runID,
+          pipeline: "qa",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:03Z",
+          finished_at: "2026-04-03T12:00:04Z",
+          question: "Who owns payments?",
+          current_step: "qa.ask",
+          runtime_provider: "claude-code",
+          provider: "fake",
+          answer: "Recovered Q&A answer for payments ownership.",
+          citations: [{ path: "reports/as-is/overview.md", reason: "ownership evidence" }],
+          unresolved: [],
+          confidence: 0.87,
+          generated_at: "2026-04-03T12:00:04Z",
+        });
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(runID);
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent("queued");
+    });
+    expect(screen.getByTestId("qa-ask-btn")).toBeDisabled();
+    expect(await screen.findByText(`Q&A run ${runID} accepted; reconciling details failed: qa detail temporarily unavailable`)).toBeInTheDocument();
+    expect(startCalls).toBe(1);
+
+    await waitFor(() => expect(screen.getByTestId("qa-answer")).toHaveTextContent("Recovered Q&A answer for payments ownership."), { timeout: 4000 });
+    expect(screen.getByTestId("qa-run-status")).toHaveTextContent("succeeded");
+    expect(screen.getByTestId("qa-answer-panel")).toHaveTextContent("Confidence: 87%");
+    expect(startCalls).toBe(1);
+  }, 10_000);
+
+  it("keeps the accepted Q&A run selected when an older history response resolves late", async () => {
+    const oldRun = {
+      run_id: "qa-old-history",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T11:00:00Z",
+      finished_at: "2026-04-03T11:00:01Z",
+      question: "Old history question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: "Old history answer SHOULD NOT SELECT",
+      citations: [],
+      unresolved: [],
+      confidence: 0.5,
+      generated_at: "2026-04-03T11:00:01Z",
+    };
+    const newRunID = "qa-new-history";
+    const lateHistory = deferredResponse();
+    let historyCalls = 0;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        historyCalls += 1;
+        if (historyCalls === 1) {
+          return lateHistory.promise;
+        }
+        return jsonResponse({ items: [oldRun] });
+      }
+      if (method === "POST" && url === "/api/qa/runs") {
+        return jsonResponse({ run_id: newRunID, status: "queued" }, 202);
+      }
+      if (method === "GET" && url === `/api/qa/runs/${newRunID}`) {
+        return jsonResponse({
+          run_id: newRunID,
+          pipeline: "qa",
+          status: "succeeded",
+          started_at: "2026-04-03T12:00:03Z",
+          finished_at: "2026-04-03T12:00:04Z",
+          question: "New history question",
+          current_step: "qa.ask",
+          provider: "fake",
+          answer: "New accepted answer remains selected.",
+          citations: [],
+          unresolved: [],
+          confidence: 0.93,
+          generated_at: "2026-04-03T12:00:04Z",
+        });
+      }
+      if (method === "GET" && url === `/api/qa/runs/${oldRun.run_id}`) {
+        return jsonResponse(oldRun);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "New history question" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+
+    expect(await screen.findByTestId("qa-answer")).toHaveTextContent("New accepted answer remains selected.");
+    lateHistory.resolve(jsonResponse({ items: [oldRun] }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRunID);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New accepted answer remains selected.");
+      expect(screen.getByTestId("qa-answer")).not.toHaveTextContent("SHOULD NOT SELECT");
+      expect(screen.getByTestId("qa-run-history")).toHaveTextContent("New history question");
+    });
+  }, 10_000);
+
+  it("ignores a late Q&A detail response after a newer history run is selected", async () => {
+    const lateOldDetail = deferredResponse();
+    const oldRun = {
+      run_id: "qa-old-detail",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T11:00:00Z",
+      finished_at: "2026-04-03T11:00:01Z",
+      question: "Old detail question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: null,
+      citations: [],
+      unresolved: [],
+      confidence: 0.1,
+      generated_at: "2026-04-03T11:00:01Z",
+    };
+    const newRun = {
+      run_id: "qa-new-detail",
+      pipeline: "qa",
+      status: "succeeded",
+      started_at: "2026-04-03T12:00:00Z",
+      finished_at: "2026-04-03T12:00:01Z",
+      question: "New detail question",
+      current_step: "qa.ask",
+      provider: "fake",
+      answer: "New selected detail remains visible.",
+      citations: [],
+      unresolved: [],
+      confidence: 0.9,
+      generated_at: "2026-04-03T12:00:01Z",
+    };
+    let oldDetailRequested = false;
+    const baseFetch = createFetchMock();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (method === "GET" && url === "/api/qa/runs?limit=20") {
+        return jsonResponse({ items: [oldRun, newRun] });
+      }
+      if (method === "GET" && url === `/api/qa/runs/${oldRun.run_id}`) {
+        oldDetailRequested = true;
+        return lateOldDetail.promise;
+      }
+      if (method === "GET" && url === `/api/qa/runs/${newRun.run_id}`) {
+        return jsonResponse(newRun);
+      }
+
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    fireEvent.click(screen.getByTestId("stage-ask"));
+    await waitFor(() => expect(oldDetailRequested).toBe(true));
+
+    fireEvent.click(await screen.findByRole("button", { name: /New detail question/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRun.run_id);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New selected detail remains visible.");
+    });
+
+    lateOldDetail.resolve(
+      jsonResponse({
+        ...oldRun,
+        answer: "Old delayed detail SHOULD NOT SHOW",
+        confidence: 0.99,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("qa-run-status")).toHaveTextContent(newRun.run_id);
+      expect(screen.getByTestId("qa-answer")).toHaveTextContent("New selected detail remains visible.");
+      expect(screen.getByTestId("qa-answer")).not.toHaveTextContent("SHOULD NOT SHOW");
+    });
+  }, 10_000);
 
   it("renders Q&A failure recovery and retries the original question", async () => {
     const fetchMock = createFetchMock({

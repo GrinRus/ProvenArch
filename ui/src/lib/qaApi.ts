@@ -70,10 +70,10 @@ export async function startQAQuestion(question: string): Promise<QARunStartRespo
   });
 }
 
-export async function getQARun(runId: string): Promise<QARunResponse> {
-  return fetchJSON<QARunResponse>(`/api/qa/runs/${encodeURIComponent(runId)}`);
+export async function getQARun(runId: string, signal?: AbortSignal): Promise<QARunResponse> {
+  return fetchJSON<QARunResponse>(`/api/qa/runs/${encodeURIComponent(runId)}`, signal ? { signal } : undefined);
 }
 
-export async function listQARuns(limit = 20): Promise<QARunListResponse> {
-  return fetchJSON<QARunListResponse>(`/api/qa/runs?limit=${limit}`);
+export async function listQARuns(limit = 20, signal?: AbortSignal): Promise<QARunListResponse> {
+  return fetchJSON<QARunListResponse>(`/api/qa/runs?limit=${limit}`, signal ? { signal } : undefined);
 }

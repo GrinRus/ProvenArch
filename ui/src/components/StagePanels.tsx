@@ -8,6 +8,7 @@ import { RunStatusPanel } from "./RunStatusPanel";
 import { TabNav } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
+import { isAbortError, useRequestGate } from "../hooks/useRequestGate";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
 import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
@@ -4601,47 +4602,81 @@ export function AskStagePanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
+  const historyRequest = useRequestGate("qa-history");
+  const detailRequest = useRequestGate("qa-detail");
+  const pollRequest = useRequestGate("qa-poll");
+  const selectedRunIDRef = useRef<string | null>(null);
+  const qaRunRef = useRef<QARunResponse | null>(null);
+  const selectionSequenceRef = useRef(0);
   const qaRunActive = qaRun?.status === "queued" || qaRun?.status === "running";
   const citations = qaRun?.citations ?? [];
   const unresolved = qaRun?.unresolved ?? [];
   const confidence = typeof qaRun?.confidence === "number" ? Math.round(qaRun.confidence * 100) : 0;
 
+  function claimQASelection(runID: string): number {
+    selectionSequenceRef.current += 1;
+    selectedRunIDRef.current = runID;
+    setSelectedRunID(runID);
+    return selectionSequenceRef.current;
+  }
+
+  function isCurrentQASelection(selectionVersion: number, runID: string): boolean {
+    return selectionSequenceRef.current === selectionVersion && selectedRunIDRef.current === runID;
+  }
+
   useEffect(() => {
-    let canceled = false;
+    selectedRunIDRef.current = selectedRunID;
+  }, [selectedRunID]);
+
+  useEffect(() => {
+    qaRunRef.current = qaRun;
+  }, [qaRun]);
+
+  useEffect(() => {
+    const selectionVersion = selectionSequenceRef.current;
+    const historyToken = historyRequest.begin("initial");
     async function loadHistory() {
       try {
-        const history = await listQARuns(20);
-        if (canceled) {
+        const history = await listQARuns(20, historyToken.signal);
+        if (!historyRequest.isCurrent(historyToken)) {
           return;
         }
         const items = history.items ?? [];
-        setRunHistory(items);
-        setHistoryStatus(items.length > 0 ? "" : "No Q&A runs yet.");
-        if (items[0]?.run_id) {
-          setSelectedRunID(items[0].run_id);
+        const currentRun = qaRunRef.current;
+        const visibleItems = currentRun ? mergeQARunHistory(currentRun, items, "preserve") : items;
+        setRunHistory(visibleItems);
+        setHistoryStatus(visibleItems.length > 0 ? "" : "No Q&A runs yet.");
+        if (items[0]?.run_id && selectedRunIDRef.current === null && selectionSequenceRef.current === selectionVersion) {
+          const selectedVersion = claimQASelection(items[0].run_id);
           setQARun(items[0]);
+          const detailToken = detailRequest.begin(items[0].run_id);
           try {
-            const detail = await getQARun(items[0].run_id);
-            if (!canceled) {
+            const detail = await getQARun(items[0].run_id, detailToken.signal);
+            if (detailRequest.isCurrent(detailToken) && isCurrentQASelection(selectedVersion, items[0].run_id)) {
               setQARun(detail);
               setRunHistory((current) => mergeQARunHistory(detail, current, "preserve"));
               setHistoryStatus("");
             }
           } catch (error) {
-            if (!canceled) {
+            if (!isAbortError(error) && detailRequest.isCurrent(detailToken) && isCurrentQASelection(selectedVersion, items[0].run_id)) {
               setStatus(error instanceof Error ? error.message : "Q&A run detail failed");
             }
+          } finally {
+            detailRequest.finish(detailToken);
           }
         }
       } catch (error) {
-        if (!canceled) {
+        if (!isAbortError(error) && historyRequest.isCurrent(historyToken)) {
           setHistoryStatus(error instanceof Error ? error.message : "Q&A history failed to load");
         }
+      } finally {
+        historyRequest.finish(historyToken);
       }
     }
     void loadHistory();
     return () => {
-      canceled = true;
+      historyRequest.abort();
+      detailRequest.abort();
     };
   }, []);
 
@@ -4649,11 +4684,13 @@ export function AskStagePanel({
     if (!qaRun?.run_id || !qaRunActive) {
       return;
     }
+    const runID = qaRun.run_id;
     let canceled = false;
     const refresh = async () => {
+      const token = pollRequest.begin(runID);
       try {
-        const next = await getQARun(qaRun.run_id);
-        if (!canceled) {
+        const next = await getQARun(runID, token.signal);
+        if (!canceled && pollRequest.isCurrent(token) && selectedRunIDRef.current === runID) {
           setQARun(next);
           setSelectedRunID(next.run_id);
           setRunHistory((current) => mergeQARunHistory(next, current, "preserve"));
@@ -4661,46 +4698,66 @@ export function AskStagePanel({
           setStatus(next.status === "succeeded" ? "Q&A run completed." : next.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
         }
       } catch (error) {
-        if (!canceled) {
+        if (!isAbortError(error) && !canceled && pollRequest.isCurrent(token) && selectedRunIDRef.current === runID) {
           setStatus(error instanceof Error ? error.message : "Q&A run polling failed");
         }
+      } finally {
+        pollRequest.finish(token);
       }
     };
     const interval = window.setInterval(() => void refresh(), 1000);
     return () => {
       canceled = true;
+      pollRequest.abort();
       window.clearInterval(interval);
     };
   }, [qaRun?.run_id, qaRunActive]);
 
   async function refreshHistory() {
+    const token = historyRequest.begin("manual");
     setHistoryStatus("Refreshing Q&A history.");
     try {
-      const history = await listQARuns(20);
+      const history = await listQARuns(20, token.signal);
+      if (!historyRequest.isCurrent(token)) {
+        return;
+      }
       const items = history.items ?? [];
-      const mergedItems = qaRun ? mergeQARunHistory(qaRun, items, "preserve") : items;
+      const currentRun = qaRunRef.current;
+      const mergedItems = currentRun ? mergeQARunHistory(currentRun, items, "preserve") : items;
       setRunHistory(mergedItems);
       setHistoryStatus(mergedItems.length > 0 ? "" : "No Q&A runs yet.");
     } catch (error) {
-      setHistoryStatus(error instanceof Error ? error.message : "Q&A history failed to load");
+      if (!isAbortError(error) && historyRequest.isCurrent(token)) {
+        setHistoryStatus(error instanceof Error ? error.message : "Q&A history failed to load");
+      }
+    } finally {
+      historyRequest.finish(token);
     }
   }
 
   async function handleSelectRun(run: QARunResponse) {
-    setSelectedRunID(run.run_id);
+    const selectionVersion = claimQASelection(run.run_id);
+    const token = detailRequest.begin(run.run_id);
     setQARun(run);
     setSelectedLoading(true);
     setStatus("");
     try {
-      const detail = await getQARun(run.run_id);
-      setQARun(detail);
-      setRunHistory((current) => mergeQARunHistory(detail, current, "preserve"));
-      setHistoryStatus("");
-      setStatus(detail.status === "succeeded" ? "Q&A run loaded." : detail.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
+      const detail = await getQARun(run.run_id, token.signal);
+      if (detailRequest.isCurrent(token) && isCurrentQASelection(selectionVersion, run.run_id)) {
+        setQARun(detail);
+        setRunHistory((current) => mergeQARunHistory(detail, current, "preserve"));
+        setHistoryStatus("");
+        setStatus(detail.status === "succeeded" ? "Q&A run loaded." : detail.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
+      }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Q&A run detail failed");
+      if (!isAbortError(error) && detailRequest.isCurrent(token) && isCurrentQASelection(selectionVersion, run.run_id)) {
+        setStatus(error instanceof Error ? error.message : "Q&A run detail failed");
+      }
     } finally {
-      setSelectedLoading(false);
+      if (detailRequest.isCurrent(token) && isCurrentQASelection(selectionVersion, run.run_id)) {
+        setSelectedLoading(false);
+      }
+      detailRequest.finish(token);
     }
   }
 
@@ -4725,26 +4782,41 @@ export function AskStagePanel({
 
   async function startQARun(trimmed: string) {
     setBusy(true);
-    setQARun(null);
-    setSelectedRunID(null);
-    setStatus("");
+    setStatus("Submitting Q&A run.");
     try {
       const started = await startQAQuestion(trimmed);
-      setStatus("Q&A run queued.");
-      setSelectedRunID(started.run_id);
-      const detail = await getQARun(started.run_id);
-      setQARun(detail);
-      setRunHistory((current) => mergeQARunHistory(detail, current));
+      const provisionalRun = buildProvisionalQARun(started, trimmed);
+      const selectionVersion = claimQASelection(started.run_id);
+      const token = detailRequest.begin(started.run_id);
+      setQARun(provisionalRun);
+      setRunHistory((current) => mergeQARunHistory(provisionalRun, current));
       setHistoryStatus("");
-      if (detail.status === "succeeded") {
-        setStatus("Q&A run completed.");
-      } else if (detail.status === "failed") {
-        setStatus("Q&A run failed.");
-      } else {
-        setStatus("Q&A run is running.");
+      setStatus(`Q&A run ${started.run_id} accepted; reconciling details.`);
+      try {
+        const detail = await getQARun(started.run_id, token.signal);
+        if (detailRequest.isCurrent(token) && isCurrentQASelection(selectionVersion, started.run_id)) {
+          setQARun(detail);
+          setRunHistory((current) => mergeQARunHistory(detail, current));
+          setHistoryStatus("");
+          if (detail.status === "succeeded") {
+            setStatus("Q&A run completed.");
+          } else if (detail.status === "failed") {
+            setStatus("Q&A run failed.");
+          } else {
+            setStatus("Q&A run is running.");
+          }
+        }
+      } catch (error) {
+        if (!isAbortError(error) && detailRequest.isCurrent(token) && isCurrentQASelection(selectionVersion, started.run_id)) {
+          setStatus(`Q&A run ${started.run_id} accepted; reconciling details failed: ${qaErrorMessage(error, "Q&A run detail temporarily unavailable")}`);
+        }
+      } finally {
+        detailRequest.finish(token);
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Q&A request failed");
+      if (!isAbortError(error)) {
+        setStatus(error instanceof Error ? error.message : "Q&A request failed");
+      }
     } finally {
       setBusy(false);
     }
@@ -4924,6 +4996,37 @@ export function AskStagePanel({
       </div>
     </section>
   );
+}
+
+function buildProvisionalQARun(started: { run_id: string; status: string }, question: string): QARunResponse {
+  return {
+    run_id: started.run_id,
+    pipeline: "qa",
+    status: normalizeQARunStatus(started.status),
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    question,
+    current_step: "qa.ask",
+    answer: null,
+    citations: [],
+    unresolved: [],
+    confidence: null,
+    generated_at: null,
+    warnings: [],
+    error_code: null,
+    error: null,
+  };
+}
+
+function normalizeQARunStatus(status: string): QARunResponse["status"] {
+  if (status === "queued" || status === "running" || status === "succeeded" || status === "failed") {
+    return status;
+  }
+  return "queued";
+}
+
+function qaErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function QAFailureRecovery({
