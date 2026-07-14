@@ -11,6 +11,11 @@ ACP — **AI-native** и **spec-first** проект.
 - Требуемый стек: Go exact version из `.go-version`, Node exact version из `.node-version`, npm 10.x, Git
 - `go.mod` остаётся на language compatibility level `go 1.20`; не используйте это как разрешение собирать release устаревшим Go toolchain.
 - Установите зависимости: `make bootstrap`
+- Contract validation uses a separate locked npm toolchain in `tools/contracts`. `make contracts`
+  runs `npm ci` for that package and then validates schemas/examples with the repo-local
+  `ajv-cli`, `ajv-formats` and `js-yaml` versions from `tools/contracts/package-lock.json`.
+  Tool version updates must include an explicit `tools/contracts/package.json` and
+  `tools/contracts/package-lock.json` diff.
 - Прогоните DoD-проверки:
   - `make contracts`
   - `make test`

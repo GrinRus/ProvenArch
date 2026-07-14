@@ -125,7 +125,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19M` reproducible embedded UI build after `19L`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19O` locked contract validator tooling after `19M`
+- [x] Continue PR-1 with `19O` locked contract validator tooling after `19M`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19N` composite release verdict gate after `19O`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1222,8 +1224,10 @@ change chunk names/order without a dedicated guard.
       if Git detects a diff.
 - [x] Wire the new verifiers into provider-free UI CI.
 - [x] Update testing/build docs for deterministic UI and stale embedded bundle checks.
-- [ ] Continue PR-1 with `19O` locked contract validator tooling after `19M` review/commit
+- [x] Continue PR-1 with `19O` locked contract validator tooling after `19M` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change app UI behavior or design.
@@ -1283,6 +1287,87 @@ Tooling-only changes: Make targets, CI workflow and scripts. No runtime API/sche
 - 2026-07-14: Full DoD passed with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`. A docs-sync active-plan invariant was fixed by adding the same
   final-reconciliation archive goal to completed `19L` that earlier completed slices use.
+
+### Plan ID
+EP-20260714-epic-19-19o-locked-contract-validator-toolchain
+
+### Context
+`19O` follows committed `19M` and closes the remaining release-reproducibility tooling gap before
+`19N`. The current `make contracts` target executes:
+`npm exec --yes --package=ajv-cli --package=ajv-formats --package=js-yaml ...`, which lets npm
+resolve mutable registry versions at validation time. That makes local/CI contract validation
+depend on whatever `latest` resolves to, rather than a reviewed lockfile diff.
+
+### Goals (must have)
+- [x] Add a versioned, lockfile-backed contract validator tooling package for `ajv-cli`,
+      `ajv-formats` and `js-yaml`.
+- [x] Make `make contracts` install/use that locked toolchain instead of mutable
+      `npm exec --package=...` resolution.
+- [x] Keep contract validation offline-capable after the locked package has been installed.
+- [x] Keep current schema/example/fixture validation behavior unchanged.
+- [x] Update developer/testing docs so toolchain version changes require explicit package/lockfile
+      review.
+- [ ] Continue PR-1 with `19N` composite release verdict gate after `19O` review/commit boundary
+      is stable.
+
+### Non-goals
+- [ ] Do not change schemas, examples, fixtures or semantic contract rules.
+- [ ] Do not change UI package dependencies or the embedded UI build.
+- [ ] Do not introduce live provider/network dependencies into required CI.
+- [ ] Do not implement release verifier behavior; that remains `19N`.
+
+### Implementation
+1) Add `tools/contracts/package.json` with exact dependency ranges for the validator CLI
+   toolchain and generate a committed `package-lock.json`.
+2) Update `Makefile` with a `CONTRACT_TOOLS_DIR` and make `contracts` run
+   `scripts/run-npm.sh ci --prefix tools/contracts` before validation, so installed versions come
+   from the lockfile.
+3) Update `scripts/validate-contracts.sh` to execute `tools/contracts/node_modules/.bin/ajv` and
+   `tools/contracts/node_modules/.bin/js-yaml` directly, so global tools are never used as a
+   fallback, and fail with a clear bootstrap message if the locked install is missing.
+4) Leave schema/example/fixture validation loops intact so positive/negative behavior does not
+   move in this slice.
+5) Update `CONTRIBUTING.md` and `docs/TESTING_STRATEGY.md` to document the locked contract
+   toolchain and explicit lockfile review requirement.
+
+### Interfaces
+Tooling-only changes: a new contract-tool npm package/lockfile, `make contracts` behavior and
+validation script bootstrap. No product HTTP/API/schema/artifact contract change.
+
+### Tests
+- `make contracts` installs the locked toolchain and validates the existing positive/negative
+  fixtures.
+- Running `scripts/validate-contracts.sh` after `tools/contracts` install works without
+  `npm exec --package` or mutable latest resolution.
+- Removing the installed tool binaries makes the script fail with a bootstrap hint rather than
+  falling back to global tools.
+- Existing full DoD remains green.
+
+### Docs/fixtures
+- Update `CONTRIBUTING.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/fixture updates expected because validator semantics are unchanged.
+
+### Acceptance
+- [x] `ACP_NODE_TOOL_CANDIDATES="$HOME/.cache/provenarch-toolchains/node-v22.21.1-darwin-arm64/bin" make contracts` passes with the locked toolchain.
+- [x] `PATH="$HOME/.cache/provenarch-toolchains/node-v22.21.1-darwin-arm64/bin:/usr/bin:/bin" scripts/validate-contracts.sh` passes after locked install by using repo-local tool binaries
+      plus only the pinned Node runtime.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no schema, fixture, UI build or release-verifier behavior leaked into
+      this slice.
+- [x] Commit `19O: lock contract validation tooling`.
+
+### Progress log
+- 2026-07-14: Started `19O` after clean `19M` commit. Spec-first and docs-sync rules apply
+  because this slice changes required contract-validation tooling and developer docs.
+- 2026-07-14: Implemented `tools/contracts` exact dependency package/lockfile, including a
+  patched `fast-json-patch` override to keep the new lockfile free of high audit advisories.
+  `make contracts` now performs lockfile-backed `npm ci` and `scripts/validate-contracts.sh`
+  executes repo-local `ajv`/`js-yaml` binaries directly instead of falling back to globals.
+  Verification passed: clean locked install, direct pinned-Node/offline script run, missing-tools
+  negative bootstrap, `npm audit --audit-level=high`, and full DoD with exact Node 22.21.1:
+  `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

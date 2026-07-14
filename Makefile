@@ -1,6 +1,7 @@
 GO ?= ./scripts/run-go.sh
 NPM ?= ./scripts/run-npm.sh
 UI_DIR := ui
+CONTRACT_TOOLS_DIR := tools/contracts
 GO_FILES := $(shell find cmd internal -name '*.go' -type f 2>/dev/null)
 RUNTIME ?= fake
 REPO_NAME ?= primary-repo
@@ -14,7 +15,8 @@ bootstrap:
 	$(NPM) ci --prefix $(UI_DIR)
 
 contracts:
-	$(NPM) exec --yes --package=ajv-cli --package=ajv-formats --package=js-yaml -- bash ./scripts/validate-contracts.sh
+	$(NPM) ci --prefix $(CONTRACT_TOOLS_DIR) --ignore-scripts --audit=false --fund=false
+	ACP_CONTRACT_TOOLS_BIN="$(CURDIR)/$(CONTRACT_TOOLS_DIR)/node_modules/.bin" bash ./scripts/validate-contracts.sh
 
 test: contracts
 	$(GO) test ./...

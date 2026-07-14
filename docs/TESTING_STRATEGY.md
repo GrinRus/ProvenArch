@@ -173,6 +173,8 @@ Toolchain policy:
 Implemented required jobs:
 - `contracts`
   - `make contracts`
+  - locked validator toolchain from `tools/contracts/package-lock.json`; required CI must not
+    resolve mutable `latest` packages during validation
   - schema validation
   - parse examples/fixtures
 - `backend`
@@ -413,6 +415,9 @@ Release workflow hardening:
 
 - Public product APIs и schema contracts этим документом не меняются
 - для schema validation в CI используется Draft 2020-12 compatible validator
+- contract validation tools (`ajv-cli`, `ajv-formats`, `js-yaml`) live in
+  `tools/contracts`; version changes require an explicit `package.json`/`package-lock.json`
+  review and `make contracts` must run from the lockfile-backed install.
 - основной backend test loop предполагает `go test`
 - UI smoke стек: `React + Vite + Vitest + Playwright`
 - Balanced timeout defaults:

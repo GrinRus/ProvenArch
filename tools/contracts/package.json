@@ -1,0 +1,15 @@
+{
+  "name": "@provenarch/contract-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Locked JSON/YAML contract validation toolchain for ProvenArch CI.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ajv-cli": "5.0.0",
+    "ajv-formats": "3.0.1",
+    "js-yaml": "5.2.1"
+  },
+  "overrides": {
+    "fast-json-patch": "3.1.1"
+  }
+}
