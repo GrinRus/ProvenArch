@@ -212,7 +212,9 @@ Implemented additional jobs:
 - `smoke-api`
   - `acp serve --workspace ... --runtime fake`
   - `/api/workspace/validate`
-  - pipeline status/artifacts/logs endpoints
+  - pipeline status/artifacts endpoints
+  - run logs endpoint with explicit `cursor`/`limit`, second-page pagination and invalid cursor
+    response validation
   - dynamic free port + explicit fail on run polling timeout
 - `ui`
   - runs UI tests, production build, deterministic build verification and embedded bundle
@@ -303,7 +305,9 @@ Release workflow hardening:
 - pipeline endpoints не принимают `workspace_path`
 - run logs endpoint:
   - `GET /api/pipeline/runs/<run_id>/logs?cursor=<n>&limit=<n>`
-  - pagination + invalid params + run_not_found
+  - required API smoke validates first page, second page from `next_cursor`, payload shape,
+    non-2xx/malformed failure handling and `400 invalid_cursor`
+  - deeper Go/API coverage keeps invalid params + run_not_found cases
   - structured failure diagnostics в `fields` (`stdout_snippet`/`stderr_snippet`, `task_id`, `provider`, counters)
   - mixed wire-shape (`kind=event|runtime_output`, optional `stream=stdout|stderr`)
 - run cancel endpoint:

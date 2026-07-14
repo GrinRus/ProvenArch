@@ -145,7 +145,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19S3` required PR lint routing after `19S2`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3`
+- [x] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1992,8 +1994,10 @@ provider dependencies.
 - [x] Remove duplicated partial UI typecheck from the UI workflow where safe.
 - [x] Keep UI tests/build/determinism checks in the UI workflow.
 - [x] Update testing documentation to list the canonical PR lint workflow.
-- [ ] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3` review/commit boundary is
+- [x] Continue PR-1 with `19T` logs endpoint smoke coverage after `19S3` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change branch protection settings or GitHub repository configuration.
@@ -2041,6 +2045,83 @@ interfaces change.
   duplicated UI typecheck from the UI workflow while preserving tests/build/drift checks, updated
   testing docs, verified workflow YAML parsing, and completed full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19t-logs-smoke-coverage
+
+### Context
+`19T` follows committed `19S3`. The backend logs endpoint already has Go coverage for cursor,
+limit, missing run and mixed event/runtime-output payloads, but required API smoke currently only
+touches status, artifacts, run list and cancel. The backlog asks for provider-free smoke coverage
+that fails on missing/malformed logs pagination behavior before PR merge.
+
+### Goals (must have)
+- [x] Extend `scripts/smoke-api.sh` to request run logs with explicit `cursor` and `limit`.
+- [x] Validate logs response shape: matching `run_id`, array `items`, integer `next_cursor`,
+      boolean `eof`, per-item cursor/message/kind and legal runtime stream values.
+- [x] Validate pagination by fetching a second page from the first page `next_cursor`.
+- [x] Validate invalid cursor returns `400 invalid_cursor`.
+- [x] Add deterministic script tests for normal empty/non-empty pages, malformed payload,
+      server/error status and invalid-cursor error handling without requiring a live ACP server.
+- [x] Update smoke baseline documentation.
+- [ ] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change the HTTP logs endpoint contract or backend API routing.
+- [ ] Do not add live-provider, external-network or hosted dependencies to required smoke.
+- [ ] Do not change UI log rendering; that was covered by earlier UI slices.
+- [ ] Do not change release workflows or release evidence gates.
+
+### Implementation
+1) Refactor `scripts/smoke-api.sh` into reusable helper functions plus a `main` entrypoint guarded
+   by a lib-only environment variable for deterministic tests.
+2) Add helpers that validate HTTP status/error code and logs JSON payloads with Python, failing on
+   malformed shape, stale `run_id`, bad cursor progression, unknown `kind`, illegal `stream`, empty
+   messages or non-boolean `eof`.
+3) In the live smoke path, after the run succeeds and artifacts are fetched, request
+   `/api/pipeline/runs/<run_id>/logs?cursor=0&limit=2`, then request a second page from
+   `next_cursor`, and assert invalid cursor `-1` returns `400 invalid_cursor`.
+4) Add `scripts/tests/smoke_api_logs_test.py` that sources the shell helpers in lib-only mode and
+   covers empty/non-empty success, malformed payload, non-2xx status, wrong error code and invalid
+   cursor validation.
+5) Update `docs/TESTING_STRATEGY.md` smoke baseline to state that API smoke validates logs
+   cursor/limit pagination and invalid params.
+
+### Interfaces
+Script/test/docs only. No schema, backend API, TypeScript, workspace, artifact, provider or release
+interfaces change.
+
+### Tests
+- `python3 -m unittest scripts.tests.smoke_api_logs_test`.
+- `bash -n scripts/smoke-api.sh`.
+- `shellcheck scripts/smoke-api.sh`.
+- `bash ./scripts/smoke-api.sh` under the fake runtime smoke environment.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] Smoke validates first and second logs pages for the started run.
+- [x] Smoke fails on malformed logs payloads.
+- [x] Smoke fails on 5xx/non-2xx logs responses.
+- [x] Smoke validates invalid cursor as `400 invalid_cursor`.
+- [x] Script unit tests pass.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no backend contract, live-provider or unrelated CI scope leaked into
+      this slice.
+- [x] Commit `19T: smoke test run logs pagination`.
+
+### Progress log
+- 2026-07-14: Started `19T` after clean `19S3` commit. Spec-first and docs-sync rules apply
+  because this slice changes required smoke coverage and documented testing baseline.
+- 2026-07-14: Added logs page validation to API smoke, covered helper failure paths with
+  deterministic Python tests, verified the live fake-server smoke path, and completed full DoD with
+  exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
