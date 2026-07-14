@@ -44,7 +44,9 @@
 2) **UI (`ui/`)** *(operator console shell)*
    - React + TypeScript + Vite
    - Dev: `npm run dev` с proxy на backend
-   - Prod: `npm run build` → `ui/dist` встраивается в Go бинарь
+   - Prod: `npm run build` → deterministic `ui/dist` встраивается в Go бинарь как
+     versioned `internal/api/ui_dist`; CI verifies same-commit build determinism and rejects
+     stale embedded assets.
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - UI first-run entrypoint использует pre-console `OnboardingShell`, а не девятую product stage: `Workspace -> Sources -> Runner -> Ready`, с верхним setup summary для current step/current blocker/next action, runner recovery guidance для headless provider command/auth/quota blockers и затем переходом в Console V2
    - UI shell организован как Proven Arch console: top health strip (actual build/version metadata, workspace path, repo count, runtime/provider, permission mode, Git publication state), product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральная рабочая область, right inspector (`Next action`, blockers, evidence refs, workspace health, runtime safety, Git publication) и bottom activity drawer для logs/events

@@ -117,7 +117,15 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19J` request-scoped UI detail state after `19I`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19K1` run mutation acknowledgement after `19J`
+- [x] Continue PR-1 with `19K1` run mutation acknowledgement after `19J`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19K2` Q&A provisional run ordering after `19K1`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19L` editor draft safety after `19K2`
+      review/commit boundary is stable.
+- [x] Continue PR-1 with `19M` reproducible embedded UI build after `19L`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19O` locked contract validator tooling after `19M`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1130,8 +1138,10 @@ the draft clean even when the operator changed the text after save started.
 - [x] Add per-path single-owner draft state for Charter/Baseline editable artifacts.
 - [x] Ignore late artifact loads for old paths or dirty newer drafts.
 - [x] Keep edits made during a deferred artifact save dirty and visible after save resolves.
-- [ ] Continue PR-1 with `19M` reproducible embedded UI build after `19L` review/commit
+- [x] Continue PR-1 with `19M` reproducible embedded UI build after `19L` review/commit
       boundary is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change Git publication, Q&A, pipeline run or queue semantics.
@@ -1193,6 +1203,86 @@ unless implementation changes operator-visible editor status copy.
   baseline artifacts. Verification passed: UI typecheck, targeted App stale-write tests, UI
   Vitest `105/105`, and full DoD with exact Node 22.21.1: `make contracts`, `make test`,
   `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19m-deterministic-embedded-ui-bundle
+
+### Context
+`19M` follows committed `19L`. `make build` currently removes `ui/dist`, runs Vite and copies the
+result into `internal/api/ui_dist`, but CI does not prove that the committed embedded bundle is
+fresh. There is also no exact-commit double-build verifier that compares independent clean
+builds by sorted path/digest. Vite output naming is implicit, so future bundler upgrades could
+change chunk names/order without a dedicated guard.
+
+### Goals (must have)
+- [x] Make Vite output naming explicit for entry chunks, dynamic chunks and assets.
+- [x] Add an exact-commit UI build determinism verifier that builds the same ref in two
+      independent temp roots and compares sorted paths/digests.
+- [x] Add an embedded UI freshness verifier that rebuilds/copies `internal/api/ui_dist` and fails
+      if Git detects a diff.
+- [x] Wire the new verifiers into provider-free UI CI.
+- [x] Update testing/build docs for deterministic UI and stale embedded bundle checks.
+- [ ] Continue PR-1 with `19O` locked contract validator tooling after `19M` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change app UI behavior or design.
+- [ ] Do not change backend APIs, schemas or live-provider requirements.
+- [ ] Do not solve contract validator lockfiles; that remains `19O`.
+- [ ] Do not make live provider checks required in PR CI.
+
+### Implementation
+1) Update `ui/vite.config.ts` with explicit deterministic `assetsDir`, `entryFileNames`,
+   `chunkFileNames` and `assetFileNames`.
+2) Add `scripts/verify-ui-deterministic-build.sh`: archive the requested Git ref into two temp
+   roots, or copy the current `WORKTREE` for pre-commit self-review, reuse installed
+   `ui/node_modules` when available, run the pinned `scripts/run-npm.sh run build --prefix ui`
+   in both roots, and compare sorted SHA-256 path manifests.
+3) Add `scripts/check-ui-dist-fresh.sh`: rebuild UI, copy `ui/dist` into `internal/api/ui_dist`
+   using the same embed path as `make build`, and fail with a diff/stat when committed embedded
+   assets are stale.
+4) Add Make targets for both checks without changing the local `make build` behavior that updates
+   embedded assets for the current slice.
+5) Update the UI workflow to run UI tests, standalone Vite build, deterministic double-build and
+   embedded bundle freshness checks after `npm ci`.
+6) Update `docs/TESTING_STRATEGY.md` and build guidance to explain local usage and CI behavior.
+
+### Interfaces
+Tooling-only changes: Make targets, CI workflow and scripts. No runtime API/schema changes.
+
+### Tests
+- `scripts/verify-ui-deterministic-build.sh HEAD` produces identical sorted path/digest manifests
+  for two clean temp roots.
+- `scripts/check-ui-dist-fresh.sh` exits zero when `internal/api/ui_dist` matches the source UI
+  build.
+- A deliberately stale embedded asset would make `scripts/check-ui-dist-fresh.sh` exit non-zero
+  in CI.
+- Existing UI tests/typecheck/build remain green.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- Update `CONTRIBUTING.md` and architecture build guidance for the new UI verification commands.
+
+### Acceptance
+- [x] `scripts/verify-ui-deterministic-build.sh WORKTREE` passes before commit; CI runs the same
+      verifier against `HEAD` through `make verify-ui-determinism`.
+- [x] `scripts/check-ui-dist-fresh.sh` passes on the current bundle state.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no UI behavior, schema, contract-toolchain or live-provider scope
+      leaked into this slice.
+- [x] Commit `19M: make embedded UI builds reproducible`.
+
+### Progress log
+- 2026-07-14: Started `19M` after clean `19L` commit. Spec-first and docs-sync rules apply
+  because this slice changes deterministic build tooling and required CI behavior.
+- 2026-07-14: Implemented explicit Vite output names, UI determinism/freshness scripts, Make
+  targets and provider-free UI workflow checks. Pre-commit targeted verification passed:
+  `scripts/verify-ui-deterministic-build.sh WORKTREE`, `make build`, and
+  `scripts/check-ui-dist-fresh.sh`.
+- 2026-07-14: Full DoD passed with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`. A docs-sync active-plan invariant was fixed by adding the same
+  final-reconciliation archive goal to completed `19L` that earlier completed slices use.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

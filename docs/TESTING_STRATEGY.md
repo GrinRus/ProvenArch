@@ -187,6 +187,10 @@ Implemented required jobs:
   - `./scripts/run-npm.sh run typecheck --prefix ui`
   - `./scripts/run-npm.sh run test --prefix ui -- --run`
   - `./scripts/run-npm.sh run build --prefix ui`
+  - `make verify-ui-determinism` builds the exact checked-out commit in two independent
+    temp roots and compares sorted `ui/dist` path/digest manifests
+  - `make verify-ui-dist` rebuilds and re-embeds `internal/api/ui_dist`, then fails if the
+    tracked embedded bundle is stale
 
 Implemented additional jobs:
 - `golden`
@@ -399,6 +403,9 @@ Release workflow hardening:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
 - tracked generated artifacts policy:
   - `internal/api/ui_dist/*` и `fixtures/scenarios/*/golden/readable/*` остаются versioned в git как часть baseline/release surface
+  - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
+    the embedded bundle and `make verify-ui-dist` to prove the committed bundle matches the
+    current Vite output.
   - controlled snapshot refresh:
   - `ACP_UPDATE_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
 
@@ -423,6 +430,8 @@ Release workflow hardening:
 - `make test`
 - `make lint`
 - `make build`
+- `make verify-ui-determinism`
+- `make verify-ui-dist`
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`
 - `make run-ui`
 - `./scripts/full-run-batch.sh`

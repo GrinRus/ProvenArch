@@ -7,7 +7,7 @@ REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
 STRESS_TEST ?= TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow
 
-.PHONY: bootstrap contracts test test-stress lint build run-backend run-ui quickstart-local
+.PHONY: bootstrap contracts test test-stress lint build verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 
 bootstrap:
 	$(GO) mod tidy
@@ -48,6 +48,12 @@ build:
 	cp ui/dist/index.html internal/api/ui_dist/index.html
 	mkdir -p ./bin
 	$(GO) build -o ./bin/acp ./cmd/acp
+
+verify-ui-determinism:
+	bash ./scripts/verify-ui-deterministic-build.sh HEAD
+
+verify-ui-dist:
+	bash ./scripts/check-ui-dist-fresh.sh
 
 run-backend:
 	@test -n "$(WORKSPACE)" || (echo "Set WORKSPACE=/abs/path/to/arch-workspace"; exit 1)

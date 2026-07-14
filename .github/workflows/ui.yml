@@ -37,3 +37,9 @@ jobs:
 
       - name: Build UI
         run: npm run build --prefix ui
+
+      - name: Verify deterministic UI build
+        run: make verify-ui-determinism
+
+      - name: Verify embedded UI bundle is fresh
+        run: make verify-ui-dist

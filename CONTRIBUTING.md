@@ -16,6 +16,9 @@ ACP — **AI-native** и **spec-first** проект.
   - `make test`
   - `make lint`
   - `make build`
+- Для изменений в `ui/src`, `ui/vite.config.ts` или embedded UI assets дополнительно проверьте:
+  - `make verify-ui-determinism`
+  - `make verify-ui-dist`
 
 ## ADRs
 Пишите ADR, если:
@@ -42,3 +45,4 @@ ACP — **AI-native** и **spec-first** проект.
 ## Review expectations
 
 Pull request должен быть небольшим, воспроизводимо проверенным и не должен добавлять live network/provider dependency в required CI. Изменения `schemas/*` и `docs/spec/*` требуют синхронного обновления docs, examples/fixtures, валидаторов и тестов.
+UI source changes must include the deterministic `internal/api/ui_dist` refresh produced by `make build`; stale embedded bundles are rejected by `make verify-ui-dist`.
