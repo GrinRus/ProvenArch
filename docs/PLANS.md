@@ -135,7 +135,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19R1` ARIA tabs controller after `19Q`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19R2` keyboard path combobox after `19R1`
+- [x] Continue PR-1 with `19R2` keyboard path combobox after `19R1`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19R3` accessible async announcements after `19R2`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1628,8 +1630,10 @@ fix should be centralized rather than duplicated per stage.
 - [x] Wire current `TabNav` consumers to matching active tabpanel relationships without changing
       user-visible IA or tab labels.
 - [x] Cover keyboard navigation, single tabbable tab, and aria-controls/labelledby links in Vitest.
-- [ ] Continue PR-1 with `19R2` keyboard path combobox after `19R1` review/commit boundary is
+- [x] Continue PR-1 with `19R2` keyboard path combobox after `19R1` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not redesign Review/Publish IA; that remains Epic 20.
@@ -1680,6 +1684,77 @@ interfaces change.
   `TabNav` consumers to active tabpanels, added focused Vitest coverage, regenerated embedded UI
   assets, and completed targeted UI tests plus full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19r2-keyboard-path-combobox
+
+### Context
+`19R2` follows committed `19R1` and continues the accessibility primitives band. The onboarding
+local path picker already exposes `role="combobox"` and renders suggestion buttons in a listbox,
+but keyboard users cannot move through suggestions, select one with Enter, close with Escape, or
+observe an active descendant. The fix should stay inside the existing `LocalPathCombobox` surface
+and keep pointer selection behavior unchanged.
+
+### Goals (must have)
+- [x] Add active option state for local path suggestions.
+- [x] Wire `aria-activedescendant` from the input to the active option.
+- [x] Support ArrowDown/ArrowUp navigation with wraparound.
+- [x] Support Enter selection of the active option and Escape close/clear active option.
+- [x] Preserve pointer selection parity and existing onboarding `onSelect` side effects.
+- [x] Cover keyboard-only selection, Escape close and active descendant behavior in Vitest.
+- [ ] Continue PR-1 with `19R3` accessible async announcements after `19R2` review/commit
+      boundary is stable.
+
+### Non-goals
+- [ ] Do not change onboarding/source API contracts or path suggestion payloads.
+- [ ] Do not change run/Q&A/editor async state; those were `19J..19L`.
+- [ ] Do not add async alert/live-region behavior; that remains `19R3`.
+- [ ] Do not redesign onboarding layout, path suggestion ranking or source validation.
+
+### Implementation
+1) Extend `LocalPathCombobox` with `activeIndex`, stable option IDs and active-option reset rules
+   when the popover closes, suggestions change or the input value changes.
+2) Add input `onKeyDown` handling for ArrowDown, ArrowUp, Enter and Escape. Arrow keys open the
+   popover and move the active option; Enter applies the active suggestion through the same
+   `onChange`/`onSelect` path as pointer clicks; Escape closes without selecting.
+3) Add `aria-activedescendant` only while the popover is open and an active option exists, and mark
+   the active option with a visual/semantic selected state.
+4) Keep existing focus/blur timeout behavior, loading/error helper copy and pointer `onMouseDown`
+   behavior intact.
+5) Add focused component tests with mocked path-suggestion API and no backend/schema changes.
+
+### Interfaces
+Frontend-only component behavior change. No backend, schema, workspace, artifact, HTTP or
+TypeScript app-contract payload changes.
+
+### Tests
+- Keyboard-only ArrowDown + Enter selects a suggestion, calls `onChange`, and invokes `onSelect`
+  with the selected item.
+- ArrowUp/ArrowDown update `aria-activedescendant` and wrap through suggestions predictably.
+- Escape closes the popup and removes `aria-activedescendant` without selecting.
+- Pointer click still selects the clicked suggestion and closes the popup.
+
+### Docs/fixtures
+- No product docs changes expected beyond this ExecPlan; the accessibility behavior is enforced by
+  focused component tests.
+- Regenerate embedded UI bundle through `make build` if UI source changes update
+  `internal/api/ui_dist`.
+
+### Acceptance
+- [x] Targeted `LocalPathCombobox` Vitest tests pass.
+- [x] `npm --prefix ui run typecheck` passes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no `19R3`, backend, schema or Epic 20 IA scope leaked into this slice.
+- [x] Commit `19R2: make path combobox keyboard accessible`.
+
+### Progress log
+- 2026-07-14: Started `19R2` after clean `19R1` commit. Spec-first and UI implementation QA rules
+  apply because this slice changes keyboard/focus behavior in an existing onboarding control.
+- 2026-07-14: Added active option state, `aria-activedescendant`, ArrowUp/Down wraparound,
+  Enter/Escape handling, pointer parity coverage, regenerated embedded UI assets, and completed
+  targeted UI tests plus full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

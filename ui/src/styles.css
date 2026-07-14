@@ -3511,7 +3511,8 @@ code {
 }
 
 .path-combobox-option:hover,
-.path-combobox-option:focus-visible {
+.path-combobox-option:focus-visible,
+.path-combobox-option.is-active {
   background: var(--surface-muted);
 }
 
