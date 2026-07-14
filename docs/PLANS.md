@@ -159,7 +159,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W3` provider argument wrapper cleanup after `19W2`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3`
+- [x] Continue PR-1 with `19W4` docflow compatibility helper cleanup after `19W3`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19W5a` review diff residual cleanup after `19W4`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2554,6 +2556,67 @@ interfaces change.
 - 2026-07-14: Removed the three legacy default provider argument functions, confirmed no remaining
   `internal/runtime` references, ran Claude/Qwen/Codex adapter tests, and completed full DoD with
   exact Node 22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w4-docflow-compatibility-helper-cleanup
+
+### Context
+`19W4` follows committed `19W3`. `docs/BACKLOG.md` marks `DEAD-006` as docflow compatibility
+helper cleanup: two local orchestrator helpers have been superseded by the artifact-quality layer.
+Current docflow already calls `artifactquality.HasRepoSpecificCitationSurface(...)` and
+`artifactquality.IsGenericRuntimeSummaryCitation(...)` directly; the remaining local helpers are
+unused wrappers.
+
+### Goals (must have)
+- [x] Remove unused `manifestHasRepoSpecificCitationSurface`.
+- [x] Remove unused `isGenericRuntimeSummaryCitation`.
+- [x] Keep the artifact-quality package as the only implementation surface for those checks.
+- [x] Verify docflow and artifact-quality tests still pass.
+- [x] Verify removed helper identifiers have no remaining code references.
+- [x] Continue PR-1 with `19W5a` review diff residual cleanup after `19W4` review/commit boundary
+      is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change artifact-quality warning semantics or wording.
+- [ ] Do not change final/citation index generation.
+- [ ] Do not change docflow rendering, promotion or collect manifest validation.
+- [ ] Do not start `19W5a` package-local residual cleanup in this slice.
+
+### Implementation
+1) Delete the two unused docflow wrapper functions.
+2) Run gofmt and reference search for the removed identifiers.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/orchestrator ./internal/artifactquality -count=1`.
+- Reference search for removed helper identifiers returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Two local docflow compatibility helpers are removed without aliases/replacements.
+- [x] Existing artifact-quality direct calls remain unchanged.
+- [x] Docflow and artifact-quality tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include
+      `19W5a` work.
+- [x] Commit `19W4: remove docflow compatibility helpers`.
+
+### Progress log
+- 2026-07-14: Started `19W4` after clean `19W3` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes internal
+  docflow compatibility dead surfaces only.
+- 2026-07-14: Removed the two unused docflow compatibility helpers, confirmed no remaining
+  references, ran orchestrator/artifact-quality tests, and completed full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

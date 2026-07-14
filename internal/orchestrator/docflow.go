@@ -518,14 +518,6 @@ func assessRefreshArtifactWarnings(
 	return warnings
 }
 
-func manifestHasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
-	return artifactquality.HasRepoSpecificCitationSurface(manifest)
-}
-
-func isGenericRuntimeSummaryCitation(id string) bool {
-	return artifactquality.IsGenericRuntimeSummaryCitation(id)
-}
-
 func (e *pipelineExecution) authoredDomainReports() (map[string]string, error) {
 	reportsByDomain := map[string]string{}
 	for _, manifest := range e.shardPacks {
