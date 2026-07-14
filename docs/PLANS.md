@@ -149,7 +149,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19U` deterministic mock Playwright CI after `19T`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U`
+- [x] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19V` Python runtime pinning after `19U2`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2146,8 +2148,10 @@ script that runs the seven scenarios explicitly without live providers.
 - [x] Keep console-error and horizontal-overflow assertions active in the existing mock specs.
 - [x] Wire the UI workflow to run the mock Playwright gate after build/determinism checks.
 - [x] Update testing documentation for the required mock browser gate.
-- [ ] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U` review/commit boundary is
+- [x] Continue PR-1 with `19U2` optional V8 coverage baseline after `19U` review/commit boundary is
       stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not add live provider checks or external repository/network dependencies.
@@ -2199,6 +2203,74 @@ release or live matrix interfaces change.
   contract tests for the seven explicit scenarios. Verified local `e2e:mock` as `7 passed / 0
   skipped` after installing local Chromium, then completed full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19u2-ui-v8-coverage-baseline
+
+### Context
+`19U2` follows committed `19U`. Vitest unit coverage is currently runnable only through the normal
+test command, so there is no locked V8 coverage provider, deterministic coverage output or recorded
+informational baseline that includes all `ui/src` files. This slice is explicitly optional and must
+not become a hard quality threshold gate.
+
+### Goals (must have)
+- [x] Lock `@vitest/coverage-v8` in `ui/package.json`/`ui/package-lock.json` at the Vitest version.
+- [x] Add a canonical UI coverage script that emits deterministic text and JSON summaries.
+- [x] Configure coverage to include all `ui/src` files and exclude tests/setup type-only noise.
+- [x] Record current line/statement/function/branch percentages as informational baseline only.
+- [x] Update testing documentation for the optional coverage baseline.
+- [ ] Continue PR-1 with `19V` Python runtime pinning after `19U2` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not make coverage thresholds fail required CI in this slice.
+- [ ] Do not add Playwright/browser coverage coupling.
+- [ ] Do not change UI runtime behavior or test assertions.
+- [ ] Do not change backend, schema, provider or live matrix behavior.
+
+### Implementation
+1) Install/lock `@vitest/coverage-v8` matching the repository's Vitest version.
+2) Extend `ui/vite.config.ts` test coverage config with provider `v8`, text/json reporters,
+   deterministic output directory and `include: ["src/**/*.{ts,tsx}"]`.
+3) Add `coverage` package script that runs Vitest coverage in one-shot mode.
+4) Add a lightweight Python contract test that confirms the script/dependency/config remain wired.
+5) Run coverage once, capture the summary percentages in `docs/TESTING_STRATEGY.md`, and keep them
+   informational.
+
+### Interfaces
+UI tooling/docs only. No backend API, schema, workspace, artifact, provider, Playwright or release
+interfaces change.
+
+### Tests
+- `npm run coverage --prefix ui` completes after clean install state and writes text/json coverage.
+- `python3 -m unittest scripts/tests/ui_coverage_contract_test.py`.
+- `npm run typecheck --prefix ui`.
+- Full DoD remains provider-free.
+
+### Docs/fixtures
+- Update `docs/TESTING_STRATEGY.md`.
+- No schema/example/golden fixture changes.
+
+### Acceptance
+- [x] `@vitest/coverage-v8` is locked and version changes require package/lockfile diff.
+- [x] Coverage includes all `ui/src` files.
+- [x] Coverage summary is deterministic enough for local comparison and emits JSON.
+- [x] No coverage thresholds gate CI.
+- [x] `go test ./internal/docsync` passes after docs changes.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no Playwright, runtime behavior or hard-threshold scope leaked into
+      this slice.
+- [x] Commit `19U2: add deterministic UI coverage baseline`.
+
+### Progress log
+- 2026-07-14: Started `19U2` after clean `19U` commit. Spec-first and docs-sync rules apply
+  because this slice changes UI test tooling and documented testing baseline.
+- 2026-07-14: Locked `@vitest/coverage-v8`, added `npm run coverage --prefix ui`, configured
+  V8 text/JSON coverage over `ui/src`, recorded the informational baseline
+  (`85.36/77.03/88.54/85.22` statements/branches/functions/lines), ignored generated coverage
+  artifacts, and completed full DoD with exact Node 22.21.1: `make contracts`, `make test`,
+  `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

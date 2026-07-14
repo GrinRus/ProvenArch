@@ -13,6 +13,7 @@ Thumbs.db
 ui/node_modules/
 ui/dist/
 ui/test-results/
+ui/coverage/
 tools/contracts/node_modules/
 npm-debug.log*
 yarn-error.log*

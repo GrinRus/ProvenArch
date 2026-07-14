@@ -222,6 +222,9 @@ Implemented additional jobs:
   - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes seven local
     provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
     horizontal overflow
+  - optional local coverage is available through `npm run coverage --prefix ui`; it uses locked
+    `@vitest/coverage-v8`, includes all `ui/src` implementation files and writes ignored
+    `ui/coverage/coverage-summary.json` / `coverage-final.json`
 
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
@@ -447,6 +450,10 @@ Release workflow hardening:
   требуется.
 - UI smoke стек: `React + Vite + Vitest + Playwright`; required `e2e:mock` is deterministic and
   provider-free, while `e2e:live` remains a trusted-machine diagnostic/release-gate tool.
+- UI V8 coverage baseline is informational only, not a required CI threshold. Baseline from
+  `2026-07-14` (`npm run coverage --prefix ui`): statements `85.36%` (`3220/3772`), branches
+  `77.03%` (`3200/4154`), functions `88.54%` (`812/917`), lines `85.22%` (`3087/3622`). Future
+  threshold ratchets should only move upward and must be explicit package/config/docs changes.
 - Balanced timeout defaults:
   - step `1800s`, heartbeat `30s`, pipeline `2400s`, kill-grace `30s`
   - api-ready `60s`, api-init `120s`, ui-init poll `900s`, ui-cancel poll `420s`
