@@ -169,7 +169,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19W5d` reports compiler residual cleanup after `19W5c`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
+- [x] Continue PR-1 with `19W5e` prompt-contract residual cleanup after `19W5d`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -2860,6 +2862,65 @@ interfaces change.
   `writeStringListWithFallback` helper remains unchanged, ran reports compiler tests, and
   completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
   `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19w5e-prompt-contract-residual-cleanup
+
+### Context
+`19W5e` follows committed `19W5d` and closes the `DEAD-007` package-local residual track.
+`docs/CODE_AUDIT_2026-07-10.md` identifies the residual at
+`internal/runtime/promptcontract/collect_repair.go:213`. In the current tree this is the unused
+`firstNonEmpty` helper; collect repair prompt composition uses explicit path/evidence selection
+logic instead.
+
+### Goals (must have)
+- [x] Remove unused `firstNonEmpty`.
+- [x] Keep collect manifest and collect artifact-pair repair prompts unchanged.
+- [x] Verify prompt-contract tests still pass.
+- [x] Verify the removed helper identifier has no remaining code references.
+- [x] Continue PR-1 with `19X` UI dead-surface cleanup after `19W5e` review/commit boundary is
+      stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
+
+### Non-goals
+- [ ] Do not change collect repair prompt wording, evidence ranking or fallback behavior.
+- [ ] Do not change runtime draft validation or repair retry policy.
+- [ ] Do not change schemas, fixtures or live-provider gates.
+- [ ] Do not start `19X` UI dead-surface cleanup in this slice.
+
+### Implementation
+1) Delete the unused `firstNonEmpty` helper.
+2) Run gofmt and reference search for the removed identifier.
+
+### Interfaces
+Internal Go dead-code cleanup only. No public API, schema, workspace, UI, provider or release
+interfaces change.
+
+### Tests
+- `./scripts/run-go.sh test ./internal/runtime/promptcontract -count=1`.
+- Reference search for `firstNonEmpty` returns no active code hits.
+- Staticcheck/canonical lint remains green through full DoD.
+
+### Docs/fixtures
+- `docs/PLANS.md` only. No behavior docs, schemas, examples or golden fixtures should change.
+
+### Acceptance
+- [x] Prompt-contract residual helper is removed without alias/replacement.
+- [x] Prompt-contract tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms this is behavior-neutral dead-code cleanup and does not include `19X`
+      work.
+- [x] Commit `19W5e: remove prompt contract residuals`.
+
+### Progress log
+- 2026-07-14: Started `19W5e` after clean `19W5d` commit. Spec-first rule applies; no schema,
+  model-fixture or docs-visible behavior skill is required because the slice removes one internal
+  prompt-contract dead helper only.
+- 2026-07-14: Removed unused `firstNonEmpty`, confirmed no remaining code references, ran
+  prompt-contract tests, and completed full DoD with exact Node 22.21.1: `make contracts`,
+  `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review

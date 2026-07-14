@@ -210,15 +210,6 @@ func collectCanonicalPathMappingLines(task acpruntime.Task, docPaths []string) [
 	return lines
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
 	docRel := collectArtifactPairRepairDocumentPath(task, validationErr)
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
