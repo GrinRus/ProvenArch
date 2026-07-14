@@ -13,7 +13,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Verify composite release evidence
+        env:
+          ACP_RELEASE_MATRIX_ID: ${{ vars.ACP_RELEASE_MATRIX_ID }}
+          ACP_RELEASE_VERDICT_PATH: ${{ vars.ACP_RELEASE_VERDICT_PATH }}
+        run: |
+          set -euo pipefail
+          verdict_path="${ACP_RELEASE_VERDICT_PATH:-}"
+          if [ -z "$verdict_path" ] && [ -n "${ACP_RELEASE_MATRIX_ID:-}" ]; then
+            verdict_path="reports/release_verdict_${ACP_RELEASE_MATRIX_ID}.json"
+          fi
+          if [ -z "$verdict_path" ]; then
+            echo "Set ACP_RELEASE_VERDICT_PATH or ACP_RELEASE_MATRIX_ID in the github-release environment." >&2
+            exit 1
+          fi
+          python3 scripts/verify-release-verdict.py "$verdict_path"
+
   release:
+    needs: verify-release-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: github-release
@@ -34,7 +60,9 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: |
+            ui/package-lock.json
+            tools/contracts/package-lock.json
 
       - name: Install Syft for release SBOMs
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0

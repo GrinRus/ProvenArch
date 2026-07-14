@@ -67,7 +67,26 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertEqual(["v*"], triggers["push"]["tags"])
 
         job = workflow["jobs"]["release"]
+        verify_job = workflow["jobs"]["verify-release-evidence"]
+
+        self.assertEqual("ubuntu-latest", verify_job["runs-on"])
+        self.assertEqual("github-release", verify_job["environment"])
+        self.assertEqual({"contents": "read"}, verify_job["permissions"])
+        verify_runs = [step.get("run", "") for step in verify_job["steps"]]
+        self.assertTrue(
+            any("scripts/verify-release-verdict.py" in run for run in verify_runs),
+            "release evidence verifier must run before publication",
+        )
+        verify_step = next(
+            step
+            for step in verify_job["steps"]
+            if "scripts/verify-release-verdict.py" in step.get("run", "")
+        )
+        self.assertIn("ACP_RELEASE_MATRIX_ID", verify_step["env"])
+        self.assertIn("ACP_RELEASE_VERDICT_PATH", verify_step["env"])
+
         self.assertEqual("ubuntu-latest", job["runs-on"])
+        self.assertEqual("verify-release-evidence", job["needs"])
         steps = job["steps"]
 
         uses = [step.get("uses", "") for step in steps]
@@ -92,6 +111,12 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertEqual("write", job["permissions"]["contents"])
         self.assertEqual("write", job["permissions"]["id-token"])
         self.assertEqual("write", job["permissions"]["attestations"])
+
+        for name, candidate in workflow["jobs"].items():
+            permissions = candidate.get("permissions", {})
+            if any(value == "write" for value in permissions.values()):
+                self.assertEqual("release", name)
+                self.assertEqual("verify-release-evidence", candidate.get("needs"))
 
     def test_go_workflows_use_repository_go_version_file(self) -> None:
         workflow_names = (

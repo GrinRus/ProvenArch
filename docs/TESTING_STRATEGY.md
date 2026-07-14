@@ -218,6 +218,10 @@ Security/advisory workflows:
 
 Release workflow hardening:
 - tag-only release workflow uses job-level write permissions, an explicit `github-release` environment, pinned actions, timeouts, and provenance/SBOM artifact generation.
+- tag release publication is split behind a read-only `verify-release-evidence` job that runs
+  `scripts/verify-release-verdict.py` against `ACP_RELEASE_VERDICT_PATH` or
+  `ACP_RELEASE_MATRIX_ID`; the write-enabled GoReleaser/provenance job has
+  `needs: verify-release-evidence`.
 - GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 

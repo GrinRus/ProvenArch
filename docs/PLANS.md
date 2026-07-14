@@ -127,7 +127,9 @@ for transactional promotion and reliable run lifecycle recovery.
       review/commit boundary is stable.
 - [x] Continue PR-1 with `19O` locked contract validator tooling after `19M`
       review/commit boundary is stable.
-- [ ] Continue PR-1 with `19N` composite release verdict gate after `19O`
+- [x] Continue PR-1 with `19N` composite release verdict gate after `19O`
+      review/commit boundary is stable.
+- [ ] Continue PR-1 with `19P` Step 1 card enrichment after `19N`
       review/commit boundary is stable.
 
 ### Non-goals
@@ -1307,8 +1309,10 @@ depend on whatever `latest` resolves to, rather than a reviewed lockfile diff.
 - [x] Keep current schema/example/fixture validation behavior unchanged.
 - [x] Update developer/testing docs so toolchain version changes require explicit package/lockfile
       review.
-- [ ] Continue PR-1 with `19N` composite release verdict gate after `19O` review/commit boundary
+- [x] Continue PR-1 with `19N` composite release verdict gate after `19O` review/commit boundary
       is stable.
+- [ ] Keep this plan active until final Epic 19 reconciliation archives completed PR-1 slice
+      plans.
 
 ### Non-goals
 - [ ] Do not change schemas, examples, fixtures or semantic contract rules.
@@ -1368,6 +1372,83 @@ validation script bootstrap. No product HTTP/API/schema/artifact contract change
   Verification passed: clean locked install, direct pinned-Node/offline script run, missing-tools
   negative bootstrap, `npm audit --audit-level=high`, and full DoD with exact Node 22.21.1:
   `make contracts`, `make test`, `make lint`, `make build`.
+
+### Plan ID
+EP-20260714-epic-19-19n-composite-release-verdict-gate
+
+### Context
+`19N` follows committed `19M` and `19O`. `scripts/verify-release-verdict.py` already verifies a
+canonical `reports/release_verdict_<matrix-id>.json` plus companion
+`swe_ux_assessment_<matrix-id>.md` and `swe_artifact_quality_assessment_<matrix-id>.md`, including
+missing files, `FAIL`, matrix-id mismatch and unaccepted manual assessments. The GitHub release
+workflow still grants GoReleaser/write permissions in the publishing job without a preceding
+read-only composite-evidence verifier job.
+
+### Goals (must have)
+- [x] Add a read-only release evidence verification job that runs
+      `scripts/verify-release-verdict.py` before any GoReleaser/write-permission job can start.
+- [x] Make release publication depend on that verifier job with `needs`.
+- [x] Keep GoReleaser and provenance write permissions scoped only to the publishing job.
+- [x] Keep release verification offline: no live provider or matrix harness execution in the
+      workflow.
+- [x] Add workflow regression tests for missing verifier, missing dependency, and write
+      permissions appearing before verification.
+- [x] Update release runbook/docs with the workflow inputs and composite evidence gate.
+- [ ] Continue PR-1 with `19P` Step 1 card enrichment after `19N` review/commit boundary is
+      stable.
+
+### Non-goals
+- [ ] Do not change canonical release matrices, providers, sweeps or live matrix harness.
+- [ ] Do not generate live evidence in CI.
+- [ ] Do not weaken `verify-release-verdict.py` payload/manual-assessment requirements.
+- [ ] Do not implement semantic enrichment; that remains `19P`.
+
+### Implementation
+1) Split `.github/workflows/release.yml` into a read-only `verify-release-evidence` job and the
+   existing write-enabled `release` job.
+2) The verifier job checks out the exact tag commit, resolves a verdict path from either
+   `ACP_RELEASE_VERDICT_PATH` or `ACP_RELEASE_MATRIX_ID`, and runs
+   `python3 scripts/verify-release-verdict.py "$verdict_path"`.
+3) The release job keeps `contents/id-token/attestations: write`, keeps GoReleaser/attestation
+   steps unchanged, and adds `needs: verify-release-evidence`.
+4) Update release workflow tests to assert the verifier job has read-only permissions, the release
+   job depends on it, and no GoReleaser/write-permission job can run without the verifier.
+5) Update `docs/RELEASE_LIVE_E2E_RUNBOOK.md` and `docs/TESTING_STRATEGY.md` for the composite
+   gate and required evidence variables.
+
+### Interfaces
+CI/release workflow surface only: `ACP_RELEASE_VERDICT_PATH` or `ACP_RELEASE_MATRIX_ID` must point
+the release workflow at already-created evidence files in the checked-out tag. No product API,
+schema or live harness interface changes.
+
+### Tests
+- Existing `scripts/tests/verify_release_verdict_test.py` continues covering missing, `FAIL`,
+  matrix-mismatched and unaccepted SWE evidence.
+- `scripts/tests/release_distribution_test.py` covers release workflow job ordering and
+  permissions.
+- Full DoD remains green.
+
+### Docs/fixtures
+- Update `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+- Update `docs/TESTING_STRATEGY.md`.
+- No fixtures/schema changes expected.
+
+### Acceptance
+- [x] Targeted release verifier/distribution tests pass.
+- [x] Full slice DoD passes with exact Node `22.21.1`:
+      `make contracts`, `make test`, `make lint`, `make build`.
+- [x] Self-review confirms no live matrix/provider, schema, UI or semantic enrichment scope leaked
+      into this slice.
+- [x] Commit `19N: require composite release verdict`.
+
+### Progress log
+- 2026-07-14: Started `19N` after clean `19O` commit. Spec-first and docs-sync rules apply
+  because this slice changes release workflow policy and release docs.
+- 2026-07-14: Implemented read-only `verify-release-evidence` workflow job, wired the
+  write-enabled `release` job through `needs`, kept GoReleaser/provenance write permissions only
+  on the publishing job, and documented `ACP_RELEASE_MATRIX_ID` / `ACP_RELEASE_VERDICT_PATH`.
+  Verification passed: targeted release verifier/distribution tests and full DoD with exact Node
+  22.21.1: `make contracts`, `make test`, `make lint`, `make build`.
 
 ### Plan ID
 EP-20260711-run-pinned-evidence-review
