@@ -319,6 +319,9 @@ func TestLauncherWorkspaceManifestAndRuntimeSelection(t *testing.T) {
 func TestOnboardingWorkspaceSwitchConflictsWithActiveRun(t *testing.T) {
 	t.Parallel()
 
+	// Register TempDir cleanup before server shutdown so t.Cleanup's LIFO order
+	// always stops the active run before removing its workspace.
+	root := t.TempDir()
 	server := NewLauncherServer(testServerRuntimeConfig(), func(ws workspace.Root, config ServerRuntimeConfig) *orchestrator.Service {
 		return orchestrator.NewService(
 			orchestrator.WithHistoryWorkspace(ws),
@@ -333,7 +336,6 @@ func TestOnboardingWorkspaceSwitchConflictsWithActiveRun(t *testing.T) {
 		_ = server.Shutdown(ctx)
 	})
 
-	root := t.TempDir()
 	workspacePath := filepath.Join(root, "arch-workspace")
 	repoPath := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
