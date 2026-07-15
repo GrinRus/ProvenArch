@@ -6,6 +6,7 @@
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
+> **Refresh maintenance:** ACP объясняет no-op/full/selective execution, переиспользует только validator-promoted baseline shard evidence и не считает commit messages источником архитектурной истины.
 
 ---
 

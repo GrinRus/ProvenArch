@@ -17,6 +17,10 @@ The impact contract is explicitly `advisory`. The current orchestrator continues
 
 ## Consequences
 
+- Advisory planning and factual execution are separate persisted contracts: `refresh-impact-plan.json` is immutable, while `refresh-execution.json` records no-op/selective/full behavior and conservative fallback.
+- Selective collect reuses prior shard packs only through the existing validated checkpoint replay path; unavailable or mismatched baseline evidence forces full execution before providers start.
+- Publication decisions are independently auditable through `refresh-materialization.json`; preserved content carries baseline provenance and digest.
+
 - Each run has reviewable baseline evidence and deterministic planning output.
 - Initial and legacy workspaces safely fall back without blocking the existing full pipeline.
 - Required CI remains provider-independent and can exercise all decisions with synthetic Git output and fixtures.

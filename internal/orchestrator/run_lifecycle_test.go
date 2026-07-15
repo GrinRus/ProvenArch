@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,9 +17,17 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-func TestRunPersistsRevisionAndAdvisoryImpactArtifactsWithoutSkippingRefresh(t *testing.T) {
+func TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts(t *testing.T) {
 	t.Parallel()
 	ws := createWorkspace(t)
+	for _, repo := range []string{"payments-service", "users-service"} {
+		root := filepath.Join(ws.Path, "repos", repo)
+		for _, args := range [][]string{{"init"}, {"add", "README.md"}, {"-c", "user.name=ACP Test", "-c", "user.email=acp@example.test", "commit", "-m", "baseline"}} {
+			if output, gitErr := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); gitErr != nil {
+				t.Fatalf("init git repo %s: %v: %s", repo, gitErr, output)
+			}
+		}
+	}
 	service := NewService(WithHistoryWorkspace(ws), WithClock(func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) }))
 	initInfo, initArtifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineInit, NonInteractive: true})
 	if err != nil {
@@ -27,19 +36,24 @@ func TestRunPersistsRevisionAndAdvisoryImpactArtifactsWithoutSkippingRefresh(t *
 	if initInfo.Status != RunStatusSucceeded || !artifactKindPresent(initArtifacts, "source-revisions") {
 		t.Fatalf("expected source revisions in successful init inventory: info=%+v artifacts=%+v", initInfo, initArtifacts)
 	}
+	if _, _, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineRefresh, NonInteractive: true}); err != nil {
+		t.Fatalf("establish post-init refresh baseline: %v", err)
+	}
 	refreshInfo, refreshArtifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineRefresh, NonInteractive: true})
 	if err != nil {
 		t.Fatalf("run refresh: %v", err)
 	}
-	if refreshInfo.Status != RunStatusSucceeded || !strings.HasSuffix(refreshInfo.CurrentStep, "step4.proposals") {
-		t.Fatalf("advisory plan must not skip full refresh: %+v", refreshInfo)
+	if refreshInfo.Status != RunStatusSucceeded || refreshInfo.CurrentStep != "" || refreshInfo.RefreshSummary == nil || refreshInfo.RefreshSummary.Mode != "no_op" {
+		t.Fatalf("unchanged refresh must finish as an explained no-op: %+v", refreshInfo)
 	}
-	if !artifactKindPresent(refreshArtifacts, "source-revisions") || !artifactKindPresent(refreshArtifacts, "refresh-impact-plan") {
+	if !artifactKindPresent(refreshArtifacts, "source-revisions") || !artifactKindPresent(refreshArtifacts, "refresh-impact-plan") || !artifactKindPresent(refreshArtifacts, "refresh-execution") || !artifactKindPresent(refreshArtifacts, "refresh-materialization") {
 		t.Fatalf("expected planning artifacts in refresh inventory: %+v", refreshArtifacts)
 	}
 	for rel, parser := range map[string]func([]byte) error{
-		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "source-revisions.json")):    func(raw []byte) error { _, err := refreshplan.ParseSourceRevisions(raw); return err },
-		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "refresh-impact-plan.json")): func(raw []byte) error { _, err := refreshplan.ParseImpactPlan(raw); return err },
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "source-revisions.json")):        func(raw []byte) error { _, err := refreshplan.ParseSourceRevisions(raw); return err },
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "refresh-impact-plan.json")):     func(raw []byte) error { _, err := refreshplan.ParseImpactPlan(raw); return err },
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "refresh-execution.json")):       func(raw []byte) error { _, err := refreshplan.ParseRefreshExecution(raw); return err },
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "refresh-materialization.json")): func(raw []byte) error { _, err := refreshplan.ParseRefreshMaterialization(raw); return err },
 	} {
 		raw, err := ws.ReadFile(rel)
 		if err != nil {
@@ -48,6 +62,63 @@ func TestRunPersistsRevisionAndAdvisoryImpactArtifactsWithoutSkippingRefresh(t *
 		if err := parser(raw); err != nil {
 			t.Fatalf("parse %s: %v", rel, err)
 		}
+	}
+}
+
+func TestRefreshSelectivelyReplaysUnaffectedBaselineShards(t *testing.T) {
+	ws := createWorkspace(t)
+	for _, repo := range []string{"payments-service", "users-service"} {
+		root := filepath.Join(ws.Path, "repos", repo)
+		for _, args := range [][]string{{"init"}, {"add", "README.md"}, {"-c", "user.name=ACP Test", "-c", "user.email=acp@example.test", "commit", "-m", "baseline"}} {
+			if output, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+				t.Fatalf("init git repo: %v: %s", err, output)
+			}
+		}
+	}
+	service := NewService(WithHistoryWorkspace(ws), WithClock(func() time.Time { return time.Date(2026, 7, 15, 13, 0, 0, 0, time.UTC) }))
+	if _, _, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineInit, NonInteractive: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineRefresh, NonInteractive: true}); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(ws.Path, "repos", "payments-service")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# payments-service\n\nChanged API.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", repo, "add", "README.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, output)
+	}
+	if output, err := exec.Command("git", "-C", repo, "-c", "user.name=ACP Test", "-c", "user.email=acp@example.test", "commit", "-m", "incorrect intent label").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, output)
+	}
+	info, artifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineRefresh, NonInteractive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.RefreshSummary == nil || info.RefreshSummary.Mode != "affected_only" {
+		t.Fatalf("expected affected-only execution, got %+v", info.RefreshSummary)
+	}
+	if !artifactKindPresent(artifacts, "refresh-materialization") {
+		t.Fatalf("missing materialization audit: %+v", artifacts)
+	}
+	raw, readErr := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", info.RunID, "refresh-materialization.json")))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	materialization, parseErr := refreshplan.ParseRefreshMaterialization(raw)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	hasPreserved := false
+	for _, decision := range materialization.Decisions {
+		if decision.Action == "preserved" {
+			hasPreserved = true
+			break
+		}
+	}
+	if !hasPreserved {
+		t.Fatalf("expected at least one byte-preserved decision: %+v", materialization.Decisions)
 	}
 }
 

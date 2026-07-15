@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/refresh-execution.schema.json",
+  "title": "ACP Refresh Execution Audit",
+  "type": "object",
+  "required": ["version", "run_id", "generated_at", "baseline_run_id", "plan_decision", "mode", "reason_codes", "source_ranges", "affected_shards", "preserved_shards", "provider_steps_skipped", "artifact_path"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "baseline_run_id": {"type": ["string", "null"], "minLength": 1},
+    "plan_decision": {"type": "string", "enum": ["unchanged_candidate", "selective_candidate", "full_refresh_required"]},
+    "mode": {"type": "string", "enum": ["no_op", "affected_only", "full"]},
+    "reason_codes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "source_ranges": {"type": "array", "items": {"$ref": "#/$defs/source_range"}},
+    "affected_shards": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "preserved_shards": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "provider_steps_skipped": {"type": "boolean"},
+    "artifact_path": {"type": "string", "pattern": "^reports/taskruns/[^/]+/refresh-execution\\.json$"}
+  },
+  "$defs": {"source_range": {"type": "object", "required": ["repo", "baseline_revision", "current_revision"], "properties": {"repo": {"type": "string", "minLength": 1}, "baseline_revision": {"type": ["string", "null"]}, "current_revision": {"type": ["string", "null"]}}, "additionalProperties": false}},
+  "additionalProperties": false
+}

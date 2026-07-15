@@ -492,7 +492,10 @@ func (e *pipelineExecution) runStepAsIs(ctx context.Context, stepID string) erro
 		Label: "As-Is Draft Manifest",
 	})
 	e.logInfo(stepID, "", "assembling staged doc flow", nil)
-	return e.assembleStagedDocFlow()
+	if err := e.assembleStagedDocFlow(); err != nil {
+		return err
+	}
+	return e.preserveUnaffectedStagedDocuments()
 }
 
 func (e *pipelineExecution) runStepValidator(ctx context.Context, stepID string) error {

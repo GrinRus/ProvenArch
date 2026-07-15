@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/refresh-materialization.schema.json",
+  "title": "ACP Refresh Materialization Decisions",
+  "type": "object",
+  "required": ["version", "run_id", "generated_at", "baseline_run_id", "mode", "decisions"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "baseline_run_id": {"type": ["string", "null"], "minLength": 1},
+    "mode": {"type": "string", "enum": ["no_op", "affected_only", "full"]},
+    "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}}
+  },
+  "$defs": {"decision": {"type": "object", "required": ["path", "action", "reason_codes", "source_run_id", "content_sha256"], "properties": {"path": {"type": "string", "minLength": 1}, "action": {"type": "string", "enum": ["updated", "preserved", "removed", "uncertain"]}, "reason_codes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}, "source_run_id": {"type": ["string", "null"], "minLength": 1}, "content_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}}, "additionalProperties": false}},
+  "additionalProperties": false
+}

@@ -63,9 +63,13 @@ docs_first_contracts=(
   "schemas/qa-answer.schema.json:examples/qa-answer.example.json"
   "schemas/source-revisions.schema.json:examples/source-revisions.example.json"
   "schemas/refresh-impact-plan.schema.json:examples/refresh-impact-plan.example.json"
+  "schemas/refresh-execution.schema.json:examples/refresh-execution.example.json"
+  "schemas/refresh-materialization.schema.json:examples/refresh-materialization.example.json"
   "schemas/source-revisions.schema.json:fixtures/refresh-planning/unchanged/source-revisions.json"
   "schemas/refresh-impact-plan.schema.json:fixtures/refresh-planning/unchanged/refresh-impact-plan.json"
   "schemas/refresh-impact-plan.schema.json:fixtures/refresh-planning/full-fallback/refresh-impact-plan.json"
+  "schemas/refresh-execution.schema.json:fixtures/refresh-planning/unchanged/refresh-execution.json"
+  "schemas/refresh-materialization.schema.json:fixtures/refresh-planning/unchanged/refresh-materialization.json"
 )
 
 for entry in "${docs_first_contracts[@]}"; do

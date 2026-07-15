@@ -35,13 +35,21 @@ export function ChangesPage({
         <aside className="panel review-packages" data-testid="review-packages">
           <h2>Review packages</h2>
           {reviewCandidates.length === 0 ? <p className="empty-state">No analysis history is available.</p> : <ul className="compact-list">{reviewCandidates.map((run) => {
-            return <li key={run.run_id}><div><strong>{run.pipeline} · {run.run_id}</strong><span>{run.status}</span><span>Publication: Unknown</span></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id)}>Change Review</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open Run Studio</button>}</li>;
+            return <li key={run.run_id}><div><strong>{run.pipeline} · {run.run_id}</strong><span>{run.status}</span><span>{refreshLabel(run)}</span><span>Publication: Unknown</span></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id)}>Change Review</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open Run Studio</button>}</li>;
           })}</ul>}
         </aside>
       ) : null}
       {children}
     </section>
   );
+}
+
+function refreshLabel(run: RunListItem): string {
+  if (run.pipeline !== "refresh") return "Initial architecture build";
+  if (!run.refresh_summary) return "Refresh details unavailable";
+  if (run.refresh_summary.mode === "no_op") return "No changes in analysis scope";
+  const title = run.refresh_summary.mode === "affected_only" ? "Affected scope refresh" : "Full refresh";
+  return `${title} · ${run.refresh_summary.updated} updated · ${run.refresh_summary.preserved} preserved · ${run.refresh_summary.uncertain} uncertain`;
 }
 
 function label(view: ChangesView): string {

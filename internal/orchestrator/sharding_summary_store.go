@@ -178,6 +178,7 @@ func (e *pipelineExecution) loadReplayableShardResult(
 		}
 	}
 	prepared.Task.StepID = stepID
+	prepared.Task.RunID = e.runID
 	prepared.Task.DomainID = strings.TrimSpace(domainID)
 	if strings.TrimSpace(prepared.Task.ShardID) == "" {
 		prepared.Task.ShardID = strings.TrimSpace(plan.ShardID)

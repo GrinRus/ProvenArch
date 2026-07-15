@@ -273,7 +273,19 @@ Output mapping rules:
 - `repo_deltas[]` preserve complete changed-file status including rename/copy original path, scope and mapped shards/domains. More than 10,000 changed paths records the exact count with `changes_complete=false` and never maps a partial list.
 - Stale/preserved artifacts are candidates only; this schema does not authorize selective execution or promotion.
 
-## 10) QA Answer Schema
+## 10) Refresh Execution Schema
+
+- **Source of truth:** `schemas/refresh-execution.schema.json`
+- Фиксирует фактический режим refresh (`no_op`, `affected_only`, `full`), исходное решение planner, source ranges, причины fallback и реально сохранённые/затронутые shards.
+- `refresh-impact-plan.json` остаётся неизменяемым advisory input; execution audit не переписывает исходное решение planner.
+
+## 11) Refresh Materialization Schema
+
+- **Source of truth:** `schemas/refresh-materialization.schema.json`
+- Фиксирует решения `updated`, `preserved`, `removed`, `uncertain`, baseline provenance и SHA-256 доступного содержимого.
+- `uncertain` не разрешает selective promotion; полный объединённый staged set обязан пройти validator до атомарной promotion.
+
+## 12) QA Answer Schema
 
 - **Source of truth:** `schemas/qa-answer.schema.json`
 - Primary runtime output для async Ask step `qa.ask`.
@@ -295,7 +307,7 @@ Semantic role:
 - file is written only under `reports/taskruns/<run_id>/qa/qa-answer.json`;
 - it is run/audit output, not a promoted canonical architecture artifact.
 
-## 11) Model conventions
+## 13) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:

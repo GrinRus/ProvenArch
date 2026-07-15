@@ -50,6 +50,9 @@ func SharedSections(task acpruntime.Task) []string {
 	if stepPolicy := strings.TrimSpace(steppolicy.StepSpecificPolicy(task.StepID)); stepPolicy != "" {
 		sections = append(sections, stepPolicy)
 	}
+	if strings.TrimSpace(task.StepID) == "refresh.step1.collect" && strings.TrimSpace(task.RefreshIntentContext) != "" {
+		sections = append(sections, strings.TrimSpace(task.RefreshIntentContext))
+	}
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		asIsLines := []string{

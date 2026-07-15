@@ -1546,6 +1546,7 @@ export function AnalysisStagePanel({
         </section>
       ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
+      {runStatus?.pipeline === "refresh" ? <RefreshExecutionSummary runStatus={runStatus} /> : null}
 
       <ModalDialog
         open={queueConfirmationOpen}
@@ -1608,6 +1609,25 @@ export function AnalysisStagePanel({
         <PendingPermissionsTable pendingPermissions={pendingPermissions} />
       </details>
       <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
+    </section>
+  );
+}
+
+function RefreshExecutionSummary({ runStatus }: { runStatus: RunStatusResponse }) {
+  const summary = runStatus.refresh_summary;
+  if (!summary) {
+    return <section className="subsection" data-testid="refresh-summary-unavailable"><h2>Refresh details</h2><p className="hint">Refresh details unavailable for this legacy run.</p></section>;
+  }
+  const title = summary.mode === "no_op" ? "No changes in analysis scope" : summary.mode === "affected_only" ? "Affected scope refresh" : "Full refresh";
+  return (
+    <section className="subsection" data-testid="refresh-execution-summary">
+      <div className="section-heading-row"><h2>{title}</h2><StatusBadge tone={summary.mode === "full" ? "info" : "ok"}>{summary.mode.replace("_", " ")}</StatusBadge></div>
+      <dl className="compact-defs">
+        <div><dt>Planner decision</dt><dd>{summary.decision}</dd></div>
+        <div><dt>Baseline run</dt><dd>{summary.baseline_run_id || "none"}</dd></div>
+        <div><dt>Reason</dt><dd>{summary.reason_codes.length > 0 ? summary.reason_codes.join(", ") : "none"}</dd></div>
+        <div><dt>Artifacts</dt><dd>{summary.updated} updated · {summary.preserved} preserved · {summary.removed} removed · {summary.uncertain} uncertain</dd></div>
+      </dl>
     </section>
   );
 }

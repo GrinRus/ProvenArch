@@ -1252,7 +1252,7 @@ Suggested PR slices:
     the default decision flow
 ## Epic 21 — Evidence-backed Architecture Home + Impact-aware Refresh (Wave 1)
 
-Status (2026-07-15): `21A`, `21B` and `21C` implemented. `21D`–`21G` remain open; therefore the epic remains in progress. Advisory impact decisions do not yet skip provider work or selectively promote artifacts.
+Status (2026-07-15): complete. `21A`–`21G` implemented with schema-validated planning/execution/materialization evidence, provider-free no-op, fail-closed affected-only collect, byte-preserving promotion decisions and operator explanation. Epic 18 R3 remains a separate trusted-host release gate.
 
 Context:
 - ProvenArch already has the stronger trust and governance foundation: a separate Git-versioned
@@ -1357,24 +1357,28 @@ Suggested PR slices:
   - process the complete changed path set for planning; if safety limits are exceeded, mark full
     refresh instead of silently dropping paths
 - `21D Explainable no-op refresh`
+  - **done:** safe provider-free no-op, factual execution audit and CLI/API/UI explanation
   - skip provider steps only for unchanged clean revisions or out-of-scope-only changes
   - finish the refresh successfully with taskrun impact evidence and no canonical report/model/
     proposal/changelog rewrites
   - surface the no-op reason and source range in CLI/API/UI run status using existing extension
     patterns or a separately synchronized contract change
 - `21E Affected-only collect execution + bounded Git intent evidence`
+  - **done:** validated baseline checkpoint replay, fail-closed fallback and bounded secondary Git intent
   - dispatch only impacted existing shards/domains while preserving deterministic ordering and current
     failure semantics
   - pass affected-path context plus bounded recent commit summaries to collect tasks
   - fall back to full collect for any in-scope unmapped or ambiguous change
   - prove that source evidence wins over stale/incorrect commit messages in prompt and fixture tests
 - `21F Surgical downstream materialization and promotion`
+  - **done:** dependency candidates, byte-identity preservation and updated/preserved/removed/uncertain audit contract
   - rebuild global summaries only when their dependency set changes
   - update affected domain docs/model entities/edges/findings/proposals while carrying forward known-good
     unaffected artifacts from the explicit baseline run
   - keep preserved canonical files byte-identical and validate the merged final index/citation set
   - record `updated / preserved / removed / uncertain` artifact decisions for Review and Publish
 - `21G Operator explanation, product language and release validation`
+  - **done:** Runs/Changes summaries, legacy state, synchronized docs and deterministic UI gates
   - show impact summary, no-op reason and artifact decisions in Analysis/Review/Publish without adding a
     new product stage
   - keep pre-maintenance copy truthful (`builds an evidence-backed architecture workspace`) and use

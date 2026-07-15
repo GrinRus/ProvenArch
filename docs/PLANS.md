@@ -5233,6 +5233,52 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 
 ---
 
+## EP-20260715-21D-explainable-no-op
+
+### Goal
+- Turn safe `unchanged_candidate` plans into successful provider-free refreshes without canonical rewrites.
+
+### Plan
+- [x] Persist factual refresh execution audit and additive run summary.
+- [x] Fail closed for every planner fallback and leave validator-promoted baseline selection unchanged.
+- [x] Surface no-op identity in CLI and Runs and cover schema/orchestrator behavior.
+
+## EP-20260715-21E-affected-collect
+
+### Goal
+- Execute only affected collect shards when all unaffected baseline packs can be replayed safely.
+
+### Plan
+- [x] Preflight and copy baseline packs into current taskrun staging before provider execution.
+- [x] Reuse the existing checkpoint parser/apply path and preserve deterministic scheduling semantics.
+- [x] Fall back to full execution on missing packs or shard-plan mismatch and provide bounded Git intent context.
+
+## EP-20260715-21F-surgical-materialization
+
+### Goal
+- Make downstream publication decisions explicit and validator-gated.
+
+### Plan
+- [x] Add schema-validated materialization decisions with provenance and digest.
+- [x] Record byte-identical no-op preservation and full-refresh rebuild decisions.
+- [x] Keep final/citation validation and atomic promotion as the only canonical mutation boundary.
+
+## EP-20260715-21G-operator-explanation
+
+### Goal
+- Explain refresh behavior in existing Runs and Changes surfaces and synchronize product documentation.
+
+### Plan
+- [x] Show no-op, affected-only, full and legacy-unavailable states without a new product stage.
+- [x] Synchronize README, architecture, specs, appendix, stakeholder and ADR sources.
+- [x] Close Epic 21 after complete deterministic DoD and mock E2E gates.
+
+### Results
+- Full deterministic DoD passed on 2026-07-15: contracts, complete Go suite, 246 Python tests, 141 Vitest tests, lint/typecheck, embedded production build and 7/7 mock Playwright scenarios.
+- Epic 18 R3 remains blocked at trusted-host preflight until this work is committed/merged and canonical `/tmp/provenarch-live-e2e` pinned checkouts are bootstrapped.
+
+---
+
 ## EP-20260710-code-audit-remediation-backlog
 
 ### Context

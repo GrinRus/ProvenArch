@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "run_id": "run-refresh-2",
+  "generated_at": "2026-07-15T12:00:00Z",
+  "baseline_run_id": "run-init-1",
+  "plan_decision": "unchanged_candidate",
+  "mode": "no_op",
+  "reason_codes": ["source_revisions_unchanged"],
+  "source_ranges": [],
+  "affected_shards": [],
+  "preserved_shards": [],
+  "provider_steps_skipped": true,
+  "artifact_path": "reports/taskruns/run-refresh-2/refresh-execution.json"
+}

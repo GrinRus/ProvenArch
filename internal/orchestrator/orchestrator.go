@@ -127,6 +127,19 @@ type RunInfo struct {
 	ErrorCode          string                         `json:"error_code,omitempty"`
 	Error              string                         `json:"error,omitempty"`
 	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
+	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
+}
+
+type RefreshSummary struct {
+	Mode          string   `json:"mode"`
+	Decision      string   `json:"decision"`
+	BaselineRunID string   `json:"baseline_run_id,omitempty"`
+	ReasonCodes   []string `json:"reason_codes"`
+	ArtifactPath  string   `json:"artifact_path"`
+	Updated       int      `json:"updated"`
+	Preserved     int      `json:"preserved"`
+	Removed       int      `json:"removed"`
+	Uncertain     int      `json:"uncertain"`
 }
 
 type Artifact struct {
@@ -173,6 +186,7 @@ type runHistoryItem struct {
 	ErrorCode          string                         `json:"error_code,omitempty"`
 	Error              string                         `json:"error,omitempty"`
 	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
+	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
 	Artifacts          []Artifact                     `json:"artifacts,omitempty"`
 }
 
@@ -467,8 +481,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	if _, exists := artifactIndexFor(initialArtifacts)[sourceArtifact.Path]; !exists {
 		initialArtifacts = append(initialArtifacts, sourceArtifact)
 	}
+	var refreshExecution *refreshplan.RefreshExecution
+	var refreshImpact *refreshplan.ImpactPlan
 	if request.Pipeline == PipelineRefresh {
 		impact := refreshplan.BuildImpactPlan(ctx, sourceRevisions, baseline, validation.ResolvedRepos, priorEvidence, s.clock(), nil)
+		refreshImpact = &impact
 		impactRaw, impactErr := refreshplan.MarshalImpactPlan(impact)
 		if impactErr == nil {
 			_, impactErr = refreshplan.ParseImpactPlan(impactRaw)
@@ -483,19 +500,70 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		if _, exists := artifactIndexFor(initialArtifacts)[impactArtifact.Path]; !exists {
 			initialArtifacts = append(initialArtifacts, impactArtifact)
 		}
+		executionAudit := refreshplan.NewRefreshExecution(runID, impact, sourceRevisions, s.clock())
+		executionRaw, executionErr := refreshplan.MarshalRefreshExecution(executionAudit)
+		if executionErr == nil {
+			_, executionErr = refreshplan.ParseRefreshExecution(executionRaw)
+		}
+		if executionErr == nil {
+			executionErr = request.Workspace.WriteFile(executionAudit.ArtifactPath, append(executionRaw, '\n'))
+		}
+		if executionErr != nil {
+			return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("persist refresh execution: %w", executionErr), executionErr, "run failed: refresh execution planning", nil)
+		}
+		initialArtifacts = append(initialArtifacts, Artifact{Path: executionAudit.ArtifactPath, Kind: "refresh-execution", Label: "Refresh execution"})
+		baselineID := ""
+		if executionAudit.BaselineRunID != nil {
+			baselineID = *executionAudit.BaselineRunID
+		}
+		initialInfo.RefreshSummary = &RefreshSummary{Mode: executionAudit.Mode, Decision: executionAudit.PlanDecision, BaselineRunID: baselineID, ReasonCodes: refreshplan.SummaryReasonCodes(executionAudit), ArtifactPath: executionAudit.ArtifactPath}
+		refreshExecution = &executionAudit
 	}
 	initialInfo.Warnings = append([]string(nil), initialWarnings...)
 	if err := s.storeRun(runRecord{info: initialInfo, artifacts: append([]Artifact(nil), initialArtifacts...)}); err != nil {
 		return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("store planning artifacts: %w", err), err, "run failed: planning artifact registration", nil)
 	}
+	if refreshExecution != nil && refreshExecution.Mode == "no_op" {
+		materializationArtifact, counts, materializationErr := writeRefreshMaterialization(request.Workspace, runID, *refreshExecution, priorEvidence.AllCanonicalPaths, "preserved", priorEvidence.AllCanonicalPaths, nil, s.clock().UTC().Format(time.RFC3339))
+		if materializationErr != nil {
+			return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("persist refresh materialization: %w", materializationErr), materializationErr, "run failed: refresh materialization", nil)
+		}
+		initialArtifacts = append(initialArtifacts, materializationArtifact)
+		initialInfo.RefreshSummary.Updated, initialInfo.RefreshSummary.Preserved, initialInfo.RefreshSummary.Removed, initialInfo.RefreshSummary.Uncertain = counts.Updated, counts.Preserved, counts.Removed, counts.Uncertain
+		finishedAt := s.clock().UTC()
+		initialInfo.Status = RunStatusSucceeded
+		initialInfo.FinishedAt = &finishedAt
+		initialInfo.CurrentStep = ""
+		if err := s.storeRun(runRecord{info: initialInfo, artifacts: append([]Artifact(nil), initialArtifacts...)}); err != nil {
+			return initialInfo, initialArtifacts, err
+		}
+		s.appendRunLog(runID, RunLogEntry{Timestamp: finishedAt, Level: RunLogLevelInfo, Message: "refresh completed without provider execution", Fields: map[string]any{"mode": "no_op", "reasons": refreshExecution.ReasonCodes}})
+		_ = s.cleanupRunLogs()
+		return initialInfo, initialArtifacts, nil
+	}
 
 	execution := pipelineExecution{
-		runID:     runID,
-		pipeline:  request.Pipeline,
-		workspace: request.Workspace,
-		store:     model.NewStore(request.Workspace),
-		compiler:  reports.NewCompiler(request.Workspace),
-		clock:     s.clock,
+		runID:            runID,
+		pipeline:         request.Pipeline,
+		workspace:        request.Workspace,
+		store:            model.NewStore(request.Workspace),
+		compiler:         reports.NewCompiler(request.Workspace),
+		clock:            s.clock,
+		refreshExecution: refreshExecution,
+		preservedArtifactCandidates: func() []string {
+			if refreshImpact == nil {
+				return nil
+			}
+			return append([]string(nil), refreshImpact.PreservedArtifactCandidates...)
+		}(),
+		baselineCanonicalPaths: append([]string(nil), priorEvidence.AllCanonicalPaths...),
+		baselineContentDigests: managedContentDigests(request.Workspace, priorEvidence.AllCanonicalPaths),
+		staleArtifactCandidates: func() []string {
+			if refreshImpact == nil {
+				return nil
+			}
+			return append([]string(nil), refreshImpact.StaleArtifactCandidates...)
+		}(),
 		pipelineRunProgressState: pipelineRunProgressState{
 			startedAt:        startedAt,
 			stepStatus:       initialInfo,
@@ -534,6 +602,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		}
 		execution.resolvedRepoPaths[name] = path
 	}
+	if refreshImpact != nil {
+		execution.refreshIntentContext = buildRefreshIntentContext(ctx, *refreshImpact, execution.resolvedRepoPaths)
+	}
 	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
 	execution.executionProfile = resolvedExecution.Effective
 	if resolvedTimeouts.Effective.StepTimeoutSec > 0 {
@@ -541,6 +612,28 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	if resolvedTimeouts.Effective.HeartbeatSec > 0 {
 		execution.runtimeHeartbeatInterval = time.Duration(resolvedTimeouts.Effective.HeartbeatSec) * time.Second
+	}
+	if execution.refreshExecution != nil && execution.refreshExecution.Mode == "affected_only" {
+		if selectiveErr := execution.prepareSelectiveCollectBaseline(); selectiveErr != nil {
+			if cleanupRoot, resolveErr := request.Workspace.Resolve(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "shards"))); resolveErr == nil {
+				_ = os.RemoveAll(cleanupRoot)
+			}
+			execution.refreshExecution.Mode = "full"
+			execution.refreshExecution.PreservedShards = []string{}
+			execution.refreshExecution.ReasonCodes = append(execution.refreshExecution.ReasonCodes, "selective_baseline_unavailable")
+			if persistErr := persistRefreshExecutionAudit(request.Workspace.WriteFile, execution.refreshExecution); persistErr != nil {
+				return s.finishExecutionFailure(runID, initialInfo, &execution, persistErr)
+			}
+			initialInfo.RefreshSummary.Mode = "full"
+			initialInfo.RefreshSummary.ReasonCodes = refreshplan.SummaryReasonCodes(*execution.refreshExecution)
+			execution.stepStatus = initialInfo
+			execution.warnings = append(execution.warnings, fmt.Sprintf("selective refresh fell back to full: %v", selectiveErr))
+		} else if persistErr := persistRefreshExecutionAudit(request.Workspace.WriteFile, execution.refreshExecution); persistErr != nil {
+			return s.finishExecutionFailure(runID, initialInfo, &execution, persistErr)
+		}
+		if err := s.storeRun(runRecord{info: initialInfo, artifacts: append([]Artifact(nil), initialArtifacts...)}); err != nil {
+			return initialInfo, initialArtifacts, err
+		}
 	}
 	execution.onLog = func(entry RunLogEntry) {
 		if strings.TrimSpace(entry.StepID) == "" {
@@ -594,17 +687,79 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	if len(execution.partialFailures) > 0 {
 		return s.finishPartialExecutionFailure(runID, initialInfo, &execution)
 	}
+	if execution.refreshExecution != nil {
+		paths := make([]string, 0, len(execution.artifacts))
+		for _, artifact := range execution.artifacts {
+			paths = append(paths, artifact.Path)
+		}
+		if execution.refreshExecution.Mode == "affected_only" {
+			preservedSet := map[string]struct{}{}
+			for _, path := range execution.preservedCanonicalPaths {
+				preservedSet[path] = struct{}{}
+			}
+			for _, path := range execution.preservedArtifactCandidates {
+				baselineDigest, ok := execution.baselineContentDigests[path]
+				if !ok {
+					continue
+				}
+				current := managedContentDigests(request.Workspace, []string{path})[path]
+				if current == baselineDigest {
+					preservedSet[path] = struct{}{}
+				}
+			}
+			execution.preservedCanonicalPaths = execution.preservedCanonicalPaths[:0]
+			for path := range preservedSet {
+				execution.preservedCanonicalPaths = append(execution.preservedCanonicalPaths, path)
+			}
+			sort.Strings(execution.preservedCanonicalPaths)
+		}
+		current := map[string]struct{}{}
+		for _, path := range paths {
+			if isManagedRefreshArtifact(path) {
+				current[path] = struct{}{}
+			}
+		}
+		stale := map[string]struct{}{}
+		for _, path := range execution.staleArtifactCandidates {
+			stale[path] = struct{}{}
+		}
+		removed := []string{}
+		for _, path := range execution.baselineCanonicalPaths {
+			if _, exists := current[path]; exists {
+				continue
+			}
+			if execution.refreshExecution.Mode == "full" {
+				removed = append(removed, path)
+				continue
+			}
+			if _, affected := stale[path]; affected {
+				removed = append(removed, path)
+			}
+		}
+		materializationArtifact, counts, materializationErr := writeRefreshMaterialization(request.Workspace, runID, *execution.refreshExecution, paths, "updated", execution.preservedCanonicalPaths, removed, s.clock().UTC().Format(time.RFC3339))
+		if materializationErr != nil {
+			return s.finishExecutionFailure(runID, initialInfo, &execution, fmt.Errorf("persist refresh materialization: %w", materializationErr))
+		}
+		execution.addArtifacts(materializationArtifact)
+		initialInfo.RefreshSummary.Updated, initialInfo.RefreshSummary.Preserved, initialInfo.RefreshSummary.Removed, initialInfo.RefreshSummary.Uncertain = counts.Updated, counts.Preserved, counts.Removed, counts.Uncertain
+	}
 
 	return s.finishExecutionSuccess(runID, initialInfo, &execution)
 }
 
 type pipelineExecution struct {
-	runID     string
-	pipeline  Pipeline
-	workspace workspace.Root
-	store     model.Store
-	compiler  reports.Compiler
-	clock     func() time.Time
+	runID                       string
+	pipeline                    Pipeline
+	workspace                   workspace.Root
+	store                       model.Store
+	compiler                    reports.Compiler
+	clock                       func() time.Time
+	refreshExecution            *refreshplan.RefreshExecution
+	preservedArtifactCandidates []string
+	preservedCanonicalPaths     []string
+	baselineCanonicalPaths      []string
+	baselineContentDigests      map[string]string
+	staleArtifactCandidates     []string
 	pipelineRunProgressState
 	pipelineArtifactRegistry
 	pipelineRuntimeState
@@ -637,6 +792,7 @@ type pipelineRuntimeState struct {
 	runtimeHeartbeatInterval time.Duration
 	executionProfile         acpruntime.ExecutionValues
 	permissionProfile        acpruntime.PermissionValues
+	refreshIntentContext     string
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string
 	stepProviders            acpruntime.StepProviderValues
