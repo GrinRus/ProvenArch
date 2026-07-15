@@ -349,28 +349,17 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 
 ### Continuous Backlog Queue Policy
 
-Epic 19 (`Code Quality Audit Remediation`) is merged into `main` at `02716bb`, so Epic 20
-(`Console UX trust, evidence workflow and IA reset`) is no longer blocked by PR-1. The canonical
-post-beta direction is Architecture Change Review in
-`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`. Before implementing the first selected UX slice,
-`20A Run-pinned evidence snapshot truth` under `EP-20260711-run-pinned-evidence-review`, re-audit
-the snapshot foundation delivered by Epic 19 and scope the slice only to remaining trust gaps.
-`docs/BACKLOG.md` remains the reference/acceptance backlog; this file selects and sequences focused
-active slices.
-
-Wave 1 planning also contains Epic 21 / `EP-20260712-evidence-backed-architecture-refresh`;
-implementation has not started, and its first reviewable slice is
-`21A Architecture home + documentation quality baseline`.
+Epics 19, 20 and 21 are complete in `main`. `docs/BACKLOG.md` remains the reference/acceptance
+backlog; this file selects focused active slices. The current release blocker is Epic 18 R3:
+trusted-machine composite evidence over fresh canonical release matrices. New Wave 1 product work
+requires a separate owner-selected ExecPlan after R3.
 
 Allowed next workstreams:
-- Epic 19 archive/reconciliation bookkeeping only; no additional Epic 19 engineering slice remains.
-- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice after a current-code
-  sufficiency audit narrows work already covered by Epic 19.
-- Existing live-quality/release-validation plans below, only when their trusted-machine/provider prerequisites are satisfied.
+- Epic 19/20/21 archive or reconciliation bookkeeping only; no additional engineering slice remains.
+- Epic 18 R3 release validation, only when trusted-machine/provider/path prerequisites are satisfied.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
 - New Wave 1 or product work: create a fresh decision-complete ExecPlan before implementation.
-- `EP-20260712-evidence-backed-architecture-refresh`: begin with slice `21A`; slices `21B+` require their own focused plan update and contract synchronization before implementation.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
@@ -5041,7 +5030,7 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
 | 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
 | 20 Console UX trust and IA reset | done | 20A–20N deliver trustworthy contracts, four-destination shell, feature seams, semantic primitives and responsive task gates; Epic 18 trusted-machine release evidence remains separate |
-| 21 Evidence-backed Architecture Home + impact-aware refresh | planned (Wave 1) | Out of MVP; implementation starts only from its separate architecture-home/docs-quality slice |
+| 21 Evidence-backed Architecture Home + impact-aware refresh | done (Wave 1) | Architecture Home, source revision/impact evidence, provider-free no-op, affected-only collect, surgical materialization and operator explanation are implemented |
 
 ---
 
@@ -5276,6 +5265,46 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 ### Results
 - Full deterministic DoD passed on 2026-07-15: contracts, complete Go suite, 246 Python tests, 141 Vitest tests, lint/typecheck, embedded production build and 7/7 mock Playwright scenarios.
 - Epic 18 R3 remains blocked at trusted-host preflight until this work is committed/merged and canonical `/tmp/provenarch-live-e2e` pinned checkouts are bootstrapped.
+
+---
+
+## EP-20260715-epic18-r3-composite-release
+
+### Context
+- Epic 21 is complete at `b95e72f`; Epic 18 R3 is the remaining release-readiness gate.
+- `release full` is three fresh constituent matrices, while the tag workflow currently accepts only
+  one verdict path. The trusted host has provider CLIs, writable `/tmp` and sufficient disk, but its
+  canonical pinned path checkouts are not bootstrapped.
+
+### Goals
+- [x] Add a backward-compatible composite verifier/workflow interface through
+  `ACP_RELEASE_MATRIX_IDS` and reject ambiguous or duplicate configuration.
+- [x] Reconcile Epic 21 and Epic 18 status across planning, stakeholder, testing and runbook docs.
+- [ ] Merge the composite-gate slice after full deterministic DoD.
+- [ ] Bootstrap and verify canonical pinned checkouts on the trusted host.
+- [ ] Run direct Codex `smoke tiny`, then standalone release fast/long, then fresh release-full
+  fast/long/ftgo-sentry constituents; stop on the first product/provider/host failure.
+- [ ] Persist only bounded final release evidence, verify every constituent plus the composite, and
+  close Epic 18 only after all verdicts are `PASS` with accepted SWE UX/artifact assessments.
+
+### Non-goals
+- No HTTP API, persisted product schema, workspace contract, provider contract or canonical matrix changes.
+- No timeout overrides, wrapper scripts, hosted live workflow, release tag or new Wave 1 product epic.
+- No commit of raw taskrun directories, provider logs or temporary canonical checkouts.
+
+### Acceptance
+- Single-matrix release settings remain compatible; exactly one release-evidence selection mode is required.
+- Any missing/failed/duplicate constituent or missing/rejected companion assessment blocks GoReleaser.
+- R3 uses only direct `scripts/full-run-batch-matrix.sh` commands from a clean merged commit.
+- Release readiness requires exact providers, run index 1, baseline/parallel shard-plan equality,
+  strict zero-failure, frontend evidence and three accepted full-release evidence packages.
+- Each code/docs PR passes `make contracts`, `make test`, `make lint`, `make build`.
+
+### Progress log
+- 2026-07-15: Confirmed exact Go/Node toolchains and qwen/claude/codex CLIs; `/tmp` is writable with
+  sufficient disk. Canonical `/tmp/provenarch-live-e2e` checkouts remain the preflight blocker.
+- 2026-07-15: Implemented multi-path verifier input, duplicate matrix rejection, mutually exclusive
+  workflow settings and focused deterministic tests; synchronized stale Epic 21 tracker language.
 
 ---
 

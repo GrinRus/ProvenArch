@@ -28,19 +28,20 @@ jobs:
 
       - name: Verify composite release evidence
         env:
+          ACP_RELEASE_MATRIX_IDS: ${{ vars.ACP_RELEASE_MATRIX_IDS }}
           ACP_RELEASE_MATRIX_ID: ${{ vars.ACP_RELEASE_MATRIX_ID }}
           ACP_RELEASE_VERDICT_PATH: ${{ vars.ACP_RELEASE_VERDICT_PATH }}
         run: |
           set -euo pipefail
-          verdict_path="${ACP_RELEASE_VERDICT_PATH:-}"
-          if [ -z "$verdict_path" ] && [ -n "${ACP_RELEASE_MATRIX_ID:-}" ]; then
-            verdict_path="reports/release_verdict_${ACP_RELEASE_MATRIX_ID}.json"
+          verifier_args=()
+          if [ -n "${ACP_RELEASE_MATRIX_IDS:-}" ]; then
+            verifier_args+=(--matrix-ids "$ACP_RELEASE_MATRIX_IDS")
+          elif [ -n "${ACP_RELEASE_MATRIX_ID:-}" ]; then
+            verifier_args+=(--matrix-id "$ACP_RELEASE_MATRIX_ID")
+          elif [ -n "${ACP_RELEASE_VERDICT_PATH:-}" ]; then
+            verifier_args+=(--verdict-path "$ACP_RELEASE_VERDICT_PATH")
           fi
-          if [ -z "$verdict_path" ]; then
-            echo "Set ACP_RELEASE_VERDICT_PATH or ACP_RELEASE_MATRIX_ID in the github-release environment." >&2
-            exit 1
-          fi
-          ./scripts/run-python.sh scripts/verify-release-verdict.py "$verdict_path"
+          ./scripts/run-python.sh scripts/verify-release-verdict.py "${verifier_args[@]}"
 
   release:
     needs: verify-release-evidence

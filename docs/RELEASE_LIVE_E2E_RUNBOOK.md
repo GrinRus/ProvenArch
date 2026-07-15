@@ -646,16 +646,28 @@ Non-release/diagnostic matrix пишет neutral result:
 Pre-tag/offline check:
 ```bash
 python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
+
+# release full: all three fresh constituent matrices in one fail-closed check
+python3 scripts/verify-release-verdict.py \
+  reports/release_verdict_<fast-matrix-id>.json \
+  reports/release_verdict_<long-matrix-id>.json \
+  reports/release_verdict_<ftgo-sentry-matrix-id>.json
 ```
 
-Скрипт проверяет уже созданный release-mode `release_verdict_<matrix-id>.json`: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Затем он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Он не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
+Скрипт проверяет один или несколько уже созданных release-mode verdict JSON: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Для каждого constituent он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Повторяющийся `matrix_id` блокирует composite check. Verifier не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
-GitHub tag release workflow применяет тот же verifier как отдельный read-only job до GoReleaser:
+GitHub tag release workflow применяет тот же verifier как отдельный read-only job до GoReleaser.
+Нужно настроить ровно один режим:
 
+- для composite `release full` задайте
+  `ACP_RELEASE_MATRIX_IDS=<fast-id>,<long-id>,<ftgo-sentry-id>`;
 - задайте `ACP_RELEASE_MATRIX_ID=<matrix-id>` в environment/repository variables, чтобы workflow
-  проверил `reports/release_verdict_<matrix-id>.json`; либо
+  проверил один `reports/release_verdict_<matrix-id>.json`; либо
 - задайте `ACP_RELEASE_VERDICT_PATH=reports/release_verdict_<matrix-id>.json`, если нужен явный
   путь.
+
+Одновременная настройка нескольких режимов, пустые или повторяющиеся IDs блокируют publication
+до запуска write-enabled job.
 
 Если verifier не находит `PASS` machine verdict или оба matching accepted SWE reports, publishing
 job с `contents/id-token/attestations: write` не стартует. Workflow не запускает live matrix и не

@@ -16,6 +16,7 @@ MANUAL_ASSESSMENTS = {
     "ux": "swe_ux_assessment_{matrix_id}.md",
     "artifact_quality": "swe_artifact_quality_assessment_{matrix_id}.md",
 }
+MATRIX_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 
 
 def load_payload(path: Path) -> dict[str, Any]:
@@ -115,14 +116,10 @@ def verify_manual_assessments(verdict_path: Path, matrix_id: str) -> list[str]:
     return failures
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("verdict_json", type=Path, help="Path to reports/release_verdict_<matrix-id>.json")
-    args = parser.parse_args(argv)
-
-    payload = load_payload(args.verdict_json)
+def verify_verdict_path(verdict_path: Path) -> tuple[str, list[str]]:
+    payload = load_payload(verdict_path)
     matrix_id = str(payload.get("matrix_id", "")).strip()
-    path_matrix_id = matrix_id_from_verdict_path(args.verdict_json)
+    path_matrix_id = matrix_id_from_verdict_path(verdict_path)
     failures = verify_payload(payload)
     if not matrix_id:
         failures.append("matrix_id must be present")
@@ -131,12 +128,78 @@ def main(argv: list[str] | None = None) -> int:
             f"matrix_id must match verdict filename {path_matrix_id!r}, got {matrix_id!r}"
         )
     else:
-        failures.extend(verify_manual_assessments(args.verdict_json, matrix_id))
+        failures.extend(verify_manual_assessments(verdict_path, matrix_id))
+    return matrix_id, failures
+
+
+def parse_matrix_ids(value: str) -> list[str]:
+    matrix_ids = [item.strip() for item in value.split(",")]
+    if not matrix_ids or any(not item for item in matrix_ids):
+        raise SystemExit("ACP_RELEASE_MATRIX_IDS contains an empty matrix id")
+    invalid = [item for item in matrix_ids if not MATRIX_ID_PATTERN.fullmatch(item)]
+    if invalid:
+        raise SystemExit(f"invalid matrix id in ACP_RELEASE_MATRIX_IDS: {invalid[0]!r}")
+    duplicates = sorted({item for item in matrix_ids if matrix_ids.count(item) > 1})
+    if duplicates:
+        raise SystemExit(f"duplicate matrix id in ACP_RELEASE_MATRIX_IDS: {duplicates[0]!r}")
+    return matrix_ids
+
+
+def resolve_verdict_paths(args: argparse.Namespace) -> list[Path]:
+    configured = [
+        bool(args.verdict_json),
+        bool(args.matrix_ids),
+        bool(args.matrix_id),
+        bool(args.verdict_path),
+    ]
+    if sum(configured) != 1:
+        raise SystemExit(
+            "set exactly one release evidence mode: positional verdict paths, "
+            "--matrix-ids, --matrix-id or --verdict-path"
+        )
+    if args.verdict_json:
+        return list(args.verdict_json)
+    if args.matrix_ids:
+        return [Path("reports") / f"release_verdict_{item}.json" for item in parse_matrix_ids(args.matrix_ids)]
+    if args.matrix_id:
+        matrix_ids = parse_matrix_ids(args.matrix_id)
+        if len(matrix_ids) != 1:
+            raise SystemExit("--matrix-id accepts exactly one matrix id")
+        return [Path("reports") / f"release_verdict_{matrix_ids[0]}.json"]
+    return [args.verdict_path]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "verdict_json",
+        type=Path,
+        nargs="*",
+        help="One or more paths to reports/release_verdict_<matrix-id>.json",
+    )
+    parser.add_argument("--matrix-ids", help="Comma-separated composite matrix IDs resolved under reports/")
+    parser.add_argument("--matrix-id", help="Single matrix ID resolved under reports/")
+    parser.add_argument("--verdict-path", type=Path, help="Explicit single verdict path")
+    args = parser.parse_args(argv)
+    verdict_paths = resolve_verdict_paths(args)
+
+    failures: list[str] = []
+    matrix_ids: set[str] = set()
+    for verdict_path in verdict_paths:
+        matrix_id, verdict_failures = verify_verdict_path(verdict_path)
+        if matrix_id:
+            if matrix_id in matrix_ids:
+                failures.append(f"duplicate matrix_id in composite release evidence: {matrix_id!r}")
+            matrix_ids.add(matrix_id)
+        failures.extend(f"{verdict_path}: {failure}" for failure in verdict_failures)
     if failures:
         for failure in failures:
             print(f"release evidence not ready: {failure}", file=sys.stderr)
         return 1
-    print(f"release evidence ready: {args.verdict_json}")
+    for verdict_path in verdict_paths:
+        print(f"release evidence ready: {verdict_path}")
+    if len(verdict_paths) > 1:
+        print(f"composite release evidence ready: {len(verdict_paths)} constituent matrices")
     return 0
 
 

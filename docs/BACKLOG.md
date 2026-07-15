@@ -358,6 +358,9 @@ Suggested PR slices:
 
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
+Status (2026-07-15): deterministic boundary/quality remediation is complete; trusted-machine R3
+release evidence remains open and is the only release-readiness blocker after Epic 21.
+
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape
   (`execution_report_*`, selected-provider totals, no legacy mixed `quality_report_*` artifacts),
