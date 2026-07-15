@@ -5305,6 +5305,13 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   sufficient disk. Canonical `/tmp/provenarch-live-e2e` checkouts remain the preflight blocker.
 - 2026-07-15: Implemented multi-path verifier input, duplicate matrix rejection, mutually exclusive
   workflow settings and focused deterministic tests; synchronized stale Epic 21 tracker language.
+- 2026-07-15: Merged the composite gate as `89b4bb49`, bootstrapped and verified all canonical
+  pinned checkouts, exact Go/Node/npm toolchains and three release provider CLIs. Direct Codex
+  `smoke tiny` matrix `smoke-tiny-bank-20260715T172229Z` stopped before provider execution because
+  the live backend-cycle helper treated a successful Epic 21 `no_op` refresh as missing telemetry.
+  Opened a bounded remediation: accept the absent legacy quality summary only when the matching
+  run-scoped `refresh-execution.json` proves `unchanged_candidate`, `no_op` and skipped providers;
+  every missing, malformed or mismatched audit remains a gate failure.
 
 ---
 

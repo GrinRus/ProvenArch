@@ -384,6 +384,32 @@ append_api_init_run_result_row() {
   append_run_result_row_once "1" "fake" "${HEADLESS_PROVIDER:-fake}" "init" "$API_INIT_RUN_ID" "$status" "$WORKSPACE_BASELINE" "$API_INIT_STATUS_JSON"
 }
 
+is_successful_noop_refresh() {
+  local workspace_path="$1"
+  local run_id="$2"
+  local execution_path="$workspace_path/reports/taskruns/$run_id/refresh-execution.json"
+
+  [[ -f "$execution_path" ]] || return 1
+  python3 - "$execution_path" "$run_id" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+valid = (
+    payload.get("version") == 1
+    and payload.get("run_id") == sys.argv[2]
+    and payload.get("mode") == "no_op"
+    and payload.get("plan_decision") == "unchanged_candidate"
+    and payload.get("provider_steps_skipped") is True
+)
+raise SystemExit(0 if valid else 1)
+PY
+}
+
 refresh_runtime_cycle_metrics() {
   if [[ -f "$RUN_RESULTS_TSV" ]]; then
     local metrics
@@ -1117,6 +1143,12 @@ PY
 
   quality_path="$workspace_path/reports/taskruns/${run_id}-quality.json"
   if [[ ! -f "$quality_path" ]]; then
+    if [[ "$pipeline" == "refresh" ]] && is_successful_noop_refresh "$workspace_path" "$run_id"; then
+      log "refresh run $run_id completed as validated no-op without run telemetry summary"
+      append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "$status" "$workspace_path" "$output_path"
+      LAST_SIGNAL="${previous_signal:-0}"
+      return 0
+    fi
     append_run_result_row_once "$iteration" "$runtime_mode" "$runtime_provider" "$pipeline" "$run_id" "failed" "$workspace_path" "$output_path"
     die "missing run telemetry summary for run $run_id at $quality_path"
   fi

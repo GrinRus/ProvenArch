@@ -2169,6 +2169,58 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual(["1", "fake", "codex-code", "init", run_id, "failed"], fields[:6])
         self.assertEqual("fake@fake", fields[14])
 
+    def test_backend_cycle_accepts_only_matching_valid_noop_refresh_audit(self) -> None:
+        workspace = self.root / "noop-workspace"
+        run_id = "run_20260715_173314_001"
+        execution_path = workspace / "reports" / "taskruns" / run_id / "refresh-execution.json"
+        write_json(
+            execution_path,
+            {
+                "version": 1,
+                "run_id": run_id,
+                "plan_decision": "unchanged_candidate",
+                "mode": "no_op",
+                "provider_steps_skipped": True,
+            },
+        )
+        script_text = BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8")
+        function = extract_bash_function(script_text, "is_successful_noop_refresh")
+
+        valid = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "\n".join(
+                    [
+                        "set -euo pipefail",
+                        function,
+                        f"is_successful_noop_refresh {shlex.quote(str(workspace))} {shlex.quote(run_id)}",
+                    ]
+                ),
+            ],
+            check=False,
+        )
+        self.assertEqual(0, valid.returncode)
+
+        payload = json.loads(execution_path.read_text(encoding="utf-8"))
+        payload["provider_steps_skipped"] = False
+        write_json(execution_path, payload)
+        invalid = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                "\n".join(
+                    [
+                        "set -euo pipefail",
+                        function,
+                        f"is_successful_noop_refresh {shlex.quote(str(workspace))} {shlex.quote(run_id)}",
+                    ]
+                ),
+            ],
+            check=False,
+        )
+        self.assertNotEqual(0, invalid.returncode)
+
     def test_python_report_prefers_parse_signature_contract_failure_over_runner_unavailable(self) -> None:
         run_dir = self.root / "run-parse-signature-python"
         self._create_fixture_run_dir(run_dir)
