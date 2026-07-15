@@ -28,6 +28,8 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         self.assertIn("leaving for SWE artifact assessment", helper)
         self.assertIn("resolve_failed_run_id_from_workspace", helper)
         self.assertIn('run_id="$(resolve_failed_run_id_from_workspace "$workspace_path" "$pipeline" || true)"', helper)
+        self.assertIn("is_successful_noop_refresh", helper)
+        self.assertIn("completed as validated no-op without run telemetry summary", helper)
         self.assertNotIn('FAILURE_REASON="quality"', helper)
 
     def test_backend_cycle_api_init_poll_has_progress_grace(self) -> None:
