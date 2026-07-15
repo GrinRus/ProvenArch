@@ -31,7 +31,8 @@
    - Поддерживает batch/non-interactive режим для CI jobs
    - `run` выполняет deterministic `init|refresh` pipeline в local/batch/non-interactive execution
    - перед выполнением `init|refresh` orchestrator фиксирует schema-validated `reports/taskruns/<run_id>/source-revisions.json`: Git revisions/worktree state, effective analysis scope и fingerprint только analysis inputs (`workspace` repo/scope config, imports, `charter/**`, `skills/**`), без process provider settings и generated outputs
-   - перед `refresh.step1.collect` orchestrator пишет advisory `refresh-impact-plan.json`, используя полный `git diff --name-status -z -M -C` и prior validated evidence dependencies; ambiguous, dirty, rewritten, unreadable, unmapped или oversized input fail-closed в `full_refresh_required`. До slices 21D/21E decision не меняет полный pipeline dispatch.
+   - перед `refresh.step1.collect` orchestrator пишет неизменяемый advisory `refresh-impact-plan.json`, затем фактический `refresh-execution.json`: безопасный unchanged/out-of-scope plan даёт no-op без providers/canonical writes; selective plan checkpoint-replay-ит валидные unaffected baseline shards, а любое несовпадение fail-closed переключает полный pipeline до первого provider call
+   - `refresh-materialization.json` отделяет `updated/preserved/removed/uncertain` publication decisions от planner; canonical promotion остаётся validator-gated и атомарной
    - `qa` даёт deterministic compatibility ответы по артефактам workspace; UI target Ask использует async runtime-backed Q&A runs
    - `doctor` выполняет read-only readiness checks для local install/workspace/repo/runtime/UI; CLI exit codes: `0` ready, `1` user-fixable issues, `2` invalid flags/internal request error
    - `version` / `--version` печатает build metadata (`version`, `commit`, `built`) для проверки release binary без workspace; UI получает те же runtime metadata через `GET /api/system/version`, доступный до выбора workspace

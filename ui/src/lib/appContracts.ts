@@ -155,6 +155,19 @@ export type RunStatusResponse = {
   error_code?: string | null;
   error?: string | null;
   superseded_by_run_id?: string | null;
+  refresh_summary?: RefreshSummary | null;
+};
+
+export type RefreshSummary = {
+  mode: "no_op" | "affected_only" | "full";
+  decision: "unchanged_candidate" | "selective_candidate" | "full_refresh_required";
+  baseline_run_id?: string;
+  reason_codes: string[];
+  artifact_path: string;
+  updated: number;
+  preserved: number;
+  removed: number;
+  uncertain: number;
 };
 
 export type RunListItem = {
@@ -171,6 +184,7 @@ export type RunListItem = {
   error_code?: string | null;
   error?: string | null;
   superseded_by_run_id?: string | null;
+  refresh_summary?: RefreshSummary | null;
   authoritative_index?: boolean;
 };
 

@@ -1009,9 +1009,12 @@ pending refresh. Заменённый pending run получает terminal `sta
 Возвращает список materialized artifacts для run.
 
 Для `init|refresh` inventory включает `reports/taskruns/<run_id>/source-revisions.json`; для
-`refresh` также включает `reports/taskruns/<run_id>/refresh-impact-plan.json`. Это обычные
+`refresh` также включает `refresh-impact-plan.json`, `refresh-execution.json` и
+`refresh-materialization.json`. Run status/list получают additive `refresh_summary` с mode,
+decision, baseline, reason codes, artifact path и счётчиками `updated/preserved/removed/uncertain`.
+Legacy runs не получают это поле. Это обычные
 readable taskrun artifacts через существующий endpoint, отдельного HTTP endpoint нет.
-Impact plan имеет `enforcement="advisory"` и не означает, что текущий refresh пропустил шаги.
+Impact plan остаётся advisory; фактический пропуск/выбор шагов подтверждается только `refresh_summary` и `refresh-execution.json`.
 
 **200**
 ```json

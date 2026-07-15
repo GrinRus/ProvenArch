@@ -26,3 +26,9 @@ describe("ChangesPage", () => {
     expect(onOpenRunStudio.mock.calls.flat()).toEqual(expect.arrayContaining(["run-no-index", "run-failed"]));
   });
 });
+
+it("explains no-op refresh packages", () => {
+  const noopRuns: RunListItem[] = [{ run_id: "run-noop", pipeline: "refresh", status: "succeeded", started_at: "2026-07-15T12:00:00Z", authoritative_index: true, refresh_summary: { mode: "no_op", decision: "unchanged_candidate", baseline_run_id: "run-base", reason_codes: ["source_revisions_unchanged"], artifact_path: "reports/taskruns/run-noop/refresh-execution.json", updated: 0, preserved: 3, removed: 0, uncertain: 0 } }];
+  render(<ChangesPage runs={noopRuns} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
+  expect(screen.getByText("No changes in analysis scope")).toBeInTheDocument();
+});

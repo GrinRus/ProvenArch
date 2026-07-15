@@ -536,6 +536,13 @@ func runPipeline(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "run_id: %s\n", runInfo.RunID)
 	fmt.Fprintf(stdout, "pipeline: %s\n", runInfo.Pipeline)
 	fmt.Fprintf(stdout, "status: %s\n", runInfo.Status)
+	if runInfo.RefreshSummary != nil {
+		fmt.Fprintf(stdout, "refresh mode: %s\n", runInfo.RefreshSummary.Mode)
+		if runInfo.RefreshSummary.Mode == "no_op" {
+			fmt.Fprintln(stdout, "refresh result: No changes in analysis scope")
+		}
+		fmt.Fprintf(stdout, "refresh source baseline: %s\n", runInfo.RefreshSummary.BaselineRunID)
+	}
 	fmt.Fprintf(stdout, "runtime mode: %s\n", runtimeConfig.mode)
 	fmt.Fprintf(stdout, "runtime provider: %s\n", runtimeConfig.provider)
 	executionResolved := service.ResolveExecutionProfile(ws.Manifest)

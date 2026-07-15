@@ -83,6 +83,7 @@ func StepSpecificPolicy(stepID string) string {
 			`- Allowed semantic.entities[*].type values: service, datastore, integration, external.system, team, domain, api, component.`,
 			`- Forbidden placeholder entity types: runtime_provider, runtime, metadata.`,
 			`- Analyze only repository/workspace artifacts; do NOT perform web search or external browsing.`,
+			`- Current source files and observed evidence are authoritative; bounded commit subjects are secondary intent hints and must never override source evidence.`,
 			`- Every provenance.evidence.path must resolve to an existing file in workspace/repo scope.`,
 			`- Every provenance.evidence.repo must name the repository that owns the cited path.`,
 			`- Do NOT emit synthetic evidence paths such as search_source/*, search_query/*, search_config/*.`,

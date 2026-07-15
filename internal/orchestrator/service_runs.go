@@ -681,6 +681,7 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		ErrorCode:          record.info.ErrorCode,
 		Error:              record.info.Error,
 		SupersededByRunID:  record.info.SupersededByRunID,
+		RefreshSummary:     cloneRefreshSummary(record.info.RefreshSummary),
 		Artifacts:          append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
@@ -719,9 +720,19 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			ErrorCode:          item.ErrorCode,
 			Error:              item.Error,
 			SupersededByRunID:  item.SupersededByRunID,
+			RefreshSummary:     cloneRefreshSummary(item.RefreshSummary),
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true
+}
+
+func cloneRefreshSummary(value *RefreshSummary) *RefreshSummary {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.ReasonCodes = append([]string(nil), value.ReasonCodes...)
+	return &clone
 }
 
 func classifyExecutionError(err error) (code string, message string) {

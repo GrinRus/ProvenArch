@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "run_id": "run-refresh-2",
+  "generated_at": "2026-07-15T12:00:01Z",
+  "baseline_run_id": "run-init-1",
+  "mode": "no_op",
+  "decisions": [{"path": "reports/as-is/overview.md", "action": "preserved", "reason_codes": ["no_op_preserved_baseline"], "source_run_id": "run-init-1", "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
+}

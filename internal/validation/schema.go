@@ -13,14 +13,16 @@ import (
 type Schema string
 
 const (
-	WorkspaceSchema         Schema = "workspace.schema.json"
-	ShardPackManifestSchema Schema = "shard-pack-manifest.schema.json"
-	FinalRunIndexSchema     Schema = "final-run-index.schema.json"
-	CitationIndexSchema     Schema = "citation-index.schema.json"
-	ValidatorVerdictSchema  Schema = "validator-verdict.schema.json"
-	QAAnswerSchema          Schema = "qa-answer.schema.json"
-	SourceRevisionsSchema   Schema = "source-revisions.schema.json"
-	RefreshImpactPlanSchema Schema = "refresh-impact-plan.schema.json"
+	WorkspaceSchema              Schema = "workspace.schema.json"
+	ShardPackManifestSchema      Schema = "shard-pack-manifest.schema.json"
+	FinalRunIndexSchema          Schema = "final-run-index.schema.json"
+	CitationIndexSchema          Schema = "citation-index.schema.json"
+	ValidatorVerdictSchema       Schema = "validator-verdict.schema.json"
+	QAAnswerSchema               Schema = "qa-answer.schema.json"
+	SourceRevisionsSchema        Schema = "source-revisions.schema.json"
+	RefreshImpactPlanSchema      Schema = "refresh-impact-plan.schema.json"
+	RefreshExecutionSchema       Schema = "refresh-execution.schema.json"
+	RefreshMaterializationSchema Schema = "refresh-materialization.schema.json"
 )
 
 var (

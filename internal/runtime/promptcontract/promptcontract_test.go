@@ -76,6 +76,16 @@ func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) 
 	}
 }
 
+func TestRefreshPromptMarksGitIntentAsSecondary(t *testing.T) {
+	task := acpruntime.Task{StepID: "refresh.step1.collect", Workspace: t.TempDir(), WriteRoot: t.TempDir(), DraftFinalRoot: t.TempDir(), RefreshIntentContext: "REFRESH AFFECTED-SCOPE CONTEXT\nchanged=modified:src/api.go\ncommit=abc wrong label"}
+	prompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
+	for _, expected := range []string{"changed=modified:src/api.go", "commit=abc wrong label", "Current source files and observed evidence are authoritative"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("prompt missing %q", expected)
+		}
+	}
+}
+
 func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) {
 	t.Parallel()
 

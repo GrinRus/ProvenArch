@@ -34,8 +34,9 @@ human review принимает решения, а Git хранит accepted arc
 `reports/as-is/overview.md` является каноническим Architecture Home: он ведёт к областям,
 потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Каждый
 `init|refresh` также сохраняет `source-revisions.json`; `refresh` дополнительно пишет
-schema-validated advisory `refresh-impact-plan.json`. Эти планы пока объясняют возможный
-impact, но не сокращают pipeline: no-op/selective execution остаются следующими slices.
+schema-validated `refresh-impact-plan.json`, `refresh-execution.json` и `refresh-materialization.json`.
+Безопасный unchanged/out-of-scope refresh завершается без provider и canonical rewrites; selective
+refresh переиспользует только валидные baseline shard packs, иначе fail-closed выполняет полный pipeline.
 
 ACP нужен, когда вы хотите получить:
 

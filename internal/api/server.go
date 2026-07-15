@@ -1739,6 +1739,7 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 		"error_code":           formatOptionalString(runInfo.ErrorCode),
 		"error":                formatOptionalString(runInfo.Error),
 		"superseded_by_run_id": formatOptionalString(runInfo.SupersededByRunID),
+		"refresh_summary":      runInfo.RefreshSummary,
 	}
 }
 

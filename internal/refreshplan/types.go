@@ -10,9 +10,11 @@ import (
 )
 
 const (
-	SourceRevisionsVersion = 1
-	ImpactPlanVersion      = 1
-	MaxChangedPaths        = 10_000
+	SourceRevisionsVersion        = 1
+	ImpactPlanVersion             = 1
+	RefreshExecutionVersion       = 1
+	RefreshMaterializationVersion = 1
+	MaxChangedPaths               = 10_000
 )
 
 type SourceRevisions struct {
@@ -58,6 +60,44 @@ type ImpactPlan struct {
 	StaleArtifactCandidates     []string    `json:"stale_artifact_candidates"`
 	PreservedArtifactCandidates []string    `json:"preserved_artifact_candidates"`
 	PlannedActions              []string    `json:"planned_actions"`
+}
+
+type RefreshExecution struct {
+	Version              int           `json:"version"`
+	RunID                string        `json:"run_id"`
+	GeneratedAt          string        `json:"generated_at"`
+	BaselineRunID        *string       `json:"baseline_run_id"`
+	PlanDecision         string        `json:"plan_decision"`
+	Mode                 string        `json:"mode"`
+	ReasonCodes          []string      `json:"reason_codes"`
+	SourceRanges         []SourceRange `json:"source_ranges"`
+	AffectedShards       []string      `json:"affected_shards"`
+	PreservedShards      []string      `json:"preserved_shards"`
+	ProviderStepsSkipped bool          `json:"provider_steps_skipped"`
+	ArtifactPath         string        `json:"artifact_path"`
+}
+
+type SourceRange struct {
+	Repo             string  `json:"repo"`
+	BaselineRevision *string `json:"baseline_revision"`
+	CurrentRevision  *string `json:"current_revision"`
+}
+
+type RefreshMaterialization struct {
+	Version       int                `json:"version"`
+	RunID         string             `json:"run_id"`
+	GeneratedAt   string             `json:"generated_at"`
+	BaselineRunID *string            `json:"baseline_run_id"`
+	Mode          string             `json:"mode"`
+	Decisions     []ArtifactDecision `json:"decisions"`
+}
+
+type ArtifactDecision struct {
+	Path          string   `json:"path"`
+	Action        string   `json:"action"`
+	ReasonCodes   []string `json:"reason_codes"`
+	SourceRunID   *string  `json:"source_run_id"`
+	ContentSHA256 *string  `json:"content_sha256"`
 }
 
 type RepoDelta struct {
@@ -119,6 +159,72 @@ func ParseImpactPlan(raw []byte) (ImpactPlan, error) {
 	}
 	normalizeImpactPlan(&value)
 	return value, nil
+}
+
+func ParseRefreshExecution(raw []byte) (RefreshExecution, error) {
+	if err := validation.ValidateRawJSON(validation.RefreshExecutionSchema, raw); err != nil {
+		return RefreshExecution{}, fmt.Errorf("refresh execution is invalid: %w", err)
+	}
+	var value RefreshExecution
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return RefreshExecution{}, fmt.Errorf("decode refresh execution: %w", err)
+	}
+	normalizeRefreshExecution(&value)
+	return value, nil
+}
+
+func MarshalRefreshExecution(value RefreshExecution) ([]byte, error) {
+	normalizeRefreshExecution(&value)
+	return json.MarshalIndent(value, "", "  ")
+}
+
+func ParseRefreshMaterialization(raw []byte) (RefreshMaterialization, error) {
+	if err := validation.ValidateRawJSON(validation.RefreshMaterializationSchema, raw); err != nil {
+		return RefreshMaterialization{}, fmt.Errorf("refresh materialization is invalid: %w", err)
+	}
+	var value RefreshMaterialization
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return RefreshMaterialization{}, fmt.Errorf("decode refresh materialization: %w", err)
+	}
+	normalizeRefreshMaterialization(&value)
+	return value, nil
+}
+
+func MarshalRefreshMaterialization(value RefreshMaterialization) ([]byte, error) {
+	normalizeRefreshMaterialization(&value)
+	return json.MarshalIndent(value, "", "  ")
+}
+
+func normalizeRefreshExecution(value *RefreshExecution) {
+	if value.ReasonCodes == nil {
+		value.ReasonCodes = []string{}
+	}
+	if value.SourceRanges == nil {
+		value.SourceRanges = []SourceRange{}
+	}
+	if value.AffectedShards == nil {
+		value.AffectedShards = []string{}
+	}
+	if value.PreservedShards == nil {
+		value.PreservedShards = []string{}
+	}
+	sort.Strings(value.ReasonCodes)
+	sort.Strings(value.AffectedShards)
+	sort.Strings(value.PreservedShards)
+	sort.Slice(value.SourceRanges, func(i, j int) bool { return value.SourceRanges[i].Repo < value.SourceRanges[j].Repo })
+}
+
+func normalizeRefreshMaterialization(value *RefreshMaterialization) {
+	if value.Decisions == nil {
+		value.Decisions = []ArtifactDecision{}
+	}
+	for i := range value.Decisions {
+		if value.Decisions[i].ReasonCodes == nil {
+			value.Decisions[i].ReasonCodes = []string{}
+		}
+		sort.Strings(value.Decisions[i].ReasonCodes)
+	}
+	sort.Slice(value.Decisions, func(i, j int) bool { return value.Decisions[i].Path < value.Decisions[j].Path })
 }
 
 func MarshalSourceRevisions(value SourceRevisions) ([]byte, error) {
