@@ -19,7 +19,7 @@ operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts
 > **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
 > **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
 > **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-07-10.
+> **Последняя ревизия README:** 2026-07-15.
 
 ## Что это
 
@@ -129,6 +129,12 @@ runs завершаются как canceled, а новые async starts посл
 оператора к `Sources` с actionable diagnostics.
 
 После onboarding основной UI остаётся прежним:
+
+> **Планируемый post-beta UX:** детальная целевая концепция Architecture Change Review описана в
+> [`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md).
+> Порядок переезда, contract-first зависимости, QA gates и все reference links собраны в
+> [`docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+> Текущий бинарь по-прежнему использует Console V2 и перечисленные ниже восемь stages.
 
 1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state, а source validation recovery panel поднимет blocking repo/source diagnostics выше raw `workspace.yaml` details.
 2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts плюс read-only workspace health snapshot; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
@@ -405,6 +411,7 @@ Release artifacts также могут включать SBOM/provenance files; 
 
 ## Пользовательские документы
 
+- [docs/STAKEHOLDER_DOC.md](docs/STAKEHOLDER_DOC.md) - canonical implemented/planned status matrix.
 - [docs/INSTALL.md](docs/INSTALL.md) - install paths и source build prerequisites.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - local diagnostics и common failures.
 - [SUPPORT.md](SUPPORT.md) - support scope и evidence expectations.

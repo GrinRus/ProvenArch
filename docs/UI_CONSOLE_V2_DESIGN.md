@@ -1,9 +1,17 @@
 # UI Console V2 Design Baseline
 
-Статус: approved design direction, 2026-05-27.
+Статус: **historical approved V2 design baseline and current shell lineage**, 2026-05-27.
 
-Этот документ фиксирует целевое UX/UI-видение ACP Console V2. Он описывает design baseline
-для будущей реализации и не утверждает, что все экраны уже реализованы в коде.
+Будущее post-beta направление зафиксировано в
+[`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md). Текст и
+PNG этого документа сохраняются для traceability; до инкрементальной миграции фактическое
+поведение продукта остаётся Console V2. Порядок безопасного cutover и retirement описан в
+[`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+
+Этот документ фиксирует историческую V2 design specification и решения, на которых построена
+текущая консоль. Спецификация была реализована частично: фактическое поведение описывают README и
+`docs/ARCHITECTURE.md`; approval affordances и selected-artifact commit copy ниже не следует
+считать действующими contracts.
 
 ## Visual references
 
@@ -216,10 +224,10 @@ Every stage must have explicit surfaces for:
 - Treat right inspector and activity drawer as shared shell primitives, not per-screen one-off panels.
 - Live E2E must be updated with the UI changes in the same feature wave.
 
-## Current code baseline after latest main
+## Historical implementation starting point
 
-Rebase on `origin/main` commit `3aa458a` ("Improve live E2E operator flow") changed the
-starting point for V2 implementation:
+Rebase на тогдашний `origin/main` commit `3aa458a` ("Improve live E2E operator flow") задал
+историческую starting point для V2 implementation. Это не описание latest `main`:
 
 - current code already has `AppShell`, `TopStatusBar`, `StageRail`, `RightInspector`,
   `ActivityDrawer`, `StagePanels` and `ConsolePrimitives`; V2 should refine these surfaces rather
