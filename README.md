@@ -121,30 +121,20 @@ runs завершаются как canceled, а новые async starts посл
 
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
 2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
-3. `Runner`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, runner recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
-4. `Ready`: проверьте summary, откройте Console V2 после validation или запустите первый `init` analysis после successful local readiness check.
+3. `Analysis brief`: сохраните project name и scope либо подтвердите запуск без brief с явным quality warning.
+4. `Runner & readiness`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
+5. `Review & start`: проверьте summary и запустите первый `init` после successful local readiness check.
 
 Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
 Валидный manifest можно сразу довести до `Ready` после выбора runner; manifest с ошибками вернёт
 оператора к `Sources` с actionable diagnostics.
 
-После onboarding основной UI остаётся прежним:
-
-> **Планируемый post-beta UX:** детальная целевая концепция Architecture Change Review описана в
-> [`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md).
-> Порядок переезда, contract-first зависимости, QA gates и все reference links собраны в
-> [`docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
-> Текущий бинарь по-прежнему использует Console V2 и перечисленные ниже восемь stages.
-
-1. `Source`: редактируйте repo inventory, guided analysis scope и docs imports; repo table покажет источник, ref, include/exclude summary и validation state, а source validation recovery panel поднимет blocking repo/source diagnostics выше raw `workspace.yaml` details.
-2. `Readiness`: провалидируйте `workspace.yaml`, запустите readiness checks и проверьте runtime/permissions/artifacts плюс read-only workspace health snapshot; provider recovery block показывает command/auth/quota guidance после headless outage, а первый analysis остаётся disabled до successful doctor result.
-3. `Charter`: проверьте wizard summary, domain/team card overview, стартовый architecture charter и baseline prompts; charter baseline recovery panel поднимет prompt/charter bundle warnings до запуска Analysis.
-4. `Analysis`: запустите или отслеживайте `init`/`refresh` analysis через mission control, timeline, shard/log table, warning/error drilldown, failed-run recovery path и live diagnostics для shard/repair/stall/raw-output сигналов; terminal canceled/restart-reconciled runs показываются как `canceled`/`recovered`, а provider-unavailable failures ведут к Readiness checks before retry.
-5. `Review` / `Proposals` / `Ask` / `Publish`: просмотрите coverage, artifacts, diagrams, proposals; proposal package recovery поднимет неполные proposal/changelog packages до Publish; задайте read-only Q&A с run history/citations/safety/recovery panel и подготовьте git changes.
-
-При повторном открытии Console V2 выбирает newest active run и открывает `Analysis`; если активных
-прогонов нет, но есть завершённый run с артефактами, UI открывает `Review`. Empty/stale/no-run
-states остаются явными в run strip и mission control.
+После setup основной shell использует четыре destination: `Home / Runs / Knowledge / Changes`.
+Home показывает четыре authoritative оси и одну next action; Runs объединяет history, Run Studio и
+явную refresh queue; Knowledge читает только current promoted workspace; Changes открывает immutable
+run snapshot через Evidence/Findings/Proposals/Diff/Publish. Setup остаётся contextual utility, Ask —
+global `Current workspace · read-only` dialog, а diagnostics не влияют на workflow acceptance.
+Back/Forward и reload восстанавливают run, source, view и artifact/entity context.
 
 Опытные пользователи, scripts, CI и live E2E могут по-прежнему открыть direct-mode console сразу на известном workspace. Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
 

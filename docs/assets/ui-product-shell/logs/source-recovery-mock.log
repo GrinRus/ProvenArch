@@ -1,0 +1,20 @@
+[2m[WebServer] [22m
+[2m[WebServer] [22m> acp-ui@0.0.0 dev
+[2m[WebServer] [22m> vite --host 127.0.0.1 --port 18180
+[2m[WebServer] [22m
+[2m[WebServer] [22m(node:92915) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[2m[WebServer] [22m(Use `node --trace-warnings ...` to show where the warning was created)
+[2m[WebServer] [22m
+[2m[WebServer] [22m  VITE v8.0.11  ready in 324 ms
+[2m[WebServer] [22m
+[2m[WebServer] [22m  ➜  Local:   http://127.0.0.1:18180/
+
+Running 1 test using 1 worker
+
+(node:93026) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93026) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › e2e/source-recovery-mock.spec.ts:226:1 › source recovery mock: validation blockers stay actionable and readable (3.2s)
+
+  1 passed (6.7s)

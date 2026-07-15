@@ -141,7 +141,7 @@ Baseline scenario set:
   - promotion builds a complete run-scoped generation, validates indexed files, activates managed canonical roots with journaled rollback, and regression tests inject failures across copy/model/diagram/activation operations to prove canonical state is either the previous complete generation or the new complete generation
   - `reports/changelog/*` draft files are activated through the journaled file path while preserving existing changelog history; stale managed artifact registry entries are removed only after successful activation
 - UI route-shell seams:
-  - stage-based console seams (`AppShell`/`StageRail`/`StagePanels`/`ActivityDrawer`) receive grouped `model/actions`, while run selection, stale artifact clearing, logs polling, Ask evidence and stable stage `data-testid` controls remain covered by UI tests
+  - feature-owned Changes/Knowledge/Publish view models receive authoritative route/data inputs; ProductShell, semantic primitives and ContextDrawer have focused component coverage
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;
@@ -319,7 +319,7 @@ Release workflow hardening:
 - run cancel endpoint:
   - `POST /api/pipeline/runs/<run_id>/cancel`
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
-- UI path: open workspace, validate, inspect the selected completed run evidence and publish gate through Console V2 stage rail controls (`Source / Readiness / Analysis / Review / Publish`). In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init. `Charter`, `Proposals` and `Ask` stay covered by deterministic UI/unit surfaces and optional diagnostics where applicable.
+- UI path: open Guided Setup, inspect Runs, select completed run evidence in Changes and open Publish through destination/view controls. In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init.
 - Required mock Playwright gate: `npm run e2e:mock --prefix ui` starts a local Vite UI through
   `ui/playwright.mock.config.ts` and runs exactly seven deterministic scenarios:
   source recovery, onboarding recovery, permission recovery, provider stream, failed-shard analysis,
@@ -411,7 +411,7 @@ Release workflow hardening:
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_ARTIFACT_SOURCE=snapshot`, `UI_E2E_SNAPSHOT_RUN_ID`, `UI_E2E_OUTPUT_DIR`
-  - release-facing `init-inspect` validates the Console V2 operator journey over the copied backend refresh snapshot: `Source -> Readiness -> Analysis -> Review -> Publish`
+  - release-facing `init-inspect` validates the product journey over the copied backend refresh snapshot: `Setup -> Runs -> Changes -> Publish`
   - durable V2 screenshot refs are diagnostic evidence only: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png`, default Ask evidence `frontend-ask-desktop.png`, and `frontend-review-mobile.png`
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class

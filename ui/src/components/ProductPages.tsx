@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { RunCoordination, RunStatusResponse } from "../lib/appContracts";
 import type { SetupStep } from "../lib/appRoutes";
 import type { WorkflowState } from "../lib/workflowState";
+import { Button, MetricGrid, PageHeader, RouteTabs } from "./SemanticPrimitives";
 
 export function HomePage({
   workflow,
@@ -27,19 +28,10 @@ export function HomePage({
       ? `Pending · ${coordination.pending.run_id}`
       : runStatus ? `${runStatus.pipeline} · ${runStatus.status}` : "Idle";
   return (
-    <section className="panel stage-panel home-panel" data-testid="home-panel">
-      <div className="stage-header">
-        <div><h1>Architecture workspace</h1><p className="hint">One authoritative view of readiness, execution, evidence and publication.</p></div>
-        <span className={`status ${workflow.status === "blocked" ? "err" : workflow.status === "complete" ? "ok" : "warn"}`}>{workflow.status.replace("_", " ")}</span>
-      </div>
-      <div className="home-summary-grid" aria-label="Workflow state axes">
-        <article><span className="metric-label">Workspace</span><strong>{workspaceReady ? "Ready" : "Needs setup"}</strong></article>
-        <article><span className="metric-label">Execution</span><strong>{execution}</strong></article>
-        <article><span className="metric-label">Latest accepted evidence</span><strong>{evidenceStatus.replace(/_/g, " ")}</strong></article>
-        <article><span className="metric-label">Publication</span><strong>{gitChanges > 0 ? `${gitChanges} workspace changes` : "Clean"}</strong></article>
-      </div>
+    <section className="panel stage-panel home-panel density-comfortable" data-testid="home-panel">
+      <PageHeader title="Architecture workspace" purpose="One authoritative view of readiness, execution, evidence and publication." state={<span className={`status ${workflow.status === "blocked" ? "err" : workflow.status === "complete" ? "ok" : "warn"}`}>{workflow.status.replace("_", " ")}</span>} action={<Button tone="primary" data-testid="home-primary-action" onClick={onPrimaryAction}>{workflow.nextAction.label}</Button>} />
+      <MetricGrid items={[{ label: "Workspace", value: workspaceReady ? "Ready" : "Needs setup" }, { label: "Execution", value: execution }, { label: "Latest accepted evidence", value: evidenceStatus.replace(/_/g, " ") }, { label: "Publication", value: gitChanges > 0 ? `${gitChanges} workspace changes` : "Clean" }]} />
       <p data-testid="home-attention-reason">{workflow.attention}</p>
-      <button type="button" data-testid="home-primary-action" onClick={onPrimaryAction}>{workflow.nextAction.label}</button>
     </section>
   );
 }
@@ -55,11 +47,7 @@ export const guidedSetupSteps: Array<{ id: SetupStep; label: string }> = [
 export function GuidedSetupPage({ step, onStepChange, children }: { step: SetupStep; onStepChange: (step: SetupStep) => void; children: ReactNode }) {
   return (
     <section className="guided-setup" data-testid="guided-setup-page">
-      <nav className="destination-tabs" aria-label="Guided setup steps">
-        {guidedSetupSteps.map((item) => (
-          <button key={item.id} type="button" data-testid={item.id === "workspace" ? "stage-source" : item.id === "brief" ? "stage-charter" : item.id === "runner" ? "stage-readiness" : `setup-step-${item.id}`} aria-current={step === item.id ? "page" : undefined} onClick={() => onStepChange(item.id)}><span data-testid={`setup-step-label-${item.id}`}>{item.label}</span></button>
-        ))}
-      </nav>
+      <RouteTabs label="Guided setup steps" value={step} items={guidedSetupSteps.map((item) => ({ ...item, testId: item.id === "workspace" ? "stage-source" : item.id === "brief" ? "stage-charter" : item.id === "runner" ? "stage-readiness" : `setup-step-${item.id}` }))} onChange={onStepChange} />
       {children}
     </section>
   );
