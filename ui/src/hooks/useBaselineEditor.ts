@@ -24,6 +24,7 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
   const [selectedEditorContent, setSelectedEditorContent] = useState("");
   const [selectedEditorLoadedPath, setSelectedEditorLoadedPath] = useState("");
   const [editorStatus, setEditorStatus] = useState("");
+  const [hasUnsavedEditorDraft, setHasUnsavedEditorDraft] = useState(false);
   const selectedEditorPathRef = useRef("");
   const draftsRef = useRef(new Map<string, EditorDraft>());
   const loadSequenceRef = useRef(0);
@@ -155,6 +156,7 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
     const draft = getDraft(path);
     draft.content = value;
     draft.dirty = value !== draft.loadedContent;
+    setHasUnsavedEditorDraft(Array.from(draftsRef.current.values()).some((item) => item.dirty));
     draft.loaded = true;
     draft.revision += 1;
     setSelectedEditorLoadedPath(path);
@@ -177,6 +179,7 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
       if (currentDraft.revision === saveRevision && currentDraft.content === saveContent) {
         currentDraft.loadedContent = saveContent;
         currentDraft.dirty = false;
+        setHasUnsavedEditorDraft(Array.from(draftsRef.current.values()).some((item) => item.dirty));
         currentDraft.loaded = true;
         setEditorStatus(`Saved ${path}`);
       } else {
@@ -193,6 +196,7 @@ export function useBaselineEditor({ setBusy, setError }: UseBaselineEditorOption
   }
 
   return {
+    hasUnsavedEditorDraft,
     baselineEditorArtifacts,
     baselineBundleWarnings,
     workspaceRootPath,

@@ -34,7 +34,7 @@ import {
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
-import { defaultStageForDestination, destinationForStage, destinationFromPath, destinationPaths } from "./lib/appRoutes";
+import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
@@ -47,8 +47,14 @@ import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 import { loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 
 export default function App() {
-  const [destination, setDestination] = useState<WorkflowDestination>(() => destinationFromPath(window.location.pathname, true));
-  const [activeStage, setActiveStageState] = useState<StageId>(() => defaultStageForDestination(destinationFromPath(window.location.pathname, true)));
+  const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location, true));
+  const destination = route.destination;
+  const [activeStage, setActiveStageState] = useState<StageId>(() => stageForRoute(parseAppRoute(window.location, true)));
+  const [routeNotice, setRouteNotice] = useState("");
+  const unsavedDraftRef = useRef(false);
+  const restoredRouteRunRef = useRef<string | null>(null);
+  const restoredArtifactRef = useRef<string | null>(null);
+  const defaultChangesRunRef = useRef<string | null>(null);
   const userSelectedStageRef = useRef(false);
   const autoOpenedStageRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -74,22 +80,28 @@ export default function App() {
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
 
+  const navigateRoute = useCallback((nextRoute: AppRoute, replace = false) => {
+    if (!replace && route.destination === "setup" && nextRoute.destination !== "setup" && unsavedDraftRef.current && !window.confirm("Leave Setup? Unsaved workspace or editor changes will be lost.")) return;
+    const nextPath = formatAppRoute(nextRoute);
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) window.history[replace ? "replaceState" : "pushState"]({}, "", nextPath);
+    setRoute(nextRoute);
+    setActiveStageState(stageForRoute(nextRoute));
+  }, [route.destination]);
+
   const navigateDestination = useCallback((nextDestination: WorkflowDestination, replace = false) => {
-    const nextPath = destinationPaths[nextDestination];
-    if (window.location.pathname !== nextPath) {
-      window.history[replace ? "replaceState" : "pushState"]({}, "", nextPath);
-    }
-    setDestination(nextDestination);
-  }, []);
+    navigateRoute({ destination: nextDestination, invalid: [] }, replace);
+  }, [navigateRoute]);
 
   const setActiveStage = useCallback((stage: StageId) => {
-    setActiveStageState(stage);
-    navigateDestination(destinationForStage(stage));
-  }, [navigateDestination]);
+    const nextDestination = destinationForStage(stage);
+    const nextRoute: AppRoute = nextDestination === route.destination ? { ...route, invalid: [] } : { destination: nextDestination, invalid: [] };
+    if (nextDestination === "setup") nextRoute.setupStep = stage === "readiness" ? "runner" : stage === "charter" ? "brief" : "sources";
+    if (nextDestination === "changes") nextRoute.changesView = stage === "publish" ? "publish" : stage === "proposals" ? "proposals" : "overview";
+    navigateRoute(nextRoute);
+  }, [navigateRoute, route]);
 
   const handleDestinationChange = useCallback((nextDestination: WorkflowDestination) => {
     navigateDestination(nextDestination);
-    setActiveStageState(defaultStageForDestination(nextDestination));
   }, [navigateDestination]);
 
   const runtimeSettings = useRuntimeSettings({
@@ -164,6 +176,7 @@ export default function App() {
     gitDiff,
     gitDiffStatus,
     bootstrapRuns,
+    clearRunSelection,
     loadGitDiff,
     handleRunPipeline,
     handleSelectRun,
@@ -176,12 +189,14 @@ export default function App() {
     validateResult,
     validationDiagnosticsByRepo,
     manifestContent,
+    hasUnsavedManifestDraft,
     manifestStatus,
     baselineEditorArtifacts,
     baselineBundleWarnings,
     workspaceRootPath,
     selectedEditorPath,
     selectedEditorContent,
+    hasUnsavedEditorDraft,
     selectedEditorLoadedPath,
     editorStatus,
     guidedRepos,
@@ -226,18 +241,33 @@ export default function App() {
   } = workspaceSetup;
 
   useEffect(() => {
+    unsavedDraftRef.current = hasUnsavedManifestDraft || hasUnsavedEditorDraft;
+  }, [hasUnsavedEditorDraft, hasUnsavedManifestDraft]);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!unsavedDraftRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, []);
+
+  useEffect(() => {
     void bootstrapApp();
   }, []);
 
   useEffect(() => {
     const handlePopState = () => {
-      const nextDestination = destinationFromPath(window.location.pathname, consoleReady);
-      navigateDestination(nextDestination, true);
-      setActiveStageState(defaultStageForDestination(nextDestination));
+      const nextRoute = parseAppRoute(window.location, consoleReady);
+      setRoute(nextRoute);
+      setActiveStageState(stageForRoute(nextRoute));
+      setRouteNotice(nextRoute.invalid.length ? `Unsupported URL context was removed: ${nextRoute.invalid.join(", ")}.` : "");
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [consoleReady, navigateDestination]);
+  }, [consoleReady]);
 
   useEffect(() => {
     if (activeStage !== "charter") {
@@ -265,7 +295,9 @@ export default function App() {
       }
       await bootstrapConsoleData({ validateWorkspace: true });
       setConsoleReady(true);
-		navigateDestination(destinationFromPath(window.location.pathname, true), true);
+		const restoredRoute = parseAppRoute(window.location, true);
+		setRouteNotice(restoredRoute.invalid.length ? `Unsupported URL context was removed: ${restoredRoute.invalid.join(", ")}.` : "");
+		navigateRoute(restoredRoute, true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
     }
@@ -521,20 +553,78 @@ export default function App() {
     }
   }
 
-  async function handleOpenArtifactAndReview(path: string) {
+  const handleOpenArtifactAndReview = useCallback(async (path: string) => {
     await handleOpenArtifact(path);
-    if (path.startsWith("proposals/") || path.startsWith("reports/changelog/")) {
-      setActiveStage("proposals");
+    const artifactKey = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.path === path)?.id || path;
+    navigateRoute({
+      destination: "changes",
+      runId: runId ?? undefined,
+      runRequested: Boolean(runId),
+      changesView: route.destination === "changes" ? route.changesView ?? "overview" : "evidence",
+      source: "snapshot",
+      artifact: artifactKey,
+      mode: route.mode ?? "rendered",
+      invalid: [],
+    });
+  }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.changesView, route.destination, route.mode, runId]);
+
+  async function handleSelectRunAndRoute(id: string) {
+    if (destination === "runs") navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
+    else navigateRoute({ ...route, destination: "changes", runId: id, runRequested: true, source: "snapshot", invalid: [] });
+    await handleSelectRun(id);
+  }
+
+  useEffect(() => {
+    if (!consoleReady || runList.length === 0) return;
+    if (route.runId) {
+      if (!runList.some((item) => item.run_id === route.runId)) {
+        if (restoredRouteRunRef.current !== route.runId) {
+          setRouteNotice(`Run ${route.runId} is unavailable. Select another run; the source was not changed.`);
+          restoredRouteRunRef.current = route.runId;
+          clearRunSelection();
+          navigateRoute({ ...route, runId: undefined, runRequested: true, artifact: undefined, invalid: [] }, true);
+        }
+      } else if (runId !== route.runId && restoredRouteRunRef.current !== route.runId) {
+        restoredRouteRunRef.current = route.runId;
+        void handleSelectRun(route.runId);
+      }
       return;
     }
-    setActiveStage("review");
-  }
+    restoredRouteRunRef.current = null;
+    if (route.destination === "changes" && !route.runRequested) {
+      const latest = runList.find((item) => item.status === "succeeded" && (item.pipeline === "init" || item.pipeline === "refresh"));
+      if (latest && defaultChangesRunRef.current !== latest.run_id) {
+        defaultChangesRunRef.current = latest.run_id;
+        navigateRoute({ ...route, runId: latest.run_id, runRequested: true, source: "snapshot", invalid: [] }, true);
+        if (runId !== latest.run_id) void handleSelectRun(latest.run_id);
+      }
+    }
+  }, [clearRunSelection, consoleReady, handleSelectRun, navigateRoute, route, runId, runList]);
+
+  useEffect(() => {
+    if (!route.artifact || evidenceSnapshot.status === "idle" || evidenceSnapshot.status === "loading") return;
+    const match = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.id === route.artifact || artifact.path === route.artifact);
+    if (!match) {
+      setRouteNotice(`Artifact ${route.artifact} is unavailable in the selected source.`);
+      navigateRoute({ ...route, artifact: undefined, invalid: [] }, true);
+      return;
+    }
+    if (selectedArtifact !== match.path && restoredArtifactRef.current !== route.artifact) {
+      restoredArtifactRef.current = route.artifact;
+      void handleOpenArtifact(match.path);
+    }
+  }, [diagramArtifacts, evidenceSnapshot.status, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route, selectedArtifact]);
+
+  useEffect(() => {
+    if (!route.artifact) restoredArtifactRef.current = null;
+  }, [route.artifact]);
 
   const diagnostics = useMemo(() => [...(validateResult?.errors ?? []), ...(validateResult?.warnings ?? [])], [validateResult]);
   const validationErrors = useMemo(() => diagnostics.filter((diagnostic) => diagnostic.level === "error"), [diagnostics]);
   const doctorFailures = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "fail") ?? [], [setupDoctorResult]);
   const artifactCount = nonDiagramArtifacts.length + diagramArtifacts.length;
   useEffect(() => {
+    if (destination !== "home") return;
     if (userSelectedStageRef.current || autoOpenedStageRef.current) {
       return;
     }
@@ -547,7 +637,7 @@ export default function App() {
       autoOpenedStageRef.current = true;
       setActiveStage("review");
     }
-  }, [artifactCount, selectedRunIsActive]);
+  }, [artifactCount, destination, selectedRunIsActive, setActiveStage]);
 
   useEffect(() => {
     if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
@@ -728,12 +818,12 @@ export default function App() {
       >
 	  {destination === "setup" ? (
 		<nav className="destination-tabs" aria-label="Setup sections">
-			  {(["source", "readiness", "charter"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStageState(stage)}>{stage === "source" ? "Workspace" : stage === "readiness" ? "Runtime & readiness" : "Charter"}</button>)}
+			  {(["source", "readiness", "charter"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStage(stage)}>{stage === "source" ? "Workspace" : stage === "readiness" ? "Runtime & readiness" : "Charter"}</button>)}
 		</nav>
 	  ) : null}
 	  {destination === "changes" ? (
 		<nav className="destination-tabs" aria-label="Changes sections">
-			  {(["review", "proposals", "publish"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStageState(stage)}>{stage === "review" ? "Review" : stage === "proposals" ? "Proposals" : "Publish"}</button>)}
+			  {(["review", "proposals", "publish"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStage(stage)}>{stage === "review" ? "Review" : stage === "proposals" ? "Proposals" : "Publish"}</button>)}
 		</nav>
 	  ) : null}
 	  {destination === "home" && activeStage !== "ask" ? (
@@ -858,7 +948,7 @@ export default function App() {
           onRunPipeline={(pipeline, intent) => void handleRunPipeline(pipeline, intent)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onCancelRun={(id) => void handleCancelRun(id)}
-          onSelectRun={(id) => void handleSelectRun(id)}
+          onSelectRun={(id) => void handleSelectRunAndRoute(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
@@ -880,7 +970,7 @@ export default function App() {
           gitDiff={gitDiff}
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
-          onSelectRun={(id) => void handleSelectRun(id)}
+          onSelectRun={(id) => void handleSelectRunAndRoute(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
       ) : null}
@@ -928,6 +1018,7 @@ export default function App() {
       ) : null}
 
       {error ? <p className="status err">Error: {error}</p> : null}
+      {routeNotice ? <p className="status warn" role="status" data-testid="route-notice">{routeNotice}</p> : null}
       </ProductShell>
       <ModalDialog
         open={gitConfirmation !== null}

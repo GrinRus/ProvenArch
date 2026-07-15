@@ -4989,7 +4989,7 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
 | 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
-| 20 Console UX trust and IA reset | in progress (20A–20I1 foundation implemented) | Trustworthy snapshot/Git/runtime/coordination contracts and the five-destination shell foundation are implemented; 20F2, 20I2 and 20J–20N remain open |
+| 20 Console UX trust and IA reset | in progress (20A–20I2 implemented) | Trustworthy contracts, deliberate queue controls, five-destination shell and deep URL context are implemented; 20J–20N remain open |
 | 21 Evidence-backed Architecture Home + impact-aware refresh | planned (Wave 1) | Out of MVP; implementation starts only from its separate architecture-home/docs-quality slice |
 
 ---
@@ -5092,6 +5092,32 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 
 ### Results
 - Full deterministic DoD passed on 2026-07-15: contracts, Go, 246 Python tests, 128 Vitest tests, lint/typecheck, production build and 7/7 mock Playwright scenarios.
+
+---
+
+## EP-20260715-20I2-deep-url-context
+
+### Goal
+- Make route, setup step, run/source selection, artifact/entity identity and viewer mode reloadable and navigable through native History API URLs.
+
+### Non-goals
+- No router dependency, persisted draft contract, queue UI expansion or product-page recomposition from 20J.
+
+### Plan
+- [x] Add a typed codec for Setup, Runs, Knowledge and Changes deep context.
+- [x] Restore run and artifact identity without cross-run/current-workspace fallback; canonicalize defaults and sanitize stale context with a visible notice.
+- [x] Preserve viewer mode through reload/Back/Forward and warn before leaving an unsaved Setup/editor draft.
+- [x] Cover nested SPA fallback paths and focused URL-state scenarios.
+- [x] Pass full deterministic DoD and mock E2E.
+
+### Acceptance
+- Direct GET, reload and Back/Forward recover the same valid product context.
+- An explicitly stale run or artifact is removed from the URL with an explanation and never replaced silently by another source.
+- User navigation uses `pushState`; only defaults, invalid context and canonical paths use `replaceState`.
+
+### Results
+- Full deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 132 Vitest tests, ShellCheck/typecheck, production build and 7/7 mock Playwright scenarios with critical axe checks.
+- Run recovery navigation updates URL identity before async evidence loading, removing a race where the old deep link could reselect the failed run.
 
 ---
 

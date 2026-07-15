@@ -884,7 +884,7 @@ func TestEmbeddedUIServesProductRoutesDirectly(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
-	for _, route := range []string{"/setup", "/home", "/runs", "/knowledge", "/changes", "/unknown-product-route"} {
+	for _, route := range []string{"/setup?step=runner", "/home", "/runs", "/runs/run-1", "/knowledge?view=atlas&entity=svc.payments&source=current", "/changes?run=run-1&view=evidence&artifact=doc.overview&mode=raw", "/unknown-product-route"} {
 		response, err := http.Get(httpServer.URL + route)
 		if err != nil {
 			t.Fatalf("GET %s: %v", route, err)

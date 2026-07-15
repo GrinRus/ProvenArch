@@ -156,6 +156,7 @@ export type RunCoordination = {
 };
 
 export type Artifact = {
+  id?: string;
   path: string;
   kind: string;
   label: string;

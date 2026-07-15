@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchJSON } from "../lib/api";
 import { dedupeArtifactsByPath, indexArtifactPath } from "../lib/runState";
@@ -52,7 +52,7 @@ export function useRunArtifacts() {
     return text.includes("```mermaid");
   }, [selectedArtifact, selectedArtifactContent]);
 
-  async function loadTextArtifact(path: string, signal?: AbortSignal): Promise<string> {
+  const loadTextArtifact = useCallback(async (path: string, signal?: AbortSignal): Promise<string> => {
     if (!path) {
       throw new Error("artifact path is required");
     }
@@ -67,7 +67,7 @@ export function useRunArtifacts() {
     const content = await response.text();
     contentByReadPath.current.set(path, content);
     return content;
-  }
+  }, []);
 
   async function fetchArtifacts(id: string) {
     const token = artifactsRequest.begin(id);
@@ -137,7 +137,7 @@ export function useRunArtifacts() {
     }
   }
 
-  async function handleOpenArtifact(path: string) {
+  const handleOpenArtifact = useCallback(async (path: string) => {
     const artifact = artifactsRef.current.find((item) => item.path === path);
     const readPath = artifact?.read_path ?? path;
     const token = previewRequest.begin(`${path}|${readPath}`);
@@ -157,7 +157,7 @@ export function useRunArtifacts() {
     } finally {
       previewRequest.finish(token);
     }
-  }
+  }, [loadTextArtifact, previewRequest]);
 
   function clearArtifacts() {
     artifactsRequest.abort();
@@ -275,6 +275,7 @@ function buildRunSnapshotIndex(id: string, finalRunIndexPath: string, finalRunIn
       }
       readPathByCanonicalPath.set(canonicalPath, stagedPath);
       return {
+        id: String(document.id ?? "").trim() || undefined,
         path: canonicalPath,
         read_path: stagedPath,
         canonical_path: canonicalPath,

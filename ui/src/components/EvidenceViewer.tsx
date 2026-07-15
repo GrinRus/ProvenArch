@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -13,10 +13,28 @@ type EvidenceViewerProps = {
   demo?: boolean;
   diff?: ReactNode;
   onOpenArtifact?: (path: string) => void;
+  mode?: "rendered" | "raw" | "diff";
+  onModeChange?: (mode: "rendered" | "raw" | "diff") => void;
 };
 
-export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, onOpenArtifact }: EvidenceViewerProps) {
-  const [view, setView] = useState<"rendered" | "raw" | "diff">("rendered");
+export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, onOpenArtifact, mode, onModeChange }: EvidenceViewerProps) {
+  const [localView, setLocalView] = useState<"rendered" | "raw" | "diff">(() => modeFromLocation(diff));
+  const view = mode ?? localView;
+  const setView = (next: "rendered" | "raw" | "diff") => {
+    setLocalView(next);
+    onModeChange?.(next);
+    if (!mode && typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("mode", next);
+      window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    }
+  };
+  useEffect(() => {
+    if (mode) return;
+    const restore = () => setLocalView(modeFromLocation(diff));
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [diff, mode]);
   const options = [
     { id: "rendered" as const, label: "Rendered" },
     { id: "raw" as const, label: "Raw" },
@@ -60,6 +78,13 @@ export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, o
       </div>
     </section>
   );
+}
+
+function modeFromLocation(diff: ReactNode): "rendered" | "raw" | "diff" {
+  if (typeof window === "undefined") return "rendered";
+  const value = new URLSearchParams(window.location.search).get("mode");
+  if (value === "raw" || (value === "diff" && diff)) return value;
+  return "rendered";
 }
 
 function isLocalEvidenceLink(href: string): boolean {

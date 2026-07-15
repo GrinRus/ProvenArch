@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import App from "./App";
@@ -809,6 +809,7 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
 
 describe("App", () => {
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -1519,7 +1520,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     expect(screen.getByText(/open question\(s\) require review/i)).toBeInTheDocument();
@@ -1628,6 +1629,49 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "Setup" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("sanitizes an explicitly missing run without falling back to another snapshot", async () => {
+    vi.stubGlobal("fetch", createFetchMock({ runStarted: true }));
+
+    await renderConsoleApp("/changes?run=missing-run&view=evidence&source=snapshot&mode=raw");
+
+    expect(await screen.findByTestId("route-notice")).toHaveTextContent("missing-run is unavailable");
+    await waitFor(() => expect(window.location.search).not.toContain("run="));
+    expect(window.location.search).toContain("source=snapshot");
+    expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("No evidence content is available");
+    expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("unknown run");
+  });
+
+  it("restores a legacy artifact path and raw viewer mode from a direct Changes URL", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      runStarted: true,
+      runArtifacts: {
+        "run-1": {
+          run_id: "run-1",
+          artifacts: [{ path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" }],
+        },
+      },
+      artifactText: { "reports/as-is/overview.md": "# Direct evidence\n" },
+    }));
+
+    await renderConsoleApp("/changes?run=run-1&view=evidence&source=snapshot&artifact=reports%2Fas-is%2Foverview.md&mode=raw");
+
+    expect(await screen.findByTestId("evidence-raw")).toHaveTextContent("Direct evidence");
+    expect(window.location.search).toContain("mode=raw");
+    expect(window.location.search).toContain("artifact=reports%2Fas-is%2Foverview.md");
+  });
+
+  it("warns before leaving Setup with an unsaved workspace draft", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await renderConsoleApp("/setup?step=sources");
+
+    fireEvent.change(await screen.findByLabelText("workspace.yaml content"), { target: { value: "version: 1\nrepos: []\n" } });
+    fireEvent.click(screen.getByRole("link", { name: "Runs" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Unsaved workspace or editor changes"));
+    expect(window.location.pathname).toBe("/setup");
+  });
+
   it("opens Review by default when a completed run already has artifacts", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1645,9 +1689,10 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes");
 
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
+    expect(window.location.search).toContain("run=run-1");
     expect(screen.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Changes" })).toHaveAttribute("aria-current", "page");
@@ -1752,7 +1797,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp(`/changes?run=${failedRunID}&view=overview&source=snapshot&mode=rendered`);
 
     const recovery = await screen.findByTestId("review-run-recovery");
     expect(recovery).toHaveTextContent(successfulRunID);
@@ -1799,7 +1844,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
     expect(screen.getByTestId("review-section-jumps")).toHaveTextContent("Preview");
@@ -1918,7 +1963,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
     fireEvent.click(await screen.findByTestId("review-artifact-explorer-toggle"));
@@ -1969,7 +2014,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
@@ -2005,7 +2050,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
@@ -2052,7 +2097,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     navigateToStage("proposals");
@@ -2106,7 +2151,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     navigateToStage("proposals");
@@ -2147,7 +2192,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     await waitFor(() => expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("reports/as-is/overview.md"));
@@ -2186,7 +2231,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("publish");
@@ -2276,7 +2321,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("publish");
@@ -2365,7 +2410,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
     navigateToStage("proposals");
@@ -2430,7 +2475,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("publish");
@@ -2470,7 +2515,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("publish");
@@ -2510,7 +2555,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i })[0]);
@@ -3488,7 +3533,7 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("analysis");
@@ -4463,7 +4508,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp();
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
     await screen.findByTestId("review-panel");
 
     navigateToStage("analysis");

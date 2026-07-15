@@ -87,6 +87,12 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     (nextCancelBusy: boolean) => dispatch({ type: "setCancelBusy", cancelBusy: nextCancelBusy }),
     []
   );
+  const clearRunSelection = useCallback(() => {
+    dispatch({ type: "setRunID", runId: null });
+    dispatch({ type: "setRunStatus", runStatus: null });
+    resetRunLogs();
+    clearArtifacts();
+  }, [clearArtifacts, resetRunLogs]);
 
   const {
     hasActiveRuns,
@@ -170,6 +176,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     gitDiff,
     gitDiffStatus,
     bootstrapRuns,
+    clearRunSelection,
     fetchRunReviewSummary,
     loadGitDiff,
     handleRunPipeline,

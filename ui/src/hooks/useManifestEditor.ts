@@ -17,6 +17,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   const [guidedRepos, dispatchGuidedRepos] = useReducer(guidedReposReducer, undefined, initialGuidedRepos);
   const [guidedDocsImportsPath, setGuidedDocsImportsPath] = useState("./docs/imports");
   const setupDirtyRef = useRef(false);
+  const [hasUnsavedManifestDraft, setHasUnsavedManifestDraft] = useState(false);
   const manifestContentRef = useRef("");
   const formRevisionRef = useRef(0);
 
@@ -37,6 +38,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
 
   function markSetupDirty() {
     setupDirtyRef.current = true;
+    setHasUnsavedManifestDraft(true);
     formRevisionRef.current += 1;
     setValidateResult(null);
     setManifestStatus("");
@@ -199,6 +201,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
       if (isCurrentManifestSave(saveRevision, nextManifest)) {
         setValidateResult(validation);
         setupDirtyRef.current = false;
+        setHasUnsavedManifestDraft(false);
         setManifestStatus("Saved workspace.yaml");
       } else {
         setupDirtyRef.current = true;
@@ -222,6 +225,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
       if (isCurrentManifestSave(saveRevision, saveContent)) {
         setValidateResult(validation);
         setupDirtyRef.current = false;
+        setHasUnsavedManifestDraft(false);
         setManifestStatus("Saved workspace.yaml");
       } else {
         setupDirtyRef.current = true;
@@ -235,6 +239,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   }
 
   return {
+    hasUnsavedManifestDraft,
     validateResult,
     validationDiagnosticsByRepo,
     manifestContent,

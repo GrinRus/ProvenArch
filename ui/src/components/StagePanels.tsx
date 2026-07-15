@@ -3232,6 +3232,8 @@ export function ReviewStagePanel({
   onOpenArtifact,
 }: ReviewStageProps) {
   const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
+  const openReviewArtifactRef = useRef(onOpenArtifact);
+  openReviewArtifactRef.current = onOpenArtifact;
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
   const coverageArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/coverage/summary.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
@@ -3267,9 +3269,9 @@ export function ReviewStagePanel({
 
   useEffect(() => {
     if (reviewView === "evidence" && !selectedArtifact && preferredReviewArtifact) {
-      onOpenArtifact(preferredReviewArtifact.path);
+      openReviewArtifactRef.current(preferredReviewArtifact.path);
     }
-  }, [onOpenArtifact, preferredReviewArtifact, reviewView, selectedArtifact]);
+  }, [preferredReviewArtifact, reviewView, selectedArtifact]);
 
   return (
     <div className="stage-stack" data-testid="review-panel">
@@ -4285,6 +4287,8 @@ export function ProposalsStagePanel({
   onGoPublish: () => void;
 }) {
   const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff" | "logs">("preview");
+  const openProposalArtifactRef = useRef(onOpenArtifact);
+  openProposalArtifactRef.current = onOpenArtifact;
   const proposalReview = deriveProposalReviewModel({ artifacts, openQuestions });
   const selectedProposalArtifact = proposalReview.proposalArtifacts.find((artifact) => artifact.path === selectedArtifact);
   const preferredProposalArtifact =
@@ -4295,9 +4299,9 @@ export function ProposalsStagePanel({
 
   useEffect(() => {
     if (!selectedProposalArtifact && preferredProposalArtifact && selectedArtifact !== preferredProposalArtifact.path) {
-      onOpenArtifact(preferredProposalArtifact.path);
+      openProposalArtifactRef.current(preferredProposalArtifact.path);
     }
-  }, [onOpenArtifact, preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
+  }, [preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
 
   useEffect(() => {
     if (proposalView === "diff") {
