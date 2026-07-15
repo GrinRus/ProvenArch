@@ -60,6 +60,249 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260715-architecture-change-review-ui-migration-wave
+
+### Context
+The Architecture Change Review target design and seven reference screens are accepted as the
+post-beta direction, but implementation still needs one decision-complete migration wave. The
+current React UI is organized around eight stages in `App.tsx`, `StageRail.tsx` and a large
+`StagePanels.tsx`; several target trust states also need authoritative API readback before new
+screens can present them. The detailed wave plan must map existing Epic `20A–20N` to contract-first
+dependencies, current code owners, deterministic QA, one-shell cutover, rollback and the exact
+internal/external references used during review.
+
+### Goals (must have)
+- [x] Audit current UI orchestration, hooks/components, API/runtime/Git read models and test/release
+      infrastructure before fixing delivery order.
+- [x] Record one source-of-truth/reference matrix covering target design, schemas/specs, current
+      behavior, visual screens, UX evidence, QA policy and official external interaction patterns.
+- [x] Convert Epic `20A–20N` into dependency-ordered contract, trust, shell, destination, craft and
+      rollout phases without inventing competing slice IDs.
+- [x] Fix exact code/test ownership, canonical fixtures, per-PR gates, wave-exit acceptance,
+      cutover/rollback and documentation synchronization rules.
+- [x] Record that `20B1`, `20C1` and `20F1` are required contract-first PR after current-code
+      sufficiency inspection, while `20A` reuses its already landed snapshot foundations.
+- [x] Cross-link the migration plan from target/current UI docs, Epic 20, README, architecture and
+      stakeholder status without claiming that the new shell is implemented.
+- [x] Complete documentation checks and the full deterministic repository DoD.
+- [ ] Archive this completed planning slice during the next tracker reconciliation.
+
+### Non-goals
+- [x] Do not implement or restyle React UI in this planning slice.
+- [x] Do not change API, schema, runtime, Git mutation, queue or artifact behavior.
+- [x] Do not introduce a parallel hidden shell, production feature flag or big-bang rewrite.
+- [x] Do not run provider-live/release matrices; they remain a trusted-machine pre-release gate.
+- [x] Do not turn external console references or generated PNGs into product contracts.
+
+### Approach
+1) Reconcile mandatory project docs and inspect current UI/API/test ownership.
+2) Resolve target trust assumptions against current payloads and code behavior.
+3) Define source priority, delivery dependency graph and current-to-target route/module maps.
+4) Specify every existing Epic 20 slice with deliverable, expected files, tests and exit condition.
+5) Define deterministic fixtures, task anchors, viewport/a11y gates, embedded-bundle checks and
+   live/release boundary.
+6) Synchronize discovery surfaces and execute docs plus repository DoD checks.
+
+### Files expected to change
+- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`
+- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
+- `docs/UI_CONSOLE_V2_DESIGN.md`
+- `docs/BACKLOG.md`
+- `docs/PLANS.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] Migration authority and conflict resolution are explicit; schemas/specs outrank UI plans,
+      written target outranks PNG, and README/ARCHITECTURE remain implemented-behavior docs.
+- [x] The wave starts with `20A`, then required `20B1`/`20C1`, and delays shell cutover until
+      authoritative snapshot/Git/runtime/queue/workflow foundations exist.
+- [x] `20I1` is an atomic one-shell cutover with four honest temporary compositions and no hidden
+      Console V2 controls; rollback is a slice revert, not a dual-shell toggle.
+- [x] Every `20A–20N` slice has an implementation/test handoff and preserves local-first,
+      automatic promotion, read-only sources and full-workspace Git semantics.
+- [x] Six canonical fixtures, stable task anchors, accessibility/viewport gates and required/live
+      test boundaries are fixed.
+- [x] The complete visual/internal/external reference set is linkable from one document.
+- [x] `git diff --check`, link/path checks, docs synchronization tests and full DoD pass.
+
+### Risks
+- A detailed plan can drift into a competing roadmap; the plan keeps `BACKLOG.md` `20A–20N` as the
+  only acceptance IDs and uses phases only for coordination.
+- The shell can appear ready while underlying truth is client-derived; mandatory contract-first PR
+  prevent `20I1` from landing before authoritative readback.
+- Visual references can encourage brittle screenshot matching; written behavior, task assertions,
+  viewports and deterministic fixtures remain the acceptance basis.
+- Live E2E selectors are tied to Console V2; they migrate only at wave exit and never become an
+  ordinary merge dependency on providers.
+
+### Progress log
+- 2026-07-15: Audited `App.tsx`, shell/stage components, hooks/contracts, Git diff/commit behavior,
+  run history/queue persistence, Vitest/Playwright contracts and release runbook. Confirmed that
+  full Git inventory, historical runtime mode and pending/supersession readback require
+  contract-first PR before their target UI.
+- 2026-07-15: Added
+  `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md` with authority rules, all internal and
+  official external references, six delivery phases, existing `20A–20N` slice cards, module/route
+  maps, fixtures, QA gates, one-shell cutover/rollback and first-slice handoff; synchronized product
+  discovery and stakeholder surfaces.
+- 2026-07-15: Verified every local migration-plan link, `git diff --check` and
+  `go test ./internal/docsync`; full deterministic DoD passed with exact Node 22.21.1:
+  `make contracts`, `make test` (Go, 246 Python and 116 UI tests), `make lint`, `make build`.
+  `make verify-ui-determinism` and `make verify-ui-dist` also passed; generated embedded UI remained
+  unchanged because this planning slice does not edit product code.
+- 2026-07-15: Final independent code/docs/QA review closed Git preview-to-mutation TOCTOU,
+  launcher-only runtime switching, explicit single-pending queue command semantics, path-only
+  `20I1` versus deep-context `20I2`, same-slice cutover docs, executable responsive/a11y fixtures
+  and exact mock/live contract files. Epic 20 and target design were synchronized with those
+  decisions rather than leaving the migration plan as a competing source.
+- 2026-07-15: Re-ran the full DoD after review fixes: contracts, Go tests, 246 Python tests,
+  116 UI tests, lint/typecheck and production build passed. WORKTREE UI determinism, embedded
+  bundle freshness, local-link validation, `git diff --check` and docs-sync also passed; the final
+  read-only code/docs/QA rechecks returned PASS.
+
+### Plan ID
+EP-20260715-architecture-change-review-design-baseline
+
+### Context
+The exploratory UX audit selected Architecture Change Review as the product backbone, with
+attention-first Home, focused Run Studio, Knowledge/Atlas and contextual Evidence Studio modes.
+The repository still treats the implemented eight-stage Console V2 design and its screenshots as
+the only detailed design baseline. Before implementation starts, the chosen post-beta direction
+needs one canonical target specification, project-owned visual references and explicit links from
+the current baseline, architecture overview and Epic 20 backlog.
+
+### Goals (must have)
+- [x] Locate and reconcile the existing UI design baseline, screenshots, backlog decisions,
+      architecture notes, UX evidence and React/CSS source-of-truth surfaces.
+- [x] Define the detailed target product model, information architecture, journeys, screens,
+      state matrix, interaction rules, responsive behavior and accessibility requirements.
+- [x] Define a semantic visual system and reusable component families aligned with the current
+      calm palette and plain-CSS implementation boundary.
+- [x] Generate and persist seven reference screens for the selected hybrid concept under `docs/assets`.
+- [x] Synchronize the V2 baseline, README, architecture overview, stakeholder matrix and Epic 20 with the new target
+      concept without claiming that the target UI is already implemented.
+- [ ] Archive this completed design-baseline plan during the next tracker reconciliation.
+
+### Non-goals
+- [x] Do not implement or restyle React UI code in this design-baseline slice.
+- [x] Do not change API, artifact, workspace, runtime or Git mutation contracts.
+- [x] Do not introduce persisted review approval or imply selected-file commit semantics.
+- [x] Do not treat generated PNG references as pixel-perfect implementation contracts.
+
+### Approach
+1) Inspect the current design/doc/assets/code source-of-truth and record current-versus-target status.
+2) Specify the Architecture Change Review backbone and supporting product modes from user jobs.
+3) Define honest source, execution, evidence and publication state semantics.
+4) Define semantic tokens, component anatomy, density and responsive/accessibility rules.
+5) Generate one reference image for each key target surface and persist it in the repository.
+6) Cross-link the target design from current docs/backlog and run docs/full repository checks.
+
+### Files expected to change
+- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
+- `docs/assets/ui-architecture-change-review/*.png`
+- `docs/UI_CONSOLE_V2_DESIGN.md`
+- `docs/BACKLOG.md`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] One canonical target document distinguishes implemented V2 behavior from planned post-beta UX.
+- [x] Target IA uses `Home / Runs / Knowledge / Changes`, with Setup contextual and Ask global.
+- [x] Full first-run, refresh, failure/recovery, review, Q&A and Git publication paths are specified.
+- [x] Workspace, execution, evidence and publication axes have explicit empty/partial/error states.
+- [x] Visual tokens and component contracts are implementation-ready but do not mutate CSS yet.
+- [x] Seven project-owned reference screens are linked from the target design document.
+- [x] Existing V2 screenshots remain available as historical design/current-shell references.
+- [x] Documentation checks and full DoD pass without product-code or contract changes.
+
+### Risks
+- Generated UI references can contain minor text/rendering artifacts; written behavior and component
+  contracts remain authoritative over pixels.
+- Some target trust states depend on Epic 20 contract-first slices; the spec must label those
+  dependencies instead of inventing data or presenting approvals that do not exist.
+- Current docs describe implemented eight-stage navigation. Target links must be additive and
+  explicitly planned until implementation and E2E migration are complete.
+
+### Progress log
+- 2026-07-15: Located the historical V2 design/current-shell baseline at `docs/UI_CONSOLE_V2_DESIGN.md`, historical
+  visuals under `docs/assets/ui-console-v2/`, target trust decisions in Epic 20, current UX evidence
+  under `reports/`, and implementation sources in `ui/src/components` plus `ui/src/styles.css`.
+- 2026-07-15: Added the user-selected Architecture Change Review target spec with explicit
+  promotion-vs-Git-acceptance boundary, source identity, active/historical routing, four-axis state
+  derivation, migration bridge, semantic tokens, responsive/accessibility rules and seven-screen
+  reference set; synchronized V2/README/ARCHITECTURE/BACKLOG/STAKEHOLDER status and IA.
+- 2026-07-15: Generated and visually inspected seven consistent 1536x1024 reference screens for
+  Guided Setup, Home, Run Studio, Change Review, Evidence Studio, Knowledge Atlas and Publish;
+  corrected the only prominent generated-copy defect before persisting assets. Full deterministic
+  DoD passed with exact Node 22.21.1: `make contracts`, `make test` (Go, 246 Python and 116 UI
+  tests), `make lint`, `make build`; product code and public contracts remained unchanged.
+
+### Plan ID
+EP-20260714-ui-ux-redesign-exploration
+
+### Context
+The current operator console exposes the full local-first ACP workflow, but its information
+architecture and visual hierarchy have accumulated around backend stages and diagnostics.
+Before implementation, the product needs an evidence-backed redesign exploration grounded in
+the actual end-to-end operator journey, rendered UI, and current patterns from comparable
+developer and operations consoles.
+
+### Goals (must have)
+- [x] Reconstruct the product problem, primary users, and complete ACP/AOR operator journey from
+      canonical docs, code, and rendered UI.
+- [x] Audit the current console for task clarity, hierarchy, density, state coverage, recovery,
+      accessibility, and trust/evidence workflow issues.
+- [x] Research current comparable engineering consoles and extract transferable interaction
+      patterns with source links.
+- [x] Produce at least three genuinely distinct redesign concepts, including information
+      architecture, core surfaces, strengths, risks, and recommendation criteria.
+- [ ] Archive this completed research plan during the next tracker reconciliation.
+
+### Non-goals
+- [x] Do not implement UI code or change API/schema/workspace contracts in this exploration.
+- [x] Do not expand the MVP provider list, hosted scope, or security/compliance scope.
+- [x] Do not treat visual styling alone as a complete redesign.
+
+### Approach
+1) Read canonical product and pipeline documentation and map the current source architecture.
+2) Inspect the rendered onboarding and console surfaces alongside their React implementation.
+3) Model the primary, alternate, failure, recovery, and repeat-use journeys.
+4) Compare relevant developer/operations consoles and synthesize reusable patterns.
+5) Define and evaluate distinct redesign concepts against ACP constraints and operator jobs.
+
+### Files expected to change
+- `docs/PLANS.md` only for this research pass.
+
+### Acceptance criteria
+- [x] Product and user-job summary is grounded in canonical sources.
+- [x] Current-state flow covers onboarding, readiness, analysis, review, Q&A, and publication.
+- [x] Current UI findings include missing or weak loading/empty/error/partial/offline/recovery states.
+- [x] At least three concepts differ structurally, not only by theme or color.
+- [x] Each concept includes a screen model, interaction model, tradeoffs, and fit assessment.
+- [x] Final recommendation identifies what to prototype and validate next without changing code.
+
+### Risks
+- Repository terminology uses `AOR` internally without a canonical user-facing expansion; this
+  exploration treats it as the core ACP runtime/orchestrator flow unless contrary evidence appears.
+- A static/code-only review can miss density and responsive defects, so rendered inspection is
+  required before final synthesis.
+
+### Progress log
+- 2026-07-14: Started product, pipeline, UI, and reference-console research; no product code changes.
+- 2026-07-14: Reconstructed the complete onboarding, readiness, init/refresh, review, Q&A,
+  recovery, and Git publication journeys from canonical docs, React state, and API behavior.
+- 2026-07-14: Inspected desktop and mobile renders and completed all seven deterministic UI mock
+  scenarios; identified trust, state-model, density, responsive, and false-affordance defects.
+- 2026-07-14: Compared official Temporal, Dagster, GitHub Actions, Prefect, Grafana, Backstage,
+  Argo, and Sentry interaction patterns and synthesized five structurally distinct concepts.
+- 2026-07-14: Selected an architecture-change-review backbone with attention-first Home, focused Run
+  Studio, Knowledge/Atlas, and contextual Evidence workbench as the recommended prototype direction.
+
+### Plan ID
 EP-20260713-live-e2e-codex-model-pin
 
 ### Context
@@ -106,23 +349,23 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 
 ### Continuous Backlog Queue Policy
 
-The normal product backlog queue has one implementation-complete PR-1 program, Epic 19
-(`Code Quality Audit Remediation`), and one blocked post-beta program, Epic 20 (`Console UX trust,
-evidence workflow and IA reset`).
-The first selected UX engineering slice is `20A Run-pinned evidence snapshot truth` under
-`EP-20260711-run-pinned-evidence-review`, but Epic 20 must not start until Epic 19 is merged into
-`main`. `docs/BACKLOG.md` remains the reference/acceptance backlog; this file selects and
-sequences focused active slices.
+Epic 19 (`Code Quality Audit Remediation`) is merged into `main` at `02716bb`, so Epic 20
+(`Console UX trust, evidence workflow and IA reset`) is no longer blocked by PR-1. The canonical
+post-beta direction is Architecture Change Review in
+`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`. Before implementing the first selected UX slice,
+`20A Run-pinned evidence snapshot truth` under `EP-20260711-run-pinned-evidence-review`, re-audit
+the snapshot foundation delivered by Epic 19 and scope the slice only to remaining trust gaps.
+`docs/BACKLOG.md` remains the reference/acceptance backlog; this file selects and sequences focused
+active slices.
 
 Wave 1 planning also contains Epic 21 / `EP-20260712-evidence-backed-architecture-refresh`;
 implementation has not started, and its first reviewable slice is
 `21A Architecture home + documentation quality baseline`.
 
 Allowed next workstreams:
-- PR-1/Epic 19 review, push/PR and merge bookkeeping only; no additional Epic 19 engineering slice
-  remains after final reconciliation.
-- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice only after PR-1 is
-  merged into `main`.
+- Epic 19 archive/reconciliation bookkeeping only; no additional Epic 19 engineering slice remains.
+- `EP-20260711-run-pinned-evidence-review` as the active Epic 20 UX trust slice after a current-code
+  sufficiency audit narrows work already covered by Epic 19.
 - Existing live-quality/release-validation plans below, only when their trusted-machine/provider prerequisites are satisfied.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
 - `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
@@ -138,10 +381,9 @@ Task selection rules:
 EP-20260713-epic-19-pr1-remediation
 
 ### Context
-Epic 19 has been implemented locally as one large draft PR on branch
-`codex/epic-19-code-quality-remediation`, with backlog slices `19A..19X` used as internal commit
-and checklist boundaries. The branch has been deliberately synced with `main` after `19X`. Epic 20
-remains out of scope until Epic 19 is merged into `main`.
+Epic 19 was implemented as one review program with backlog slices `19A..19X` used as internal
+commit and checklist boundaries. It is merged into `main` at `02716bb`; remaining work for this
+plan is archive/reconciliation bookkeeping only.
 
 ### Goals (must have)
 - [x] Add a shared atomic persistence primitive for workspace-owned files: temporary file,
@@ -229,13 +471,14 @@ remains out of scope until Epic 19 is merged into `main`.
       review/commit boundary is stable.
 - [x] Continue PR-1 with final Epic 19 docs/backlog reconciliation after `19X`
       review/commit boundary is stable.
-- [ ] Complete PR-1 review/push/merge into `main` before starting Epic 20.
+- [x] Complete PR-1 review/push/merge into `main` before starting Epic 20.
+- [ ] Archive this merged Epic 19 plan during the next tracker reconciliation.
 
 ### Non-goals
 - [ ] Do not implement `19B` transactional canonical promotion in the first pass.
 - [ ] Do not change public artifact schemas in `19A`.
 - [ ] Do not change provider selection, live matrix inputs or hosted/security scope.
-- [ ] Do not open Epic 20 work until Epic 19 is merged or explicitly rebased after merge.
+- [x] Do not open Epic 20 implementation work until Epic 19 is merged or explicitly rebased after merge.
 
 ### Approach
 1) Add the persistence primitive in `internal/workspace` and expose it through the existing
@@ -3063,21 +3306,22 @@ EP-20260714-epic-19-19z-final-reconciliation
 `19Z` follows committed `19X` and reconciles PR-1 status after all Epic 19 implementation slices
 are complete. The branch has also been deliberately merged with `main`, preserving the concurrent
 workspace-health/Karpathy planning work from `main` and the complete Epic 19 slice evidence from
-this branch.
+this branch. Current update: the reconciled program later merged into `main` at `02716bb`.
 
 ### Goals (must have)
-- [x] Mark Epic 19 backlog status as implementation-complete pending PR review/merge.
+- [x] Record the then-current Epic 19 status as implementation-complete pending PR review/merge.
 - [x] Update stakeholder status so PR-1 no longer claims the stale `19I` current-work marker.
 - [x] Preserve all `19A..19X` plan evidence and `main` active plan evidence after merge conflict
       resolution.
 - [x] Record that Epic 20 remains blocked until PR-1 merges into `main`.
-- [ ] Keep PR-1 review/push/merge as the remaining open owner/repository coordination step.
+- [x] Complete PR-1 review/push/merge into `main`.
+- [ ] Archive this completed reconciliation plan during the next tracker reconciliation.
 
 ### Non-goals
 - [ ] Do not start Epic 20 in this reconciliation slice.
 - [ ] Do not run live providers or trusted-machine release gates.
 - [ ] Do not change canonical release matrices or provider lists.
-- [ ] Do not mark PR-1 as merged before it is actually merged into `main`.
+- [x] Do not mark PR-1 as merged before it is actually merged into `main`.
 
 ### Implementation
 1) Sync `docs/BACKLOG.md`, `docs/STAKEHOLDER_DOC.md` and the Epic 19 active plan status.
@@ -3098,10 +3342,11 @@ release interface changes.
 - `docs/BACKLOG.md`, `docs/PLANS.md`, `docs/STAKEHOLDER_DOC.md`.
 
 ### Acceptance
-- [x] Backlog/stakeholder/plan status consistently says Epic 19 is implementation-complete but
-      pending PR review/merge.
+- [x] At the `19Z` commit boundary, backlog/stakeholder/plan status consistently said Epic 19 was
+      implementation-complete but pending PR review/merge.
 - [x] Full DoD passes after merging `main`.
 - [x] Commit `19Z: reconcile Epic 19 completion`.
+- [x] Current backlog/stakeholder/plan status records the later merge at `02716bb`.
 
 ### Progress log
 - 2026-07-14: Reconciled Epic 19 backlog/stakeholder/plan status, preserved both Epic 19 and
@@ -3109,6 +3354,8 @@ release interface changes.
   `doctorWarnings` local exposed by the new noUnused gate, regenerated `internal/api/ui_dist`, and
   completed full DoD with exact Node 22.21.1: `make contracts`, `make test`, `make lint`,
   `make build`.
+- 2026-07-15: Recorded the later merge into `main` at `02716bb`; archive remains for the next
+  tracker reconciliation.
 
 ### Plan ID
 EP-20260623-karpathy-adoption-roadmap
@@ -3310,12 +3557,17 @@ canonical `reports/health/*` artifacts in this slice.
 EP-20260711-run-pinned-evidence-review
 
 ### Context
-Epic 20 starts with the highest-risk trust defect in the current Console V2. The persisted
-`final-run-index.json` contract already requires both `canonical_path` and `staged_path`, but
-the TypeScript contract drops `staged_path` and selected-run Review reads the current canonical
-path. Coverage and open questions are also loaded from stable current-workspace paths. After a
-new promotion, an operator can therefore select an older `run_id` while seeing newer bytes.
-This slice restores immutable run-pinned review without changing the canonical artifact schema.
+Epic 20 originally started with the highest-risk trust defect found in Console V2: historical
+review could lose staged identity and expose current canonical bytes. Epic 19 subsequently landed
+typed `staged_path`, selected-run identity/containment checks and run-keyed artifact loading. This
+slice now begins with a sufficiency audit and closes only the remaining explicit source-mode,
+fail-closed edge semantics, atomic view-state and rendered same-path multi-run proof gaps, without
+changing the canonical artifact schema.
+
+Re-baseline note (2026-07-15): Epic 19 delivered typed staged snapshot foundations in
+`appContracts.ts` and `useRunArtifacts.ts`. Before implementation, audit current behavior against
+the goals below and retain only missing explicit source-mode, fail-closed, transaction and rendered
+multi-run proof work; do not duplicate landed code.
 
 ### Goals (must have)
 - [ ] Preserve top-level `run_id`/`generated_at` and document `staged_path` in the frontend
@@ -3411,6 +3663,8 @@ This slice restores immutable run-pinned review without changing the canonical a
 - 2026-07-11: Selected `20A` as the first P0 slice after the full UX/UI trust and craft audit;
   recorded the dependency-ordered Epic 20 program in `docs/BACKLOG.md`. Implementation has not
   started.
+- 2026-07-15: Epic 19 merged into `main` at `02716bb`; snapshot foundations now require a
+  sufficiency audit before this implementation plan is activated.
 
 ### Plan ID
 EP-20260712-evidence-backed-architecture-refresh
@@ -4728,7 +4982,9 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
-| 19 Code quality remediation | planned | 29 audit findings + 13 dead-code groups decomposed into reviewable local-first slices in `docs/BACKLOG.md` |
+| 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
+| 20 Console UX trust and IA reset | planned (implementation wave fixed; `20A` first) | Corrective post-beta program; target design plus `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md` define the one-shell, contract-first delivery path |
+| 21 Evidence-backed Architecture Home + impact-aware refresh | planned (Wave 1) | Out of MVP; implementation starts only from its separate architecture-home/docs-quality slice |
 
 ---
 
@@ -4807,4 +5063,3 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
   slice-count checks. Full DoD was not repeated because this slice changes no code,
   schemas/spec contracts or fixtures; the same exact code baseline DoD is recorded as passing
   in the immediately preceding audit ExecPlan.
-| 20 Console UX trust and IA reset | planned (P0 selected) | Corrective post-beta program; `20A` run-pinned evidence snapshot truth is the active normal product slice |

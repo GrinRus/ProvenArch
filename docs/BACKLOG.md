@@ -479,9 +479,9 @@ Suggested PR slices:
 
 ## Epic 19 — Code Quality Audit Remediation (Local-first MVP)
 
-Status: implementation-complete on `codex/epic-19-code-quality-remediation`; PR-1 is pending
-review/merge into `main`. Source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at
-baseline `122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
+Status: implementation-complete and merged into `main` at `02716bb`.
+Source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at baseline
+`122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
 
 ### Goal
 
@@ -537,10 +537,10 @@ dependencies: `19A -> 19B`, `19C -> 19D -> 19E`, `19G -> 19H`,
 - завершение P1 подтверждается deterministic CI; manual live release gate выполняется
   отдельно и не блокирует review отдельных non-live slices.
 
-Implementation note: local slice commits `19A..19X` are complete, the branch has been deliberately
-synced with `main`, and the final merge gate remains `make contracts`, `make test`, `make lint`,
-`make build` on the reconciled PR branch plus normal PR review. Epic 20 must not start until PR-1
-is merged.
+Implementation note: local slice commits `19A..19X` completed the program and were merged into
+`main` at `02716bb` after the reconciled branch passed `make contracts`, `make test`, `make lint`
+and `make build`. Epic 20 is unblocked; its first implementation slice starts with a current-code
+sufficiency audit because Epic 19 already delivered part of the snapshot foundation.
 
 ### Suggested PR slices
 
@@ -883,15 +883,21 @@ Context:
   task-based аудит показал системный разрыв: console хорошо объясняет runtime diagnostics,
   однако недостаточно надёжно отвечает на вопросы «какой run я смотрю», «какие данные
   проверены», «что именно будет закоммичено» и «что считается завершённым».
-- Это corrective successor для UI/IA частей Epics 16–17. После реализации Epic 20 новая
-  группировка `Setup / Runs / Review / Publish` и global `Ask` заменяет требование о восьми
-  обязательных numbered stages; backend/runtime contracts, local-first boundary,
-  deterministic required CI и release live-E2E guardrails сохраняются.
-- Главные trust defects подтверждены кодом и rendered multi-run проверкой:
-  selected historical run теряет обязательный `staged_path` и читает latest
-  `canonical_path`; UI обещает `Commit selected artifacts`, а backend выполняет
-  `git add -A`; client-only runtime selector может расходиться с effective server runtime;
-  fake walkthrough может выглядеть как publication-ready evidence.
+- Это corrective successor для UI/IA частей Epics 16–17. Канонический target описан в
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md). После
+  реализации Epic 20 primary IA `Home / Runs / Knowledge / Changes`, contextual Setup и global
+  Ask заменяют требование о восьми обязательных numbered stages; backend/runtime contracts,
+  local-first boundary, deterministic required CI и release live-E2E guardrails сохраняются.
+- Детальный delivery order, обязательные contract-first PR, code/test map, cutover/rollback и
+  reference matrix зафиксированы в
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+  План отображает эти же `20A–20N` и не является вторым roadmap.
+- Исходный trust audit подтвердил несколько defects: selected historical run терял обязательный
+  `staged_path`, UI обещает `Commit selected artifacts`, хотя backend выполняет `git add -A`,
+  client-only runtime selector может расходиться с effective server runtime, а fake walkthrough
+  может выглядеть как publication-ready evidence. Epic 19 уже доставил typed staged-path mapping,
+  containment/run-identity validation и run-keyed loading; для `20A` остаются sufficiency audit,
+  explicit source-mode UX, fail-closed edge semantics и rendered same-path multi-run proof.
 - Оставшийся UI debt — raw Markdown через `<pre>` в Review/Proposals/Publish, presence-based
   stage statuses, permanently disabled approval actions, обязательный вид `Ask` в rail,
   перегруженный first viewport, неполные keyboard contracts и монолитные
@@ -902,8 +908,9 @@ Product decisions for this epic:
   separate, explicitly labelled mode and is never a silent fallback;
 - MVP Git action remains full-workspace commit because that is the current backend contract;
   UI calls it `Commit all workspace changes`, shows the full change inventory and requires
-  confirmation; exact file/folder-scoped commit needs a separate owner-approved API/schema
-  slice;
+  confirmation; commit/branch commands carry the confirmed inventory/HEAD identity and fail with
+  typed `409` if it is stale before mutation; exact file/folder-scoped commit needs a separate
+  owner-approved API/schema slice;
 - Git mutation is available only in Publish; Charter and other workbenches link to Publish
   instead of bypassing its gate;
 - fake stays the recommended deterministic walkthrough, but its outputs are labelled
@@ -912,8 +919,10 @@ Product decisions for this epic:
 - runtime/provider identity is process- and run-scoped: current effective values come from
   server readback; historical runs use persisted run-start `runtime_mode` plus
   `step_providers` (shown as one provider or `Mixed`), never the current client selection;
-  Console does not hot-restart its own process in this epic and instead shows exact restart
-  guidance until a new server readback confirms the desired configuration;
+  the existing runtime switch is limited to launcher/first-run Setup before console entry and
+  without active/pending runs; an in-console desired choice remains a Settings-session draft,
+  never changes effective service state and shows exact restart guidance until a new process
+  readback confirms it;
 - Charter/analysis brief remains recommended, not mandatory: skipping it is an explicit
   choice with a quality warning;
 - Review and Proposals stay honest read-only inspection surfaces until a persisted review
@@ -936,7 +945,8 @@ Priority and dependency order:
   `20D` depends on `20C`.
 - P1 decision workflow: `20E` depends on `20A–20D`; `20F` depends on `20C`;
   `20G` depends on `20A`; `20H` can run after `20B`.
-- P1/P2 structure and craft: `20I` depends on `20E`; `20J` on `20I + 20G`;
+- P1/P2 structure and craft: `20I` depends on `20E`; `20J1` on `20I + 20F`, `20J2` on
+  `20I + 20G`;
   `20K` follows the trust components from `20G/20H/20I`; `20L` depends on `20I + 20K`;
   `20M` depends on `20E + 20G + 20J`.
 - `20N` closes the program, but every preceding slice must add its own focused tests rather
@@ -946,25 +956,30 @@ Acceptance:
 - selecting two runs with the same `canonical_path` and different content always renders each
   run's own staged bytes, coverage and open questions; missing/corrupt snapshot data becomes
   an explicit error and never falls back to latest canonical content;
-- Review and Publish identify `run_id`, persisted run runtime/provider set, generated time and
+- Changes and Publish identify `run_id`, persisted run runtime/provider set, generated time and
   `Run snapshot` versus `Current workspace` context in the primary header;
-- every full-workspace commit path accurately describes its scope, shows tracked/untracked
-  inventory covered by the action and requires confirmation; proposal-branch creation has a
-  separate branch name/base confirmation and both mutation types are unavailable outside Publish;
+- every full-workspace commit path accurately describes its scope, shows the complete
+  new/modified/deleted/untracked/renamed/copied/changed inventory covered by the action, handles
+  binary/unavailable diffs honestly and requires confirmation; the backend rejects a changed
+  inventory/HEAD with typed `409` before mutation; proposal-branch creation has a separate branch
+  name/base confirmation with the same stale-state protection and both mutation types are
+  unavailable outside Publish;
 - effective runtime/provider/permission mode comes from server readback; a desired setting
   cannot be presented as active until a restarted process confirms it through readback;
-- fake output is visibly demo/wiring evidence in Analysis, Review and Publish and requires a
+- fake output is visibly demo/wiring evidence in Run Studio, Changes and Publish and requires a
   distinct intentional confirmation before commit;
-- one shared workflow selector drives rail/navigation status, Review/Proposals blockers,
-  inspector next action and Publish gate without contradictory ready/blocked states;
-- normal run actions are disabled while a run is active; an explicit queue action names the
-  pending pipeline and explains debounce/supersession before it is submitted;
+- one shared workflow selector drives PrimaryNav status, Home/PageHeader/ContextDrawer next action,
+  Changes blockers and Publish gate without contradictory ready/blocked states;
+- normal run commands return typed `409` while a run is active; only an explicit queue intent may
+  create/replace the single pending run, names its pipeline and exposes typed supersession identity;
 - Markdown artifacts are readable by default with safe Rendered/Raw/Diff modes, source
   provenance and deterministic loading/empty/error/large-content states;
-- primary IA is grouped as `Setup / Runs / Review / Publish`; Ask and Settings/Diagnostics are
-  utilities, browser Back/Forward works, and URL state restores at least view, run and artifact;
+- primary IA is grouped as `Home / Runs / Knowledge / Changes`; Setup is contextual, Ask and
+  Settings/Diagnostics are utilities, browser Back/Forward works, and URL state restores at least
+  view, run, source mode and artifact/entity;
 - on `1440`, `1280`, `1024` and `390x844` viewports there is no document-level horizontal
-  overflow; stage title, current state and primary next action fit in the first mobile viewport;
+  overflow; destination/page title, current state and primary next action fit in the first mobile
+  viewport;
 - tabs, combobox, forms, async status/error announcements and destructive confirmations meet
   their keyboard/screen-reader contracts and automated accessibility checks have no critical
   violations;
@@ -986,6 +1001,9 @@ Non-goals:
 
 Suggested PR slices:
 - `20A Run-pinned evidence snapshot truth` (P0, first selected slice)
+  - Epic 19 уже доставил базовые typed snapshot contracts и run-keyed artifact loading; перед
+    реализацией этого slice провести sufficiency audit и оставить здесь только недостающие
+    source-mode, fail-closed, rendered multi-run и migration-proof requirements
   - preserve top-level `run_id`/`generated_at` and document `staged_path` in the TypeScript
     final-index contract and build selected-run refs from staged paths, including coverage and
     open-question documents
@@ -1010,20 +1028,26 @@ Suggested PR slices:
   - exit: rendered multi-run proof shows the older run's bytes after a newer promotion
 
 - `20B Honest full-workspace Publish boundary` (P0; depends on `20A` for snapshot labelling)
-  - PR `20B1`, only if needed: add an authoritative Git change-inventory read contract covering
+  - PR `20B1`: add an authoritative Git change-inventory read contract covering
     modified/deleted/untracked paths, with API docs, validators/fixtures and backend tests
   - PR `20B2`: implement the truthful Publish UI only after the inventory contract is sufficient
   - rename the action to `Commit all workspace changes` and label artifact selection as preview,
     not commit scope
   - show branch, tracked modifications, deletions and untracked paths covered by `git add -A`;
     block commit if that inventory cannot be loaded
+  - fingerprint branch/HEAD, normalized status/path/original path, mode/binary state, index
+    identity and content hashes; counts are not a confirmation identity
   - require a confirmation summary with change counts, unresolved-question warning and the
     selected evidence context; cancel performs no mutation
   - keep proposal-branch creation as a separate confirmation naming branch/base; it must not
     inherit commit-scope copy
+  - send expected fingerprint/HEAD with commit and expected fingerprint/source branch/base/HEAD
+    with proposal-branch; serialize backend validation and return `409 stale_git_confirmation`
+    without side effects when the confirmation is stale
   - remove commit/branch mutation controls from Charter and route users to Publish
   - tests: dirty file outside selected run is visible; untracked file is visible; cancel is
-    side-effect free; Charter has no mutation path; successful commit refreshes real Git state
+    side-effect free; inventory/HEAD change after dialog open is rejected; concurrent confirmation
+    is serialized; Charter has no mutation path; successful commit refreshes real Git state
   - expected code surface: `BaselineGitPanel.tsx`, `StagePanels.tsx`, `useGitActions.ts`,
     workspace Git API/handler tests; contract docs are updated if inventory fields are added
 
@@ -1033,28 +1057,36 @@ Suggested PR slices:
     `step_providers`; use one provider label or `Mixed` for multi-provider runs
   - PR `20C2`: consume that contract in the UI after contract docs/fixtures/backend tests pass
   - make server readback the source of truth for current effective runtime/provider/permissions
-    and persisted run metadata the source for historical Review
+    and persisted run metadata the source for historical Changes context
   - display desired and effective values separately; use `Pending restart` until a restarted
     process reports the desired configuration
-  - make run preflight/top bar/Analysis use effective values, never a client-only selection
-  - do not add a UI hot-restart API; provide an exact restart command/instruction and refresh
-    readback after reconnect
+  - make run preflight/GlobalHeader/Run Studio use effective values, never a client-only selection
+  - preserve immediate runtime selection only as a launcher/first-run Setup exception before
+    console entry and without active/pending runs; outside it `/api/onboarding/runtime` returns
+    `409 runtime_switch_requires_restart`
+  - do not call that launcher endpoint from in-console Settings; keep the desired choice as an
+    explicit session draft, provide an exact restart command/instruction and refresh readback after
+    reconnect; do not promise reload persistence without a future persisted process-preference
+    contract
   - tests: UI selects headless while server remains fake; simulated server restart/readback
     success; mixed step providers; missing historical metadata; readback/reconnect error;
     direct mode and onboarding first-run identity
-  - expected code surface: server status/readiness API, `appContracts.ts`, runtime hooks,
+  - expected code surface: server status/readiness API, `internal/api/onboarding.go`,
+    `internal/api/server_test.go`, `ui/src/lib/onboardingApi.ts`, `appContracts.ts`, runtime hooks,
     `TopStatusBar.tsx`, Readiness and Analysis; invoke schema/contract synchronization if the
     public payload changes
 
 - `20D Fake/demo evidence boundary` (P0; depends on `20C`)
-  - add persistent `Deterministic demo` identity to run summary, Review trust status and Publish
+  - add persistent `Deterministic demo` identity to run summary, Changes trust status and Publish;
+    pair it with the separate `Demo evidence` trust label wherever evidence readiness is shown
   - replace `Evidence ready` / normal `READY` semantics for fake with `Demo evidence`
   - keep fake publication available only as `Commit all demo workspace changes`
     with a warning that no live architecture analysis occurred
   - tests: fake can complete walkthrough, never appears live-ready, normal headless run keeps
     live evidence semantics, demo confirmation is required before Git mutation
-  - expected code surface: shared run identity selector, Analysis/Review/Publish/inspector copy,
-    fake Playwright fixtures and README walkthrough wording
+  - expected migration inputs: shared run identity selector, current
+    Analysis/Review/Publish/inspector copy, fake Playwright fixtures and README walkthrough wording;
+    target outputs are Run Studio, Changes, Publish and ContextDrawer
 
 - `20E Shared workflow status and publication gate` (P1; depends on `20A–20D`)
   - replace presence-based `done` with `available / needs_review / blocked / complete` semantics
@@ -1063,39 +1095,47 @@ Suggested PR slices:
     and Git mutation errors
   - preserve Epic 18 black-box boundary: `reports/taskruns/*-quality.json`, runtime telemetry
     and matrix counters never decide artifact acceptance in the product gate
-  - use the same model in navigation, stage header, inspector and Publish; prevent a green
+  - use the same derivation/precedence table in PrimaryNav, Home, PageHeader, ContextDrawer and
+    Publish; prevent a green
     top-level status when a detailed gate is blocked
   - remove permanently disabled evidence/proposal approval buttons and offer only real
     navigation/recovery actions
   - tests: table-driven state matrix for partial artifacts, proposal blocker, open questions,
     fake, failed Git action, clean post-commit workspace and stale selected run
-  - expected code surface: `stageModel.ts`, a new pure workflow selector/view model,
-    `App.tsx`, Review/Proposals/Publish and inspector components
+  - expected migration inputs: `stageModel.ts`, `App.tsx`, current Review/Proposals/Publish and
+    inspector components; target output is a pure workflow selector consumed by Home/Changes/Publish
 
 - `20F Deliberate run start, refresh and queue semantics` (P1; depends on `20C`)
-  - PR `20F1`, only if needed: expose pending/superseded run identity and pipeline through a
-    contract-first read model with docs/fixtures/backend tests
+  - PR `20F1`: expose active identity and the single replaceable pending run
+    identity/pipeline plus typed `superseded_by_run_id` through a contract-first read model with
+    docs/fixtures/backend tests
+  - make the command contract deliberate: ordinary start while active returns `409 run_active`;
+    only explicit queue intent can create or replace pending, and supersession has a typed
+    `error_code` rather than free-form text parsing
   - PR `20F2`: implement deliberate queue controls against that authoritative read model
-  - disable ordinary init/refresh actions while a run is active across Analysis and inspector
+  - disable ordinary init/refresh actions while a run is active across Run Studio, Home and
+    ContextDrawer
   - expose `Queue refresh after current run` only when existing backend queue semantics apply;
     show pending run id/pipeline and replacement/supersession rule before confirmation
   - keep last accepted evidence selected if a start request fails
-  - tests: double click, active run, pending replacement, request failure, cancellation and
-    post-terminal queue transition
-  - expected code surface: run service/API read model, run hooks, Analysis mission control,
-    active-run strip and inspector; preserve single-active/debounce backend invariants
+  - tests: stale UI/double click cannot silently enqueue, explicit queue, active run, pending
+    replacement with typed supersession, request failure, cancellation and post-terminal queue
+    transition
+  - expected migration inputs: run service/API read model, run hooks, current Analysis mission
+    control, active-run strip and inspector; target output is Runs/Run Studio while preserving
+    single-active/debounce backend invariants
 
 - `20G Shared evidence-first ArtifactViewer` (P1; depends on `20A`)
   - render Markdown safely by default with headings, lists, tables, fenced code, local evidence
     links and Mermaid; raw HTML stays disabled
-  - provide consistent `Rendered / Raw / Diff` modes and source metadata in Review, Proposals
-    and Publish
+  - provide consistent `Rendered / Raw / Diff` modes and source metadata in Changes,
+    Knowledge/Atlas and Publish through shared Evidence Studio
   - add loading, empty, unavailable snapshot, parse error and large-content behavior without
     replacing content with generic cards
   - tests: tables/code/links/Mermaid, script injection, broken artifact, long lines, diff view,
     keyboard mode switch and snapshot/current-workspace source badge
-  - expected code surface: new `ArtifactViewer` component, artifact-link resolver,
-    Review/Proposals/Publish integrations and focused component tests
+  - expected code surface: new `ArtifactViewer`/Evidence Studio component, artifact-link resolver,
+    current Review/Proposals/Publish migration integrations and focused component tests
 
 - `20H Accessibility-critical interaction contracts` (P1; can follow `20B`)
   - implement WAI-ARIA tab keyboard behavior: roving tabindex, arrows, Home/End,
@@ -1112,38 +1152,57 @@ Suggested PR slices:
     async feedback primitives, top bar and token styles
 
 - `20I Navigation model and URL-restorable context` (P1; depends on `20E`)
-  - PR `20I1 Navigation/IA`: replace the mandatory numbered rail with grouped destinations and
-    relocate utilities without adding URL state in the same review
+  - PR `20I1 Navigation/IA`: replace the mandatory numbered rail with grouped destinations,
+    relocate utilities and add only path-level `/setup|home|runs|knowledge|changes` navigation,
+    `popstate` and direct-load SPA fallback
   - replace the mandatory numbered rail with grouped primary destinations:
-    `Setup / Runs / Review / Publish`
-  - move Ask to a global read-only utility and Settings/Diagnostics to expert access without
-    changing their runtime/API semantics
-  - PR `20I2 URL context`: persist and restore navigation context after `20I1` is accepted
-  - persist at least view, selected run and selected artifact in URL/history; Back/Forward and
-    reload restore a valid context and sanitize missing ids
+    `Home / Runs / Knowledge / Changes`
+  - land a minimal attention-first Home over the shared selector and authoritative current hooks;
+    the new shell is not accepted until all four routes have visible, honest temporary compositions
+  - keep first-run Setup as a guided session before the primary shell and expose it later from
+    the workspace menu; move Ask to a global read-only utility and Settings/Diagnostics to expert
+    access without changing their runtime/API semantics
+  - `/knowledge` may remain an explicit partial/unavailable temporary composition until `20J2`;
+    it must not derive architecture truth from filenames
+  - synchronize README/ARCHITECTURE/current UI baseline/STAKEHOLDER current-shell status in the
+    same `20I1` cutover
+  - PR `20I2 URL context`: persist and restore deep navigation context after `20I1` is accepted
+  - persist at least view, selected run, source mode and selected artifact/entity in URL/history;
+    Back/Forward and reload restore a valid context and sanitize missing ids
   - preserve/migrate operator-facing `data-testid` values with unit/fake E2E coverage; do not
     add hidden compatibility controls
-  - expected code surface: navigation model, shell/rail, `App.tsx` state boundary and URL tests
+  - expected code surface: navigation model, shell/rail, `App.tsx` state boundary, URL tests and
+    `internal/api/server_test.go` direct GET SPA-fallback coverage for target routes
 
-- `20J Guided Setup, Runs and Review composition` (P1/P2; depends on `20I` and `20G`)
-  - PR `20J1 Guided Setup + Runs`: change first-run preparation and run mission control only
+- `20J Home, Guided Setup, Runs, Knowledge and Changes composition` (P1/P2; `20J1` depends on
+  `20I + 20F`, `20J2` depends on `20I + 20G`)
+  - PR `20J1 Home + Guided Setup + Runs`: change attention summary, first-run preparation and run
+    mission control only
+  - make Home answer workspace/readiness, active/pending execution, latest evidence and current
+    workspace publication state with one non-contradictory next action
   - compose Setup from Workspace, Sources, recommended Analysis brief and Runner/Readiness;
     make `Run without brief` an explicit quality trade-off
   - make Runs answer first: what is running, current step/blocker, next action and history;
     keep shard/raw telemetry behind diagnostics
-  - PR `20J2 Review + Ask context`: recompose evidence/decision work and contextual utility
-  - compose Review around evidence queue, findings/gaps, domain map and proposals/decisions
-    using the shared viewer and gate
+  - PR `20J2 Changes + Knowledge + Ask context`: recompose evidence/decision work, current
+    architecture knowledge and contextual utility
+  - compose Architecture Change Review around evidence queue, findings/gaps, proposals and
+    publication using the shared viewer and gate; compose Knowledge around Overview, Atlas,
+    entities and artifacts with explicit partial states
+  - make Changes list route successful `init|refresh` snapshots to review, failed/canceled/recovered
+    runs to retained-evidence Run Studio, and QA runs to Ask history; per-run publication remains
+    `Unknown` without an authoritative run-to-commit association
   - label Ask as `Current workspace` context until run-scoped Q&A has an explicit contract
   - tests: first-time guided walkthrough, explicit Charter skip, failed run recovery,
     historical review, proposal blocker and contextual Ask entry
-  - expected code surface: onboarding transition, stage composition, Analysis/Review/Ask
-    containers and navigation copy; pipeline semantics stay unchanged
+  - expected migration inputs: onboarding transition, current stage composition and
+    Analysis/Review/Ask containers; target outputs are Home, Runs, Knowledge, Changes and global
+    Ask while pipeline semantics stay unchanged
 
 - `20K Semantic UI consolidation and density` (P2; after primary trust components stabilize)
   - define semantic roles for text, surface, border, action, status and focus plus a compact
     type scale, 6–8 spacing steps, three radii and compact/comfortable density
-  - consolidate the `Button`, `Tabs`, `StageHeader`, `RecoveryPanel`,
+  - consolidate the `Button`, `Tabs`, `PageHeader`, `ContextBar`, `RecoveryPanel`,
     `Metric/DefinitionList`, `DataTable/CardList` and async state primitives introduced/reused
     by earlier vertical slices; do not rebuild accepted interactions
   - migrate only components touched by Epic 20; remove nested card borders where section
@@ -1157,18 +1216,20 @@ Suggested PR slices:
   - at `1024–1439px` use compact navigation and an inspector drawer instead of reserving three
     permanent columns
   - after idle/success collapse active-run chrome to one summary line; on mobile show one health
-    summary with collapsible run detail before stage content
+    summary with collapsible run detail before destination content
   - convert decision tables to mobile cards where comparison is not essential; keep intentional
     scroll only for true tabular comparison
   - viewport gates: no document overflow at `1440/1280/1024/390`, workbench at least `720px`
-    wide at `1024`, and mobile stage title/state/primary action visible above `y=520`
+    wide at `1024`, and mobile destination title/state/primary action visible above `y=520`
   - tests: settled and loading screenshots, drawer focus/escape behavior, long paths/text,
-    Review/Analysis/Publish first viewport and orientation changes
-  - expected code surface: shell/rail/inspector/active-run components and responsive styles
+    Changes/Run Studio/Publish first viewport and orientation changes
+  - expected migration inputs: shell/rail/inspector/active-run components and responsive styles;
+    target output uses PrimaryNav and modal/non-modal ContextDrawer variants
 
-- `20M Review/Publish module seam and maintainability` (P2; depends on `20E`, `20G`, `20J`)
-  - extract Review and Publish containers/view models from the monolithic
-    `StagePanels.tsx` while preserving public props and operator-facing selectors
+- `20M Changes/Knowledge/Publish module seam and maintainability` (P2; depends on `20E`, `20G`, `20J`)
+  - extract target Changes, Knowledge and Publish containers/view models from the monolithic
+    `StagePanels.tsx`, using current Review/Publish panels as migration inputs while preserving
+    accepted public props and operator-facing selectors
   - centralize recovery/gate/viewer composition instead of duplicating panel anatomy
   - keep the refactor behavior-neutral beyond already accepted Epic 20 UX decisions; split
     other stages only when their own vertical slice is touched
@@ -1183,8 +1244,9 @@ Suggested PR slices:
     blocker and next action; commit confirmation names full scope; Back/Forward restores context
   - run component/a11y tests and rendered fake scenarios at `1440/1280/1024/390`; keep provider
     live runs manual and classify their evidence through the existing release runbook
-  - update README, ARCHITECTURE, UI design baseline, TESTING_STRATEGY, stakeholder matrix and
-    screenshots only after the corresponding behavior is implemented
+  - update README, ARCHITECTURE, implemented UI baseline, TESTING_STRATEGY, stakeholder matrix and
+    implementation screenshots only after the corresponding behavior is implemented; planned
+    design references remain clearly labelled as non-runtime artifacts
   - exit: a first-time user completes guided fake walkthrough without mistaking demo output for
     live evidence, and an experienced operator can inspect raw diagnostics without cluttering
     the default decision flow

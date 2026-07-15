@@ -2,7 +2,7 @@
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
 > **Версия:** v1.2 (implementation-aligned)
-> **Дата:** 04 May 2026
+> **Дата:** 15 July 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
@@ -26,15 +26,14 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
-| Code quality audit remediation | implementation-complete (Epic 19 / PR-1 pending review+merge) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: PR-1 branch `codex/epic-19-code-quality-remediation` has completed local slices `19A..19X`, including crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
-| Console evidence trust and IA reset | planned (post-beta; Epic 20, `20A` selected) | `docs/BACKLOG.md` defines the dependency-ordered corrective program; `docs/PLANS.md` selects immutable run-pinned evidence review as the first P0 slice. Current Console V2 remains the implemented beta baseline until each slice is accepted. |
+| Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
+| Console evidence trust and IA reset | planned (post-beta; Epic 20 implementation wave fixed, `20A` first) | [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) defines the user-selected target `Home / Runs / Knowledge / Changes`; [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md) fixes contract-first dependencies, delivery order, QA/cutover/rollback and reference links; `docs/BACKLOG.md` remains slice acceptance. Current Console V2 remains implemented until `20I1` atomically replaces its shell. |
 | Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
 
 Epic matrix:
-- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17
-- follow-up: 19 implementation-complete pending PR review/merge (quality remediation without
-  hosted/frontend-security scope expansion); 20 active (post-beta UX/UI trust program; first
-  selected slice is `20A`)
+- done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
+- follow-up: 20 active/unblocked (post-beta UX/UI trust program; implementation wave fixed and
+  first selected slice is the current-code sufficiency audit of `20A`)
 - out of MVP: 12, 13, 21 (planned Wave 1)
 
 ---
