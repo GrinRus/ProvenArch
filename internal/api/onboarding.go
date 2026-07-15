@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -128,7 +129,30 @@ func (s *Server) handleOnboardingRuntime(writer http.ResponseWriter, request *ht
 		Provider:       provider,
 		ProviderSource: providerSource,
 	}); err != nil {
+		if errors.Is(err, errRuntimeSwitchRequiresRestart) {
+			writeError(writer, http.StatusConflict, "runtime_switch_requires_restart", err.Error())
+			return
+		}
 		writeError(writer, http.StatusConflict, "runtime_switch_conflict", err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
+}
+
+func (s *Server) handleOnboardingEnterConsole(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeMethodNotAllowed(writer, http.MethodPost)
+		return
+	}
+	if request.Body != nil {
+		var payload struct{}
+		if err := decodeStrictJSON(request, &payload); err != nil && !errors.Is(err, io.EOF) {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+	}
+	if err := s.enterConsole(); err != nil {
+		writeError(writer, http.StatusPreconditionRequired, "console_entry_not_ready", err.Error())
 		return
 	}
 	writeJSON(writer, http.StatusOK, s.onboardingStatusPayload())
@@ -142,10 +166,14 @@ func (s *Server) onboardingStatusPayload() map[string]any {
 	runtimeConfig := snapshot.RuntimeConfig
 	runtimeSelected := snapshot.RuntimeSelected
 	launcherMode := snapshot.LauncherMode
+	consoleEntered := snapshot.ConsoleEntered
+	canSwitchRuntime := !consoleEntered && (snapshot.Service == nil || !snapshot.Service.HasInFlightRun())
 
 	return map[string]any{
 		"ok":                 true,
 		"launcher_mode":      launcherMode,
+		"console_entered":    consoleEntered,
+		"can_switch_runtime": canSwitchRuntime,
 		"workspace_selected": workspaceSelected,
 		"workspace_ready":    workspaceReady,
 		"workspace":          workspacePath,

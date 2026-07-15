@@ -8,7 +8,7 @@ SHELL_FILES := $(shell find scripts -name '*.sh' -type f 2>/dev/null | sort)
 RUNTIME ?= fake
 REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
-STRESS_TEST ?= TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow
+STRESS_TEST ?= TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh
 
 .PHONY: bootstrap contracts test test-stress lint build verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 

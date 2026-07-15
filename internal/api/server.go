@@ -28,11 +28,13 @@ import (
 
 type Server struct {
 	mu                sync.RWMutex
+	gitMutationMu     sync.Mutex
 	workspace         workspace.Root
 	workspacePath     string
 	workspaceSelected bool
 	runtimeSelected   bool
 	launcherMode      bool
+	consoleEntered    bool
 	service           *orchestrator.Service
 	runtimeConfig     ServerRuntimeConfig
 	serviceFactory    ServiceFactory
@@ -60,6 +62,7 @@ type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Serv
 const defaultServerShutdownTimeout = 10 * time.Second
 
 var errSessionMutationConflict = errors.New("workspace or runtime cannot change while a run is active or queued")
+var errRuntimeSwitchRequiresRestart = errors.New("runtime switch requires server restart after entering Console")
 
 type serverSessionSnapshot struct {
 	Workspace         workspace.Root
@@ -67,6 +70,7 @@ type serverSessionSnapshot struct {
 	WorkspaceSelected bool
 	RuntimeSelected   bool
 	LauncherMode      bool
+	ConsoleEntered    bool
 	Service           *orchestrator.Service
 	RuntimeConfig     ServerRuntimeConfig
 	Generation        uint64
@@ -86,6 +90,9 @@ func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
 
 func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runtimeConfig ServerRuntimeConfig) *Server {
 	runtimeConfig = normalizeServerRuntimeConfig(runtimeConfig, ServerRuntimeConfig{})
+	if service != nil {
+		service.SetRuntimeMode(runtimeConfig.Mode)
+	}
 	return &Server{
 		workspace:         ws,
 		workspacePath:     ws.Path,
@@ -93,6 +100,7 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		runtimeSelected:   true,
 		runtimeConfig:     runtimeConfig,
 		service:           service,
+		consoleEntered:    true,
 		generation:        1,
 	}
 }
@@ -114,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/status", s.handleOnboardingStatus)
 	mux.HandleFunc("/api/onboarding/workspace", s.handleOnboardingWorkspace)
 	mux.HandleFunc("/api/onboarding/runtime", s.handleOnboardingRuntime)
+	mux.HandleFunc("/api/onboarding/enter-console", s.handleOnboardingEnterConsole)
 	mux.HandleFunc("/api/onboarding/path-suggestions", s.handleOnboardingPathSuggestions)
 	mux.HandleFunc("/api/onboarding/recent-workspaces/forget", s.handleOnboardingRecentWorkspaceForget)
 	mux.HandleFunc("/api/system/info", s.handleSystemInfo)
@@ -128,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
+	mux.HandleFunc("/api/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
@@ -238,6 +248,7 @@ func (s *Server) sessionSnapshot() serverSessionSnapshot {
 		WorkspaceSelected: s.workspaceSelected,
 		RuntimeSelected:   s.runtimeSelected,
 		LauncherMode:      s.launcherMode,
+		ConsoleEntered:    s.consoleEntered,
 		Service:           s.service,
 		RuntimeConfig:     s.runtimeConfig,
 		Generation:        s.generation,
@@ -370,6 +381,9 @@ func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, erro
 func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) (*orchestrator.Service, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.consoleEntered {
+		return nil, errRuntimeSwitchRequiresRestart
+	}
 	if s.serviceHasInFlightWorkLocked() {
 		return nil, errSessionMutationConflict
 	}
@@ -381,6 +395,17 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) (*orchestrator.Ser
 	}
 	s.generation++
 	return s.service, nil
+}
+
+func (s *Server) enterConsole() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.workspaceSelected || s.workspace.Path == "" || s.service == nil || !s.runtimeSelected {
+		return errors.New("workspace and runtime must be ready before entering Console")
+	}
+	s.consoleEntered = true
+	s.generation++
+	return nil
 }
 
 func (s *Server) shouldBlockAPIRequest(apiPath string) bool {
@@ -779,7 +804,10 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"ok": true,
+		"ok":               true,
+		"runtime_mode":     snapshot.RuntimeConfig.Mode,
+		"runtime_provider": snapshot.RuntimeConfig.Provider,
+		"provider_source":  snapshot.RuntimeConfig.ProviderSource,
 		"timeouts": map[string]any{
 			"persisted": timeouts.Persisted,
 			"effective": timeouts.Effective,
@@ -969,7 +997,9 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	var payload struct {
-		Message string `json:"message"`
+		Message             string `json:"message"`
+		ExpectedFingerprint string `json:"expected_fingerprint"`
+		ExpectedHeadOID     string `json:"expected_head_oid"`
 	}
 	if err := decodeStrictJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
@@ -980,6 +1010,21 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 		message = "chore: update ACP workspace artifacts"
 	}
 	ws := s.getWorkspace()
+	if strings.TrimSpace(payload.ExpectedFingerprint) == "" {
+		writeError(writer, http.StatusBadRequest, "git_confirmation_required", "expected_fingerprint is required")
+		return
+	}
+	s.gitMutationMu.Lock()
+	defer s.gitMutationMu.Unlock()
+	state, err := collectWorkspaceGitState(request.Context(), ws)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
+		return
+	}
+	if state.Fingerprint != strings.TrimSpace(payload.ExpectedFingerprint) || state.Identity.HeadOID != strings.TrimSpace(payload.ExpectedHeadOID) {
+		writeError(writer, http.StatusConflict, "stale_git_confirmation", "workspace Git state changed after confirmation")
+		return
+	}
 	if _, err := runGit(request.Context(), ws.Path, "add", "-A"); err != nil {
 		writeError(writer, http.StatusBadRequest, "git_add_failed", err.Error())
 		return
@@ -1010,7 +1055,12 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 		return
 	}
 	var payload struct {
-		Name string `json:"name"`
+		Name                 string `json:"name"`
+		ExpectedFingerprint  string `json:"expected_fingerprint"`
+		ExpectedSourceBranch string `json:"expected_source_branch"`
+		ExpectedBaseRef      string `json:"expected_base_ref"`
+		ExpectedBaseOID      string `json:"expected_base_oid"`
+		ExpectedHeadOID      string `json:"expected_head_oid"`
 	}
 	if err := decodeStrictJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
@@ -1023,6 +1073,25 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 	}
 
 	ws := s.getWorkspace()
+	if strings.TrimSpace(payload.ExpectedFingerprint) == "" || strings.TrimSpace(payload.ExpectedSourceBranch) == "" || strings.TrimSpace(payload.ExpectedBaseRef) == "" {
+		writeError(writer, http.StatusBadRequest, "git_confirmation_required", "expected_fingerprint, expected_source_branch and expected_base_ref are required")
+		return
+	}
+	s.gitMutationMu.Lock()
+	defer s.gitMutationMu.Unlock()
+	state, err := collectWorkspaceGitState(request.Context(), ws)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
+		return
+	}
+	if state.Fingerprint != strings.TrimSpace(payload.ExpectedFingerprint) ||
+		state.Identity.Branch != strings.TrimSpace(payload.ExpectedSourceBranch) ||
+		state.Identity.BaseRef != strings.TrimSpace(payload.ExpectedBaseRef) ||
+		state.Identity.BaseOID != strings.TrimSpace(payload.ExpectedBaseOID) ||
+		state.Identity.HeadOID != strings.TrimSpace(payload.ExpectedHeadOID) {
+		writeError(writer, http.StatusConflict, "stale_git_confirmation", "workspace Git state changed after confirmation")
+		return
+	}
 	if _, err := runGit(request.Context(), ws.Path, "checkout", "-b", branch); err != nil {
 		if _, fallbackErr := runGit(request.Context(), ws.Path, "checkout", branch); fallbackErr != nil {
 			writeError(writer, http.StatusBadRequest, "git_branch_failed", err.Error())
@@ -1227,6 +1296,7 @@ type pipelineRequest struct {
 	Commit               bool   `json:"commit"`
 	CreateProposalBranch bool   `json:"create_proposal_branch"`
 	Trigger              string `json:"trigger"`
+	Intent               string `json:"intent"`
 }
 
 var supportedTriggers = map[string]struct{}{
@@ -1272,6 +1342,18 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusNotImplemented, "not_supported", "commit/create_proposal_branch is not supported in this slice")
 		return
 	}
+	intent := orchestrator.RunIntent(strings.TrimSpace(body.Intent))
+	if intent == "" {
+		intent = orchestrator.RunIntentStart
+	}
+	if intent != orchestrator.RunIntentStart && intent != orchestrator.RunIntentQueue {
+		writeError(writer, http.StatusBadRequest, "run_intent_invalid", "intent must be start or queue")
+		return
+	}
+	if intent == orchestrator.RunIntentQueue && pipeline != orchestrator.PipelineRefresh {
+		writeError(writer, http.StatusBadRequest, "queue_intent_not_supported", "queue intent is supported only for refresh runs")
+		return
+	}
 
 	snapshot := s.sessionSnapshot()
 	if !snapshot.RuntimeSelected {
@@ -1306,8 +1388,17 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		Workspace:      snapshot.Workspace,
 		Pipeline:       pipeline,
 		NonInteractive: true,
+		Intent:         intent,
 	})
 	if err != nil {
+		if errors.Is(err, orchestrator.ErrRunActive) {
+			writeError(writer, http.StatusConflict, "run_active", "another run is already active")
+			return
+		}
+		if errors.Is(err, orchestrator.ErrQueueUnsupported) {
+			writeError(writer, http.StatusBadRequest, "queue_intent_not_supported", err.Error())
+			return
+		}
 		if statusCode, code, message, ok := mapTypedRunnerAPIError(err); ok {
 			writeError(writer, statusCode, code, message)
 			return
@@ -1401,14 +1492,28 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		if runInfo.Pipeline == string(orchestrator.PipelineQA) {
 			continue
 		}
-		items = append(items, formatRunInfoPayload(runInfo))
+		item := formatRunInfoPayload(runInfo)
+		artifacts, _ := snapshot.Service.GetRunArtifacts(runInfo.RunID)
+		item["authoritative_index"] = hasAuthoritativeRunIndex(runInfo.RunID, artifacts)
+		items = append(items, item)
 		if len(items) >= limit {
 			break
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"items": items,
+		"items":        items,
+		"coordination": snapshot.Service.Coordination(),
 	})
+}
+
+func hasAuthoritativeRunIndex(runID string, artifacts []orchestrator.Artifact) bool {
+	expected := filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "final-run-index.json"))
+	for _, artifact := range artifacts {
+		if filepath.ToSlash(filepath.Clean(artifact.Path)) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handlePipelineRunStatus(writer http.ResponseWriter, runID string) {
@@ -1620,18 +1725,20 @@ func formatOptionalString(value string) any {
 
 func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 	return map[string]any{
-		"run_id":              runInfo.RunID,
-		"pipeline":            runInfo.Pipeline,
-		"status":              runInfo.Status,
-		"started_at":          runInfo.StartedAt.UTC().Format(time.RFC3339),
-		"finished_at":         formatOptionalTime(runInfo.FinishedAt),
-		"question":            formatOptionalString(runInfo.Question),
-		"current_step":        runInfo.CurrentStep,
-		"step_providers":      runInfo.StepProviders,
-		"warnings":            runInfo.Warnings,
-		"pending_permissions": formatPermissionRequests(runInfo.PendingPermissions),
-		"error_code":          formatOptionalString(runInfo.ErrorCode),
-		"error":               formatOptionalString(runInfo.Error),
+		"run_id":               runInfo.RunID,
+		"pipeline":             runInfo.Pipeline,
+		"status":               runInfo.Status,
+		"started_at":           runInfo.StartedAt.UTC().Format(time.RFC3339),
+		"finished_at":          formatOptionalTime(runInfo.FinishedAt),
+		"question":             formatOptionalString(runInfo.Question),
+		"current_step":         runInfo.CurrentStep,
+		"runtime_mode":         formatOptionalString(runInfo.RuntimeMode),
+		"step_providers":       runInfo.StepProviders,
+		"warnings":             runInfo.Warnings,
+		"pending_permissions":  formatPermissionRequests(runInfo.PendingPermissions),
+		"error_code":           formatOptionalString(runInfo.ErrorCode),
+		"error":                formatOptionalString(runInfo.Error),
+		"superseded_by_run_id": formatOptionalString(runInfo.SupersededByRunID),
 	}
 }
 

@@ -21,6 +21,17 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	if request.Pipeline == PipelineQA && strings.TrimSpace(request.Question) == "" {
 		return "", fmt.Errorf("question is required for qa runs")
 	}
+	intent := request.Intent
+	if intent == "" {
+		intent = RunIntentStart
+	}
+	if intent != RunIntentStart && intent != RunIntentQueue {
+		return "", fmt.Errorf("unsupported run intent %q", intent)
+	}
+	if intent == RunIntentQueue && request.Pipeline != PipelineRefresh {
+		return "", ErrQueueUnsupported
+	}
+	request.Intent = intent
 	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
 	if err != nil {
 		return "", err
@@ -41,31 +52,28 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 				Status:        RunStatusQueued,
 				StartedAt:     now,
 				Question:      strings.TrimSpace(request.Question),
+				RuntimeMode:   s.runtimeMode,
 				StepProviders: resolvedStepProviders.Effective.StringMap(),
 			},
 		})
 	}
 	if s.isActiveRunLocked() {
-		if s.pendingRun != nil {
-			if now.Sub(s.pendingRun.queuedAt) <= s.debounceWindow {
-				if err := storeQueuedRun(); err != nil {
-					s.mu.Unlock()
-					return "", err
-				}
-				if err := s.markRunSupersededLocked(s.pendingRun.runID, runID); err != nil {
-					s.mu.Unlock()
-					return "", err
-				}
-				s.pendingRun = &pendingRun{
-					runID:    runID,
-					request:  request,
-					queuedAt: now,
-				}
-				s.mu.Unlock()
-				return runID, nil
-			}
+		if intent != RunIntentQueue {
 			s.mu.Unlock()
-			return "", fmt.Errorf("run is already active and pending queue is outside debounce window")
+			return "", ErrRunActive
+		}
+		if s.pendingRun != nil {
+			if err := storeQueuedRun(); err != nil {
+				s.mu.Unlock()
+				return "", err
+			}
+			if err := s.markRunSupersededLocked(s.pendingRun.runID, runID); err != nil {
+				s.mu.Unlock()
+				return "", err
+			}
+			s.pendingRun = &pendingRun{runID: runID, request: request, queuedAt: now}
+			s.mu.Unlock()
+			return runID, nil
 		}
 		if err := storeQueuedRun(); err != nil {
 			s.mu.Unlock()
@@ -116,7 +124,7 @@ func (s *Service) CancelRun(runID string) error {
 	}
 
 	switch record.info.Status {
-	case RunStatusSucceeded, RunStatusFailed:
+	case RunStatusSucceeded, RunStatusFailed, RunStatusCanceled:
 		s.mu.Unlock()
 		return ErrRunNotCancelable
 	case RunStatusQueued:
@@ -261,6 +269,16 @@ func (s *Service) ListRuns(limit int) []RunInfo {
 	return infos[:limit]
 }
 
+func (s *Service) Coordination() RunCoordination {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	coordination := RunCoordination{ActiveRunID: s.activeRunID}
+	if s.pendingRun != nil {
+		coordination.Pending = &PendingRunInfo{RunID: s.pendingRun.runID, Pipeline: string(s.pendingRun.request.Pipeline)}
+	}
+	return coordination
+}
+
 func (s *Service) HasInFlightRun() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -361,11 +379,13 @@ func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
 			FinishedAt:         record.info.FinishedAt,
 			Question:           record.info.Question,
 			CurrentStep:        record.info.CurrentStep,
+			RuntimeMode:        record.info.RuntimeMode,
 			StepProviders:      cloneStringMap(record.info.StepProviders),
 			Warnings:           append([]string(nil), record.info.Warnings...),
 			PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
 			ErrorCode:          record.info.ErrorCode,
 			Error:              record.info.Error,
+			SupersededByRunID:  record.info.SupersededByRunID,
 		},
 		artifacts: append([]Artifact(nil), record.artifacts...),
 	}, true
@@ -503,7 +523,7 @@ func (s *Service) waitForRunTerminal(ctx context.Context, runID string) error {
 	defer ticker.Stop()
 	for {
 		info, ok := s.GetRun(runID)
-		if !ok || info.Status == RunStatusSucceeded || info.Status == RunStatusFailed {
+		if !ok || info.Status == RunStatusSucceeded || info.Status == RunStatusFailed || info.Status == RunStatusCanceled {
 			return nil
 		}
 		select {
@@ -532,9 +552,10 @@ func (s *Service) markRunSupersededLocked(oldRunID string, newRunID string) erro
 	}
 	finishedAt := s.clock().UTC()
 	superseded := record.info
-	superseded.Status = RunStatusFailed
-	superseded.ErrorCode = ""
+	superseded.Status = RunStatusCanceled
+	superseded.ErrorCode = runErrorCodeSuperseded
 	superseded.Error = fmt.Sprintf("run superseded by newer event %q (last-event-wins)", newRunID)
+	superseded.SupersededByRunID = newRunID
 	superseded.FinishedAt = &finishedAt
 	return s.upsertRunLocked(runRecord{
 		info:      superseded,
@@ -652,12 +673,14 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		Status:             record.info.Status,
 		StartedAt:          record.info.StartedAt.UTC().Format(time.RFC3339),
 		CurrentStep:        record.info.CurrentStep,
+		RuntimeMode:        record.info.RuntimeMode,
 		Question:           record.info.Question,
 		StepProviders:      cloneStringMap(record.info.StepProviders),
 		Warnings:           append([]string(nil), record.info.Warnings...),
 		PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
 		ErrorCode:          record.info.ErrorCode,
 		Error:              record.info.Error,
+		SupersededByRunID:  record.info.SupersededByRunID,
 		Artifacts:          append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
@@ -689,11 +712,13 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			FinishedAt:         finishedAt,
 			Question:           item.Question,
 			CurrentStep:        item.CurrentStep,
+			RuntimeMode:        item.RuntimeMode,
 			StepProviders:      cloneStringMap(item.StepProviders),
 			Warnings:           append([]string(nil), item.Warnings...),
 			PendingPermissions: append([]acpruntime.PermissionRequest(nil), item.PendingPermissions...),
 			ErrorCode:          item.ErrorCode,
 			Error:              item.Error,
+			SupersededByRunID:  item.SupersededByRunID,
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true

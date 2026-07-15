@@ -5,11 +5,11 @@ export async function listPipelineRuns(limit = 100, init?: RequestInit): Promise
   return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`, init);
 }
 
-export async function startPipelineRun(pipeline: "init" | "refresh"): Promise<RunStartResponse> {
+export async function startPipelineRun(pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<RunStartResponse> {
   return fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trigger: "ui", commit: false, create_proposal_branch: false }),
+    body: JSON.stringify({ trigger: "ui", intent, commit: false, create_proposal_branch: false }),
   });
 }
 

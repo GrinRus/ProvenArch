@@ -1,0 +1,117 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
+	server := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodGet, "/api/knowledge", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var response knowledgeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "unavailable" || response.SourceMode != "current_workspace" {
+		t.Fatalf("unexpected source/status: %#v", response)
+	}
+	if len(response.Entities)+len(response.Edges)+len(response.Artifacts)+len(response.Issues) != 0 {
+		t.Fatalf("empty workspace must not invent knowledge: %#v", response)
+	}
+}
+
+func TestKnowledgeReturnsValidatedEntitiesEdgesAndArtifacts(t *testing.T) {
+	server := newTestServer(t)
+	root := server.getWorkspace().Path
+	writeKnowledgeTestFile(t, root, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, root, "model/entities/svc.users.yaml", "id: svc.users\ntype: service\nname: Users\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
+	writeKnowledgeTestFile(t, root, "model/edges/edge.payments.calls.users.yaml", "id: edge.payments.calls.users\ntype: calls\nfrom: svc.payments\nto: svc.users\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
+	writeKnowledgeTestFile(t, root, "reports/as-is/overview.md", "# Overview\n")
+
+	recorder := httptest.NewRecorder()
+	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodGet, "/api/knowledge", nil))
+	var response knowledgeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "available" || len(response.Entities) != 2 || len(response.Edges) != 1 {
+		t.Fatalf("unexpected knowledge response: %#v", response)
+	}
+	if response.Entities[0].Path != "model/entities/svc.payments.yaml" || response.Edges[0].Path != "model/edges/edge.payments.calls.users.yaml" {
+		t.Fatalf("paths are not canonical workspace paths: %#v %#v", response.Entities, response.Edges)
+	}
+	if len(response.Artifacts) != 4 {
+		t.Fatalf("artifact inventory length = %d, want 4", len(response.Artifacts))
+	}
+}
+
+func TestKnowledgeKeepsValidDataWhenFilesAreMalformedOrReferencesBreak(t *testing.T) {
+	server := newTestServer(t)
+	root := server.getWorkspace().Path
+	writeKnowledgeTestFile(t, root, "model/entities/svc.valid.yaml", "id: svc.valid\ntype: service\nname: Valid\nprovenance:\n  kind: inference\n  confidence: 1\n")
+	writeKnowledgeTestFile(t, root, "model/entities/broken.yaml", "id: [not-valid\n")
+	writeKnowledgeTestFile(t, root, "model/edges/broken-reference.yaml", "id: edge.valid.calls.missing\ntype: calls\nfrom: svc.valid\nto: svc.missing\nprovenance:\n  kind: inference\n  confidence: 0.5\n")
+
+	recorder := httptest.NewRecorder()
+	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodGet, "/api/knowledge", nil))
+	var response knowledgeResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "partial" || len(response.Entities) != 1 || len(response.Edges) != 0 {
+		t.Fatalf("partial response did not retain valid knowledge: %#v", response)
+	}
+	codes := map[string]bool{}
+	for _, issue := range response.Issues {
+		codes[issue.Code] = true
+	}
+	if !codes["knowledge.entity_malformed"] || !codes["knowledge.edge_reference_missing"] {
+		t.Fatalf("missing typed issues: %#v", response.Issues)
+	}
+}
+
+func TestKnowledgeRejectsMutatingMethods(t *testing.T) {
+	server := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodPost, "/api/knowledge", nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestKnowledgeFixtureMatchesWireContract(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "api", "knowledge-current-workspace.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var response knowledgeResponse
+	if err := json.Unmarshal(content, &response); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	if response.Version != 1 || response.SourceMode != "current_workspace" || response.Status != "partial" {
+		t.Fatalf("fixture identity is invalid: %#v", response)
+	}
+	if len(response.Entities) != 1 || len(response.Artifacts) != 2 || len(response.Issues) != 1 {
+		t.Fatalf("fixture coverage is incomplete: %#v", response)
+	}
+}
+
+func writeKnowledgeTestFile(t *testing.T, root string, relative string, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", relative, err)
+	}
+}

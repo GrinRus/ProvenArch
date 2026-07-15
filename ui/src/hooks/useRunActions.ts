@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { Dispatch } from "react";
 
-import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
+import type { RunCoordination, RunListItem, RunStatusResponse } from "../lib/appContracts";
 import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
 import type { RunExplorerAction } from "../lib/runExplorerState";
 import { finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
@@ -12,6 +12,7 @@ type RunActionsContext = {
   dispatch: Dispatch<RunExplorerAction>;
   runId: string | null;
   runStatus: RunStatusResponse | null;
+  coordination: RunCoordination;
   selectedRunIsActive: boolean;
   runLogsEOF: boolean;
   setBusy: (busy: boolean) => void;
@@ -19,6 +20,7 @@ type RunActionsContext = {
   setRunID: (runId: string | null) => void;
   setRunStatus: (runStatus: RunStatusResponse | null) => void;
   setRunList: (runList: RunListItem[]) => void;
+  setCoordination: (coordination: RunCoordination) => void;
   setRunActionStatus: (status: string) => void;
   setCancelBusy: (busy: boolean) => void;
   resetRunLogs: () => void;
@@ -26,13 +28,13 @@ type RunActionsContext = {
   fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
   clearArtifacts: () => void;
   fetchArtifacts: (runId: string) => Promise<void>;
-  loadCoverageArtifacts: (runId?: string) => Promise<void>;
 };
 
 export function useRunActions({
   dispatch,
   runId,
   runStatus,
+  coordination,
   selectedRunIsActive,
   runLogsEOF,
   setBusy,
@@ -40,6 +42,7 @@ export function useRunActions({
   setRunID,
   setRunStatus,
   setRunList,
+  setCoordination,
   setRunActionStatus,
   setCancelBusy,
   resetRunLogs,
@@ -47,7 +50,6 @@ export function useRunActions({
   fetchRunLogsUntilEOF,
   clearArtifacts,
   fetchArtifacts,
-  loadCoverageArtifacts,
 }: RunActionsContext) {
   const runStatusRequest = useRequestGate("run-status");
 
@@ -56,9 +58,10 @@ export function useRunActions({
       const payload = await listPipelineRuns(limit);
       const items = payload.items ?? [];
       setRunList(items);
+      setCoordination(payload.coordination ?? {});
       return items;
     },
-    [setRunList]
+    [setCoordination, setRunList]
   );
 
   const fetchRunStatus = useCallback(
@@ -75,7 +78,6 @@ export function useRunActions({
         setRunStatus(typed);
         if (finalStatuses.has(typed.status)) {
           await fetchArtifacts(id);
-          await loadCoverageArtifacts(id);
         }
         return typed;
       } catch (error) {
@@ -87,7 +89,7 @@ export function useRunActions({
         runStatusRequest.finish(token);
       }
     },
-    [fetchArtifacts, loadCoverageArtifacts, runStatusRequest, setRunStatus]
+    [fetchArtifacts, runStatusRequest, setRunStatus]
   );
 
   const handleSelectRun = useCallback(
@@ -104,7 +106,9 @@ export function useRunActions({
         resetRunLogs();
         clearArtifacts();
         const status = await fetchRunStatus(id);
-        await fetchArtifacts(id);
+        if (!status || !finalStatuses.has(status.status)) {
+          await fetchArtifacts(id);
+        }
         await fetchRunLogs(id, true);
         if (status && finalStatuses.has(status.status)) {
           await fetchRunLogsUntilEOF(id);
@@ -162,29 +166,32 @@ export function useRunActions({
   });
 
   const handleRunPipeline = useCallback(
-    async (pipeline: "init" | "refresh"): Promise<boolean> => {
+    async (pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<boolean> => {
       setBusy(true);
       setError(null);
       setRunActionStatus("");
-      clearArtifacts();
-      resetRunLogs();
       let acceptedRunID = "";
       try {
-        const payload = await startPipelineRun(pipeline);
+        const payload = await startPipelineRun(pipeline, intent);
         acceptedRunID = payload.run_id;
         const provisionalRun = buildProvisionalRun(pipeline, payload);
         dispatch({
           type: "upsertRunListItem",
           item: provisionalRun,
         });
+        if (intent === "queue" && coordination.active_run_id) {
+          await loadRunList(100);
+          setRunActionStatus(`Refresh ${payload.run_id} queued; the selected evidence remains unchanged.`);
+          return true;
+        }
+        clearArtifacts();
+        resetRunLogs();
         setRunID(payload.run_id);
         setRunStatus(provisionalRun);
         setRunActionStatus(`Run ${payload.run_id} accepted; reconciling details.`);
         const status = await fetchRunStatus(payload.run_id);
         await fetchRunLogs(payload.run_id, true);
-        if (status && finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(payload.run_id);
-        }
+        if (status && finalStatuses.has(status.status)) await fetchRunLogsUntilEOF(payload.run_id);
         await loadRunList(100);
         setRunActionStatus("");
         return true;
@@ -206,6 +213,7 @@ export function useRunActions({
       fetchRunLogsUntilEOF,
       fetchRunStatus,
       loadRunList,
+      coordination.active_run_id,
       resetRunLogs,
       setBusy,
       setError,
@@ -214,8 +222,8 @@ export function useRunActions({
     ]
   );
 
-  const handleCancelSelectedRun = useCallback(async () => {
-    if (!runId || !selectedRunIsActive) {
+  const handleCancelRun = useCallback(async (targetRunID: string) => {
+    if (!targetRunID) {
       return;
     }
 
@@ -223,29 +231,29 @@ export function useRunActions({
     setError(null);
     setRunActionStatus("");
     try {
-      const response = await requestRunCancel(runId);
+      const response = await requestRunCancel(targetRunID);
 
       if (response.status === 202) {
-        setRunActionStatus(`Cancel requested for ${runId}`);
+        setRunActionStatus(`Cancel requested for ${targetRunID}`);
         try {
           await loadRunList(100);
-          const status = await fetchRunStatus(runId);
+          const status = await fetchRunStatus(targetRunID);
           if (status && finalStatuses.has(status.status)) {
-            await fetchRunLogsUntilEOF(runId);
+            await fetchRunLogsUntilEOF(targetRunID);
           } else {
-            await fetchRunLogs(runId, false);
+            await fetchRunLogs(targetRunID, false);
           }
         } catch (requestError) {
-          setRunActionStatus(`Cancel requested for ${runId}; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
+          setRunActionStatus(`Cancel requested for ${targetRunID}; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
         }
         return;
       }
 
       if (response.status === 404) {
         const latestRuns = await loadRunList(100);
-        const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
-        if (nextSelectedRunID !== runId) {
-          dispatch({ type: "clearRunStatusForRun", runId });
+        const nextSelectedRunID = reconcileSelectedRunID(targetRunID, latestRuns);
+        if (targetRunID === runId && nextSelectedRunID !== targetRunID) {
+          dispatch({ type: "clearRunStatusForRun", runId: targetRunID });
           resetRunLogs();
           clearArtifacts();
           if (nextSelectedRunID) {
@@ -264,9 +272,9 @@ export function useRunActions({
       if (response.status === 409) {
         setRunActionStatus("Selected run is already terminal.");
         await loadRunList(100);
-        const status = await fetchRunStatus(runId);
+        const status = await fetchRunStatus(targetRunID);
         if (status && finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(runId);
+          await fetchRunLogsUntilEOF(targetRunID);
         }
         return;
       }
@@ -287,12 +295,16 @@ export function useRunActions({
     loadRunList,
     resetRunLogs,
     runId,
-    selectedRunIsActive,
     setCancelBusy,
     setError,
     setRunActionStatus,
     setRunID,
   ]);
+
+  const handleCancelSelectedRun = useCallback(async () => {
+    if (!runId || !selectedRunIsActive) return;
+    await handleCancelRun(runId);
+  }, [handleCancelRun, runId, selectedRunIsActive]);
 
   return {
     bootstrapRuns,
@@ -302,6 +314,7 @@ export function useRunActions({
     fetchRunStatus,
     handleSelectRun,
     handleCancelSelectedRun,
+    handleCancelRun,
   };
 }
 

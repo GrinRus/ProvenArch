@@ -215,7 +215,7 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 	if len(task.RepoScopes) > 0 {
 		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
 	}
-	overview.WriteString("- Evidence refs: reports/as-is/overview.md, reports/coverage/summary.md, reports/taskruns/" + strings.TrimSpace(task.RunID) + "/staging/final/final-run-index.json\n")
+	overview.WriteString("- Evidence refs: reports/as-is/overview.md, reports/coverage/summary.md\n")
 
 	coverage := strings.Builder{}
 	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")

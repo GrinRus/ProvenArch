@@ -21,6 +21,14 @@ export async function selectOnboardingRuntime(runtime: string, runtimeProvider: 
   });
 }
 
+export async function enterOnboardingConsole(): Promise<OnboardingStatusResponse> {
+  return fetchJSON<OnboardingStatusResponse>("/api/onboarding/enter-console", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
 export async function forgetOnboardingRecentWorkspace(path: string): Promise<OnboardingStatusResponse> {
   return fetchJSON<OnboardingStatusResponse>("/api/onboarding/recent-workspaces/forget", {
     method: "POST",

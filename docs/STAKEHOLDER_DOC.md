@@ -24,16 +24,16 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `TestArchitectSummaryIsDeterministicAcrossRuns`, scenario golden snapshot |
 | Q&A capability with UI + CLI + public API surface | target upgraded | UI uses async `/api/qa/runs`; deterministic `internal/qa` + `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
-| User-friendly install + first-run readiness surface | done (usability hardening) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go` (`GET /api/system/version`, `GET /api/system/doctor`), `ui/src/components/TopStatusBar.tsx`, `ui/src/components/StageRail.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
+| User-friendly install + first-run readiness surface | done (trust shell cutover) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go`, `ui/src/components/ProductShell.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts local onboarding; UI selects/creates workspace, configures multi-repo `repos[]`, requires runner choice, shows current setup blocker/next action, disabled-action reasons and headless provider command/auth/quota recovery guidance, then enters Console V2. Direct `acp serve --workspace` remains compatibility path. |
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
-| Console evidence trust and IA reset | planned (post-beta; Epic 20 implementation wave fixed, `20A` first) | [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) defines the user-selected target `Home / Runs / Knowledge / Changes`; [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md) fixes contract-first dependencies, delivery order, QA/cutover/rollback and reference links; `docs/BACKLOG.md` remains slice acceptance. Current Console V2 remains implemented until `20I1` atomically replaces its shell. |
+| Console evidence trust and IA reset | active (20A–20J2 implemented; 20K–20N remain) | The native History shell now provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, current-workspace Knowledge read model and global read-only Ask. `docs/BACKLOG.md` remains slice acceptance for the open Epic 20 follow-ups. |
 | Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
-- follow-up: 20 active/unblocked (post-beta UX/UI trust program; implementation wave fixed and
-  first selected slice is the current-code sufficiency audit of `20A`)
+- follow-up: 20 active/unblocked (`20A–20J2` implemented; semantic consolidation, responsive budget
+  and remaining `20K–20N` follow-ups stay open)
 - out of MVP: 12, 13, 21 (planned Wave 1)
 
 ---

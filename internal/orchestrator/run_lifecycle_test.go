@@ -15,7 +15,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
-func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
+func TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh(t *testing.T) {
 	t.Parallel()
 
 	ws := createWorkspace(t)
@@ -50,10 +50,19 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	}
 
 	advanceClock(10 * time.Second)
+	_, err = service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineRefresh,
+		NonInteractive: true,
+	})
+	if !errors.Is(err, ErrRunActive) {
+		t.Fatalf("expected ordinary start to return ErrRunActive, got %v", err)
+	}
 	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
 		NonInteractive: true,
+		Intent:         RunIntentQueue,
 	})
 	if err != nil {
 		t.Fatalf("queue pending run inside debounce window: %v", err)
@@ -70,21 +79,23 @@ func TestStartAsyncRunRejectsWhenPendingOutsideDebounceWindow(t *testing.T) {
 	}
 
 	advanceClock(2 * time.Minute)
-	_, err = service.StartAsyncRun(context.Background(), RunRequest{
+	thirdRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
-		Pipeline:       PipelineInit,
+		Pipeline:       PipelineRefresh,
 		NonInteractive: true,
+		Intent:         RunIntentQueue,
 	})
-	if err == nil {
-		t.Fatalf("expected third async run to be rejected outside debounce window")
+	if err != nil {
+		t.Fatalf("replace pending refresh: %v", err)
 	}
-	if !strings.Contains(err.Error(), "outside debounce window") {
-		t.Fatalf("expected outside-debounce error, got %v", err)
+	superseded, ok := service.GetRun(secondRunID)
+	if !ok || superseded.Status != RunStatusCanceled || superseded.ErrorCode != runErrorCodeSuperseded || superseded.SupersededByRunID != thirdRunID {
+		t.Fatalf("expected typed supersession, got %+v", superseded)
 	}
 
 	close(releaseRunner)
 	waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
-	waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	waitForRunTerminalInfo(t, service, thirdRunID, 2*time.Second)
 }
 
 func TestRunWithIDTerminalGuardPersistsFailedHistoryOnPanic(t *testing.T) {
@@ -209,6 +220,7 @@ func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
 		NonInteractive: true,
+		Intent:         RunIntentQueue,
 	})
 	if err != nil {
 		t.Fatalf("queue pending async run: %v", err)
@@ -291,6 +303,7 @@ func TestServiceShutdownFailsPendingRunWithoutStartingIt(t *testing.T) {
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
 		NonInteractive: true,
+		Intent:         RunIntentQueue,
 	})
 	if err != nil {
 		t.Fatalf("queue pending run: %v", err)
@@ -513,7 +526,7 @@ func waitForRunTerminalInfo(t *testing.T, service *Service, runID string, timeou
 		if !ok {
 			t.Fatalf("run %q not found", runID)
 		}
-		if info.Status == RunStatusSucceeded || info.Status == RunStatusFailed {
+		if info.Status == RunStatusSucceeded || info.Status == RunStatusFailed || info.Status == RunStatusCanceled {
 			return info
 		}
 		time.Sleep(10 * time.Millisecond)

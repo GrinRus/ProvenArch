@@ -297,7 +297,24 @@ Semantic role:
 
 ## 11) Изменения схем/контрактов
 
+Public HTTP contracts, не представленные JSON Schema, фиксируются в
+`docs/spec/API_SPEC.md` и проверяются handler tests + TypeScript response types. Для Epic 20
+canonical fixture полного Git confirmation/read contract находится в
+`fixtures/api/git-state-confirmation.json`, а user-facing example — в
+`examples/git-state-confirmation.example.json`. Run coordination и persisted runtime identity
+остаются additive API fields и не изменяют workspace artifact schemas.
+
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`
 - обновлением примеров/фикстур
 - кратким rationale в PR
+
+## 12) Current knowledge API read model
+
+- **Source of truth:** `docs/spec/API_SPEC.md` (`GET /api/knowledge`) и Go response types в `internal/api/knowledge.go`.
+- Это transient read model, а не новая persisted schema: `schemas/*` не меняются.
+- `source_mode` всегда `current_workspace`; historical run snapshot остаётся отдельным Changes/evidence contract.
+- `entities[]`/`edges[]` сохраняют canonical model fields и добавляют workspace-relative `path`.
+- Только parsed fields задают topology; filename-derived IDs/edges запрещены.
+- Malformed/unreadable/broken-reference файл фиксируется в typed `issues[]` и переводит общий `status` в `partial`, не скрывая валидные записи.
+- Contract examples: `examples/knowledge-current-workspace.example.json` и `fixtures/api/knowledge-current-workspace.json`.

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-15T00:00:00Z",
+  "source_mode": "current_workspace",
+  "status": "available",
+  "entities": [
+    {
+      "id": "svc.payments",
+      "type": "service",
+      "name": "Payments",
+      "provenance": { "kind": "inference", "confidence": 0.9 },
+      "path": "model/entities/svc.payments.yaml"
+    },
+    {
+      "id": "svc.users",
+      "type": "service",
+      "name": "Users",
+      "provenance": { "kind": "inference", "confidence": 0.8 },
+      "path": "model/entities/svc.users.yaml"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge.payments.calls.users",
+      "type": "calls",
+      "from": "svc.payments",
+      "to": "svc.users",
+      "provenance": { "kind": "inference", "confidence": 0.7 },
+      "path": "model/edges/edge.payments.calls.users.yaml"
+    }
+  ],
+  "artifacts": [
+    { "path": "model/entities/svc.payments.yaml", "kind": "entity", "name": "svc.payments.yaml" },
+    { "path": "model/entities/svc.users.yaml", "kind": "entity", "name": "svc.users.yaml" },
+    { "path": "model/edges/edge.payments.calls.users.yaml", "kind": "edge", "name": "edge.payments.calls.users.yaml" }
+  ],
+  "issues": []
+}

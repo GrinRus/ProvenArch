@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -371,9 +372,9 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByTestId("stage-ask").click();
-  await expect(page.getByTestId("stage-ask")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("qa-panel")).toBeVisible();
 
   const recovery = page.getByTestId("qa-failure-recovery");
   await expect(recovery).toBeVisible();
@@ -396,6 +397,13 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "qa-recovery-desktop.png");
 
+  for (const width of [1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toBeVisible();
+    await expect(recovery).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(recovery).toBeVisible();
   await expect(page.getByTestId("qa-run-history")).toBeVisible();
@@ -406,5 +414,6 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await page.getByTestId("qa-retry-run-btn").click();
   await expect(page.getByTestId("qa-answer")).toContainText("checkout-service owns checkout orchestration");
   expect(postedQuestions).toEqual(["Which service owns checkout and what evidence supports that ownership?"]);
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

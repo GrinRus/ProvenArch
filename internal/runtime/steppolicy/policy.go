@@ -523,6 +523,7 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"- summary.md and architect-summary.md contain the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal when typed shard status is visible.",
 		"- If typed shard status has failed=0 and incomplete=0, summary.md and architect-summary.md include an explicit no-shard-coverage-blocker statement that current-run shard coverage is not a blocker.",
 		"- architect-summary.md says what is complete, what is missing, what the operator should inspect or decide next, and residual risk.",
+		"- If final-run-index.json or citation-index.json is absent from the current-run staged evidence index above, omit downstream index availability entirely; do not say an index is unavailable, missing, not observed, pending, or will appear later.",
 		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",
 	)
 	return strings.Join(lines, "\n")
@@ -636,6 +637,7 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		"- changelog.md contains Updated architecture/proposal surfaces, Findings/proposals summary, Evidence index or citation references, and Residual coverage gaps.",
 		"- If typed shard completeness is visible, proposal.md and changelog.md both include the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal and no-shard-coverage-blocker statement when there are no failed or incomplete shards.",
 		"- If findings.md has any - ID: lines, both markdown targets cite at least one exact current-run finding ID.",
+		"- Every medium/high finding represented in the first-pass proposal uses one same-line bullet containing its exact Finding ID, copied Severity, concrete Affected surface/path, concrete Recommended operator action verb, and Residual gap before the manifest is written.",
 		"- If any Top Actionable Findings section is present while findings are non-empty, every Finding ID field uses an exact current-run finding ID, never none/n/a/unavailable.",
 		"- No markdown target says structured findings are absent when findings.md is non-empty, and no target uses synthetic finding placeholders.",
 		"- No markdown target says it is a bootstrap, placeholder, draft surface initialized, recovery output, or content that will be replaced later.",

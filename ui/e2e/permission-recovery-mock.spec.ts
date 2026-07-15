@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -364,9 +365,9 @@ test("permission recovery mock: Analysis triage and Readiness settings remain re
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByTestId("stage-analysis").click();
-  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
 
   const recovery = page.getByTestId("analysis-failure-recovery");
   await expect(recovery).toBeVisible();
@@ -392,14 +393,10 @@ test("permission recovery mock: Analysis triage and Readiness settings remain re
   await expect(permissionTable).toContainText("ask_unsafe_operation");
   const permissionCards = page.getByTestId("runs-pending-permissions-cards");
 
-  const blockersPanel = page.getByTestId("blockers-panel");
-  await expect(blockersPanel).toContainText("Permission: shell");
-  await expect(blockersPanel).toContainText("init.step1.collect paused for needs_user via ask_unsafe_operation");
-  await expect(blockersPanel).toContainText("Target: npm install --ignore-scripts @acme/generated-client.");
-  await expect(blockersPanel).toContainText("Reason: package install requires explicit operator review before retry");
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "permission-recovery-desktop.png");
 
+  await page.getByRole("link", { name: "Setup" }).click();
   await page.getByTestId("stage-readiness").click();
   const advancedSettings = page.getByTestId("readiness-advanced-settings");
   await advancedSettings.locator("summary").click();
@@ -417,9 +414,9 @@ test("permission recovery mock: Analysis triage and Readiness settings remain re
   await expect(permissionCards).toContainText("npm install --ignore-scripts @acme/generated-client");
   await expect(permissionCards).toContainText("package install requires explicit operator review before retry");
   await expect(permissionTable).toBeHidden();
-  await expect(blockersPanel).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "permission-recovery-mobile.png");
 
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

@@ -1,7 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
+import { EvidenceViewer } from "./EvidenceViewer";
+import { ModalDialog } from "./ModalDialog";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
@@ -29,6 +31,7 @@ import type {
   RuntimeStepProviderValues,
   RuntimeTimeoutValues,
   RunListItem,
+  RunCoordination,
   RunLogEntry,
   RunReviewStep,
   RunReviewSummaryResponse,
@@ -37,11 +40,6 @@ import type {
   WorkspaceHealthResponse,
 } from "../lib/appContracts";
 import type { LoadGitDiffOptions } from "../lib/gitDiffApi";
-
-const MermaidPreview = lazy(async () => {
-  const module = await import("./MermaidPreview");
-  return { default: module.MermaidPreview };
-});
 
 type ReviewArtifactFilter = "all" | "reports" | "diagrams" | "proposals" | "runtime";
 type PublishArtifactFilter = "all" | "changed" | "reports" | "proposals" | "diagrams" | "taskruns";
@@ -1061,7 +1059,6 @@ function DoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {
 
 export type CharterStageProps = ComponentProps<typeof BaselineEditorsPanel> & {
   wizardPanel: ReactNode;
-  gitPanel: ReactNode;
   wizardProjectName: string;
   wizardScope: string;
   wizardNfr: string;
@@ -1072,7 +1069,6 @@ export type CharterStageProps = ComponentProps<typeof BaselineEditorsPanel> & {
 
 export function CharterStagePanel({
   wizardPanel,
-  gitPanel,
   wizardProjectName,
   wizardScope,
   wizardNfr,
@@ -1120,7 +1116,6 @@ export function CharterStagePanel({
 
       {wizardPanel}
       <BaselineEditorsPanel {...baselineProps} />
-      {gitPanel}
     </div>
   );
 }
@@ -1412,6 +1407,7 @@ export type AnalysisStageProps = {
   runId: string | null;
   runStatus: RunStatusResponse | null;
   runList: RunListItem[];
+  coordination: RunCoordination;
   runActionStatus: string;
   selectedRunWarnings: string[];
   selectedRunIsActive: boolean;
@@ -1427,8 +1423,9 @@ export type AnalysisStageProps = {
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   focusBlockerSignal: number;
-  onRunPipeline: (pipeline: "init" | "refresh") => void;
+  onRunPipeline: (pipeline: "init" | "refresh", intent?: "start" | "queue") => void;
   onCancelSelectedRun: () => void;
+  onCancelRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
   onOpenArtifact: (path: string) => void;
 };
@@ -1439,6 +1436,7 @@ export function AnalysisStagePanel({
   runId,
   runStatus,
   runList,
+  coordination,
   runActionStatus,
   selectedRunWarnings,
   selectedRunIsActive,
@@ -1456,11 +1454,13 @@ export function AnalysisStagePanel({
   focusBlockerSignal,
   onRunPipeline,
   onCancelSelectedRun,
+  onCancelRun,
   onSelectRun,
   onOpenArtifact,
 }: AnalysisStageProps) {
   const blockerDetailsRef = useRef<HTMLElement>(null);
   const [selectedStepID, setSelectedStepID] = useState("");
+  const [queueConfirmationOpen, setQueueConfirmationOpen] = useState(false);
   const [stepReviewView, setStepReviewView] = useState<"artifacts" | "logs" | "evidence" | "diff">("artifacts");
   const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
   const reviewSteps = runReviewSummary?.steps ?? [];
@@ -1522,17 +1522,42 @@ export function AnalysisStagePanel({
       </div>
 
       <div className="actions">
-        <button type="button" onClick={() => onRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
+        <button type="button" onClick={() => onRunPipeline("init")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-init-btn">
           Run init
         </button>
-        <button type="button" onClick={() => onRunPipeline("refresh")} disabled={busy} data-testid="run-refresh-btn">
+        <button type="button" onClick={() => onRunPipeline("refresh")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-refresh-btn">
           Run refresh
         </button>
+        {coordination.active_run_id ? (
+          <button type="button" onClick={() => setQueueConfirmationOpen(true)} disabled={busy} data-testid="run-queue-refresh-btn">
+            Queue refresh after current run
+          </button>
+        ) : null}
         <button type="button" onClick={onCancelSelectedRun} disabled={busy || cancelBusy || !runId || !selectedRunIsActive} data-testid="run-cancel-btn">
           Cancel selected run
         </button>
       </div>
+      {coordination.active_run_id ? <p className="hint" data-testid="run-active-start-reason">Ordinary start is unavailable while <code>{coordination.active_run_id}</code> is active.</p> : null}
+      {coordination.pending ? (
+        <section className="subsection" data-testid="pending-run-summary">
+          <h2>Pending refresh</h2>
+          <p><code>{coordination.pending.run_id}</code> · {coordination.pending.pipeline}. A newly queued refresh replaces this pending run.</p>
+          <button type="button" onClick={() => onCancelRun(coordination.pending!.run_id)} disabled={busy || cancelBusy}>Cancel pending refresh</button>
+        </section>
+      ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
+
+      <ModalDialog
+        open={queueConfirmationOpen}
+        title={coordination.pending ? "Replace pending refresh" : "Queue refresh"}
+        description={coordination.pending
+          ? `Active run ${coordination.active_run_id}; pending ${coordination.pending.run_id} will be canceled as run_superseded.`
+          : `Refresh will start after active run ${coordination.active_run_id}.`}
+        confirmLabel={coordination.pending ? "Replace pending refresh" : "Queue refresh after current run"}
+        busy={busy}
+        onCancel={() => setQueueConfirmationOpen(false)}
+        onConfirm={() => { setQueueConfirmationOpen(false); onRunPipeline("refresh", "queue"); }}
+      />
 
       <AnalysisRunProgress
         runId={runId}
@@ -1544,7 +1569,6 @@ export function AnalysisStagePanel({
         blockerCount={blockerRows.length}
         onReviewBlocker={handleReviewBlocker}
       />
-      {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
       <AnalysisFailureRecovery
         busy={busy}
         runStatus={runStatus}
@@ -1575,11 +1599,14 @@ export function AnalysisStagePanel({
         onOpenArtifact={onOpenArtifact}
         onLoadGitDiff={onLoadGitDiff}
       />
-      <AnalysisShardTable rows={shardRows} />
       <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
-
-      <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
-      <PendingPermissionsTable pendingPermissions={pendingPermissions} />
+      <details className="advanced-block runs-diagnostics-drawer" data-testid="runs-diagnostics-drawer" open={showActiveLiveDiagnostics || pendingPermissions.length > 0}>
+        <summary>Diagnostics · shards, raw runtime output, permissions and telemetry</summary>
+        {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
+        <AnalysisShardTable rows={shardRows} />
+        <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
+        <PendingPermissionsTable pendingPermissions={pendingPermissions} />
+      </details>
       <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
     </section>
   );
@@ -3177,9 +3204,9 @@ export type ReviewStageProps = {
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
-  selectedArtifactIsMermaid: boolean;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
+  demo: boolean;
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
@@ -3197,9 +3224,9 @@ export function ReviewStagePanel({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
-  selectedArtifactIsMermaid,
   runLogs,
   reviewSummary,
+  demo,
   gitDiff,
   gitDiffStatus,
   onLoadGitDiff,
@@ -3207,6 +3234,8 @@ export function ReviewStagePanel({
   onOpenArtifact,
 }: ReviewStageProps) {
   const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
+  const openReviewArtifactRef = useRef(onOpenArtifact);
+  openReviewArtifactRef.current = onOpenArtifact;
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
   const coverageArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/coverage/summary.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
@@ -3242,9 +3271,9 @@ export function ReviewStagePanel({
 
   useEffect(() => {
     if (reviewView === "evidence" && !selectedArtifact && preferredReviewArtifact) {
-      onOpenArtifact(preferredReviewArtifact.path);
+      openReviewArtifactRef.current(preferredReviewArtifact.path);
     }
-  }, [onOpenArtifact, preferredReviewArtifact, reviewView, selectedArtifact]);
+  }, [preferredReviewArtifact, reviewView, selectedArtifact]);
 
   return (
     <div className="stage-stack" data-testid="review-panel">
@@ -3299,10 +3328,10 @@ export function ReviewStagePanel({
               diagramArtifacts={diagramArtifacts}
               selectedArtifact={selectedArtifact}
               selectedArtifactContent={selectedArtifactContent}
-              selectedArtifactIsMermaid={selectedArtifactIsMermaid}
               selectedArtifactIsLoading={selectedArtifactIsLoading}
               runLogs={runLogs}
               reviewSummary={reviewSummary}
+              demo={demo}
               reviewQueue={reviewQueue}
               gitDiff={gitDiff}
               gitDiffStatus={gitDiffStatus}
@@ -3490,10 +3519,10 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
-  selectedArtifactIsMermaid,
   selectedArtifactIsLoading,
   runLogs,
   reviewSummary,
+  demo,
   reviewQueue,
   gitDiff,
   gitDiffStatus,
@@ -3510,10 +3539,10 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
-  selectedArtifactIsMermaid: boolean;
   selectedArtifactIsLoading: boolean;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
+  demo: boolean;
   reviewQueue: ReviewQueueItem[];
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
@@ -3636,22 +3665,15 @@ function ReviewEvidenceWorkbench({
         />
         <div {...tabPanelProps("evidence-preview-tabs", evidenceView)}>
           {evidenceView === "preview" ? (
-            selectedArtifactIsMermaid ? (
-              <div data-testid="run-diagram-content-panel">
-                <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-                {selectedArtifactIsLoading ? (
-                  <p className="hint">Loading diagram...</p>
-                ) : (
-                  <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                    <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                  </Suspense>
-                )}
-              </div>
-            ) : (
-              <div data-testid="run-artifact-content-panel">
-                <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-                <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-              </div>
+            selectedArtifactIsLoading ? <p className="hint">Loading evidence...</p> : (
+              <EvidenceViewer
+                path={selectedArtifact}
+                content={selectedArtifactContent}
+                runId={reviewSummary?.run_id}
+                sourceMode="run_snapshot"
+                demo={demo}
+                onOpenArtifact={onOpenArtifact}
+              />
             )
           ) : null}
           {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}
@@ -4267,6 +4289,8 @@ export function ProposalsStagePanel({
   onGoPublish: () => void;
 }) {
   const [proposalView, setProposalView] = useState<"preview" | "evidence" | "changelog" | "diff" | "logs">("preview");
+  const openProposalArtifactRef = useRef(onOpenArtifact);
+  openProposalArtifactRef.current = onOpenArtifact;
   const proposalReview = deriveProposalReviewModel({ artifacts, openQuestions });
   const selectedProposalArtifact = proposalReview.proposalArtifacts.find((artifact) => artifact.path === selectedArtifact);
   const preferredProposalArtifact =
@@ -4277,9 +4301,9 @@ export function ProposalsStagePanel({
 
   useEffect(() => {
     if (!selectedProposalArtifact && preferredProposalArtifact && selectedArtifact !== preferredProposalArtifact.path) {
-      onOpenArtifact(preferredProposalArtifact.path);
+      openProposalArtifactRef.current(preferredProposalArtifact.path);
     }
-  }, [onOpenArtifact, preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
+  }, [preferredProposalArtifact, selectedArtifact, selectedProposalArtifact]);
 
   useEffect(() => {
     if (proposalView === "diff") {

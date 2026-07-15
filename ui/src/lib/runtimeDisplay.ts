@@ -1,6 +1,6 @@
 export function runtimeDisplayLabel(runtimeMode: string, runtimeProvider: string, options: { compact?: boolean } = {}): string {
   if (runtimeMode === "fake") {
-    return options.compact ? "fake" : "fake baseline";
+    return options.compact ? "Deterministic demo" : "Deterministic demo runtime";
   }
   const provider = runtimeProvider.trim() || "provider pending";
   return options.compact ? provider : `headless / ${provider}`;
@@ -8,7 +8,7 @@ export function runtimeDisplayLabel(runtimeMode: string, runtimeProvider: string
 
 export function providerDisplayLabel(runtimeMode: string, provider: string | null | undefined): string {
   if (runtimeMode === "fake") {
-    return "fake";
+    return "Demo evidence";
   }
   return provider?.trim() || "provider pending";
 }

@@ -1,6 +1,10 @@
 # SWE Artifact Quality Assessment
 
-> Manual SWE-agent artifact review over completed live E2E evidence. This report is release evidence, but it does not change `release_verdict_<matrix-id>.json`.
+> Manual SWE-agent artifact review over completed live E2E evidence. Start from promoted,
+> user-visible evidence and its selected-run snapshot. Runtime/taskrun telemetry is diagnostic
+> context only: it may explain how output was produced, but it cannot substitute for reviewing
+> what the user reads. This report is release evidence, but it does not change
+> `release_verdict_<matrix-id>.json`.
 
 ## Decision
 - matrix_id:
@@ -9,16 +13,20 @@
 - assessed_at_utc:
 
 ## Evidence Inspected
-- release verdict:
-- execution reports:
-- run matrices:
-- frontend/UI evidence:
-- taskrun telemetry:
-- final indexes:
-- citations:
-- diagrams:
-- proposals/publish artifacts:
+- promoted overview/findings/coverage:
+- promoted model/entities/edges:
+- promoted diagrams:
+- promoted proposals/changelog/publish artifacts:
+- selected-run final index and staged snapshot:
+- citations and broken/unresolved references:
+- frontend evidence rendering (Review/Knowledge/Publish):
 - Ask evidence:
+
+## Diagnostic Execution Context (not artifact acceptance)
+- release verdict:
+- execution reports and run matrices:
+- taskrun quality telemetry:
+- repair/stall/provider diagnostics:
 
 ## Artifact Findings
 - architecture truthfulness:

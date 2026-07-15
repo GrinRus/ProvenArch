@@ -410,8 +410,8 @@ func TestOnboardingRuntimeSwitchConflictsWithActiveRun(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("expected runtime switch conflict 409, got %d body=%s", response.StatusCode, string(body))
 	}
-	if code := decodeErrorCode(t, response); code != "runtime_switch_conflict" {
-		t.Fatalf("expected runtime_switch_conflict, got %q", code)
+	if code := decodeErrorCode(t, response); code != "runtime_switch_requires_restart" {
+		t.Fatalf("expected runtime_switch_requires_restart, got %q", code)
 	}
 
 	statusResponse, err := http.Get(httpServer.URL + "/api/onboarding/status")
@@ -874,6 +874,29 @@ func TestEmbeddedUIIsServedFromRoot(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(string(content)), "<!doctype html") {
 		t.Fatalf("expected html shell, got %q", string(content))
+	}
+}
+
+func TestEmbeddedUIServesProductRoutesDirectly(t *testing.T) {
+	t.Parallel()
+
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	for _, route := range []string{"/setup?step=runner", "/home", "/runs", "/runs/run-1", "/knowledge?view=atlas&entity=svc.payments&source=current", "/changes?run=run-1&view=evidence&artifact=doc.overview&mode=raw", "/unknown-product-route"} {
+		response, err := http.Get(httpServer.URL + route)
+		if err != nil {
+			t.Fatalf("GET %s: %v", route, err)
+		}
+		content, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read %s: %v", route, readErr)
+		}
+		if response.StatusCode != http.StatusOK || !strings.Contains(strings.ToLower(string(content)), "<!doctype html") {
+			t.Fatalf("expected SPA shell for %s, got status=%d body=%q", route, response.StatusCode, string(content))
+		}
 	}
 }
 
@@ -2359,14 +2382,15 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	}
 	var listPayload struct {
 		Items []struct {
-			RunID      string   `json:"run_id"`
-			Pipeline   string   `json:"pipeline"`
-			Status     string   `json:"status"`
-			StartedAt  string   `json:"started_at"`
-			FinishedAt *string  `json:"finished_at"`
-			Warnings   []string `json:"warnings"`
-			ErrorCode  any      `json:"error_code"`
-			Error      any      `json:"error"`
+			RunID              string   `json:"run_id"`
+			Pipeline           string   `json:"pipeline"`
+			Status             string   `json:"status"`
+			StartedAt          string   `json:"started_at"`
+			FinishedAt         *string  `json:"finished_at"`
+			Warnings           []string `json:"warnings"`
+			ErrorCode          any      `json:"error_code"`
+			Error              any      `json:"error"`
+			AuthoritativeIndex bool     `json:"authoritative_index"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
@@ -2386,6 +2410,9 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	}
 	if listPayload.Items[0].Status != "succeeded" {
 		t.Fatalf("expected status succeeded, got %q", listPayload.Items[0].Status)
+	}
+	if !listPayload.Items[0].AuthoritativeIndex {
+		t.Fatalf("expected completed run to advertise its authoritative final index")
 	}
 }
 
@@ -2415,6 +2442,19 @@ func TestPipelineRunsListEndpointRejectsInvalidLimit(t *testing.T) {
 	}
 	if payload.Error.Code != "invalid_limit" {
 		t.Fatalf("expected invalid_limit code, got %q", payload.Error.Code)
+	}
+}
+
+func TestAuthoritativeRunIndexIdentityIsRunScoped(t *testing.T) {
+	artifacts := []orchestrator.Artifact{{Path: "reports/taskruns/run-a/staging/final/final-run-index.json"}}
+	if !hasAuthoritativeRunIndex("run-a", artifacts) {
+		t.Fatal("expected selected run index to be authoritative")
+	}
+	if hasAuthoritativeRunIndex("run-b", artifacts) {
+		t.Fatal("cross-run index must not make another run reviewable")
+	}
+	if hasAuthoritativeRunIndex("run-a", []orchestrator.Artifact{{Path: "reports/taskruns/run-a/staging/final/not-the-index.json"}}) {
+		t.Fatal("non-index artifact must not be authoritative")
 	}
 }
 
@@ -2642,7 +2682,11 @@ func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", diffResp.StatusCode, string(body))
 	}
 	var payload struct {
-		Empty        bool `json:"empty"`
+		Empty        bool   `json:"empty"`
+		Scope        string `json:"scope"`
+		Branch       string `json:"branch"`
+		HeadOID      string `json:"head_oid"`
+		Fingerprint  string `json:"fingerprint"`
 		Files        []gitDiffFile
 		Folders      []gitDiffFolderSummary
 		SelectedFile *gitDiffFile  `json:"selected_file"`
@@ -2651,8 +2695,11 @@ func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
 	if err := json.NewDecoder(diffResp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode git diff payload: %v", err)
 	}
-	if payload.Empty || len(payload.Files) != 1 {
-		t.Fatalf("expected only selected workspace file in path-filtered diff, got %+v", payload)
+	if payload.Empty || len(payload.Files) != 3 {
+		t.Fatalf("expected complete workspace inventory with selected preview, got %+v", payload)
+	}
+	if payload.Scope != "full_workspace" || payload.Branch == "" || payload.HeadOID == "" || len(payload.Fingerprint) != 64 {
+		t.Fatalf("expected authoritative Git identity and fingerprint, got %+v", payload)
 	}
 	if payload.SelectedFile == nil || payload.SelectedFile.Path != "reports/as-is/overview.md" || payload.SelectedFile.Status != "modified" {
 		t.Fatalf("expected selected modified overview file, got %+v", payload.SelectedFile)
@@ -2693,13 +2740,14 @@ func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
 		t.Fatalf("expected folder status 200, got %d body=%s", folderResp.StatusCode, string(body))
 	}
 	var folderPayload struct {
-		Files []gitDiffFile `json:"files"`
+		Files        []gitDiffFile `json:"files"`
+		SelectedFile *gitDiffFile  `json:"selected_file"`
 	}
 	if err := json.NewDecoder(folderResp.Body).Decode(&folderPayload); err != nil {
 		t.Fatalf("decode folder diff payload: %v", err)
 	}
-	if len(folderPayload.Files) != 1 || folderPayload.Files[0].Path != "proposals/proposal-baseline/proposal.md" || folderPayload.Files[0].Status != "untracked" {
-		t.Fatalf("expected only untracked proposal in folder filter, got %+v", folderPayload.Files)
+	if len(folderPayload.Files) != 3 || folderPayload.SelectedFile == nil || folderPayload.SelectedFile.Path != "proposals/proposal-baseline/proposal.md" || folderPayload.SelectedFile.Status != "untracked" {
+		t.Fatalf("expected full inventory with proposal selected by folder preview, got %+v", folderPayload)
 	}
 }
 
@@ -2795,6 +2843,51 @@ func TestGitDiffEndpointReportsBinarySelectedFile(t *testing.T) {
 	}
 	if len(payload.Hunks) != 0 || !strings.Contains(payload.Message, "binary") {
 		t.Fatalf("expected binary file message without hunks, got message=%q hunks=%+v", payload.Message, payload.Hunks)
+	}
+}
+
+func TestGitCommitRejectsStaleFullWorkspaceConfirmationWithoutMutation(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for git mutation API tests")
+	}
+
+	server := newTestServer(t)
+	ws := initGitWorkspaceForDiffTest(t, server)
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("baseline\n")); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+	commitWorkspaceForDiffTest(t, ws, "baseline")
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("candidate\n")); err != nil {
+		t.Fatalf("write candidate: %v", err)
+	}
+
+	state, err := collectWorkspaceGitState(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("collect confirmation state: %v", err)
+	}
+	if err := ws.WriteFile("reports/unreviewed.md", []byte("late change\n")); err != nil {
+		t.Fatalf("write late change: %v", err)
+	}
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	body := fmt.Sprintf(`{"message":"publish","expected_fingerprint":%q,"expected_head_oid":%q}`, state.Fingerprint, state.Identity.HeadOID)
+	response := postJSON(t, httpServer.URL+"/api/git/commit", body)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		payload, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected stale confirmation 409, got %d body=%s", response.StatusCode, payload)
+	}
+	if code := decodeErrorCode(t, response); code != "stale_git_confirmation" {
+		t.Fatalf("expected stale_git_confirmation, got %q", code)
+	}
+
+	output, err := runGit(context.Background(), ws.Path, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("git status after rejected commit: %v", err)
+	}
+	if !strings.Contains(output, "reports/as-is/overview.md") || !strings.Contains(output, "reports/unreviewed.md") {
+		t.Fatalf("expected all changes to remain uncommitted, got %q", output)
 	}
 }
 

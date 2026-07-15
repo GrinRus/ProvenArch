@@ -16,6 +16,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
   const [wizardRules, setWizardRules] = useState("no silent re-key, evidence-first findings");
   const [wizardStatus, setWizardStatus] = useState("");
   const [wizardContractLoaded, setWizardContractLoaded] = useState(false);
+  const [wizardContractReady, setWizardContractReady] = useState(false);
 
   async function loadWizardContract() {
     try {
@@ -30,6 +31,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
       if (typeof parsed.scope === "string") {
         setWizardScope(parsed.scope);
       }
+      setWizardContractReady(Boolean(parsed.project_name?.trim() && parsed.scope?.trim()));
       if (Array.isArray(parsed.nfr_priorities)) {
         setWizardNfr(parsed.nfr_priorities.join(", "));
       }
@@ -67,6 +69,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
     try {
       await saveEditableArtifact("charter/wizard/step0-contract.json", `${JSON.stringify(payload, null, 2)}\n`);
       setWizardStatus("Saved charter/wizard/step0-contract.json");
+      setWizardContractReady(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "failed to save step0 wizard contract");
     } finally {
@@ -81,6 +84,7 @@ export function useWizardEditor({ setBusy, setError }: UseWizardEditorOptions) {
     wizardRules,
     wizardStatus,
     wizardContractLoaded,
+    wizardContractReady,
     loadWizardContract,
     setWizardProjectName,
     setWizardScope,

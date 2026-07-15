@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchJSON } from "../lib/api";
 import { dedupeArtifactsByPath, indexArtifactPath } from "../lib/runState";
@@ -13,9 +13,10 @@ export function useRunArtifacts() {
   const [openQuestions, setOpenQuestions] = useState("");
   const artifactsRef = useRef(artifacts);
   const selectedArtifactRef = useRef(selectedArtifact);
-  const artifactsRequest = useRequestGate("run-artifacts");
-  const coverageRequest = useRequestGate("run-coverage");
+  const [evidenceSnapshot, setEvidenceSnapshot] = useState<RunEvidenceSnapshot>(emptyEvidenceSnapshot());
+  const artifactsRequest = useRequestGate("run-evidence-snapshot");
   const previewRequest = useRequestGate("run-artifact-preview");
+  const contentByReadPath = useRef(new Map<string, string>());
 
   useEffect(() => {
     artifactsRef.current = artifacts;
@@ -51,79 +52,92 @@ export function useRunArtifacts() {
     return text.includes("```mermaid");
   }, [selectedArtifact, selectedArtifactContent]);
 
-  async function loadTextArtifact(path: string, signal?: AbortSignal): Promise<string> {
+  const loadTextArtifact = useCallback(async (path: string, signal?: AbortSignal): Promise<string> => {
     if (!path) {
-      return "";
+      throw new Error("artifact path is required");
     }
-    try {
-      const response = await fetch(`/api/artifacts?path=${encodeURIComponent(path)}`, { signal });
-      if (!response.ok) {
-        return "";
-      }
-      return response.text();
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      return "";
+    const cached = contentByReadPath.current.get(path);
+    if (cached !== undefined) {
+      return cached;
     }
-  }
-
-  async function loadCoverageArtifacts(id?: string) {
-    const token = coverageRequest.begin(id ?? "current-workspace");
-    try {
-      const snapshot = id ? await fetchRunSnapshotIndex(id, token.signal) : null;
-      const summaryPath = snapshot ? snapshot.readPathByCanonicalPath.get("reports/coverage/summary.md") ?? "" : "reports/coverage/summary.md";
-      const questionsPath = snapshot
-        ? snapshot.readPathByCanonicalPath.get("reports/coverage/open-questions.md") ?? ""
-        : "reports/coverage/open-questions.md";
-      const [summary, questions] = await Promise.all([
-        loadTextArtifact(summaryPath, token.signal),
-        loadTextArtifact(questionsPath, token.signal),
-      ]);
-      if (!coverageRequest.isCurrent(token)) {
-        return;
-      }
-      setCoverageSummary(summary);
-      setOpenQuestions(questions);
-    } catch (error) {
-      if (isAbortError(error) || !coverageRequest.isCurrent(token)) {
-        return;
-      }
-      throw error;
-    } finally {
-      coverageRequest.finish(token);
+    const response = await fetch(`/api/artifacts?path=${encodeURIComponent(path)}`, { signal });
+    if (!response.ok) {
+      throw new Error(`artifact ${path} is unavailable (${response.status})`);
     }
-  }
+    const content = await response.text();
+    contentByReadPath.current.set(path, content);
+    return content;
+  }, []);
 
   async function fetchArtifacts(id: string) {
     const token = artifactsRequest.begin(id);
+    setEvidenceSnapshot({ ...emptyEvidenceSnapshot(), runId: id, status: "loading" });
+    contentByReadPath.current = new Map();
     try {
       const snapshot = await fetchRunSnapshotIndex(id, token.signal);
       if (!artifactsRequest.isCurrent(token)) {
         return;
       }
       if (!snapshot) {
-        const payload = await fetchJSON<ArtifactsResponse>(`/api/pipeline/runs/${id}/artifacts`, { signal: token.signal });
-        if (!artifactsRequest.isCurrent(token)) {
-          return;
-        }
-        applyArtifacts(payload.artifacts ?? []);
+        applyEvidenceSnapshot({
+          runId: id,
+          sourceMode: "run_snapshot",
+          status: "not_produced",
+          artifacts: [],
+          coverageSummary: "",
+          openQuestions: "",
+          issues: [{ code: "snapshot_not_produced", message: `Run ${id} has no final snapshot index.` }],
+        });
         return;
       }
-
-      applyArtifacts(dedupeArtifactsByPath([...snapshot.canonicalArtifacts, ...snapshot.indexArtifacts]));
+      const nextArtifacts = dedupeArtifactsByPath([...snapshot.canonicalArtifacts, ...snapshot.indexArtifacts]);
+      const issues: EvidenceIssue[] = [];
+      await Promise.all(
+        nextArtifacts.map(async (artifact) => {
+          const readPath = artifact.read_path ?? artifact.path;
+          try {
+            await loadTextArtifact(readPath, token.signal);
+          } catch (error) {
+            if (isAbortError(error)) {
+              throw error;
+            }
+            issues.push({ code: "indexed_artifact_unavailable", path: artifact.path, message: error instanceof Error ? error.message : String(error) });
+          }
+        }),
+      );
+      if (!artifactsRequest.isCurrent(token)) {
+        return;
+      }
+      const coveragePath = snapshot.readPathByCanonicalPath.get("reports/coverage/summary.md");
+      const questionsPath = snapshot.readPathByCanonicalPath.get("reports/coverage/open-questions.md");
+      applyEvidenceSnapshot({
+        runId: id,
+        sourceMode: "run_snapshot",
+        status: issues.length > 0 ? "partial" : "available",
+        artifacts: nextArtifacts,
+        coverageSummary: coveragePath ? contentByReadPath.current.get(coveragePath) ?? "" : "",
+        openQuestions: questionsPath ? contentByReadPath.current.get(questionsPath) ?? "" : "",
+        issues,
+      });
     } catch (error) {
       if (isAbortError(error) || !artifactsRequest.isCurrent(token)) {
         return;
       }
-      throw error;
+      applyEvidenceSnapshot({
+        runId: id,
+        sourceMode: "run_snapshot",
+        status: "error",
+        artifacts: [],
+        coverageSummary: "",
+        openQuestions: "",
+        issues: [{ code: "snapshot_load_failed", message: error instanceof Error ? error.message : String(error) }],
+      });
     } finally {
       artifactsRequest.finish(token);
     }
   }
 
-  async function handleOpenArtifact(path: string) {
+  const handleOpenArtifact = useCallback(async (path: string) => {
     const artifact = artifactsRef.current.find((item) => item.path === path);
     const readPath = artifact?.read_path ?? path;
     const token = previewRequest.begin(`${path}|${readPath}`);
@@ -139,21 +153,29 @@ export function useRunArtifacts() {
       if (isAbortError(error) || !previewRequest.isCurrent(token)) {
         return;
       }
-      setSelectedArtifactContent("");
+      setSelectedArtifactContent(error instanceof Error ? `Artifact unavailable: ${error.message}` : "Artifact unavailable.");
     } finally {
       previewRequest.finish(token);
     }
-  }
+  }, [loadTextArtifact, previewRequest]);
 
   function clearArtifacts() {
     artifactsRequest.abort();
-    coverageRequest.abort();
     previewRequest.abort();
+    contentByReadPath.current = new Map();
     setArtifacts([]);
     setSelectedArtifact("");
     setSelectedArtifactContent("");
     setCoverageSummary("");
     setOpenQuestions("");
+    setEvidenceSnapshot(emptyEvidenceSnapshot());
+  }
+
+  function applyEvidenceSnapshot(snapshot: RunEvidenceSnapshot) {
+    setEvidenceSnapshot(snapshot);
+    setCoverageSummary(snapshot.coverageSummary);
+    setOpenQuestions(snapshot.openQuestions);
+    applyArtifacts(snapshot.artifacts);
   }
 
   function applyArtifacts(nextArtifacts: Artifact[]) {
@@ -181,13 +203,38 @@ export function useRunArtifacts() {
     selectedArtifactContent,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     diagramArtifacts,
     nonDiagramArtifacts,
     selectedArtifactIsMermaid,
     fetchArtifacts,
-    loadCoverageArtifacts,
     handleOpenArtifact,
     clearArtifacts,
+  };
+}
+
+export type EvidenceSourceMode = "run_snapshot" | "current_workspace";
+export type EvidenceSnapshotStatus = "idle" | "loading" | "available" | "partial" | "not_produced" | "unavailable" | "error";
+export type EvidenceIssue = { code: string; message: string; path?: string };
+export type RunEvidenceSnapshot = {
+  runId: string | null;
+  sourceMode: EvidenceSourceMode;
+  status: EvidenceSnapshotStatus;
+  artifacts: Artifact[];
+  coverageSummary: string;
+  openQuestions: string;
+  issues: EvidenceIssue[];
+};
+
+function emptyEvidenceSnapshot(): RunEvidenceSnapshot {
+  return {
+    runId: null,
+    sourceMode: "current_workspace",
+    status: "idle",
+    artifacts: [],
+    coverageSummary: "",
+    openQuestions: "",
+    issues: [],
   };
 }
 
@@ -205,28 +252,8 @@ async function fetchRunSnapshotIndex(id: string, signal?: AbortSignal): Promise<
     return null;
   }
 
-  try {
-    const finalRunIndex = await fetchJSON<FinalRunIndex>(`/api/artifacts?path=${encodeURIComponent(finalRunIndexPath)}`, { signal });
-    return buildRunSnapshotIndex(id, finalRunIndexPath, finalRunIndex);
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error;
-    }
-    return {
-      canonicalArtifacts: [],
-      indexArtifacts: [
-        {
-          path: finalRunIndexPath,
-          read_path: finalRunIndexPath,
-          kind: "taskrun",
-          label: "Final run index",
-          source_run_id: id,
-          source_mode: "run_snapshot",
-        },
-      ],
-      readPathByCanonicalPath: new Map(),
-    };
-  }
+  const finalRunIndex = await fetchJSON<FinalRunIndex>(`/api/artifacts?path=${encodeURIComponent(finalRunIndexPath)}`, { signal });
+  return buildRunSnapshotIndex(id, finalRunIndexPath, finalRunIndex);
 }
 
 function buildRunSnapshotIndex(id: string, finalRunIndexPath: string, finalRunIndex: FinalRunIndex): RunSnapshotIndex {
@@ -248,6 +275,7 @@ function buildRunSnapshotIndex(id: string, finalRunIndexPath: string, finalRunIn
       }
       readPathByCanonicalPath.set(canonicalPath, stagedPath);
       return {
+        id: String(document.id ?? "").trim() || undefined,
         path: canonicalPath,
         read_path: stagedPath,
         canonical_path: canonicalPath,

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -33,11 +34,13 @@ async function captureEvidenceScreenshot(page: Page, name: string): Promise<stri
 async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessages: string[]; branchNames: string[] }> {
   const commitMessages: string[] = [];
   const branchNames: string[] = [];
+  const finalIndexPath = `reports/taskruns/${runID}/staging/final/final-run-index.json`;
   const artifacts = [
     { path: "reports/coverage/summary.md", kind: "report", label: "Coverage summary" },
     { path: "model/entities/checkout-service.yaml", kind: "model", label: "checkout-service" },
     { path: "proposals/checkout-ownership/proposal.md", kind: "proposal", label: "Checkout ownership proposal" },
     { path: "reports/changelog/2026-04-03.md", kind: "changelog", label: "Iteration changelog" },
+    { path: finalIndexPath, kind: "taskrun", label: "Final run index" },
   ];
   const gitDiff = {
     ok: true,
@@ -338,6 +341,23 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
         "proposals/checkout-ownership/proposal.md": "# Proposal\n\nAssign checkout ownership before release handoff.\n",
         "reports/changelog/2026-04-03.md": "# Iteration changelog\n\n- Prepared checkout ownership proposal.\n",
       };
+      const canonicalPaths = artifacts.filter((artifact) => artifact.path !== finalIndexPath).map((artifact) => artifact.path);
+      for (const canonicalPath of canonicalPaths) {
+        bodies[`reports/taskruns/${runID}/staging/final/${canonicalPath}`] = bodies[canonicalPath];
+      }
+      bodies[finalIndexPath] = JSON.stringify({
+        version: 1,
+        run_id: runID,
+        pipeline: "init",
+        generated_at: "2026-04-03T12:08:00Z",
+        canonical_documents: canonicalPaths.map((canonicalPath) => ({
+          id: `doc.${canonicalPath}`,
+          kind: artifacts.find((artifact) => artifact.path === canonicalPath)?.kind ?? "report",
+          title: canonicalPath,
+          canonical_path: canonicalPath,
+          staged_path: `reports/taskruns/${runID}/staging/final/${canonicalPath}`,
+        })),
+      });
       await route.fulfill({ ...(requestedPath in bodies ? text(bodies[requestedPath]) : text(`# Fixture artifact\n\n${requestedPath || "unknown"}\n`)) });
       return;
     }
@@ -374,9 +394,10 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
+  await page.getByRole("link", { name: "Changes" }).click();
   await page.getByTestId("stage-publish").click();
-  await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("ready");
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("Commit message prepared");
@@ -384,16 +405,13 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
 
   await page.getByLabel("Commit message").fill("docs: publish checkout architecture evidence");
   await page.getByTestId("publish-commit-selected-btn").click();
+  await page.getByRole("button", { name: "Commit all workspace changes" }).click();
   const recovery = page.getByTestId("publish-git-action-recovery");
   await expect(recovery).toBeVisible();
   await expect(recovery).toContainText("Git action failed");
-  await expect(recovery).toContainText("Git commit failed: workspace has unresolved merge conflicts in reports/coverage/summary.md");
+  await expect(recovery).toContainText("Git mutation failed: workspace has unresolved merge conflicts in reports/coverage/summary.md");
   await expect(recovery).toContainText("Workspace Git state was not changed");
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("failed");
-  await expect(page.getByTestId("next-action-panel")).toContainText("Resolve Git action failure");
-  await expect(page.getByTestId("next-action-panel")).toContainText("Review the Git action failure in Commit plan before retrying.");
-  await expect(page.getByTestId("git-publication-panel")).toContainText("Git action failed");
-  await expect(page.getByTestId("git-publication-panel")).toContainText("unresolved merge conflicts");
   await expect(page.getByTestId("publish-commit-selected-btn")).toBeEnabled();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "publish-git-recovery-desktop.png");
@@ -406,9 +424,10 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
 
   await page.getByLabel("Proposal branch").fill("proposal/checkout-ownership-review");
   await page.getByTestId("git-proposal-branch-btn").click();
-  await expect(recovery).toContainText("Proposal branch failed: proposal/beta-refresh already has uncommitted local changes");
-  await expect(page.getByTestId("git-publication-panel")).toContainText("Proposal branch failed");
+  await page.getByRole("button", { name: "Create proposal branch" }).click();
+  await expect(recovery).toContainText("Git mutation failed: proposal/beta-refresh already has uncommitted local changes");
   expect(commitMessages).toEqual(["docs: publish checkout architecture evidence"]);
   expect(branchNames).toEqual(["proposal/checkout-ownership-review"]);
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

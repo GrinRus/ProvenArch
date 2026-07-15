@@ -17,7 +17,7 @@ type UseRunExplorerOptions = {
 
 export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
   const [state, dispatch] = useReducer(runExplorerReducer, initialRunExplorerState);
-  const { runId, runStatus, runList, runActionStatus, cancelBusy } = state;
+  const { runId, runStatus, runList, coordination, runActionStatus, cancelBusy } = state;
   const artifactsState = useRunArtifacts();
   const logsState = useRunLogs({ runId });
   const gitDiffState = useGitDiff();
@@ -28,11 +28,11 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     selectedArtifactContent,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     diagramArtifacts,
     nonDiagramArtifacts,
     selectedArtifactIsMermaid,
     fetchArtifacts,
-    loadCoverageArtifacts,
     handleOpenArtifact,
     clearArtifacts,
   } = artifactsState;
@@ -74,6 +74,10 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     (nextRunList: RunListItem[]) => dispatch({ type: "setRunList", runList: nextRunList }),
     []
   );
+  const setCoordination = useCallback(
+    (nextCoordination: import("../lib/appContracts").RunCoordination) => dispatch({ type: "setCoordination", coordination: nextCoordination }),
+    []
+  );
   const setRunActionStatus = useCallback(
     (nextRunActionStatus: string) =>
       dispatch({ type: "setRunActionStatus", runActionStatus: nextRunActionStatus }),
@@ -83,6 +87,12 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     (nextCancelBusy: boolean) => dispatch({ type: "setCancelBusy", cancelBusy: nextCancelBusy }),
     []
   );
+  const clearRunSelection = useCallback(() => {
+    dispatch({ type: "setRunID", runId: null });
+    dispatch({ type: "setRunStatus", runStatus: null });
+    resetRunLogs();
+    clearArtifacts();
+  }, [clearArtifacts, resetRunLogs]);
 
   const {
     hasActiveRuns,
@@ -99,10 +109,12 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,
+    handleCancelRun,
   } = useRunActions({
     dispatch,
     runId,
     runStatus,
+    coordination,
     selectedRunIsActive,
     runLogsEOF,
     setBusy,
@@ -110,6 +122,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     setRunID,
     setRunStatus,
     setRunList,
+    setCoordination,
     setRunActionStatus,
     setCancelBusy,
     resetRunLogs,
@@ -117,7 +130,6 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     fetchRunLogsUntilEOF,
     clearArtifacts,
     fetchArtifacts,
-    loadCoverageArtifacts,
   });
 
   useRunPolling({
@@ -133,6 +145,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     setRunID,
     runStatus,
     runList,
+    coordination,
     artifacts,
     selectedArtifact,
     selectedArtifactContent,
@@ -145,6 +158,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     cancelBusy,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     hasActiveRuns,
     runCounters,
     runLogTaskrunPaths,
@@ -162,11 +176,13 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     gitDiff,
     gitDiffStatus,
     bootstrapRuns,
+    clearRunSelection,
     fetchRunReviewSummary,
     loadGitDiff,
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,
+    handleCancelRun,
     handleOpenArtifact,
     handleCopyRunLogs,
     handleDownloadRunLogs,

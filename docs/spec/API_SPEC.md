@@ -103,6 +103,29 @@ Example fail message:
 - `invalid_doctor_request`
 - `doctor_failed`
 
+### GET `/api/onboarding/status`
+
+Возвращает launcher/Console boundary вместе с workspace и runtime readiness. Additive поля
+`console_entered` и `can_switch_runtime` являются серверной истиной: launcher начинает с
+`console_entered=false`, обычный `acp serve --workspace ...` — с `true`.
+
+`can_switch_runtime=true` только до входа в Console и при отсутствии active/pending analysis run.
+После входа смена runtime через `POST /api/onboarding/runtime` возвращает
+`409 runtime_switch_requires_restart`; UI должен показывать restart-guided command, а не менять
+effective runtime работающего процесса.
+
+### POST `/api/onboarding/enter-console`
+
+Фиксирует однонаправленную границу onboarding → Console для текущего server process. Body может
+быть пустым или `{}`. Успешный ответ совпадает с onboarding status и содержит
+`console_entered=true`, `can_switch_runtime=false`.
+
+**428**
+- `console_entry_not_ready` — workspace/service/runtime ещё не готовы.
+
+**400**
+- `invalid_request_body`
+
 ### GET `/api/onboarding/path-suggestions`
 Local-only launcher endpoint for searchable path comboboxes. Endpoint is available before
 workspace selection, never writes to target repos, never clones repos and does not change
@@ -244,6 +267,58 @@ Initial K2a checks:
 
 **500**
 - `workspace_health_failed`
+
+### GET `/api/knowledge`
+Возвращает read-only read model текущей promoted knowledge base bound workspace. Endpoint ничего
+не пишет, не запускает provider и не связывает данные с историческим run без authoritative
+association. Поэтому поле `promoted_from_run_id` отсутствует в контракте.
+
+`entities[]` и `edges[]` читаются из `model/entities/*.{yaml,yml}` и
+`model/edges/*.{yaml,yml}`. В ответ попадают только записи с обязательными semantic fields;
+edge включается только когда обе ссылки разрешаются в набор validated entities. `path` всегда
+является canonical workspace-relative path. `artifacts[]` — inventory читаемых файлов в
+`model/`, `reports/` и `proposals/`; имена файлов не интерпретируются как topology.
+
+**200**
+```json
+{
+  "version": 1,
+  "generated_at": "2026-07-15T00:00:00Z",
+  "source_mode": "current_workspace",
+  "status": "partial",
+  "entities": [
+    {
+      "id": "svc.payments",
+      "type": "service",
+      "name": "Payments",
+      "provenance": { "kind": "inference", "confidence": 0.9 },
+      "path": "model/entities/svc.payments.yaml"
+    }
+  ],
+  "edges": [],
+  "artifacts": [
+    { "path": "model/entities/svc.payments.yaml", "kind": "entity", "name": "svc.payments.yaml" }
+  ],
+  "issues": [
+    {
+      "code": "knowledge.edge_reference_missing",
+      "path": "model/edges/edge.payments.calls.missing.yaml",
+      "message": "edge references missing entities: from=\"svc.payments\" to=\"svc.missing\""
+    }
+  ]
+}
+```
+
+`status`:
+- `available` — есть promoted content и все обнаруженные model files валидны;
+- `partial` — часть файлов malformed/unreadable, содержит duplicate entity ID или broken edge reference; остальные валидные данные сохраняются;
+- `unavailable` — promoted model/report/proposal content отсутствует.
+
+Typed issue codes: `knowledge.entity_malformed`, `knowledge.entity_duplicate`,
+`knowledge.edge_malformed`, `knowledge.edge_reference_missing`, `knowledge.file_unreadable`,
+`knowledge.inventory_unreadable`.
+
+**405** — любой метод кроме `GET`.
 
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
@@ -524,6 +599,9 @@ Partial update persisted permission-полей в `workspace.yaml`.
 
 ### GET `/api/runtime/profile`
 Возвращает aggregate runtime profile:
+- `runtime_mode` — effective process mode (`fake|headless`);
+- `runtime_provider` — effective process provider ID;
+- `provider_source` — источник выбора provider (`cli|env|default`);
 - `timeouts`
 - `execution`
 - `permissions`
@@ -538,6 +616,9 @@ Partial update persisted permission-полей в `workspace.yaml`.
 ```json
 {
   "ok": true,
+  "runtime_mode": "headless",
+  "runtime_provider": "claude-code",
+  "provider_source": "cli",
   "timeouts": {
     "persisted": {},
     "effective": {
@@ -656,9 +737,16 @@ Partial update persisted permission-полей в `workspace.yaml`.
 {
   "commit": false,
   "create_proposal_branch": false,
-  "trigger": "ui"
+  "trigger": "ui",
+  "intent": "start"
 }
 ```
+
+`intent` optional, default `start`. Обычный `start` при active analysis run возвращает
+`409 run_active` и не создаёт history item. `intent=queue` разрешён только для `refresh`:
+без active run refresh стартует сразу, а при active run создаёт или заменяет единственный
+pending refresh. Заменённый pending run получает terminal `status=canceled`,
+`error_code=run_superseded` и `superseded_by_run_id`.
 
 `trigger` поддерживает только enum:
 - `ui`
@@ -682,7 +770,11 @@ Partial update persisted permission-полей в `workspace.yaml`.
 **400**
 - `invalid_request_body`
 - `trigger_unsupported`
+- `queue_unsupported`
 - `run_start_failed`
+
+**409**
+- `run_active`
 
 `runner_unavailable` и `runtime_contract_failed` не возвращаются start-endpoint'ом; эти коды появляются только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`, когда конкретный step-scoped provider проходит lazy preflight или runtime execution.
 
@@ -692,9 +784,10 @@ Partial update persisted permission-полей в `workspace.yaml`.
 ### POST `/api/pipeline/runs/<run_id>/cancel`
 Запрашивает отмену async run.
 
-Отмена не вводит новый `status` enum:
-- pending (`queued` в debounce queue) переводится в terminal `failed` немедленно;
-- active (`queued/running` текущий active run) отменяется cooperative через `context cancel` и завершается `failed`.
+Отмена использует terminal `status=canceled`:
+- pending run переводится в `canceled` немедленно;
+- active run отменяется cooperative через `context cancel` и завершается `canceled` с
+  `error_code=run_canceled`.
 
 **Request body**
 - пустой body допустим;
@@ -730,6 +823,7 @@ Partial update persisted permission-полей в `workspace.yaml`.
   "started_at": "2026-04-03T12:00:00Z",
   "finished_at": null,
   "current_step": "init.step1.collect",
+  "runtime_mode": "headless",
   "step_providers": {
     "step0_constitution": "claude-code",
     "step1_collect": "claude-code",
@@ -749,6 +843,7 @@ Partial update persisted permission-полей в `workspace.yaml`.
 - `running`
 - `succeeded`
 - `failed`
+- `canceled`
 
 Для runtime parse/runtime ошибок после успешного async start используется run-level статус:
 - `error_code: "runtime_contract_failed"` (или другой actionable code) в `failed` run.
@@ -763,7 +858,7 @@ Partial update persisted permission-полей в `workspace.yaml`.
 - `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
-Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются.
+Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed/canceled), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются. Ответ также содержит authoritative `coordination`: active run и единственный pending refresh, если они есть. Additive boolean `authoritative_index` сообщает, зарегистрирован ли у run его собственный staged `final-run-index.json`; только `succeeded init|refresh` с этим флагом являются Change Review packages. Финальная content/readability validation всё равно выполняется snapshot loader-ом при выборе run.
 
 Параметры:
 - `limit` optional, default `50`, max `500`
@@ -771,6 +866,10 @@ Partial update persisted permission-полей в `workspace.yaml`.
 **200**
 ```json
 {
+  "coordination": {
+    "active_run_id": null,
+    "pending": null
+  },
   "items": [
     {
       "run_id": "run_20260403_001",
@@ -779,6 +878,8 @@ Partial update persisted permission-полей в `workspace.yaml`.
       "started_at": "2026-04-03T12:00:00Z",
       "finished_at": "2026-04-03T12:00:02Z",
       "current_step": "init.step4.proposals",
+      "authoritative_index": true,
+      "runtime_mode": "headless",
       "step_providers": {
         "step0_constitution": "claude-code",
         "step1_collect": "claude-code",
@@ -926,12 +1027,62 @@ Partial update persisted permission-полей в `workspace.yaml`.
 
 ## 5) Git helper endpoints
 
+### GET `/api/git/diff`
+Возвращает authoritative полный inventory Git-состояния workspace. Query `path`, `folder`,
+`run_id` и `step_id` выбирают только preview; `files[]` и `fingerprint` всегда описывают весь
+workspace scope, соответствующий будущему `git add -A`.
+
+Identity содержит `branch`, `head_oid`, `base_ref`, `base_oid`. Для каждого файла возвращаются
+normalized `status`, `index_status`, `worktree_status`, `path`, nullable `original_path`,
+old/new mode, HEAD/index object identity, worktree SHA-256, additions/deletions и flags
+`binary|unavailable`. Rename/copy не теряют source path.
+
+`fingerprint` — SHA-256 канонического отсортированного manifest identity + полного inventory;
+он меняется при смене branch/HEAD/base, status/path/mode/index blob или рабочего содержимого.
+
+**200**
+```json
+{
+  "scope": "full_workspace",
+  "branch": "main",
+  "head_oid": "abc123",
+  "base_ref": "HEAD",
+  "base_oid": "abc123",
+  "fingerprint": "<sha256>",
+  "empty": false,
+  "files": [
+    {
+      "path": "reports/as-is/overview.md",
+      "original_path": null,
+      "status": "modified",
+      "index_status": " ",
+      "worktree_status": "M",
+      "old_mode": "100644",
+      "new_mode": "100644",
+      "head_oid": "<blob>",
+      "index_oid": "<blob>",
+      "worktree_sha256": "<sha256>",
+      "binary": false,
+      "unavailable": false,
+      "additions": 1,
+      "deletions": 0
+    }
+  ],
+  "selected_file": null,
+  "hunks": []
+}
+```
+
 ### POST `/api/git/commit`
-Коммитит текущие изменения в bound workspace repo.
+Коммитит текущие изменения в bound workspace repo с честной семантикой `git add -A`.
 
 **Request**
 ```json
-{ "message": "chore: update ACP workspace artifacts" }
+{
+  "message": "chore: update ACP workspace artifacts",
+  "expected_fingerprint": "<sha256>",
+  "expected_head_oid": "abc123"
+}
 ```
 
 **200 (committed)**
@@ -957,13 +1108,24 @@ Partial update persisted permission-полей в `workspace.yaml`.
 
 **Request**
 ```json
-{ "name": "proposal/beta-refresh" }
+{
+  "name": "proposal/beta-refresh",
+  "expected_fingerprint": "<sha256>",
+  "expected_source_branch": "main",
+  "expected_base_ref": "HEAD",
+  "expected_base_oid": "abc123",
+  "expected_head_oid": "abc123"
+}
 ```
 
 **200**
 ```json
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
+
+Обе mutation операции сериализованы. Несовпадение подтверждённых branch/HEAD/base/inventory
+возвращает `409 stale_git_confirmation` до любой Git mutation. Пустой fingerprint возвращает
+`400 git_confirmation_required`.
 
 ## 6) Q&A endpoints
 

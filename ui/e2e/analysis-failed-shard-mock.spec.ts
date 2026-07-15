@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -469,9 +470,9 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByTestId("stage-analysis").click();
-  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
 
   const recovery = page.getByTestId("analysis-failure-recovery");
   await expect(recovery).toBeVisible();
@@ -489,11 +490,14 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expect(liveDiagnostics).toContainText("Open the failed shard row and raw-output ref");
 
   const shardTable = page.getByTestId("analysis-shard-table");
+  const diagnosticsDrawer = page.getByTestId("runs-diagnostics-drawer");
+  await diagnosticsDrawer.locator("summary").click();
+  await expect(diagnosticsDrawer).toHaveAttribute("open", "");
   await expect(shardTable).toContainText("payments-root-shard");
   await expect(shardTable).toContainText("Runtime only");
   await expect(shardTable).toContainText("authored markdown and shard-pack-manifest are missing");
   await expect(shardTable).toContainText("invoices-module-shard");
-  await expect(shardTable).toContainText("Artifact pair present");
+  await expect(shardTable).toContainText("artifact list not loaded for this run");
   await expect(shardTable).not.toContainText("ftgo-applicationRuntime only");
 
   const drilldown = page.getByTestId("analysis-failed-shard-details");
@@ -519,5 +523,6 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "analysis-failed-shard-mobile.png");
 
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });
