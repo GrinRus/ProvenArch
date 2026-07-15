@@ -48,19 +48,34 @@ export async function saveEditableArtifact(path: string, content: string): Promi
   });
 }
 
-export async function commitWorkspaceArtifacts(message: string): Promise<{ status: string; message?: string; output?: string }> {
+export type GitConfirmationIdentity = {
+  fingerprint: string;
+  headOID: string;
+  sourceBranch: string;
+  baseRef: string;
+  baseOID: string;
+};
+
+export async function commitWorkspaceArtifacts(message: string, confirmation: GitConfirmationIdentity): Promise<{ status: string; message?: string; output?: string }> {
   return fetchJSON<{ status: string; message?: string; output?: string }>("/api/git/commit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, expected_fingerprint: confirmation.fingerprint, expected_head_oid: confirmation.headOID }),
   });
 }
 
-export async function createProposalBranch(name: string): Promise<{ branch: string }> {
+export async function createProposalBranch(name: string, confirmation: GitConfirmationIdentity): Promise<{ branch: string }> {
   return fetchJSON<{ branch: string }>("/api/git/proposal-branch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({
+      name,
+      expected_fingerprint: confirmation.fingerprint,
+      expected_source_branch: confirmation.sourceBranch,
+      expected_base_ref: confirmation.baseRef,
+      expected_base_oid: confirmation.baseOID,
+      expected_head_oid: confirmation.headOID,
+    }),
   });
 }
 

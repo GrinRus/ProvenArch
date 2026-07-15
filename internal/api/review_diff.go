@@ -3,6 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -154,7 +157,7 @@ func runReviewStepState(status orchestrator.RunStatus, index int, activeIndex in
 	switch status {
 	case orchestrator.RunStatusSucceeded:
 		return "done"
-	case orchestrator.RunStatusFailed:
+	case orchestrator.RunStatusFailed, orchestrator.RunStatusCanceled:
 		if index < activeIndex {
 			return "done"
 		}
@@ -329,12 +332,34 @@ func lastReviewLogMessage(logs []orchestrator.RunLogEntry) string {
 }
 
 type gitDiffFile struct {
-	Path      string `json:"path"`
-	Folder    string `json:"folder"`
-	Status    string `json:"status"`
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
-	Binary    bool   `json:"binary"`
+	Path           string  `json:"path"`
+	OriginalPath   *string `json:"original_path"`
+	Folder         string  `json:"folder"`
+	Status         string  `json:"status"`
+	IndexStatus    string  `json:"index_status"`
+	WorktreeStatus string  `json:"worktree_status"`
+	OldMode        string  `json:"old_mode,omitempty"`
+	NewMode        string  `json:"new_mode,omitempty"`
+	HeadOID        string  `json:"head_oid,omitempty"`
+	IndexOID       string  `json:"index_oid,omitempty"`
+	WorktreeSHA256 string  `json:"worktree_sha256,omitempty"`
+	Additions      int     `json:"additions"`
+	Deletions      int     `json:"deletions"`
+	Binary         bool    `json:"binary"`
+	Unavailable    bool    `json:"unavailable"`
+}
+
+type gitWorkspaceIdentity struct {
+	Branch  string `json:"branch"`
+	HeadOID string `json:"head_oid"`
+	BaseRef string `json:"base_ref"`
+	BaseOID string `json:"base_oid"`
+}
+
+type gitWorkspaceState struct {
+	Identity    gitWorkspaceIdentity
+	Files       []gitDiffFile
+	Fingerprint string
 }
 
 type gitDiffFolderSummary struct {
@@ -377,13 +402,31 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 
 	snapshot := s.sessionSnapshot()
 	ws := snapshot.Workspace
-	files, err := collectWorkspaceGitDiffFiles(request.Context(), ws, pathFilter, folderFilter, runID, stepID, snapshot.Service)
+	state, err := collectWorkspaceGitState(request.Context(), ws)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
 		return
 	}
+	files := state.Files
 	folders := summarizeGitDiffFolders(files)
 	selectedPath := pathFilter
+	if selectedPath == "" && folderFilter != "" {
+		for _, file := range files {
+			if file.Path == folderFilter || strings.HasPrefix(file.Path, strings.TrimRight(folderFilter, "/")+"/") {
+				selectedPath = file.Path
+				break
+			}
+		}
+	}
+	if selectedPath == "" && runID != "" {
+		allowed := artifactPathFilterForRun(runID, stepID, snapshot.Service)
+		for _, file := range files {
+			if _, ok := allowed[file.Path]; ok {
+				selectedPath = file.Path
+				break
+			}
+		}
+	}
 	if selectedPath == "" && len(files) > 0 {
 		selectedPath = files[0].Path
 	}
@@ -395,6 +438,12 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"ok":            true,
 		"workspace":     ws.Path,
+		"scope":         "full_workspace",
+		"branch":        state.Identity.Branch,
+		"head_oid":      formatOptionalString(state.Identity.HeadOID),
+		"base_ref":      state.Identity.BaseRef,
+		"base_oid":      formatOptionalString(state.Identity.BaseOID),
+		"fingerprint":   state.Fingerprint,
 		"run_id":        formatOptionalString(runID),
 		"step_id":       formatOptionalString(stepID),
 		"selected_path": formatOptionalString(selectedPath),
@@ -434,31 +483,30 @@ func normalizeOptionalWorkspacePath(rawPath string) (string, error) {
 	return clean, nil
 }
 
-func collectWorkspaceGitDiffFiles(ctx context.Context, ws workspace.Root, pathFilter string, folderFilter string, runID string, stepID string, service *orchestrator.Service) ([]gitDiffFile, error) {
+func collectWorkspaceGitState(ctx context.Context, ws workspace.Root) (gitWorkspaceState, error) {
 	statusOutput, err := runGitRaw(ctx, ws.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
-		return nil, err
+		return gitWorkspaceState{}, err
 	}
 	files := parseGitStatusFiles(statusOutput)
-	allowedByRun := artifactPathFilterForRun(runID, stepID, service)
-	filtered := make([]gitDiffFile, 0, len(files))
-	for _, file := range files {
-		if pathFilter != "" && file.Path != pathFilter {
-			continue
-		}
-		if folderFilter != "" && file.Path != folderFilter && !strings.HasPrefix(file.Path, strings.TrimRight(folderFilter, "/")+"/") {
-			continue
-		}
-		if allowedByRun != nil {
-			if _, ok := allowedByRun[file.Path]; !ok {
-				continue
-			}
-		}
-		enriched := enrichGitDiffFile(ctx, ws, file)
-		filtered = append(filtered, enriched)
+	for index := range files {
+		files[index] = enrichGitDiffFile(ctx, ws, files[index])
 	}
-	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Path < filtered[j].Path })
-	return filtered, nil
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].Path == files[j].Path {
+			return optionalStringValue(files[i].OriginalPath) < optionalStringValue(files[j].OriginalPath)
+		}
+		return files[i].Path < files[j].Path
+	})
+	identity, err := collectGitWorkspaceIdentity(ctx, ws.Path)
+	if err != nil {
+		return gitWorkspaceState{}, err
+	}
+	fingerprint, err := fingerprintGitWorkspaceState(identity, files)
+	if err != nil {
+		return gitWorkspaceState{}, err
+	}
+	return gitWorkspaceState{Identity: identity, Files: files, Fingerprint: fingerprint}, nil
 }
 
 func artifactPathFilterForRun(runID string, stepID string, service *orchestrator.Service) map[string]struct{} {
@@ -499,9 +547,11 @@ func parseGitStatusFiles(output string) []gitDiffFile {
 		}
 		code := item[:2]
 		rel := strings.TrimSpace(item[3:])
+		var originalPath *string
 		if strings.Contains(code, "R") || strings.Contains(code, "C") {
 			if index+1 < len(parts) && strings.TrimSpace(parts[index+1]) != "" {
-				rel = strings.TrimSpace(parts[index+1])
+				original := filepath.ToSlash(strings.TrimSpace(parts[index+1]))
+				originalPath = &original
 				index += 1
 			}
 		}
@@ -509,9 +559,12 @@ func parseGitStatusFiles(output string) []gitDiffFile {
 			continue
 		}
 		files = append(files, gitDiffFile{
-			Path:   filepath.ToSlash(rel),
-			Folder: gitDiffFolder(filepath.ToSlash(rel)),
-			Status: gitDiffStatusLabel(code),
+			Path:           filepath.ToSlash(rel),
+			OriginalPath:   originalPath,
+			Folder:         gitDiffFolder(filepath.ToSlash(rel)),
+			Status:         gitDiffStatusLabel(code),
+			IndexStatus:    gitStatusColumn(code, 0),
+			WorktreeStatus: gitStatusColumn(code, 1),
 		})
 	}
 	return files
@@ -524,6 +577,8 @@ func gitDiffStatusLabel(code string) string {
 		return "untracked"
 	case strings.Contains(code, "R"):
 		return "renamed"
+	case strings.Contains(code, "C"):
+		return "copied"
 	case strings.Contains(code, "D"):
 		return "deleted"
 	case strings.Contains(code, "A"):
@@ -533,6 +588,16 @@ func gitDiffStatusLabel(code string) string {
 	default:
 		return "changed"
 	}
+}
+
+func gitStatusColumn(code string, index int) string {
+	if index < 0 || index >= len(code) || code[index] == ' ' {
+		return "clean"
+	}
+	if code[index] == '?' {
+		return "untracked"
+	}
+	return string(code[index])
 }
 
 func gitDiffFolder(rel string) string {
@@ -545,6 +610,14 @@ func gitDiffFolder(rel string) string {
 
 func enrichGitDiffFile(ctx context.Context, ws workspace.Root, file gitDiffFile) gitDiffFile {
 	file.Binary = workspaceFileIsBinary(ws, file.Path)
+	file.OldMode, file.HeadOID = gitHeadEntry(ctx, ws.Path, file.Path)
+	file.NewMode, file.IndexOID = gitIndexEntry(ctx, ws.Path, file.Path)
+	if content, err := ws.ReadFile(file.Path); err == nil {
+		sum := sha256.Sum256(content)
+		file.WorktreeSHA256 = hex.EncodeToString(sum[:])
+	} else if file.Status != "deleted" {
+		file.Unavailable = true
+	}
 	switch file.Status {
 	case "untracked", "new":
 		if !file.Binary {
@@ -559,6 +632,69 @@ func enrichGitDiffFile(ctx context.Context, ws workspace.Root, file gitDiffFile)
 		file.Binary = file.Binary || binary
 	}
 	return file
+}
+
+func gitHeadEntry(ctx context.Context, repoPath string, rel string) (string, string) {
+	output, err := runGit(ctx, repoPath, "ls-tree", "HEAD", "--", rel)
+	if err != nil || strings.TrimSpace(output) == "" {
+		return "", ""
+	}
+	fields := strings.Fields(output)
+	if len(fields) < 3 {
+		return "", ""
+	}
+	return fields[0], fields[2]
+}
+
+func gitIndexEntry(ctx context.Context, repoPath string, rel string) (string, string) {
+	output, err := runGit(ctx, repoPath, "ls-files", "--stage", "--", rel)
+	if err != nil || strings.TrimSpace(output) == "" {
+		return "", ""
+	}
+	fields := strings.Fields(output)
+	if len(fields) < 2 {
+		return "", ""
+	}
+	return fields[0], fields[1]
+}
+
+func collectGitWorkspaceIdentity(ctx context.Context, repoPath string) (gitWorkspaceIdentity, error) {
+	identity := gitWorkspaceIdentity{Branch: "DETACHED"}
+	if branch, err := runGit(ctx, repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
+		identity.Branch = strings.TrimSpace(branch)
+	}
+	if head, err := runGit(ctx, repoPath, "rev-parse", "--verify", "HEAD"); err == nil {
+		identity.HeadOID = strings.TrimSpace(head)
+	}
+	identity.BaseRef = identity.Branch
+	identity.BaseOID = identity.HeadOID
+	if upstream, err := runGit(ctx, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil && strings.TrimSpace(upstream) != "" {
+		identity.BaseRef = strings.TrimSpace(upstream)
+		if base, baseErr := runGit(ctx, repoPath, "merge-base", "HEAD", identity.BaseRef); baseErr == nil {
+			identity.BaseOID = strings.TrimSpace(base)
+		}
+	}
+	return identity, nil
+}
+
+func fingerprintGitWorkspaceState(identity gitWorkspaceIdentity, files []gitDiffFile) (string, error) {
+	payload := struct {
+		Identity gitWorkspaceIdentity `json:"identity"`
+		Files    []gitDiffFile        `json:"files"`
+	}{Identity: identity, Files: files}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal git fingerprint manifest: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func gitNumstatForPath(ctx context.Context, ws workspace.Root, rel string) (int, int, bool) {

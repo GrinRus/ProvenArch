@@ -776,6 +776,7 @@ func newCLIService(ws workspace.Root, runtimeConfig resolvedRuntimeConfig, extra
 			return providers.BuildRunner(runtimeConfig.mode, provider)
 		}),
 		orchestrator.WithProviderFallback(runtimeConfig.provider, runtimeConfig.providerSource),
+		orchestrator.WithRuntimeMode(runtimeConfig.mode),
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunLogsRetention(runtimeConfig.runLogsTTL, runtimeConfig.runLogsMaxRuns),
 		orchestrator.WithExecutionOverrides(runtimeConfig.executionOverrides),

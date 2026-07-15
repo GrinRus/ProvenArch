@@ -4832,9 +4832,15 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 - [x] Align `codex-code` normal draft pre-artifact window with the existing Claude/Qwen draft budget and require `step2.asis_docs` first provider item to be command execution, not assistant/status prose.
 - [x] Rerun diagnostic `smoke tiny codex-code` after the Codex draft pre-command stall fix from a clean committed tree and classify the outcome.
 - [x] Rerun diagnostic `smoke tiny codex-code` after Codex quota/auth is available again; current provider usage-limit blocker prevented reaching `step2`.
-- [ ] Remove the remaining init-only `step2.asis_docs` first-pass stale downstream-index wording: when current-run final/citation indexes are not present yet, overview must omit downstream index status instead of saying they are unavailable.
-- [ ] Remove the remaining init-only `step4.proposals` first-pass low-actionability repair path: medium/high findings must link exact finding ID, affected surface/path and concrete operator action before repair.
+- [x] Remove the remaining init-only `step2.asis_docs` first-pass stale downstream-index wording: when current-run final/citation indexes are not present yet, overview must omit downstream index status instead of saying they are unavailable.
+- [x] Remove the remaining init-only `step4.proposals` first-pass low-actionability repair path: medium/high findings must link exact finding ID, affected surface/path and concrete operator action before repair.
 - [ ] Run broader trusted validation only after Phase A is `Excellent` from a clean committed tree with `qwen`, `claude`, and `codex` available in `PATH`.
+
+2026-07-15 deterministic follow-up: fake as-is evidence no longer leaks taskrun staging paths;
+normal step2 first-pass guidance now explicitly omits absent downstream-index status; normal
+step4 self-check requires exact same-line medium/high finding linkage before manifest write.
+The two remaining prompt/fake-output implementation items above are complete in code and focused
+tests; the clean-tree trusted rerun remains open and is intentionally separate from deterministic DoD.
 
 ### Non-goals
 - [ ] Do not weaken draft validation or artifact-quality gates.
@@ -4983,7 +4989,7 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
 | 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
-| 20 Console UX trust and IA reset | planned (implementation wave fixed; `20A` first) | Corrective post-beta program; target design plus `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md` define the one-shell, contract-first delivery path |
+| 20 Console UX trust and IA reset | in progress (20A–20I1 foundation implemented) | Trustworthy snapshot/Git/runtime/coordination contracts and the five-destination shell foundation are implemented; 20F2, 20I2 and 20J–20N remain open |
 | 21 Evidence-backed Architecture Home + impact-aware refresh | planned (Wave 1) | Out of MVP; implementation starts only from its separate architecture-home/docs-quality slice |
 
 ---
@@ -5020,6 +5026,49 @@ The latest `smoke tiny` diagnostic (`smoke-tiny-bank-runtime-pass-20260704T12112
 - Confirmed quality gaps include generated UI drift, ShellCheck coverage, missing V8 coverage dependency and missing failure-injection/request-order tests.
 - No production code, API, schema or contract changes were made.
 - Final worktree verification found only `docs/PLANS.md` and `docs/CODE_AUDIT_2026-07-10.md`.
+
+---
+
+## EP-20260715-console-trust-shell
+
+### Context
+- Epic 20 starts with contract truth before the Console IA cutover: selected-run evidence, Git inventory, runtime identity and run coordination must be authoritative.
+- Epic 18 quality closure remains an independent release-readiness track and must not leak live-provider dependencies into required CI.
+
+### Goals
+- Deliver 20A–20I1 as small reviewable slices, ending with one path-based shell at `/setup`, `/home`, `/runs`, `/knowledge` and `/changes`.
+- Close deterministic Epic 18 quality/contamination gaps and run the canonical trusted-machine live gate only after deterministic DoD.
+- Keep API changes additive where compatibility permits and synchronize docs, TypeScript contracts, validators, fixtures and tests.
+
+### Non-goals
+- No 20F2 queue UI, 20I2 deep URL context, 20J–20N or Epic 21 implementation.
+- No new runtime providers, hosted mode or security/compliance enforcement.
+- No live network/provider dependency in required CI.
+
+### Plan
+- [x] 20A: make selected-run evidence an atomic, fail-closed `RunEvidenceSnapshot` with explicit source mode.
+- [x] 20B1/20B2: publish complete Git inventory/identity/fingerprint and reject stale mutations before side effects.
+- [x] 20C1/20C2: persist runtime identity and separate effective runtime from restart-only desired settings after Console entry.
+- [x] 20F1: make ordinary starts fail with typed `run_active`; expose active/pending coordination and typed supersession.
+- [x] 20D/20G/20H/20E: add demo identity, safe evidence rendering, accessible primitives and one workflow selector.
+- [x] 20I1: atomically replace StageRail with the five-destination native History API shell.
+- [x] Epic 18: synchronize quality contracts, remove contamination/actionability defects and add deterministic fixtures.
+- [x] Run `make contracts`, `make test`, `make lint`, `make build` and `npm run e2e:mock --prefix ui`.
+- [ ] Perform trusted-host preflight; run direct canonical matrix commands only when all prerequisites pass.
+
+### Acceptance
+- Selected-run Review/Publish never falls back to current workspace content.
+- Git confirmation covers the exact full-workspace mutation set and stale confirmation has no side effects.
+- Historical run identity never derives from current UI selection; active/pending coordination is public and typed.
+- Only the new shell is interactive after 20I1, with direct URL and Back/Forward coverage.
+- Required CI remains deterministic; release readiness is reported only from PASS verdicts plus accepted SWE UX and artifact-quality assessments.
+
+### Results
+- The agreed Epic 20 foundation scope through 20I1 is complete: snapshot evidence is fail-closed, Git mutations are fingerprint-confirmed, runtime/coordination state is server-authored, and the legacy StageRail shell is absent from the product DOM. Epic 20 as a whole remains open.
+- Epic 18 R1/R2 are complete with promoted-evidence-first assessment language, contamination fixes and regression fixtures.
+- Deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 127 Vitest tests, ShellCheck/typecheck, production build and 7/7 Playwright mock scenarios with critical axe checks.
+- Production dependency audit reports zero vulnerabilities after pinning the Mermaid transitive DOMPurify dependency to `3.4.12`.
+- R3 is intentionally not executed from this worktree: the canonical trusted-machine gate requires reviewed committed inputs, all three release providers in `PATH`, direct matrix invocation and accepted SWE assessment reports.
 
 ---
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AppShell } from "./components/AppShell";
-import { BaselineGitPanel } from "./components/BaselineGitPanel";
+import { ProductShell } from "./components/ProductShell";
+import { ModalDialog } from "./components/ModalDialog";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import {
@@ -22,29 +22,33 @@ import {
   runtimeStepProviderOrder,
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
+  type Artifact,
   type GuidedRepo,
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
   type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
+  type RunStatusResponse,
   type SystemVersionResponse,
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
+import { defaultStageForDestination, destinationForStage, destinationFromPath, destinationPaths } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
-import { buildStageOptions } from "./lib/stageModel";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
+import { deriveWorkflowState, type WorkflowDestination, type WorkflowState } from "./lib/workflowState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
-import { forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
+import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 import { loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 
 export default function App() {
-  const [activeStage, setActiveStage] = useState<StageId>("source");
+  const [destination, setDestination] = useState<WorkflowDestination>(() => destinationFromPath(window.location.pathname, true));
+  const [activeStage, setActiveStageState] = useState<StageId>(() => defaultStageForDestination(destinationFromPath(window.location.pathname, true)));
   const userSelectedStageRef = useRef(false);
   const autoOpenedStageRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -64,11 +68,29 @@ export default function App() {
   const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
   const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
   const [consoleReady, setConsoleReady] = useState(false);
-  const [analysisFocusSignal, setAnalysisFocusSignal] = useState(0);
-  const [askPrimaryActionSignal, setAskPrimaryActionSignal] = useState(0);
+  const [analysisFocusSignal] = useState(0);
+  const [askPrimaryActionSignal] = useState(0);
   const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
+
+  const navigateDestination = useCallback((nextDestination: WorkflowDestination, replace = false) => {
+    const nextPath = destinationPaths[nextDestination];
+    if (window.location.pathname !== nextPath) {
+      window.history[replace ? "replaceState" : "pushState"]({}, "", nextPath);
+    }
+    setDestination(nextDestination);
+  }, []);
+
+  const setActiveStage = useCallback((stage: StageId) => {
+    setActiveStageState(stage);
+    navigateDestination(destinationForStage(stage));
+  }, [navigateDestination]);
+
+  const handleDestinationChange = useCallback((nextDestination: WorkflowDestination) => {
+    navigateDestination(nextDestination);
+    setActiveStageState(defaultStageForDestination(nextDestination));
+  }, [navigateDestination]);
 
   const runtimeSettings = useRuntimeSettings({
     setBusy,
@@ -84,6 +106,8 @@ export default function App() {
   });
 
   const {
+    effectiveRuntimeMode,
+    effectiveRuntimeProvider,
     runtimeTimeoutPersisted,
     runtimeTimeoutEffective,
     runtimeTimeoutSource,
@@ -123,25 +147,17 @@ export default function App() {
     runList,
     selectedArtifact,
     selectedArtifactContent,
-    runLogsStatus,
-    runLogsViewMode,
-    setRunLogsViewMode,
-    runLogsMode,
-    setRunLogsMode,
     runActionStatus,
     cancelBusy,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     runCounters,
-    runLogTaskrunPaths,
     runLogs,
-    filteredRunLogs,
     diagramArtifacts,
     nonDiagramArtifacts,
-    selectedArtifactIsMermaid,
     selectedRunWarnings,
     selectedRunIsActive,
-    runLogsRendered,
     runReviewSummary,
     runReviewStatus,
     gitDiff,
@@ -152,8 +168,6 @@ export default function App() {
     handleSelectRun,
     handleCancelSelectedRun,
     handleOpenArtifact,
-    handleCopyRunLogs,
-    handleDownloadRunLogs,
   } = runExplorer;
 
   const {
@@ -180,6 +194,7 @@ export default function App() {
     proposalBranch,
     gitStatus,
     gitError,
+    gitConfirmation,
     bootstrapWorkspaceSetup,
     setManifestContent,
     setGuidedDocsImportsPath,
@@ -204,11 +219,23 @@ export default function App() {
     handleSaveSelectedEditorArtifact,
     handleGitCommit,
     handleCreateProposalBranch,
+    confirmGitAction,
+    cancelGitAction,
   } = workspaceSetup;
 
   useEffect(() => {
     void bootstrapApp();
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextDestination = destinationFromPath(window.location.pathname, consoleReady);
+      navigateDestination(nextDestination, true);
+      setActiveStageState(defaultStageForDestination(nextDestination));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [consoleReady, navigateDestination]);
 
   useEffect(() => {
     if (activeStage !== "charter") {
@@ -231,12 +258,26 @@ export default function App() {
       syncOnboardingStatus(status);
       if (!status.can_enter_console) {
         setConsoleReady(false);
+		navigateDestination("setup", true);
         return;
       }
       await bootstrapConsoleData({ validateWorkspace: true });
       setConsoleReady(true);
+		navigateDestination(destinationFromPath(window.location.pathname, true), true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
+    }
+  }
+
+  async function handleConsoleRefresh() {
+    setBusy(true);
+    setError(null);
+    try {
+      await bootstrapApp();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -355,8 +396,11 @@ export default function App() {
       setError("Validate sources and select a runner before opening the console.");
       return false;
     }
-    await bootstrapConsoleData({ validateWorkspace: false });
-    setConsoleReady(true);
+	await bootstrapConsoleData({ validateWorkspace: false });
+	const enteredStatus = await enterOnboardingConsole();
+	syncOnboardingStatus(enteredStatus);
+	setConsoleReady(true);
+	handleDestinationChange("home");
     return true;
   }
 
@@ -484,39 +528,10 @@ export default function App() {
     setActiveStage("review");
   }
 
-  function handleStageChange(stage: StageId) {
-    userSelectedStageRef.current = true;
-    if (stage === "review") {
-      enterReviewStage();
-      return;
-    }
-    setActiveStage(stage);
-  }
-
   const diagnostics = useMemo(() => [...(validateResult?.errors ?? []), ...(validateResult?.warnings ?? [])], [validateResult]);
   const validationErrors = useMemo(() => diagnostics.filter((diagnostic) => diagnostic.level === "error"), [diagnostics]);
   const doctorFailures = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "fail") ?? [], [setupDoctorResult]);
   const artifactCount = nonDiagramArtifacts.length + diagramArtifacts.length;
-  const proposalArtifacts = useMemo(
-    () => nonDiagramArtifacts.filter((artifact) => artifact.path.startsWith("proposals/") || artifact.path.startsWith("reports/changelog/")),
-    [nonDiagramArtifacts],
-  );
-  const preferredReviewArtifactPath = useMemo(() => {
-    const preferredArtifact =
-      nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md") ??
-      nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/") && !artifact.path.startsWith("reports/changelog/")) ??
-      nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("model/")) ??
-      diagramArtifacts[0];
-    return preferredArtifact?.path ?? "";
-  }, [diagramArtifacts, nonDiagramArtifacts]);
-
-  function enterReviewStage() {
-    setActiveStage("review");
-    if (preferredReviewArtifactPath && isProposalReviewArtifact(selectedArtifact) && selectedArtifact !== preferredReviewArtifactPath) {
-      void handleOpenArtifact(preferredReviewArtifactPath);
-    }
-  }
-
   useEffect(() => {
     if (userSelectedStageRef.current || autoOpenedStageRef.current) {
       return;
@@ -547,174 +562,20 @@ export default function App() {
     [loadGitDiff, runId],
   );
 
-  const stages = useMemo(
-    () =>
-      buildStageOptions({
-        activeStage,
-        hasManifest: Boolean(manifestContent.trim()),
-        readinessBlocked: validationErrors.length > 0 || doctorFailures.length > 0,
-        readinessDone: Boolean(validateResult?.ok && setupDoctorResult?.ok),
-        charterStarted: Boolean(wizardProjectName.trim() || selectedEditorPath),
-        analysisBlocked: runStatus?.status === "failed" || (runStatus?.pending_permissions?.length ?? 0) > 0,
-        selectedRunIsActive,
-        runSucceeded: runStatus?.status === "succeeded",
-        artifactCount,
-        proposalArtifactCount: proposalArtifacts.length,
-        runningRunCount: runCounters.running,
-        hasGitStatus: Boolean(gitStatus),
-      }),
-    [
-      activeStage,
-      artifactCount,
-      doctorFailures.length,
-      gitStatus,
-      manifestContent,
-      proposalArtifacts.length,
-      runCounters.running,
-      runStatus,
-      selectedEditorPath,
-      selectedRunIsActive,
-      setupDoctorResult,
-      validateResult,
-      validationErrors.length,
-      wizardProjectName,
-    ],
-  );
+  const runtimeLabel = runtimeDisplayLabel(effectiveRuntimeMode === "unknown" ? "" : effectiveRuntimeMode, effectiveRuntimeProvider, { compact: true });
+  const selectedRunProvider = useMemo(() => {
+    if (!runStatus?.runtime_mode) {
+      return "Unknown";
+    }
+    const providers = Array.from(new Set(Object.values(runStatus.step_providers ?? {}).map((value) => value.trim()).filter(Boolean)));
+    return providers.length > 1 ? "Mixed" : providers[0] ?? (runStatus.runtime_mode === "fake" ? "fake" : "Unknown");
+  }, [runStatus?.runtime_mode, runStatus?.step_providers]);
 
-  const blockers = useMemo<InspectorItem[]>(() => {
-    const items: InspectorItem[] = [];
-    for (const diagnostic of validationErrors) {
-      items.push({
-        severity: "error",
-        label: diagnostic.code,
-        detail: diagnostic.suggestion ? `${diagnostic.message} Suggested fix available.` : diagnostic.message,
-        path: diagnostic.path,
-      });
+  useEffect(() => {
+    if (runStatus?.runtime_mode === "fake" && gitMessage === "chore: update ACP workspace artifacts") {
+      setGitMessage("chore: publish deterministic ACP demo evidence");
     }
-    for (const check of doctorFailures) {
-      items.push({
-        severity: "error",
-        label: check.label,
-        detail: check.suggestion ? `${check.message} Suggested fix available.` : check.message,
-      });
-    }
-    for (const request of runStatus?.pending_permissions ?? []) {
-      items.push({
-        severity: "error",
-        label: request.action ? `Permission: ${request.action}` : "Runtime permission",
-        detail: formatPermissionBlockerDetail(request),
-      });
-    }
-    if (runStatus?.error_code) {
-      const issue = selectedRunIssueCopy(runStatus.error_code, runStatus.error, "inspector");
-      items.push({
-        severity: "error",
-        label: issue.label,
-        detail: issue.detail,
-      });
-    }
-    if (openQuestions.trim()) {
-      items.push({
-        severity: "warn",
-        label: "Open questions",
-        detail: "Review coverage questions before publishing.",
-        path: "reports/coverage/open-questions.md",
-      });
-    }
-    if (activeStage === "publish" && artifactCount === 0) {
-      items.push({
-        severity: "error",
-        label: "No publishable artifacts",
-        detail: "Run Analysis before committing workspace artifacts.",
-      });
-    }
-    return items;
-  }, [activeStage, artifactCount, doctorFailures, openQuestions, runStatus, validationErrors]);
-
-  const evidenceRefs = useMemo<InspectorItem[]>(() => {
-    const refs: InspectorItem[] = [];
-    const addIfPresent = (path: string, label: string) => {
-      const exists = [...nonDiagramArtifacts, ...diagramArtifacts].some((artifact) => artifact.path === path) || Boolean(selectedArtifact === path);
-      if (exists) {
-        refs.push({ severity: "info", label, detail: path, path });
-      }
-    };
-    addIfPresent("reports/as-is/overview.md", "As-is overview");
-    addIfPresent("reports/coverage/summary.md", "Coverage summary");
-    addIfPresent("reports/findings/findings.md", "Findings");
-    if (diagramArtifacts[0]) {
-      refs.push({ severity: "info", label: "Diagram", detail: diagramArtifacts[0].path, path: diagramArtifacts[0].path });
-    }
-    if (selectedArtifact && !refs.some((ref) => ref.path === selectedArtifact)) {
-      refs.push({ severity: "info", label: "Selected artifact", detail: selectedArtifact, path: selectedArtifact });
-    }
-    return refs;
-  }, [diagramArtifacts, nonDiagramArtifacts, selectedArtifact]);
-
-  const workspaceHealth = useMemo<InspectorItem[]>(() => {
-    if (workspaceHealthStatus === "loading") {
-      return [{ severity: "info", label: "Workspace health", detail: "scan running" }];
-    }
-    if (workspaceHealthStatus === "error") {
-      return [{ severity: "error", label: "Workspace health scan failed", detail: workspaceHealthError || "scan failed" }];
-    }
-    if (!workspaceHealthReport) {
-      return [];
-    }
-    if (workspaceHealthReport.items.length === 0) {
-      return [{ severity: "ok", label: "No health findings", detail: "Workspace health scan found no advisory issues." }];
-    }
-    return workspaceHealthReport.items.map((item) => ({
-      severity: workspaceHealthSeverity(item.severity),
-      label: item.id,
-      detail: item.title,
-      path: item.path,
-    }));
-  }, [workspaceHealthError, workspaceHealthReport, workspaceHealthStatus]);
-
-  const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
-
-  const runtimeSafety = useMemo<InspectorItem[]>(
-    () => [
-      {
-        severity: setupRuntime === "fake" ? "ok" : "warn",
-        label: "Runtime mode",
-        detail: setupRuntime === "fake" ? "fake baseline; no live provider command required" : `headless via ${setupRuntimeProvider}`,
-      },
-      {
-        severity: runtimePermissionEffective.mode === "trusted_full_access" ? "warn" : "ok",
-        label: "Permission mode",
-        detail: String(runtimePermissionEffective.mode ?? "trusted_full_access"),
-      },
-      {
-        severity: "info",
-        label: "Approval channel",
-        detail: String(runtimePermissionEffective.approval_channel ?? "fail_fast"),
-      },
-    ],
-    [runtimePermissionEffective.approval_channel, runtimePermissionEffective.mode, setupRuntime, setupRuntimeProvider],
-  );
-
-  const gitPublication = useMemo<InspectorItem[]>(
-    () => [
-      {
-        severity: gitError ? "error" : gitStatus ? "ok" : proposalArtifacts.length > 0 || artifactCount > 0 ? "info" : "warn",
-        label: gitError ? "Git action failed" : gitStatus ? "Last Git action" : "Publication state",
-        detail: gitError || gitStatus || (artifactCount > 0 ? "Workspace artifacts are available for review before commit." : "No generated artifacts are ready to publish yet."),
-      },
-      {
-        severity: "info",
-        label: "Commit message",
-        detail: gitMessage || "not prepared",
-      },
-      {
-        severity: "info",
-        label: "Proposal branch",
-        detail: proposalBranch || "not prepared",
-      },
-    ],
-    [artifactCount, gitError, gitMessage, gitStatus, proposalArtifacts.length, proposalBranch],
-  );
+  }, [gitMessage, runStatus?.runtime_mode, setGitMessage]);
 
   const publishExternalGateItems = useMemo(
     () => [
@@ -749,25 +610,25 @@ export default function App() {
     [doctorFailures, runStatus, validationErrors],
   );
 
-  const nextAction = useMemo<NextAction>(() => deriveNextAction(activeStage, {
-    validateOK: Boolean(validateResult?.ok),
-    doctorOK: Boolean(setupDoctorResult?.ok),
-    hasArtifacts: artifactCount > 0,
-    hasProposals: proposalArtifacts.length > 0,
-    hasRun: Boolean(runStatus),
-    blockersCount: blockers.length,
-    hardBlockersCount:
-      validationErrors.length +
-      doctorFailures.length +
-      (runStatus?.pending_permissions?.length ?? 0) +
-      (runStatus?.error_code ? 1 : 0) +
-      (activeStage === "publish" && artifactCount === 0 ? 1 : 0),
-    runBlockersCount: (runStatus?.pending_permissions?.length ?? 0) + (runStatus?.error_code ? 1 : 0) + (runStatus?.status === "failed" ? 1 : 0),
-    runErrorCode: runStatus?.error_code ?? undefined,
-    reviewFindingsCount: openQuestions.trim() ? 1 : 0,
-    releaseBlockersCount: runStatus?.error_code === "release_verdict_FAIL" ? 1 : 0,
-    gitActionFailed: Boolean(gitError),
-  }), [activeStage, artifactCount, blockers.length, doctorFailures.length, gitError, openQuestions, proposalArtifacts.length, runStatus, setupDoctorResult, validateResult, validationErrors.length]);
+  const workflow = useMemo(() => {
+    const hasRunning = runList.some((run) => run.status === "running");
+    const hasQueued = runList.some((run) => run.status === "queued");
+    const evidence = evidenceSnapshot.status === "available"
+      ? "snapshot"
+      : evidenceSnapshot.status === "partial"
+        ? "partial"
+        : evidenceSnapshot.status === "not_produced" || evidenceSnapshot.status === "unavailable" || evidenceSnapshot.status === "error"
+          ? "unavailable"
+          : artifactCount > 0 ? "current" : "none";
+    return deriveWorkflowState({
+      workspace: validateResult?.ok ? "ready" : validateResult ? "invalid" : "unconfigured",
+      execution: hasRunning ? "active" : hasQueued ? "pending" : runStatus?.status === "failed" ? "failed" : runStatus?.status === "succeeded" ? "succeeded" : "idle",
+      evidence,
+      publication: gitError.toLowerCase().includes("stale_git_confirmation") ? "stale" : gitError ? "blocked" : (gitDiff?.files?.length ?? 0) > 0 ? "dirty" : "clean",
+      openQuestions: openQuestions.split("\n").filter((line) => /^\s*[-*]\s+/.test(line)).length,
+      demo: runStatus?.runtime_mode === "fake",
+    });
+  }, [artifactCount, evidenceSnapshot.status, gitDiff?.files?.length, gitError, openQuestions, runList, runStatus?.runtime_mode, runStatus?.status, validateResult]);
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -812,56 +673,6 @@ export default function App() {
     />
   );
 
-  function handleInspectorPrimaryAction() {
-    switch (nextAction.primaryActionId) {
-      case "source":
-        void handleSetupSaveGuidedWorkspaceSetup();
-        break;
-      case "readiness":
-        if (nextAction.intent === "open-readiness") {
-          setActiveStage("readiness");
-          break;
-        }
-        if (!validateResult?.ok) {
-          void handleValidateWorkspace();
-        } else if (!setupDoctorResult?.ok) {
-          void handleSetupDoctorCheck();
-        } else {
-          void handleSetupFirstRun();
-        }
-        break;
-      case "charter":
-        void handleSaveStep0WizardContract();
-        break;
-      case "analysis":
-        if (nextAction.intent === "focus-analysis-blocker") {
-          setActiveStage("analysis");
-          setAnalysisFocusSignal((value) => value + 1);
-        } else {
-          setActiveStage("analysis");
-          void handleRunPipeline(runStatus ? "refresh" : "init");
-        }
-        break;
-      case "review":
-        enterReviewStage();
-        break;
-      case "proposals":
-        setActiveStage("proposals");
-        break;
-      case "ask":
-        if (activeStage === "ask") {
-          setAskPrimaryActionSignal((value) => value + 1);
-        } else {
-          setActiveStage("ask");
-          window.requestAnimationFrame(() => document.getElementById("qaQuestion")?.focus());
-        }
-        break;
-      case "publish":
-        void handleGitCommit();
-        break;
-    }
-  }
-
   if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
     return (
       <OnboardingShell
@@ -898,53 +709,39 @@ export default function App() {
   }
 
   return (
-    <AppShell
-      buildVersion={systemVersion.version}
-      buildCommit={systemVersion.commit}
-      buildBuilt={systemVersion.built}
-      uiBundle={systemVersion.ui_bundle}
-      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
-      repoCount={validateResult?.resolved_repos?.length ?? guidedRepos.length}
-      runtimeMode={setupRuntime}
-      runtimeProvider={setupRuntimeProvider}
-      permissionMode={String(runtimePermissionEffective.mode ?? "trusted_full_access")}
-      gitStatus={gitStatus}
-      healthLabel={setupDoctorResult?.ok ? "local ready" : validateResult?.ok ? "workspace valid" : "local connected"}
-      stages={stages}
-      activeStage={activeStage}
-      nextAction={nextAction}
-      blockers={blockers}
-      evidenceRefs={evidenceRefs}
-      workspaceHealth={workspaceHealth}
-      runtimeSafety={runtimeSafety}
-      gitPublication={gitPublication}
-      runStatus={runStatus}
-      runReviewSummary={runReviewSummary}
-      runtimeLabel={runtimeLabel}
-      cancelBusy={cancelBusy}
-      selectedRunIsActive={selectedRunIsActive}
-      selectedRunId={runStatus?.run_id}
-      selectedRunStatus={runStatus?.status}
-      selectedRunErrorCode={runStatus?.error_code ?? undefined}
-      selectedRunError={runStatus?.error ?? undefined}
-      logs={filteredRunLogs}
-      renderedLogs={runLogsRendered}
-      runLogsStatus={runLogsStatus}
-      runLogsMode={runLogsMode}
-      runLogsViewMode={runLogsViewMode}
-      canExportLogs={filteredRunLogs.length > 0}
-      taskrunPaths={runLogTaskrunPaths}
-      onRefresh={() => void bootstrapApp()}
-      onStageChange={handleStageChange}
-      onPrimaryAction={handleInspectorPrimaryAction}
-      onCancelRun={() => void handleCancelSelectedRun()}
-      onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-      onRunLogsModeChange={setRunLogsMode}
-      onRunLogsViewModeChange={setRunLogsViewMode}
-      onCopyRunLogs={() => void handleCopyRunLogs()}
-      onDownloadRunLogs={handleDownloadRunLogs}
-    >
-      {activeStage === "source" ? (
+    <>
+      <ProductShell
+        destination={destination}
+        workflow={workflow}
+        workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
+        runtimeLabel={runtimeLabel}
+        buildLabel={`${systemVersion.version} · ${systemVersion.commit}`}
+        buildTitle={`version=${systemVersion.version}; commit=${systemVersion.commit}; built=${systemVersion.built}`}
+        workspaceValid={validateResult?.ok === true}
+        onDestinationChange={handleDestinationChange}
+        onAsk={() => setActiveStageState("ask")}
+        onSettings={() => { handleDestinationChange("setup"); setActiveStageState("readiness"); }}
+        onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
+        onRefresh={() => void handleConsoleRefresh()}
+      >
+	  {destination === "setup" ? (
+		<nav className="destination-tabs" aria-label="Setup sections">
+			  {(["source", "readiness", "charter"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStageState(stage)}>{stage === "source" ? "Workspace" : stage === "readiness" ? "Runtime & readiness" : "Charter"}</button>)}
+		</nav>
+	  ) : null}
+	  {destination === "changes" ? (
+		<nav className="destination-tabs" aria-label="Changes sections">
+			  {(["review", "proposals", "publish"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStageState(stage)}>{stage === "review" ? "Review" : stage === "proposals" ? "Proposals" : "Publish"}</button>)}
+		</nav>
+	  ) : null}
+	  {destination === "home" && activeStage !== "ask" ? (
+		<HomePanel workflow={workflow} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
+	  ) : null}
+	  {destination === "knowledge" && activeStage !== "ask" ? (
+		<KnowledgePanel artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]} evidenceStatus={evidenceSnapshot.status} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} />
+	  ) : null}
+
+      {destination === "setup" && activeStage === "source" ? (
         <SourceStagePanel
           busy={busy}
           guidedRepos={guidedRepos}
@@ -955,8 +752,8 @@ export default function App() {
           validationDiagnosticsByRepo={validationDiagnosticsByRepo}
           doctorResult={setupDoctorResult}
           doctorStatus={setupDoctorStatus}
-          setupRuntime={setupRuntime}
-          setupRuntimeProvider={setupRuntimeProvider}
+          setupRuntime={effectiveRuntimeMode}
+          setupRuntimeProvider={effectiveRuntimeProvider}
           onRepoChange={handleSetupRepoChange}
           onAddRepo={handleSetupAddRepo}
           onRemoveRepo={handleSetupRemoveRepo}
@@ -968,7 +765,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "readiness" ? (
+      {destination === "setup" && activeStage === "readiness" ? (
         <ReadinessStagePanel
           busy={busy}
           validateResult={validateResult}
@@ -998,7 +795,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "charter" ? (
+      {destination === "setup" && activeStage === "charter" ? (
         <CharterStagePanel
           wizardProjectName={wizardProjectName}
           wizardScope={wizardScope}
@@ -1021,19 +818,6 @@ export default function App() {
               onSave={() => void handleSaveStep0WizardContract()}
             />
           }
-          gitPanel={
-            <BaselineGitPanel
-              busy={busy}
-              gitMessage={gitMessage}
-              proposalBranch={proposalBranch}
-              gitStatus={gitStatus}
-              gitError={gitError}
-              onGitMessageChange={setGitMessage}
-              onProposalBranchChange={setProposalBranch}
-              onCommit={() => void handleGitCommit()}
-              onCreateProposalBranch={() => void handleCreateProposalBranch()}
-            />
-          }
           busy={busy}
           baselineBundleWarnings={baselineBundleWarnings}
           baselineEditorArtifacts={baselineEditorArtifacts}
@@ -1046,7 +830,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "analysis" ? (
+      {destination === "runs" && activeStage === "analysis" ? (
         <AnalysisStagePanel
           busy={busy}
           cancelBusy={cancelBusy}
@@ -1060,8 +844,8 @@ export default function App() {
           pendingPermissions={runStatus?.pending_permissions ?? []}
           runLogs={runLogs}
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
-          setupRuntime={setupRuntime}
-          setupRuntimeProvider={setupRuntimeProvider}
+          setupRuntime={runStatus?.runtime_mode ?? ""}
+          setupRuntimeProvider={selectedRunProvider}
           runReviewSummary={runReviewSummary}
           runReviewStatus={runReviewStatus}
           gitDiff={gitDiff}
@@ -1075,7 +859,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "review" ? (
+      {destination === "changes" && activeStage === "review" ? (
         <ReviewStagePanel
           runId={runId}
           runStatus={runStatus}
@@ -1086,9 +870,9 @@ export default function App() {
           diagramArtifacts={diagramArtifacts}
           selectedArtifact={selectedArtifact}
           selectedArtifactContent={selectedArtifactContent}
-          selectedArtifactIsMermaid={selectedArtifactIsMermaid}
           runLogs={runLogs}
           reviewSummary={runReviewSummary}
+          demo={runStatus?.runtime_mode === "fake"}
           gitDiff={gitDiff}
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
@@ -1097,7 +881,7 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "proposals" ? (
+      {destination === "changes" && activeStage === "proposals" ? (
         <ProposalsStagePanel
           artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
           selectedArtifact={selectedArtifact}
@@ -1116,7 +900,7 @@ export default function App() {
 
       {activeStage === "ask" ? <AskStagePanel primaryActionSignal={askPrimaryActionSignal} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
 
-      {activeStage === "publish" ? (
+      {destination === "changes" && activeStage === "publish" ? (
         <PublishStagePanel
           busy={busy}
           gitMessage={gitMessage}
@@ -1140,7 +924,72 @@ export default function App() {
       ) : null}
 
       {error ? <p className="status err">Error: {error}</p> : null}
-    </AppShell>
+      </ProductShell>
+      <ModalDialog
+        open={gitConfirmation !== null}
+        title={gitConfirmation?.action === "branch" ? "Confirm proposal branch" : "Confirm workspace commit"}
+        description="This action uses the complete workspace Git inventory shown below. If branch, HEAD, or any file changes before confirmation, ACP will reject it without a Git mutation."
+        confirmLabel={gitConfirmation?.action === "branch" ? "Create proposal branch" : "Commit all workspace changes"}
+        busy={busy}
+        onCancel={cancelGitAction}
+        onConfirm={() => void confirmGitAction()}
+      >
+        {gitConfirmation ? (
+          <div className="git-confirmation" data-testid="git-confirmation-inventory">
+            <dl className="compact-defs">
+              <div><dt>Branch</dt><dd>{gitConfirmation.diff.branch}</dd></div>
+              <div><dt>HEAD</dt><dd><code>{gitConfirmation.diff.head_oid ?? "unborn"}</code></dd></div>
+              <div><dt>Base</dt><dd>{gitConfirmation.diff.base_ref} · <code>{gitConfirmation.diff.base_oid ?? "unborn"}</code></dd></div>
+              <div><dt>Fingerprint</dt><dd><code>{gitConfirmation.diff.fingerprint}</code></dd></div>
+            </dl>
+            {gitConfirmation.diff.files.length === 0 ? <p>No workspace changes.</p> : (
+              <ul>
+                {gitConfirmation.diff.files.map((file) => (
+                  <li key={`${file.status}:${file.original_path ?? ""}:${file.path}`}>
+                    <strong>{file.status}</strong> <code>{file.path}</code>
+                    {file.original_path ? <span> from <code>{file.original_path}</code></span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </ModalDialog>
+    </>
+  );
+}
+
+function HomePanel({ workflow, runStatus, evidenceStatus, gitChanges, onPrimaryAction }: {
+  workflow: WorkflowState;
+  runStatus: RunStatusResponse | null;
+  evidenceStatus: string;
+  gitChanges: number;
+  onPrimaryAction: () => void;
+}) {
+  return (
+    <section className="panel stage-panel home-panel" data-testid="home-panel">
+      <div className="stage-header"><div><h1>Architecture workspace</h1><p className="hint">One current view of readiness, execution, evidence and publication.</p></div><span className={`status ${workflow.status === "blocked" ? "err" : workflow.status === "complete" ? "ok" : "warn"}`}>{workflow.status.replace("_", " ")}</span></div>
+      <div className="home-summary-grid">
+        <article><span className="metric-label">Latest run</span><strong>{runStatus ? `${runStatus.pipeline} · ${runStatus.status}` : "No runs"}</strong></article>
+        <article><span className="metric-label">Evidence</span><strong>{evidenceStatus.replace("_", " ")}</strong></article>
+        <article><span className="metric-label">Workspace changes</span><strong>{gitChanges}</strong></article>
+      </div>
+      <p>{workflow.attention}</p>
+      <button type="button" onClick={onPrimaryAction}>{workflow.nextAction.label}</button>
+    </section>
+  );
+}
+
+function KnowledgePanel({ artifacts, evidenceStatus, onOpenArtifact }: { artifacts: Artifact[]; evidenceStatus: string; onOpenArtifact: (path: string) => void }) {
+  return (
+    <section className="panel stage-panel knowledge-panel" data-testid="knowledge-panel">
+      <div className="stage-header"><div><h1>Knowledge</h1><p className="hint">Evidence-backed workspace documents and model artifacts from the selected snapshot.</p></div><span className="status">{evidenceStatus.replace("_", " ")}</span></div>
+      {artifacts.length === 0 ? <p className="empty-state">No selected-run knowledge is available. Run Analysis or select a completed run.</p> : (
+        <ul className="knowledge-list">
+          {artifacts.map((artifact) => <li key={`${artifact.kind}:${artifact.path}`}><button type="button" onClick={() => onOpenArtifact(artifact.path)}><strong>{artifact.label || artifact.path}</strong><code>{artifact.path}</code><span>{artifact.kind}</span></button></li>)}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -1178,11 +1027,7 @@ function selectedRunIssueCopy(errorCode: string, error: string | null | undefine
   };
 }
 
-function isProposalReviewArtifact(path: string): boolean {
-  return path.startsWith("proposals/") || path.startsWith("reports/changelog/");
-}
-
-function formatPermissionBlockerDetail(request: RuntimePermissionRequest): string {
+export function formatPermissionBlockerDetail(request: RuntimePermissionRequest): string {
   const step = request.step_id || "runtime step";
   const decision = request.decision?.decision || "pending";
   const rule = request.decision?.rule_id ? ` via ${request.decision.rule_id}` : "";
@@ -1192,7 +1037,7 @@ function formatPermissionBlockerDetail(request: RuntimePermissionRequest): strin
   return `${step} paused for ${decision}${rule}.${target}${reasonDetail}`;
 }
 
-function workspaceHealthSeverity(severity: string): InspectorItem["severity"] {
+export function workspaceHealthSeverity(severity: string): InspectorItem["severity"] {
   switch (severity) {
     case "error":
       return "error";
@@ -1203,7 +1048,7 @@ function workspaceHealthSeverity(severity: string): InspectorItem["severity"] {
   }
 }
 
-function deriveNextAction(
+export function deriveNextAction(
   activeStage: StageId,
   state: {
     validateOK: boolean;

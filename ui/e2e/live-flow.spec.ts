@@ -316,7 +316,7 @@ async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
 async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
   await page.reload();
   await expect(page.getByTestId("review-panel")).toBeVisible();
-  await expect(page.getByTestId("stage-review")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
 
   await page.getByTestId("stage-source").click();
   await expect(page.getByTestId("source-repo-table")).toBeVisible();
@@ -351,7 +351,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
 
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
   await expect(page.getByTestId("brand-version")).not.toHaveText(/v0\.1\.1 beta/i);
   await expect(page.getByTestId("brand-version")).toHaveText(/^(dev|v?\d|\w)/);

@@ -1,7 +1,8 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
+import { EvidenceViewer } from "./EvidenceViewer";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
@@ -37,11 +38,6 @@ import type {
   WorkspaceHealthResponse,
 } from "../lib/appContracts";
 import type { LoadGitDiffOptions } from "../lib/gitDiffApi";
-
-const MermaidPreview = lazy(async () => {
-  const module = await import("./MermaidPreview");
-  return { default: module.MermaidPreview };
-});
 
 type ReviewArtifactFilter = "all" | "reports" | "diagrams" | "proposals" | "runtime";
 type PublishArtifactFilter = "all" | "changed" | "reports" | "proposals" | "diagrams" | "taskruns";
@@ -1061,7 +1057,6 @@ function DoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {
 
 export type CharterStageProps = ComponentProps<typeof BaselineEditorsPanel> & {
   wizardPanel: ReactNode;
-  gitPanel: ReactNode;
   wizardProjectName: string;
   wizardScope: string;
   wizardNfr: string;
@@ -1072,7 +1067,6 @@ export type CharterStageProps = ComponentProps<typeof BaselineEditorsPanel> & {
 
 export function CharterStagePanel({
   wizardPanel,
-  gitPanel,
   wizardProjectName,
   wizardScope,
   wizardNfr,
@@ -1120,7 +1114,6 @@ export function CharterStagePanel({
 
       {wizardPanel}
       <BaselineEditorsPanel {...baselineProps} />
-      {gitPanel}
     </div>
   );
 }
@@ -3177,9 +3170,9 @@ export type ReviewStageProps = {
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
-  selectedArtifactIsMermaid: boolean;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
+  demo: boolean;
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
@@ -3197,9 +3190,9 @@ export function ReviewStagePanel({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
-  selectedArtifactIsMermaid,
   runLogs,
   reviewSummary,
+  demo,
   gitDiff,
   gitDiffStatus,
   onLoadGitDiff,
@@ -3299,10 +3292,10 @@ export function ReviewStagePanel({
               diagramArtifacts={diagramArtifacts}
               selectedArtifact={selectedArtifact}
               selectedArtifactContent={selectedArtifactContent}
-              selectedArtifactIsMermaid={selectedArtifactIsMermaid}
               selectedArtifactIsLoading={selectedArtifactIsLoading}
               runLogs={runLogs}
               reviewSummary={reviewSummary}
+              demo={demo}
               reviewQueue={reviewQueue}
               gitDiff={gitDiff}
               gitDiffStatus={gitDiffStatus}
@@ -3490,10 +3483,10 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
-  selectedArtifactIsMermaid,
   selectedArtifactIsLoading,
   runLogs,
   reviewSummary,
+  demo,
   reviewQueue,
   gitDiff,
   gitDiffStatus,
@@ -3510,10 +3503,10 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
-  selectedArtifactIsMermaid: boolean;
   selectedArtifactIsLoading: boolean;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
+  demo: boolean;
   reviewQueue: ReviewQueueItem[];
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
@@ -3636,22 +3629,15 @@ function ReviewEvidenceWorkbench({
         />
         <div {...tabPanelProps("evidence-preview-tabs", evidenceView)}>
           {evidenceView === "preview" ? (
-            selectedArtifactIsMermaid ? (
-              <div data-testid="run-diagram-content-panel">
-                <h3 data-testid="run-diagram-selected-path">{selectedArtifact || "Diagram Preview"}</h3>
-                {selectedArtifactIsLoading ? (
-                  <p className="hint">Loading diagram...</p>
-                ) : (
-                  <Suspense fallback={<p className="hint">Loading diagram renderer...</p>}>
-                    <MermaidPreview source={selectedArtifactContent} title={selectedArtifact || "diagram"} />
-                  </Suspense>
-                )}
-              </div>
-            ) : (
-              <div data-testid="run-artifact-content-panel">
-                <h3 data-testid="run-artifact-selected-path">{selectedArtifact || "Artifact Content"}</h3>
-                <pre data-testid="run-artifact-content">{selectedArtifactContent || "Select artifact to inspect."}</pre>
-              </div>
+            selectedArtifactIsLoading ? <p className="hint">Loading evidence...</p> : (
+              <EvidenceViewer
+                path={selectedArtifact}
+                content={selectedArtifactContent}
+                runId={reviewSummary?.run_id}
+                sourceMode="run_snapshot"
+                demo={demo}
+                onOpenArtifact={onOpenArtifact}
+              />
             )
           ) : null}
           {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}

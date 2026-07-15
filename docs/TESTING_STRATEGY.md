@@ -403,7 +403,10 @@ Release workflow hardening:
   - для `source_kind=git_url` refs должны быть pinned
   - child batch stdin is detached from the planned profile/sweep combinations file; regression coverage forces a dummy child to drain stdin and still requires all matrix rows to execute
   - release-mode пишет machine execution verdict `reports/release_verdict_<matrix-id>.json/.md`; non-release/diagnostic mode пишет neutral `reports/matrix_result_<matrix-id>.json/.md` без `release_state`
-  - итоговый release decision составной: `release_verdict_<matrix-id>.json = PASS`, `swe_ux_assessment_<matrix-id>.md = accepted`, `swe_artifact_quality_assessment_<matrix-id>.md = accepted`
+- итоговый release decision составной: `release_verdict_<matrix-id>.json = PASS`, `swe_ux_assessment_<matrix-id>.md = accepted`, `swe_artifact_quality_assessment_<matrix-id>.md = accepted`
+- SWE artifact assessment начинается с promoted/user-visible selected-run evidence; taskrun
+  quality JSON и runtime counters проверяются только как execution diagnostics и не являются
+  surrogate artifact acceptance.
   - pre-tag/offline verifier: `python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json`; скрипт проверяет release-mode contract/providers/run indexes/records plus matching accepted SWE reports и не запускает live harness
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`

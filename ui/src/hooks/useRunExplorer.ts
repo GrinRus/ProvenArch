@@ -28,11 +28,11 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     selectedArtifactContent,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     diagramArtifacts,
     nonDiagramArtifacts,
     selectedArtifactIsMermaid,
     fetchArtifacts,
-    loadCoverageArtifacts,
     handleOpenArtifact,
     clearArtifacts,
   } = artifactsState;
@@ -117,7 +117,6 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     fetchRunLogsUntilEOF,
     clearArtifacts,
     fetchArtifacts,
-    loadCoverageArtifacts,
   });
 
   useRunPolling({
@@ -145,6 +144,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     cancelBusy,
     coverageSummary,
     openQuestions,
+    evidenceSnapshot,
     hasActiveRuns,
     runCounters,
     runLogTaskrunPaths,

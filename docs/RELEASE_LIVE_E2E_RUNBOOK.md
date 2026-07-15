@@ -630,6 +630,12 @@ Release guard rules:
 - `reports/swe_ux_assessment_<matrix-id>.md` с `matrix_id: <matrix-id>` и `decision: accepted`
 - `reports/swe_artifact_quality_assessment_<matrix-id>.md` с `matrix_id: <matrix-id>` и `decision: accepted`
 
+Artifact-quality assessment заполняется в порядке template: сначала promoted/user-visible
+overview, findings, coverage, model, diagrams и proposals из выбранного snapshot, затем их
+final index/citations и UI rendering. `reports/taskruns/<run_id>-quality.json`, repair/stall
+counters и provider logs помещаются только в diagnostic execution context и не могут заменить
+осмотр пользовательского результата или самостоятельно дать `accepted`.
+
 Optional:
 - `reports/operator_blackbox_assessment_<matrix-id>.md` для дополнительного durable reasoning поверх evidence, но он не заменяет два SWE reports.
 

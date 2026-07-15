@@ -4,12 +4,39 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
+
+func TestAsIsDraftDoesNotLeakRunLocalStagingPaths(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	draftRoot := filepath.Join(workspace, "reports", "taskruns", "run-demo", "staging", "final")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-demo", "runtime", "step2_as_is")
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	task := acpruntime.Task{
+		TaskID: "task-as-is", RunID: "run-demo", StepID: "init.step2.asis_docs", StepContract: "as_is", AgentRole: "architect",
+		Workspace: workspace, WriteRoot: writeRoot, DraftFinalRoot: draftRoot,
+		RepoScopes: []string{"payments-service"}, StartedAtUTC: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
+	}
+	if _, err := (Runner{}).Run(context.Background(), task); err != nil {
+		t.Fatalf("run fake as-is: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(draftRoot, "overview.md"))
+	if err != nil {
+		t.Fatalf("read overview: %v", err)
+	}
+	if strings.Contains(string(raw), "reports/taskruns/") || strings.Contains(string(raw), "/staging/") {
+		t.Fatalf("fake user-visible evidence leaked staging path:\n%s", raw)
+	}
+}
 
 func TestRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {
 	t.Parallel()

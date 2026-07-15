@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -279,5 +280,6 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "onboarding-recovery-mobile.png");
 
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

@@ -98,27 +98,33 @@ export type RunStartResponse = {
 export type RunStatusResponse = {
   run_id: string;
   pipeline: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   started_at: string;
   finished_at?: string | null;
   current_step?: string;
+  runtime_mode?: "fake" | "headless" | null;
+  step_providers?: Record<string, string>;
   warnings?: string[];
   pending_permissions?: RuntimePermissionRequest[];
   error_code?: string | null;
   error?: string | null;
+  superseded_by_run_id?: string | null;
 };
 
 export type RunListItem = {
   run_id: string;
   pipeline: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   started_at: string;
   finished_at?: string | null;
   current_step?: string;
+  runtime_mode?: "fake" | "headless" | null;
+  step_providers?: Record<string, string>;
   warnings?: string[];
   pending_permissions?: RuntimePermissionRequest[];
   error_code?: string | null;
   error?: string | null;
+  superseded_by_run_id?: string | null;
 };
 
 export type RuntimePermissionRequest = {
@@ -141,6 +147,10 @@ export type RuntimePermissionDecision = {
 
 export type RunListResponse = {
   items: RunListItem[];
+  coordination?: {
+    active_run_id?: string;
+    pending?: { run_id: string; pipeline: string } | null;
+  };
 };
 
 export type Artifact = {
@@ -214,7 +224,7 @@ export type RunReviewStep = {
 export type RunReviewSummaryResponse = {
   run_id: string;
   pipeline: string;
-  status: "queued" | "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   started_at: string;
   finished_at?: string | null;
   current_step?: string;
@@ -226,11 +236,20 @@ export type RunReviewSummaryResponse = {
 
 export type GitDiffFile = {
   path: string;
+  original_path?: string | null;
   folder: string;
   status: "new" | "modified" | "deleted" | "untracked" | "renamed" | "copied" | "changed" | "unchanged";
   additions: number;
   deletions: number;
   binary: boolean;
+  index_status: string;
+  worktree_status: string;
+  old_mode?: string;
+  new_mode?: string;
+  head_oid?: string;
+  index_oid?: string;
+  worktree_sha256?: string;
+  unavailable: boolean;
 };
 
 export type GitDiffFolder = {
@@ -255,6 +274,12 @@ export type GitDiffHunk = {
 export type GitDiffResponse = {
   ok: boolean;
   workspace: string;
+  scope: "full_workspace";
+  branch: string;
+  head_oid?: string | null;
+  base_ref: string;
+  base_oid?: string | null;
+  fingerprint: string;
   run_id?: string | null;
   step_id?: string | null;
   selected_path?: string | null;
@@ -373,6 +398,8 @@ export type OnboardingPathSuggestionsResponse = {
 export type OnboardingStatusResponse = {
   ok: boolean;
   launcher_mode: boolean;
+  console_entered?: boolean;
+  can_switch_runtime?: boolean;
   workspace_selected: boolean;
   workspace_ready: boolean;
   workspace: string;
@@ -384,6 +411,9 @@ export type OnboardingStatusResponse = {
 
 export type RuntimeProfileResponse = {
   ok: boolean;
+  runtime_mode?: "fake" | "headless";
+  runtime_provider?: string;
+  provider_source?: string;
   permissions?: {
     persisted?: Partial<RuntimePermissionValues>;
     effective?: Partial<RuntimePermissionValues>;

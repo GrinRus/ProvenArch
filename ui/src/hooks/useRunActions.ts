@@ -26,7 +26,6 @@ type RunActionsContext = {
   fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
   clearArtifacts: () => void;
   fetchArtifacts: (runId: string) => Promise<void>;
-  loadCoverageArtifacts: (runId?: string) => Promise<void>;
 };
 
 export function useRunActions({
@@ -47,7 +46,6 @@ export function useRunActions({
   fetchRunLogsUntilEOF,
   clearArtifacts,
   fetchArtifacts,
-  loadCoverageArtifacts,
 }: RunActionsContext) {
   const runStatusRequest = useRequestGate("run-status");
 
@@ -75,7 +73,6 @@ export function useRunActions({
         setRunStatus(typed);
         if (finalStatuses.has(typed.status)) {
           await fetchArtifacts(id);
-          await loadCoverageArtifacts(id);
         }
         return typed;
       } catch (error) {
@@ -87,7 +84,7 @@ export function useRunActions({
         runStatusRequest.finish(token);
       }
     },
-    [fetchArtifacts, loadCoverageArtifacts, runStatusRequest, setRunStatus]
+    [fetchArtifacts, runStatusRequest, setRunStatus]
   );
 
   const handleSelectRun = useCallback(
@@ -104,7 +101,9 @@ export function useRunActions({
         resetRunLogs();
         clearArtifacts();
         const status = await fetchRunStatus(id);
-        await fetchArtifacts(id);
+        if (!status || !finalStatuses.has(status.status)) {
+          await fetchArtifacts(id);
+        }
         await fetchRunLogs(id, true);
         if (status && finalStatuses.has(status.status)) {
           await fetchRunLogsUntilEOF(id);

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -381,7 +382,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     .toBeLessThanOrEqual(1);
 }
 
-test("provider stream mock: Analysis and Activity remain readable", async ({ page }) => {
+test("provider stream mock: Analysis diagnostics remain readable", async ({ page }) => {
   test.skip(scenario !== "provider-stream-mock", `scenario ${scenario} skips provider stream mock`);
 
   const consoleErrors: string[] = [];
@@ -394,8 +395,8 @@ test("provider stream mock: Analysis and Activity remain readable", async ({ pag
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
-  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("product-shell")).toBeVisible();
+  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
 
   const liveDiagnostics = page.getByTestId("analysis-live-diagnostics");
   await expect(liveDiagnostics).toBeVisible();
@@ -404,24 +405,15 @@ test("provider stream mock: Analysis and Activity remain readable", async ({ pag
   await expect(liveDiagnostics).toContainText("Artifact pair pending");
   await expect(liveDiagnostics).toContainText("2 JSON stream events");
 
-  const activityDrawer = page.getByTestId("activity-drawer");
-  await expect(activityDrawer).toBeVisible();
-  await expect(activityDrawer).toHaveAttribute("open", "");
-  await expect(page.getByTestId("activity-stream-summary")).toContainText("2 JSON stream chunks");
-  await expect(page.getByTestId("activity-stream-summary")).toContainText("thinking_delta, text_delta");
-  await expect(page.getByTestId("activity-events-table")).toContainText("Provider stream chunk: thinking_delta.");
-  await expect(page.getByTestId("activity-events-table")).not.toContainText("checking repository structure before collect artifact writes");
-
-  await page.getByText("Full selected log view").click();
-  await expect(page.getByTestId("run-logs-content")).toContainText("checking repository structure before collect artifact writes");
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "provider-stream-desktop.png");
 
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(liveDiagnostics).toBeVisible();
-  await expect(page.getByTestId("activity-stream-summary")).toBeVisible();
+  await expect(liveDiagnostics).toContainText("thinking_delta, text_delta");
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "provider-stream-mobile.png");
 
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

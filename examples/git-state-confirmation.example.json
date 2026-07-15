@@ -1,0 +1,22 @@
+{
+  "branch": "main",
+  "head_oid": "0123456789abcdef",
+  "base_ref": "HEAD",
+  "base_oid": "0123456789abcdef",
+  "fingerprint": "9e2aa55408d0dc128a05c120f5a5361d9d9dd0c4ef146dba45f19bd13cab1b2d",
+  "files": [
+    {
+      "path": "reports/as-is/overview.md",
+      "original_path": null,
+      "status": "modified",
+      "index_status": " ",
+      "worktree_status": "M",
+      "old_mode": "100644",
+      "new_mode": "100644",
+      "binary": false,
+      "unavailable": false,
+      "additions": 1,
+      "deletions": 0
+    }
+  ]
+}

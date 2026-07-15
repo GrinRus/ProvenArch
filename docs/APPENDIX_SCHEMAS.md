@@ -297,6 +297,13 @@ Semantic role:
 
 ## 11) Изменения схем/контрактов
 
+Public HTTP contracts, не представленные JSON Schema, фиксируются в
+`docs/spec/API_SPEC.md` и проверяются handler tests + TypeScript response types. Для Epic 20
+canonical fixture полного Git confirmation/read contract находится в
+`fixtures/api/git-state-confirmation.json`, а user-facing example — в
+`examples/git-state-confirmation.example.json`. Run coordination и persisted runtime identity
+остаются additive API fields и не изменяют workspace artifact schemas.
+
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`
 - обновлением примеров/фикстур

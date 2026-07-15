@@ -1,4 +1,4 @@
-export const finalStatuses = new Set(["succeeded", "failed"]);
+export const finalStatuses = new Set(["succeeded", "failed", "canceled"]);
 export const activeStatuses = new Set(["queued", "running"]);
 export const runLogsPageLimit = 200;
 
@@ -127,7 +127,7 @@ export function runOutcomeLabel(runStatus: Pick<RunStatusLike, "status" | "error
     return fallback;
   }
   const errorCode = normalizeRunErrorCode(runStatus.error_code);
-  if (runStatus.status === "failed" && isRunCanceled(errorCode)) {
+  if (runStatus.status === "canceled" || (runStatus.status === "failed" && isRunCanceled(errorCode))) {
     return "canceled";
   }
   if (runStatus.status === "failed" && isRunReconciledAfterRestart(errorCode)) {

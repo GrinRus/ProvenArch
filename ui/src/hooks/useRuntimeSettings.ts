@@ -38,6 +38,9 @@ type UseRuntimeSettingsOptions = {
 };
 
 export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOptions) {
+  const [effectiveRuntimeMode, setEffectiveRuntimeMode] = useState<"fake" | "headless" | "unknown">("unknown");
+  const [effectiveRuntimeProvider, setEffectiveRuntimeProvider] = useState("unknown");
+  const [effectiveProviderSource, setEffectiveProviderSource] = useState("unknown");
   const [runtimeTimeoutPersisted, setRuntimeTimeoutPersisted] = useState<Partial<RuntimeTimeoutValues>>({});
   const [runtimeTimeoutEffective, setRuntimeTimeoutEffective] = useState<RuntimeTimeoutValues>(defaultRuntimeTimeoutValues);
   const [runtimeTimeoutSource, setRuntimeTimeoutSource] = useState<Partial<RuntimeTimeoutSources>>({});
@@ -101,6 +104,9 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
   async function loadRuntimeProfile() {
     try {
       const payload = await fetchJSON<RuntimeProfileResponse>("/api/runtime/profile");
+      setEffectiveRuntimeMode(payload.runtime_mode ?? "unknown");
+      setEffectiveRuntimeProvider(payload.runtime_provider ?? "unknown");
+      setEffectiveProviderSource(payload.provider_source ?? "unknown");
       const nextPermissions = normalizeRuntimePermissionValues(payload.permissions?.effective, defaultRuntimePermissionValues);
       setRuntimePermissionPersisted(payload.permissions?.persisted ?? {});
       setRuntimePermissionEffective(nextPermissions);
@@ -110,6 +116,9 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
       setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
       setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
     } catch {
+      setEffectiveRuntimeMode("unknown");
+      setEffectiveRuntimeProvider("unknown");
+      setEffectiveProviderSource("unknown");
       setRuntimePermissionPersisted({});
       setRuntimePermissionEffective(defaultRuntimePermissionValues);
       setRuntimePermissionSource({});
@@ -266,6 +275,9 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
   }
 
   return {
+    effectiveRuntimeMode,
+    effectiveRuntimeProvider,
+    effectiveProviderSource,
     runtimeTimeoutPersisted,
     runtimeTimeoutEffective,
     runtimeTimeoutSource,

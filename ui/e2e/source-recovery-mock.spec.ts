@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -235,9 +236,10 @@ test("source recovery mock: validation blockers stay actionable and readable", a
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
-  await expect(page.getByTestId("console-shell")).toBeVisible();
+  await expect(page.getByTestId("product-shell")).toBeVisible();
+  await page.getByRole("link", { name: "Setup" }).click();
   await page.getByTestId("stage-source").click();
-  await expect(page.getByTestId("stage-source")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-source")).toHaveAttribute("aria-current", "page");
 
   const recovery = page.getByTestId("source-validation-recovery");
   await expect(recovery).toBeVisible();
@@ -266,7 +268,7 @@ test("source recovery mock: validation blockers stay actionable and readable", a
   await captureEvidenceScreenshot(page, "source-recovery-desktop.png");
 
   await page.getByTestId("stage-readiness").click();
-  await expect(page.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("setup-run-first-btn")).toBeDisabled();
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("Workspace");
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("blocked");
@@ -279,5 +281,6 @@ test("source recovery mock: validation blockers stay actionable and readable", a
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "source-recovery-mobile.png");
 
+  await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
 });

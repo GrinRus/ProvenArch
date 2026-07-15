@@ -37,6 +37,7 @@ const (
 
 const (
 	runErrorCodeCanceled               = "run_canceled"
+	runErrorCodeSuperseded             = "run_superseded"
 	runErrorCodeReconciledAfterRestart = "run_reconciled_after_restart"
 	runErrorCodePartialFailed          = "run_partial_failed"
 	runtimeOutputSnippetLimitRunes     = 2000
@@ -50,12 +51,22 @@ const (
 	RunStatusRunning   RunStatus = "running"
 	RunStatusSucceeded RunStatus = "succeeded"
 	RunStatusFailed    RunStatus = "failed"
+	RunStatusCanceled  RunStatus = "canceled"
 )
 
 var (
 	ErrRunNotFound      = errors.New("run not found")
 	ErrRunNotCancelable = errors.New("run not cancelable")
+	ErrRunActive        = errors.New("run is already active")
+	ErrQueueUnsupported = errors.New("queue intent is supported only for refresh runs")
 	ErrServiceClosed    = errors.New("service is shut down")
+)
+
+type RunIntent string
+
+const (
+	RunIntentStart RunIntent = "start"
+	RunIntentQueue RunIntent = "queue"
 )
 
 type Service struct {
@@ -65,6 +76,7 @@ type Service struct {
 	resumeStaleAsync   bool
 	providerFallback   acpruntime.Provider
 	providerSource     acpruntime.ProviderSource
+	runtimeMode        string
 
 	mu             sync.RWMutex
 	runs           map[string]*runRecord
@@ -107,11 +119,13 @@ type RunInfo struct {
 	FinishedAt         *time.Time                     `json:"finished_at,omitempty"`
 	Question           string                         `json:"question,omitempty"`
 	CurrentStep        string                         `json:"current_step,omitempty"`
+	RuntimeMode        string                         `json:"runtime_mode,omitempty"`
 	StepProviders      map[string]string              `json:"step_providers,omitempty"`
 	Warnings           []string                       `json:"warnings,omitempty"`
 	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
 	ErrorCode          string                         `json:"error_code,omitempty"`
 	Error              string                         `json:"error,omitempty"`
+	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
 }
 
 type Artifact struct {
@@ -125,6 +139,17 @@ type RunRequest struct {
 	Pipeline       Pipeline
 	NonInteractive bool
 	Question       string
+	Intent         RunIntent
+}
+
+type PendingRunInfo struct {
+	RunID    string `json:"run_id"`
+	Pipeline string `json:"pipeline"`
+}
+
+type RunCoordination struct {
+	ActiveRunID string          `json:"active_run_id,omitempty"`
+	Pending     *PendingRunInfo `json:"pending,omitempty"`
 }
 
 type runHistorySnapshot struct {
@@ -140,11 +165,13 @@ type runHistoryItem struct {
 	FinishedAt         *string                        `json:"finished_at,omitempty"`
 	Question           string                         `json:"question,omitempty"`
 	CurrentStep        string                         `json:"current_step,omitempty"`
+	RuntimeMode        string                         `json:"runtime_mode,omitempty"`
 	StepProviders      map[string]string              `json:"step_providers,omitempty"`
 	Warnings           []string                       `json:"warnings,omitempty"`
 	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
 	ErrorCode          string                         `json:"error_code,omitempty"`
 	Error              string                         `json:"error,omitempty"`
+	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
 	Artifacts          []Artifact                     `json:"artifacts,omitempty"`
 }
 
@@ -234,6 +261,14 @@ func WithProviderFallback(provider acpruntime.Provider, source acpruntime.Provid
 	}
 }
 
+func WithRuntimeMode(mode string) Option {
+	return func(service *Service) {
+		if normalized, err := acpruntime.NormalizeMode(mode); err == nil {
+			service.runtimeMode = normalized
+		}
+	}
+}
+
 func NewService(options ...Option) *Service {
 	service := &Service{
 		runnerFactory:    stepRunnerFactoryFunc(func(acpruntime.Provider) (acpruntime.Runner, error) { return fakeruntime.Runner{}, nil }),
@@ -247,6 +282,7 @@ func NewService(options ...Option) *Service {
 		runLogsMaxRuns:   200,
 		providerFallback: acpruntime.ProviderClaudeCode,
 		providerSource:   acpruntime.ProviderSourceDefault,
+		runtimeMode:      acpruntime.RuntimeModeFake,
 	}
 	for _, option := range options {
 		option(service)
@@ -254,6 +290,16 @@ func NewService(options ...Option) *Service {
 	service.loadHistory()
 	_ = service.cleanupRunLogs()
 	return service
+}
+
+func (s *Service) SetRuntimeMode(mode string) {
+	normalized, err := acpruntime.NormalizeMode(mode)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.runtimeMode = normalized
+	s.mu.Unlock()
 }
 
 func ParsePipeline(value string) (Pipeline, error) {
@@ -322,8 +368,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		StartedAt:     startedAt,
 		Question:      strings.TrimSpace(request.Question),
 		CurrentStep:   resumeFromStep,
+		RuntimeMode:   s.runtimeMode,
 		StepProviders: map[string]string{},
 		Warnings:      append([]string(nil), initialWarnings...),
+	}
+	if resumed && strings.TrimSpace(resumedRecord.info.RuntimeMode) != "" {
+		initialInfo.RuntimeMode = resumedRecord.info.RuntimeMode
 	}
 	if resolvedStepProvidersErr == nil {
 		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
