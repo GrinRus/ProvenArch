@@ -137,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
+	mux.HandleFunc("/api/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
@@ -1491,7 +1492,10 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		if runInfo.Pipeline == string(orchestrator.PipelineQA) {
 			continue
 		}
-		items = append(items, formatRunInfoPayload(runInfo))
+		item := formatRunInfoPayload(runInfo)
+		artifacts, _ := snapshot.Service.GetRunArtifacts(runInfo.RunID)
+		item["authoritative_index"] = hasAuthoritativeRunIndex(runInfo.RunID, artifacts)
+		items = append(items, item)
 		if len(items) >= limit {
 			break
 		}
@@ -1500,6 +1504,16 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		"items":        items,
 		"coordination": snapshot.Service.Coordination(),
 	})
+}
+
+func hasAuthoritativeRunIndex(runID string, artifacts []orchestrator.Artifact) bool {
+	expected := filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "final-run-index.json"))
+	for _, artifact := range artifacts {
+		if filepath.ToSlash(filepath.Clean(artifact.Path)) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handlePipelineRunStatus(writer http.ResponseWriter, runID string) {

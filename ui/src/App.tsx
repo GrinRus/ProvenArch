@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
 import { GuidedSetupPage, GuidedSetupReview, HomePage, RunsPage } from "./components/ProductPages";
+import { ChangesPage } from "./components/ChangesPage";
+import { EvidenceViewer } from "./components/EvidenceViewer";
+import { KnowledgePage } from "./components/KnowledgePage";
 import { ModalDialog } from "./components/ModalDialog";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
@@ -23,8 +26,8 @@ import {
   runtimeStepProviderOrder,
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
-  type Artifact,
   type GuidedRepo,
+  type KnowledgeResponse,
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
@@ -34,7 +37,7 @@ import {
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
-import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type SetupStep } from "./lib/appRoutes";
+import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type ChangesView, type KnowledgeView, type SetupStep, type ViewerMode } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
@@ -44,7 +47,7 @@ import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
-import { loadWorkspaceHealthAPI } from "./lib/workspaceApi";
+import { loadArtifactText, loadKnowledgeAPI, loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 
 export default function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location, true));
@@ -52,6 +55,13 @@ export default function App() {
   const setupStep = route.setupStep ?? "workspace";
   const [activeStage, setActiveStageState] = useState<StageId>(() => stageForRoute(parseAppRoute(window.location, true)));
   const [routeNotice, setRouteNotice] = useState("");
+  const [askOpen, setAskOpen] = useState(false);
+  const [askReturnRoute, setAskReturnRoute] = useState<AppRoute | null>(null);
+  const [knowledge, setKnowledge] = useState<KnowledgeResponse | null>(null);
+  const [knowledgeStatus, setKnowledgeStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [knowledgeError, setKnowledgeError] = useState("");
+  const [currentArtifactPath, setCurrentArtifactPath] = useState("");
+  const [currentArtifactContent, setCurrentArtifactContent] = useState("");
   const [briefSkipConfirmationOpen, setBriefSkipConfirmationOpen] = useState(false);
   const unsavedDraftRef = useRef(false);
   const restoredRouteRunRef = useRef<string | null>(null);
@@ -77,7 +87,6 @@ export default function App() {
   const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
   const [consoleReady, setConsoleReady] = useState(false);
   const [analysisFocusSignal] = useState(0);
-  const [askPrimaryActionSignal] = useState(0);
   const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
@@ -342,6 +351,23 @@ export default function App() {
       await handleValidateWorkspace();
     }
     void refreshWorkspaceHealth();
+    void refreshKnowledge();
+  }
+
+  async function refreshKnowledge() {
+    setKnowledgeStatus("loading");
+    setKnowledgeError("");
+    try {
+      const response = await loadKnowledgeAPI();
+      setKnowledge(response);
+      setKnowledgeStatus("loaded");
+      return response;
+    } catch (requestError) {
+      setKnowledge(null);
+      setKnowledgeStatus("error");
+      setKnowledgeError(requestError instanceof Error ? requestError.message : "knowledge failed to load");
+      return null;
+    }
   }
 
   function syncOnboardingStatus(status: OnboardingStatusResponse) {
@@ -583,6 +609,24 @@ export default function App() {
     });
   }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.changesView, route.destination, route.mode, runId]);
 
+  const handleOpenCurrentArtifact = useCallback(async (path: string) => {
+    const content = await loadArtifactText(path);
+    if (content === null) {
+      setRouteNotice(`Artifact ${path} is unavailable in the current workspace.`);
+      return false;
+    }
+    setCurrentArtifactPath(path);
+    setCurrentArtifactContent(content);
+    navigateRoute({ destination: "changes", changesView: "evidence", source: "current", artifact: path, mode: route.mode ?? "rendered", invalid: [] });
+    return true;
+  }, [navigateRoute, route.mode]);
+
+  const handleAskCitation = useCallback(async (path: string) => {
+    setAskReturnRoute(route);
+    setAskOpen(false);
+    await handleOpenCurrentArtifact(path);
+  }, [handleOpenCurrentArtifact, route]);
+
   async function handleSelectRunAndRoute(id: string) {
     if (destination === "runs") navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
     else navigateRoute({ ...route, destination: "changes", runId: id, runRequested: true, source: "snapshot", invalid: [] });
@@ -606,7 +650,7 @@ export default function App() {
       return;
     }
     restoredRouteRunRef.current = null;
-    if (route.destination === "changes" && !route.runRequested) {
+    if (route.destination === "changes" && route.source !== "current" && !route.runRequested) {
       const latest = runList.find((item) => item.status === "succeeded" && (item.pipeline === "init" || item.pipeline === "refresh"));
       if (latest && defaultChangesRunRef.current !== latest.run_id) {
         defaultChangesRunRef.current = latest.run_id;
@@ -617,7 +661,7 @@ export default function App() {
   }, [clearRunSelection, consoleReady, handleSelectRun, navigateRoute, route, runId, runList]);
 
   useEffect(() => {
-    if (!route.artifact || evidenceSnapshot.status === "idle" || evidenceSnapshot.status === "loading") return;
+    if (route.source === "current" || !route.artifact || evidenceSnapshot.status === "idle" || evidenceSnapshot.status === "loading") return;
     const match = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.id === route.artifact || artifact.path === route.artifact);
     if (!match) {
       setRouteNotice(`Artifact ${route.artifact} is unavailable in the selected source.`);
@@ -629,6 +673,43 @@ export default function App() {
       void handleOpenArtifact(match.path);
     }
   }, [diagramArtifacts, evidenceSnapshot.status, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route, selectedArtifact]);
+
+  useEffect(() => {
+    if (!consoleReady || route.destination !== "knowledge" || knowledgeStatus === "loading") return;
+    if (knowledgeStatus === "idle") {
+      void refreshKnowledge();
+      return;
+    }
+    if (route.entity && knowledgeStatus === "loaded" && !knowledge?.entities.some((entity) => entity.id === route.entity)) {
+      setRouteNotice(`Entity ${route.entity} is unavailable in the current workspace.`);
+      navigateRoute({ ...route, entity: undefined, invalid: [] }, true);
+    }
+  }, [consoleReady, knowledge, knowledgeStatus, navigateRoute, route]);
+
+  useEffect(() => {
+    if (!consoleReady || route.destination !== "changes" || route.source !== "current" || !route.artifact || knowledgeStatus === "loading") return;
+    if (knowledgeStatus === "idle") {
+      void refreshKnowledge();
+      return;
+    }
+    if (!knowledge?.artifacts.some((artifact) => artifact.path === route.artifact)) {
+      setRouteNotice(`Artifact ${route.artifact} is unavailable in the current workspace.`);
+      setCurrentArtifactPath("");
+      setCurrentArtifactContent("");
+      navigateRoute({ ...route, artifact: undefined, invalid: [] }, true);
+      return;
+    }
+    if (currentArtifactPath !== route.artifact) {
+      void loadArtifactText(route.artifact).then((content) => {
+        if (content === null) {
+          setRouteNotice(`Artifact ${route.artifact} is unreadable in the current workspace.`);
+          return;
+        }
+        setCurrentArtifactPath(route.artifact ?? "");
+        setCurrentArtifactContent(content);
+      });
+    }
+  }, [consoleReady, currentArtifactPath, knowledge, knowledgeStatus, navigateRoute, route]);
 
   useEffect(() => {
     if (!route.artifact) restoredArtifactRef.current = null;
@@ -826,21 +907,36 @@ export default function App() {
         buildTitle={`version=${systemVersion.version}; commit=${systemVersion.commit}; built=${systemVersion.built}`}
         workspaceValid={validateResult?.ok === true}
         onDestinationChange={handleDestinationChange}
-        onAsk={() => setActiveStageState("ask")}
+        onAsk={() => setAskOpen(true)}
         onSettings={() => navigateRoute({ destination: "setup", setupStep: "runner", invalid: [] })}
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
 	  {destination === "changes" ? (
-		<nav className="destination-tabs" aria-label="Changes sections">
-			  {(["review", "proposals", "publish"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStage(stage)}>{stage === "review" ? "Review" : stage === "proposals" ? "Proposals" : "Publish"}</button>)}
-		</nav>
+		<ChangesPage
+		  runs={runList}
+		  selectedRunID={runId}
+		  selectedEvidenceStatus={evidenceSnapshot.status}
+		  view={route.changesView ?? "overview"}
+		  onViewChange={(view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] })}
+		  onSelectChangeReview={(id) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); }}
+		  onOpenRunStudio={(id) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); }}
+		> </ChangesPage>
 	  ) : null}
-	  {destination === "home" && activeStage !== "ask" ? (
+	  {destination === "home" ? (
 		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
 	  ) : null}
-	  {destination === "knowledge" && activeStage !== "ask" ? (
-		<KnowledgePanel artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]} evidenceStatus={evidenceSnapshot.status} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} />
+	  {destination === "knowledge" ? (
+		<KnowledgePage
+		  knowledge={knowledge}
+		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
+		  error={knowledgeError}
+		  view={route.knowledgeView ?? "overview"}
+		  selectedEntityID={route.entity}
+		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
+		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: "entities", source: "current", entity, invalid: [] })}
+		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
+		/>
 	  ) : null}
 
       {destination === "setup" ? <GuidedSetupPage step={setupStep} onStepChange={handleSetupStepChange}>
@@ -970,7 +1066,14 @@ export default function App() {
         </RunsPage>
       ) : null}
 
-      {destination === "changes" && activeStage === "review" ? (
+      {destination === "changes" && activeStage === "review" && route.source === "current" ? (
+        <section className="panel stage-panel current-evidence" data-testid="current-workspace-evidence">
+          {askReturnRoute ? <button type="button" onClick={() => { navigateRoute(askReturnRoute); setAskOpen(true); setAskReturnRoute(null); }}>Return to Ask</button> : null}
+          {currentArtifactPath ? <EvidenceViewer path={currentArtifactPath} content={currentArtifactContent} sourceMode="current_workspace" mode={route.mode ?? "rendered"} onModeChange={(mode: ViewerMode) => navigateRoute({ ...route, mode, invalid: [] })} onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)} /> : <p className="empty-state">Choose a current workspace artifact. No historical run snapshot will be substituted.</p>}
+        </section>
+      ) : null}
+
+      {destination === "changes" && activeStage === "review" && route.source !== "current" ? (
         <ReviewStagePanel
           runId={runId}
           runStatus={runStatus}
@@ -1009,8 +1112,6 @@ export default function App() {
         />
       ) : null}
 
-      {activeStage === "ask" ? <AskStagePanel primaryActionSignal={askPrimaryActionSignal} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} /> : null}
-
       {destination === "changes" && activeStage === "publish" ? (
         <PublishStagePanel
           busy={busy}
@@ -1037,6 +1138,14 @@ export default function App() {
       {error ? <p className="status err">Error: {error}</p> : null}
       {routeNotice ? <p className="status warn" role="status" data-testid="route-notice">{routeNotice}</p> : null}
       </ProductShell>
+      <ModalDialog
+        open={askOpen}
+        title="Ask current workspace"
+        description="Current workspace · read-only. Q&A execution and history do not alter Change Review or Publish acceptance."
+        onCancel={() => setAskOpen(false)}
+      >
+        <AskStagePanel onOpenArtifact={(path) => void handleAskCitation(path)} />
+      </ModalDialog>
       <ModalDialog
         open={gitConfirmation !== null}
         title={gitConfirmation?.action === "branch" ? "Confirm proposal branch" : "Confirm workspace commit"}
@@ -1077,19 +1186,6 @@ export default function App() {
         onConfirm={() => { setBriefSkipConfirmationOpen(false); void startFirstRun("analysis"); }}
       />
     </>
-  );
-}
-
-function KnowledgePanel({ artifacts, evidenceStatus, onOpenArtifact }: { artifacts: Artifact[]; evidenceStatus: string; onOpenArtifact: (path: string) => void }) {
-  return (
-    <section className="panel stage-panel knowledge-panel" data-testid="knowledge-panel">
-      <div className="stage-header"><div><h1>Knowledge</h1><p className="hint">Evidence-backed workspace documents and model artifacts from the selected snapshot.</p></div><span className="status">{evidenceStatus.replace("_", " ")}</span></div>
-      {artifacts.length === 0 ? <p className="empty-state">No selected-run knowledge is available. Run Analysis or select a completed run.</p> : (
-        <ul className="knowledge-list">
-          {artifacts.map((artifact) => <li key={`${artifact.kind}:${artifact.path}`}><button type="button" onClick={() => onOpenArtifact(artifact.path)}><strong>{artifact.label || artifact.path}</strong><code>{artifact.path}</code><span>{artifact.kind}</span></button></li>)}
-        </ul>
-      )}
-    </section>
   );
 }
 

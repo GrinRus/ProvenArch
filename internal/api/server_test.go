@@ -2382,14 +2382,15 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	}
 	var listPayload struct {
 		Items []struct {
-			RunID      string   `json:"run_id"`
-			Pipeline   string   `json:"pipeline"`
-			Status     string   `json:"status"`
-			StartedAt  string   `json:"started_at"`
-			FinishedAt *string  `json:"finished_at"`
-			Warnings   []string `json:"warnings"`
-			ErrorCode  any      `json:"error_code"`
-			Error      any      `json:"error"`
+			RunID              string   `json:"run_id"`
+			Pipeline           string   `json:"pipeline"`
+			Status             string   `json:"status"`
+			StartedAt          string   `json:"started_at"`
+			FinishedAt         *string  `json:"finished_at"`
+			Warnings           []string `json:"warnings"`
+			ErrorCode          any      `json:"error_code"`
+			Error              any      `json:"error"`
+			AuthoritativeIndex bool     `json:"authoritative_index"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
@@ -2409,6 +2410,9 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	}
 	if listPayload.Items[0].Status != "succeeded" {
 		t.Fatalf("expected status succeeded, got %q", listPayload.Items[0].Status)
+	}
+	if !listPayload.Items[0].AuthoritativeIndex {
+		t.Fatalf("expected completed run to advertise its authoritative final index")
 	}
 }
 
@@ -2438,6 +2442,19 @@ func TestPipelineRunsListEndpointRejectsInvalidLimit(t *testing.T) {
 	}
 	if payload.Error.Code != "invalid_limit" {
 		t.Fatalf("expected invalid_limit code, got %q", payload.Error.Code)
+	}
+}
+
+func TestAuthoritativeRunIndexIdentityIsRunScoped(t *testing.T) {
+	artifacts := []orchestrator.Artifact{{Path: "reports/taskruns/run-a/staging/final/final-run-index.json"}}
+	if !hasAuthoritativeRunIndex("run-a", artifacts) {
+		t.Fatal("expected selected run index to be authoritative")
+	}
+	if hasAuthoritativeRunIndex("run-b", artifacts) {
+		t.Fatal("cross-run index must not make another run reviewable")
+	}
+	if hasAuthoritativeRunIndex("run-a", []orchestrator.Artifact{{Path: "reports/taskruns/run-a/staging/final/not-the-index.json"}}) {
+		t.Fatal("non-index artifact must not be authoritative")
 	}
 }
 

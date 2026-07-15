@@ -232,9 +232,58 @@
 
 .knowledge-list button { width: 100%; }
 
+.knowledge-page,
+.changes-page,
+.current-evidence {
+  min-width: 0;
+}
+
+.knowledge-page table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.knowledge-page th,
+.knowledge-page td {
+  min-width: 9rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.knowledge-page label {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 34rem;
+  margin-bottom: 0.8rem;
+}
+
+.source-identity {
+  color: var(--ink-muted);
+}
+
+.review-packages {
+  margin-bottom: 1rem;
+}
+
+.review-packages li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.review-packages li > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
 @media (max-width: 820px) {
   .product-header { grid-template-columns: 1fr; }
   .home-summary-grid { grid-template-columns: 1fr; }
+  .review-packages li { grid-template-columns: 1fr; }
+  .modal-dialog { width: 100%; max-height: calc(100vh - 1rem); }
 }
 
 * {

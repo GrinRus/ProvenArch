@@ -1,5 +1,5 @@
 import { fetchJSON } from "./api";
-import type { BaselineBundleResponse, ValidateResponse, WorkspaceHealthResponse } from "./appContracts";
+import type { BaselineBundleResponse, KnowledgeResponse, ValidateResponse, WorkspaceHealthResponse } from "./appContracts";
 
 export async function loadWorkspaceManifest(): Promise<string> {
   const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
@@ -13,6 +13,10 @@ export async function loadBaselineBundleAPI(): Promise<BaselineBundleResponse> {
 export async function loadWorkspaceHealthAPI(): Promise<WorkspaceHealthResponse> {
   const payload = await fetchJSON<Partial<WorkspaceHealthResponse>>("/api/workspace/health");
   return normalizeWorkspaceHealthResponse(payload);
+}
+
+export async function loadKnowledgeAPI(): Promise<KnowledgeResponse> {
+  return fetchJSON<KnowledgeResponse>("/api/knowledge");
 }
 
 export async function loadArtifactText(path: string): Promise<string | null> {

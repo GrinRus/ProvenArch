@@ -277,15 +277,14 @@ proposals/                        # proposed follow-up changes
 model/entities/, model/edges/     # derived entity-per-file model
 ```
 
-UI показывает то же состояние через stage-based console:
+UI показывает то же состояние через path-based console:
 
-- `Source` / `Readiness`: repo table, repo sources, guided analysis include/exclude, `workspace.yaml`, source validation recovery, validation diagnostics, readiness cards, provider readiness recovery, doctor checklist, compact runtime profile summary и collapsed advanced runtime tools;
-- `Charter`: wizard summary, domain/team card overview, baseline prompt bundle status, charter baseline recovery и editor для `charter/*`/`skills/*`;
-- `Analysis`: run mission control, canonical `step0..step4` timeline, failed-run recovery path, live diagnostics for shard/repair/stall/raw-output signals, shard/log table with drilldown, event timeline, raw agent stream, pending permissions, provider-unavailable Readiness recovery, cooperative cancel guidance, terminal canceled/recovered outcome labels in status/history/activity, retained-evidence recovery actions и bootstrap resume newest active/newest completed run;
-- `Review`: primary review queue, selected evidence markdown/Mermaid preview, secondary grouped artifact explorer, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*`;
-- `Proposals`: proposal/changelog review room with package list, proposal package recovery for incomplete proposal/changelog artifacts, preview/evidence/changelog/diff tabs, quality blockers and publication path;
-- `Ask`: async agent-backed Q&A поверх existing workspace artifacts через `POST /api/qa/runs`, with run history, selected answer, confidence/citations/unresolved, failed-run recovery guidance, provider-unavailable Readiness guidance, terminal canceled/restart-reconciled answer copy and read-only safety/audit artifact links; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint;
-- `Publish`: Git Review Room with publication readiness summary, mobile section jumps, folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action, failed Git action recovery and proposal branch helper.
+- `/setup`: Guided Setup `Workspace → Sources → Analysis brief → Runner & readiness → Review & start`; brief сохраняется в существующий Step 0 contract, skip требует quality warning;
+- `/home`: четыре authoritative workflow axes и одна primary next action;
+- `/runs` и `/runs/<run_id>`: history/Run Studio, active/pending coordination, provider identity и retained recovery; shards/raw output/permissions остаются в локальном Diagnostics disclosure;
+- `/knowledge`: только current promoted workspace через `GET /api/knowledge`, включая Overview, validated Atlas с table fallback, searchable Entities и Artifacts; malformed files дают explicit partial state, filename-derived topology не используется;
+- `/changes`: historical Change Review с `Overview / Evidence / Findings / Proposals / Diff / Publish`, run-pinned snapshot source и честным `Unknown` publication status для отдельного run;
+- global `Ask`: modal/sheet `Current workspace · read-only` с async run history, citations и возвратом из Evidence Viewer; QA status не меняет Changes/Publish gate.
 
 Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
 

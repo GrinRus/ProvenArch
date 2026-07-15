@@ -268,6 +268,58 @@ Initial K2a checks:
 **500**
 - `workspace_health_failed`
 
+### GET `/api/knowledge`
+Возвращает read-only read model текущей promoted knowledge base bound workspace. Endpoint ничего
+не пишет, не запускает provider и не связывает данные с историческим run без authoritative
+association. Поэтому поле `promoted_from_run_id` отсутствует в контракте.
+
+`entities[]` и `edges[]` читаются из `model/entities/*.{yaml,yml}` и
+`model/edges/*.{yaml,yml}`. В ответ попадают только записи с обязательными semantic fields;
+edge включается только когда обе ссылки разрешаются в набор validated entities. `path` всегда
+является canonical workspace-relative path. `artifacts[]` — inventory читаемых файлов в
+`model/`, `reports/` и `proposals/`; имена файлов не интерпретируются как topology.
+
+**200**
+```json
+{
+  "version": 1,
+  "generated_at": "2026-07-15T00:00:00Z",
+  "source_mode": "current_workspace",
+  "status": "partial",
+  "entities": [
+    {
+      "id": "svc.payments",
+      "type": "service",
+      "name": "Payments",
+      "provenance": { "kind": "inference", "confidence": 0.9 },
+      "path": "model/entities/svc.payments.yaml"
+    }
+  ],
+  "edges": [],
+  "artifacts": [
+    { "path": "model/entities/svc.payments.yaml", "kind": "entity", "name": "svc.payments.yaml" }
+  ],
+  "issues": [
+    {
+      "code": "knowledge.edge_reference_missing",
+      "path": "model/edges/edge.payments.calls.missing.yaml",
+      "message": "edge references missing entities: from=\"svc.payments\" to=\"svc.missing\""
+    }
+  ]
+}
+```
+
+`status`:
+- `available` — есть promoted content и все обнаруженные model files валидны;
+- `partial` — часть файлов malformed/unreadable, содержит duplicate entity ID или broken edge reference; остальные валидные данные сохраняются;
+- `unavailable` — promoted model/report/proposal content отсутствует.
+
+Typed issue codes: `knowledge.entity_malformed`, `knowledge.entity_duplicate`,
+`knowledge.edge_malformed`, `knowledge.edge_reference_missing`, `knowledge.file_unreadable`,
+`knowledge.inventory_unreadable`.
+
+**405** — любой метод кроме `GET`.
+
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
 
@@ -806,7 +858,7 @@ pending refresh. Заменённый pending run получает terminal `sta
 - `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
-Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed/canceled), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются. Ответ также содержит authoritative `coordination`: active run и единственный pending refresh, если они есть.
+Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed/canceled), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются. Ответ также содержит authoritative `coordination`: active run и единственный pending refresh, если они есть. Additive boolean `authoritative_index` сообщает, зарегистрирован ли у run его собственный staged `final-run-index.json`; только `succeeded init|refresh` с этим флагом являются Change Review packages. Финальная content/readability validation всё равно выполняется snapshot loader-ом при выборе run.
 
 Параметры:
 - `limit` optional, default `50`, max `500`
@@ -826,6 +878,7 @@ pending refresh. Заменённый pending run получает terminal `sta
       "started_at": "2026-04-03T12:00:00Z",
       "finished_at": "2026-04-03T12:00:02Z",
       "current_step": "init.step4.proposals",
+      "authoritative_index": true,
       "runtime_mode": "headless",
       "step_providers": {
         "step0_constitution": "claude-code",

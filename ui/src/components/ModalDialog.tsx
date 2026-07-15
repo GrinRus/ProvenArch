@@ -4,10 +4,10 @@ type ModalDialogProps = {
   open: boolean;
   title: string;
   description: string;
-  confirmLabel: string;
+  confirmLabel?: string;
   busy?: boolean;
   children?: ReactNode;
-  onConfirm: () => void;
+  onConfirm?: () => void;
   onCancel: () => void;
 };
 
@@ -70,7 +70,7 @@ export function ModalDialog({ open, title, description, confirmLabel, busy, chil
         {children}
         <div className="modal-actions">
           <button ref={cancelRef} type="button" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={busy}>{confirmLabel}</button>
+          {confirmLabel ? <button type="button" onClick={onConfirm} disabled={busy}>{confirmLabel}</button> : null}
         </div>
       </div>
     </div>

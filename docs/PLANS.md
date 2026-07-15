@@ -5147,6 +5147,35 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 
 ---
 
+## EP-20260715-20J2-changes-knowledge-ask
+
+### Goal
+- Complete the primary product composition with historical Change Review packages, an authoritative current-workspace Knowledge read model and global read-only Ask context.
+
+### Non-goals
+- No persisted schema changes, filename-derived topology, run-scoped Ask, 20K–20N refactor/responsive budget or live network dependency.
+
+### Plan
+- [x] Add read-only `GET /api/knowledge` with validated entity/edge parsing, artifact inventory and typed partial/unavailable issues.
+- [x] Compose Changes around review packages and six URL-backed modes while routing non-reviewable runs back to Run Studio.
+- [x] Build Knowledge Overview/Atlas/Entities/Artifacts exclusively from current promoted workspace data with a searchable keyboard-accessible fallback.
+- [x] Wrap Ask as a focus-managed global dialog; open citations in the shared current-workspace Evidence Viewer and preserve return context.
+- [x] Synchronize API spec, appendix, examples/fixtures, ADR and stakeholder architecture docs; pass focused tests and full deterministic DoD.
+
+### Acceptance
+- A malformed entity or broken edge produces `partial` without hiding other valid knowledge; an empty workspace produces `unavailable`.
+- Atlas topology is based only on validated entity/edge fields and remains usable as a table without pointer input.
+- Historical Changes never claims a known publication status for a run, and current-workspace evidence never silently falls back to a run snapshot.
+- Ask owns focus while open, closes with Escape, returns focus, and citation drilldown can return to the original Ask/route context.
+
+### Results
+- `GET /api/knowledge` now exposes current-workspace validated entities/edges, readable artifact inventory and deterministic `available|partial|unavailable` state without inferred promotion identity.
+- Changes admits only successful `init|refresh` runs with their own authoritative final index as Change Review packages; other analysis outcomes route to Run Studio and QA remains Ask history.
+- Global Ask is a focus-managed read-only dialog; citations open current-workspace Evidence Viewer and preserve an explicit Return to Ask route.
+- Full deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 141 Vitest tests, ShellCheck/typecheck, production build and 7/7 mock Playwright scenarios with critical axe checks. Ask was rendered without horizontal overflow at 1440, 1280, 1024 and 390 px.
+
+---
+
 ## EP-20260710-code-audit-remediation-backlog
 
 ### Context

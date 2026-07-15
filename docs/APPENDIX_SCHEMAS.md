@@ -308,3 +308,13 @@ canonical fixture полного Git confirmation/read contract находитс
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`
 - обновлением примеров/фикстур
 - кратким rationale в PR
+
+## 12) Current knowledge API read model
+
+- **Source of truth:** `docs/spec/API_SPEC.md` (`GET /api/knowledge`) и Go response types в `internal/api/knowledge.go`.
+- Это transient read model, а не новая persisted schema: `schemas/*` не меняются.
+- `source_mode` всегда `current_workspace`; historical run snapshot остаётся отдельным Changes/evidence contract.
+- `entities[]`/`edges[]` сохраняют canonical model fields и добавляют workspace-relative `path`.
+- Только parsed fields задают topology; filename-derived IDs/edges запрещены.
+- Malformed/unreadable/broken-reference файл фиксируется в typed `issues[]` и переводит общий `status` в `partial`, не скрывая валидные записи.
+- Contract examples: `examples/knowledge-current-workspace.example.json` и `fixtures/api/knowledge-current-workspace.json`.

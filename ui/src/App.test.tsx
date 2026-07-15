@@ -33,6 +33,7 @@ type FetchMockState = {
   proposalBranchResponse?: { status: number; body: MockJSON };
   workspaceHealthResponse?: MockJSON;
   workspaceHealthStatus?: number;
+  knowledgeResponse?: MockJSON;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -474,6 +475,19 @@ function createFetchMock(state: FetchMockState = {}) {
         },
         state.workspaceHealthStatus ?? 200,
       );
+    }
+
+    if (method === "GET" && url === "/api/knowledge") {
+      return jsonResponse(state.knowledgeResponse ?? {
+        version: 1,
+        generated_at: "2026-07-15T00:00:00Z",
+        source_mode: "current_workspace",
+        status: "unavailable",
+        entities: [],
+        edges: [],
+        artifacts: [],
+        issues: [],
+      });
     }
 
     if (method === "GET" && url === "/api/runtime/timeouts") {
@@ -1639,6 +1653,33 @@ describe("App", () => {
     expect(window.location.search).toContain("source=snapshot");
     expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("No evidence content is available");
     expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("unknown run");
+  });
+
+  it("sanitizes a stale current-workspace entity without inventing another selection", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      knowledgeResponse: {
+        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "available",
+        entities: [{ id: "svc.payments", type: "service", name: "Payments", path: "model/entities/svc.payments.yaml", provenance: { kind: "inference", confidence: 0.9 } }],
+        edges: [], artifacts: [{ path: "model/entities/svc.payments.yaml", kind: "entity", name: "svc.payments.yaml" }], issues: [],
+      },
+    }));
+    await renderConsoleApp("/knowledge?view=entities&entity=svc.missing&source=current");
+    expect(await screen.findByTestId("route-notice")).toHaveTextContent("Entity svc.missing is unavailable");
+    await waitFor(() => expect(window.location.search).not.toContain("entity="));
+    expect(screen.getByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
+    expect(screen.queryByTestId("knowledge-entity-detail")).not.toBeInTheDocument();
+  });
+
+  it("sanitizes a stale current artifact without falling back to selected-run evidence", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      runStarted: true,
+      knowledgeResponse: { version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "unavailable", entities: [], edges: [], artifacts: [], issues: [] },
+    }));
+    await renderConsoleApp("/changes?view=evidence&source=current&artifact=reports%2Fmissing.md&mode=raw");
+    expect(await screen.findByTestId("route-notice")).toHaveTextContent("reports/missing.md is unavailable in the current workspace");
+    await waitFor(() => expect(window.location.search).not.toContain("artifact="));
+    expect(screen.getByTestId("current-workspace-evidence")).toHaveTextContent("No historical run snapshot will be substituted");
+    expect(screen.queryByText(/Run snapshot/)).not.toBeInTheDocument();
   });
 
   it("restores a legacy artifact path and raw viewer mode from a direct Changes URL", async () => {
@@ -2910,6 +2951,44 @@ describe("App", () => {
         body: JSON.stringify({ question: "Who owns payments?" }),
       }),
     );
+  });
+
+  it("keeps global Ask in an accessible read-only modal and returns focus on Escape", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    await renderConsoleApp("/home");
+    const askButton = screen.getByTestId("stage-ask");
+    askButton.focus();
+    fireEvent.click(askButton);
+    const dialog = await screen.findByRole("dialog", { name: "Ask current workspace" });
+    expect(dialog).toHaveTextContent("Current workspace · read-only");
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ask current workspace" })).not.toBeInTheDocument());
+    expect(askButton).toHaveFocus();
+  });
+
+  it("opens an Ask citation as current workspace evidence and restores Ask context", async () => {
+    const historyRun = {
+      run_id: "qa-citation-1", pipeline: "qa", status: "succeeded", started_at: "2026-07-15T00:00:00Z", finished_at: "2026-07-15T00:00:01Z",
+      question: "Who owns payments?", answer: "Platform owns payments.", citations: [{ path: "model/entities/svc.payments.yaml", reason: "owner record" }], unresolved: [], confidence: 0.9,
+    };
+    vi.stubGlobal("fetch", createFetchMock({
+      qaRuns: [historyRun],
+      qaRunResponses: { "qa-citation-1": historyRun },
+      knowledgeResponse: {
+        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "available",
+        entities: [{ id: "svc.payments", type: "service", name: "Payments", path: "model/entities/svc.payments.yaml", provenance: { kind: "inference", confidence: 0.9 } }],
+        edges: [], artifacts: [{ path: "model/entities/svc.payments.yaml", kind: "entity", name: "svc.payments.yaml" }], issues: [],
+      },
+      artifactText: { "model/entities/svc.payments.yaml": "# Payments\nOwner: Platform" },
+    }));
+    await renderConsoleApp("/home");
+    navigateToStage("ask");
+    fireEvent.click(await screen.findByRole("button", { name: /model\/entities\/svc\.payments\.yaml/i }));
+    expect(await screen.findByTestId("current-workspace-evidence")).toHaveTextContent("Current workspace");
+    expect(window.location.search).toContain("source=current");
+    fireEvent.click(screen.getByRole("button", { name: "Return to Ask" }));
+    expect(await screen.findByRole("dialog", { name: "Ask current workspace" })).toHaveTextContent("Platform owns payments.");
+    expect(window.location.pathname).toBe("/home");
   });
 
   it("renders the Ask workbench with history, selected answer, audit safety, and citation drilldown", async () => {

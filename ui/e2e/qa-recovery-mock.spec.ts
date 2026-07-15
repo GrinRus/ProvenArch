@@ -397,6 +397,13 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "qa-recovery-desktop.png");
 
+  for (const width of [1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toBeVisible();
+    await expect(recovery).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  }
+
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(recovery).toBeVisible();
   await expect(page.getByTestId("qa-run-history")).toBeVisible();

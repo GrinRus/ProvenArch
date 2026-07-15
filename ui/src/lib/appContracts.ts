@@ -90,6 +90,52 @@ export type WorkspaceHealthResponse = {
   items: WorkspaceHealthItem[];
 };
 
+export type KnowledgeEntity = {
+  id: string;
+  type: string;
+  name: string;
+  aliases?: string[];
+  tags?: string[];
+  attributes?: unknown;
+  owner_team_id?: string;
+  provenance: { kind: string; confidence: number; evidence?: unknown[] };
+  path: string;
+};
+
+export type KnowledgeEdge = {
+  id: string;
+  type: string;
+  from: string;
+  to: string;
+  name?: string;
+  attributes?: unknown;
+  provenance: { kind: string; confidence: number; evidence?: unknown[] };
+  path: string;
+};
+
+export type KnowledgeArtifact = {
+  path: string;
+  kind: "entity" | "edge" | "proposal" | "report" | "model" | string;
+  name: string;
+};
+
+export type KnowledgeIssue = {
+  code: string;
+  path?: string;
+  message: string;
+};
+
+export type KnowledgeResponse = {
+  version: number;
+  generated_at: string;
+  source_mode: "current_workspace";
+  status: "available" | "partial" | "unavailable";
+  entities: KnowledgeEntity[];
+  edges: KnowledgeEdge[];
+  artifacts: KnowledgeArtifact[];
+  issues: KnowledgeIssue[];
+};
+
 export type RunStartResponse = {
   run_id: string;
   status: string;
@@ -125,6 +171,7 @@ export type RunListItem = {
   error_code?: string | null;
   error?: string | null;
   superseded_by_run_id?: string | null;
+  authoritative_index?: boolean;
 };
 
 export type RuntimePermissionRequest = {

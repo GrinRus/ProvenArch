@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-15T00:00:00Z",
+  "source_mode": "current_workspace",
+  "status": "partial",
+  "entities": [
+    {
+      "id": "svc.payments",
+      "type": "service",
+      "name": "Payments",
+      "provenance": { "kind": "inference", "confidence": 0.9 },
+      "path": "model/entities/svc.payments.yaml"
+    }
+  ],
+  "edges": [],
+  "artifacts": [
+    { "path": "model/entities/svc.payments.yaml", "kind": "entity", "name": "svc.payments.yaml" },
+    { "path": "model/edges/edge.payments.calls.missing.yaml", "kind": "edge", "name": "edge.payments.calls.missing.yaml" }
+  ],
+  "issues": [
+    {
+      "code": "knowledge.edge_reference_missing",
+      "path": "model/edges/edge.payments.calls.missing.yaml",
+      "message": "edge references missing entities: from=\"svc.payments\" to=\"svc.missing\""
+    }
+  ]
+}

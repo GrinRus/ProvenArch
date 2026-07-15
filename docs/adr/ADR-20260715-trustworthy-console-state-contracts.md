@@ -26,9 +26,10 @@ Fake runtime and its artifacts are always identified as deterministic demo evide
 
 ## Consequences
 Clients must provide Git confirmation identity and handle typed `409` conflicts. Legacy runs
-without persisted runtime metadata display `Unknown`. Deep URL context is intentionally deferred;
-the five destination paths are stable now.
+without persisted runtime metadata display `Unknown`. Deep URL context now extends the five stable
+destination paths with explicit setup/run/source/artifact/entity/viewer identity; invalid identity is
+sanitized with a notice and never changes evidence source.
 
 ## Links
-- Related issues/epics: Epic 20 (20A–20I1)
+- Related issues/epics: Epic 20 (20A–20I2)
 - Related docs: `docs/spec/API_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/PLANS.md`
