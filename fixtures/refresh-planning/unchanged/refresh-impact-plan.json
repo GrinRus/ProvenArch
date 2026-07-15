@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "run_id": "fixture-unchanged",
+  "pipeline": "refresh",
+  "generated_at": "2026-07-15T12:00:01Z",
+  "baseline_run_id": "fixture-baseline",
+  "enforcement": "advisory",
+  "decision": "unchanged_candidate",
+  "fallback_reasons": [],
+  "repo_deltas": [{"repo":"repo","baseline_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","current_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison":"unchanged","changes_complete":true,"changed_path_count":0,"changes":[]}],
+  "affected_shards": [],
+  "affected_domains": [],
+  "unmapped_paths": [],
+  "stale_artifact_candidates": [],
+  "preserved_artifact_candidates": ["reports/as-is/overview.md"],
+  "planned_actions": ["candidate_no_op", "continue_full_refresh"]
+}

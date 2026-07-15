@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/refresh-impact-plan.schema.json",
+  "title": "ACP Advisory Refresh Impact Plan",
+  "type": "object",
+  "required": ["version", "run_id", "pipeline", "generated_at", "baseline_run_id", "enforcement", "decision", "fallback_reasons", "repo_deltas", "affected_shards", "affected_domains", "unmapped_paths", "stale_artifact_candidates", "preserved_artifact_candidates", "planned_actions"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "pipeline": {"type": "string", "const": "refresh"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "baseline_run_id": {"type": ["string", "null"], "minLength": 1},
+    "enforcement": {"type": "string", "const": "advisory"},
+    "decision": {"type": "string", "enum": ["unchanged_candidate", "selective_candidate", "full_refresh_required"]},
+    "fallback_reasons": {"type": "array", "items": {"type": "string", "enum": ["baseline_missing", "analysis_inputs_changed", "analysis_inputs_unreadable", "dirty_worktree", "current_revision_unavailable", "baseline_revision_unavailable", "history_rewritten", "git_diff_unavailable", "change_limit_exceeded", "prior_evidence_unreadable", "unmapped_in_scope_path"]}, "uniqueItems": true},
+    "repo_deltas": {"type": "array", "items": {"$ref": "#/$defs/repo_delta"}},
+    "affected_shards": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "affected_domains": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "unmapped_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "stale_artifact_candidates": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "preserved_artifact_candidates": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "planned_actions": {"type": "array", "items": {"type": "string", "enum": ["continue_full_refresh", "candidate_no_op", "candidate_selective_execution", "conservative_full_refresh"]}, "uniqueItems": true}
+  },
+  "$defs": {
+    "change": {
+      "type": "object",
+      "required": ["status", "path", "in_scope", "matched_shards", "matched_domains"],
+      "properties": {
+        "status": {"type": "string", "enum": ["added", "modified", "deleted", "renamed", "copied"]},
+        "path": {"type": "string", "minLength": 1},
+        "original_path": {"type": "string", "minLength": 1},
+        "in_scope": {"type": "boolean"},
+        "matched_shards": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "matched_domains": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "repo_delta": {
+      "type": "object",
+      "required": ["repo", "baseline_revision", "current_revision", "comparison", "changes_complete", "changed_path_count", "changes"],
+      "properties": {
+        "repo": {"type": "string", "minLength": 1},
+        "baseline_revision": {"type": ["string", "null"]},
+        "current_revision": {"type": ["string", "null"]},
+        "comparison": {"type": "string", "enum": ["initial", "unchanged", "ahead", "diverged", "unknown"]},
+        "changes_complete": {"type": "boolean"},
+        "changed_path_count": {"type": "integer", "minimum": 0},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

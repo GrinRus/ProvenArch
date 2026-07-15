@@ -28,12 +28,13 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts Guided Setup with Workspace, Sources, Analysis brief, Runner/readiness and Review/start; direct `acp serve --workspace` remains compatibility path. |
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20) | The native History shell provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, semantic primitives, responsive navigation/context drawer, current-workspace Knowledge and global read-only Ask. |
-| Evidence-backed architecture home + impact-aware refresh | planned (Wave 1; Epic 21) | `docs/BACKLOG.md` Epic 21, `docs/PLANS.md` plan `EP-20260712-evidence-backed-architecture-refresh`; implementation starts with architecture-home/docs-quality slice before source revision and selective refresh contracts. |
+| Evidence-backed architecture home + impact-aware refresh | in progress (21A–21C done) | `reports/as-is/overview.md` is the validated Architecture Home; each analysis run records source revisions and each refresh records an advisory impact plan. No-op/selective execution and surgical promotion remain 21D–21G. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - follow-up: Epic 20 implementation complete; release readiness remains independently gated by Epic 18 trusted-machine evidence
-- out of MVP: 12, 13, 21 (planned Wave 1)
+- in progress Wave 1: 21 (21A–21C done; 21D–21G open)
+- out of MVP: 12, 13
 
 ---
 

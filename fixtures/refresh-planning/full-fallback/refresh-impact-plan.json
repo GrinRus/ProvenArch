@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "run_id": "fixture-dirty",
+  "pipeline": "refresh",
+  "generated_at": "2026-07-15T12:00:01Z",
+  "baseline_run_id": "fixture-baseline",
+  "enforcement": "advisory",
+  "decision": "full_refresh_required",
+  "fallback_reasons": ["dirty_worktree"],
+  "repo_deltas": [{"repo":"repo","baseline_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","current_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison":"ahead","changes_complete":true,"changed_path_count":0,"changes":[]}],
+  "affected_shards": [],
+  "affected_domains": [],
+  "unmapped_paths": [],
+  "stale_artifact_candidates": [],
+  "preserved_artifact_candidates": [],
+  "planned_actions": ["conservative_full_refresh", "continue_full_refresh"]
+}

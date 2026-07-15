@@ -31,6 +31,12 @@ evidence, валидирует созданные артефакты и запи
 architecture workspace. LLM/runtime drafts remain staged, orchestrator validates/promotes,
 human review принимает решения, а Git хранит accepted architecture knowledge.
 
+`reports/as-is/overview.md` является каноническим Architecture Home: он ведёт к областям,
+потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Каждый
+`init|refresh` также сохраняет `source-revisions.json`; `refresh` дополнительно пишет
+schema-validated advisory `refresh-impact-plan.json`. Эти планы пока объясняют возможный
+impact, но не сокращают pipeline: no-op/selective execution остаются следующими slices.
+
 ACP нужен, когда вы хотите получить:
 
 - актуальный **as-is architecture overview** для repo или multi-repo системы;

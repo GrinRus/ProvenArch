@@ -61,6 +61,11 @@ docs_first_contracts=(
   "schemas/citation-index.schema.json:examples/citation-index.example.json"
   "schemas/validator-verdict.schema.json:examples/validator-verdict.example.json"
   "schemas/qa-answer.schema.json:examples/qa-answer.example.json"
+  "schemas/source-revisions.schema.json:examples/source-revisions.example.json"
+  "schemas/refresh-impact-plan.schema.json:examples/refresh-impact-plan.example.json"
+  "schemas/source-revisions.schema.json:fixtures/refresh-planning/unchanged/source-revisions.json"
+  "schemas/refresh-impact-plan.schema.json:fixtures/refresh-planning/unchanged/refresh-impact-plan.json"
+  "schemas/refresh-impact-plan.schema.json:fixtures/refresh-planning/full-fallback/refresh-impact-plan.json"
 )
 
 for entry in "${docs_first_contracts[@]}"; do

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "run_id": "fixture-unchanged",
+  "pipeline": "refresh",
+  "captured_at": "2026-07-15T12:00:00Z",
+  "baseline_run_id": "fixture-baseline",
+  "analysis_input_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+  "analysis_inputs_state": "complete",
+  "input_issues": [],
+  "repos": [{"name":"repo","source_kind":"path","path":"repos/repo","configured_ref":"main","current_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseline_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","worktree_state":"clean","effective_include":["**"],"effective_exclude":[],"comparison":"unchanged","fallback_reasons":[]}]
+}

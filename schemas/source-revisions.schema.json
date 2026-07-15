@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/source-revisions.schema.json",
+  "title": "ACP Source Revisions",
+  "type": "object",
+  "required": ["version", "run_id", "pipeline", "captured_at", "baseline_run_id", "analysis_input_fingerprint", "analysis_inputs_state", "input_issues", "repos"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "pipeline": {"type": "string", "enum": ["init", "refresh"]},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "baseline_run_id": {"type": ["string", "null"], "minLength": 1},
+    "analysis_input_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "analysis_inputs_state": {"type": "string", "enum": ["complete", "unavailable"]},
+    "input_issues": {"type": "array", "items": {"type": "string", "enum": ["analysis_inputs_unreadable"]}, "uniqueItems": true},
+    "repos": {"type": "array", "items": {"$ref": "#/$defs/repo"}}
+  },
+  "$defs": {
+    "repo": {
+      "type": "object",
+      "required": ["name", "source_kind", "configured_ref", "current_revision", "baseline_revision", "worktree_state", "effective_include", "effective_exclude", "comparison", "fallback_reasons"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "source_kind": {"type": "string", "enum": ["path", "git_url"]},
+        "path": {"type": "string", "minLength": 1},
+        "git_url": {"type": "string", "minLength": 1},
+        "configured_ref": {"type": "string"},
+        "current_revision": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{40,64}$"},
+        "baseline_revision": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{40,64}$"},
+        "worktree_state": {"type": "string", "enum": ["clean", "dirty", "unavailable"]},
+        "effective_include": {"type": "array", "items": {"type": "string"}},
+        "effective_exclude": {"type": "array", "items": {"type": "string"}},
+        "comparison": {"type": "string", "enum": ["initial", "unchanged", "ahead", "diverged", "unknown"]},
+        "fallback_reasons": {"type": "array", "items": {"type": "string", "enum": ["initial_run", "baseline_missing", "current_revision_unavailable", "baseline_revision_unavailable", "dirty_worktree", "history_rewritten"]}, "uniqueItems": true}
+      },
+      "oneOf": [
+        {"required": ["path"], "not": {"required": ["git_url"]}},
+        {"required": ["git_url"], "not": {"required": ["path"]}}
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

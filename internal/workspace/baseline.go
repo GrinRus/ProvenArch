@@ -135,6 +135,8 @@ var baselinePromptPacks = map[string]string{
 		},
 		EvidencePolicy: []string{
 			"Use only context-pack documents as evidence",
+			"Treat reports/as-is/overview.md as the Architecture Home and first navigation document, while selecting the most relevant evidence for the specific question",
+			"Distinguish confirmed facts from evidence gaps and open questions; cite the concrete supporting document for every confirmed claim",
 			"When sources disagree, surface disagreement explicitly",
 			"Never present inference as confirmed assertion",
 		},

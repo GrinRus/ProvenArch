@@ -3745,6 +3745,57 @@ impact causes conservative refresh; required CI remains deterministic and provid
 ### Progress log
 - 2026-07-12: Created Wave 1 Epic 21 and decision-complete implementation sequence. Selected `21A` as the minimal first slice; no runtime or schema behavior changed.
 
+---
+
+## EP-20260715-21A-architecture-home
+
+### Goal
+- Make `reports/as-is/overview.md` the evidence-backed navigation home and align fake/runtime/QA behavior without changing public schemas or routes.
+
+### Implementation
+- [x] Add the required non-empty architecture-home sections to step2 policy and machine validation.
+- [x] Update deterministic fake output and QA context ranking while preserving relevance-first evidence selection.
+- [x] Add focused prompt, draft-validation, fake-runtime and QA regressions.
+- [x] Synchronize pipeline, architecture and stakeholder documentation.
+
+### Acceptance
+- Complete architecture-home output passes; missing sections, runtime narration and evidence-free output fail before promotion.
+
+---
+
+## EP-20260715-21B-source-revisions
+
+### Goal
+- Persist a deterministic per-run source revision baseline without changing `workspace.yaml` or pipeline execution semantics.
+
+### Implementation
+- [x] Add and register `source-revisions.schema.json` plus parser, example and fixtures.
+- [x] Capture current revisions, worktree state, effective scopes and analysis-input fingerprint before execution.
+- [x] Select only a prior succeeded validator-promoted run with a valid matching source revision artifact as baseline.
+- [x] Register the taskrun artifact and cover conservative fallback states.
+
+### Acceptance
+- Revision/fingerprint output is deterministic, contains no absolute checkout paths and never blocks the existing full pipeline merely because selective planning is unsafe.
+
+---
+
+## EP-20260715-21C-refresh-impact-plan
+
+### Goal
+- Persist a deterministic advisory refresh impact decision before collect while retaining full refresh execution.
+
+### Implementation
+- [x] Add and register `refresh-impact-plan.schema.json` plus parser, example and fixtures.
+- [x] Compute complete Git deltas with rename/copy identity and a fail-closed 10,000-path planning limit.
+- [x] Map in-scope changes through prior shards, domains, citations and final-index dependencies.
+- [x] Persist advisory decision/candidates and keep provider dispatch unchanged.
+
+### Progress log
+- 2026-07-15: Implemented 21A–21C. Revision and impact artifacts are advisory inputs only; refresh still executes the complete pipeline. Model provenance remains represented through final-index source-shard dependencies until 21F defines a persisted selective-promotion dependency contract.
+
+### Acceptance
+- Unchanged/out-of-scope inputs can be identified as candidates; every dirty, ambiguous, incomplete or unmapped in-scope input produces `full_refresh_required`.
+
 ### Plan ID
 EP-20260629-live-e2e-artifact-summary-finalization
 
@@ -5069,6 +5120,7 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 - Deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 127 Vitest tests, ShellCheck/typecheck, production build and 7/7 Playwright mock scenarios with critical axe checks.
 - Production dependency audit reports zero vulnerabilities after pinning the Mermaid transitive DOMPurify dependency to `3.4.12`.
 - R3 is intentionally not executed from this worktree: the canonical trusted-machine gate requires reviewed committed inputs, all three release providers in `PATH`, direct matrix invocation and accepted SWE assessment reports.
+- 2026-07-15 Epic 21 preparation audit: exact Go `1.25.10` and Node `22.21.1` toolchains are available; `qwen 0.17.1`, `claude 2.1.85` and `codex-cli 0.144.1` are in `PATH`; `/tmp` is writable with more than the 5 GiB minimum. The current tree is intentionally dirty during implementation and `/tmp/provenarch-live-e2e` canonical pinned checkouts are not provisioned, so smoke/release execution remains deferred until a clean merged commit on a prepared trusted host.
 
 ---
 

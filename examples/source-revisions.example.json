@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "run_id": "run_20260715_120000_001",
+  "pipeline": "refresh",
+  "captured_at": "2026-07-15T12:00:00Z",
+  "baseline_run_id": "run_20260714_120000_001",
+  "analysis_input_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+  "analysis_inputs_state": "complete",
+  "input_issues": [],
+  "repos": [
+    {
+      "name": "payments",
+      "source_kind": "path",
+      "path": "repos/payments",
+      "configured_ref": "main",
+      "current_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "baseline_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "worktree_state": "clean",
+      "effective_include": ["src/**"],
+      "effective_exclude": ["src/generated/**"],
+      "comparison": "ahead",
+      "fallback_reasons": []
+    }
+  ]
+}

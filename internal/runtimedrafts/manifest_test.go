@@ -399,7 +399,7 @@ func TestValidateRequiredManifestAcceptsCanonicalAsIsDraft(t *testing.T) {
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 	for relPath, content := range map[string]string{
-		"overview.md":          "# Overview\n",
+		"overview.md":          validArchitectureHomeFixture(),
 		"summary.md":           "# Coverage\n",
 		"architect-summary.md": "# Architect\n",
 		"payments-overview.md": "# Payments\n",
@@ -447,7 +447,11 @@ func TestValidateRequiredManifestAcceptsAsIsDraftUpdatedAtMetadata(t *testing.T)
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 	for _, relPath := range []string{"overview.md", "summary.md", "architect-summary.md"} {
-		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte("# Evidence-backed draft\n"), 0o644); err != nil {
+		content := "# Evidence-backed draft\n"
+		if relPath == "overview.md" {
+			content = validArchitectureHomeFixture()
+		}
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), []byte(content), 0o644); err != nil {
 			t.Fatalf("write draft file %s: %v", relPath, err)
 		}
 	}
@@ -559,7 +563,7 @@ func TestValidateRequiredManifestAcceptsAsIsDraftShardCompletenessFromTypedSumma
 		t.Fatalf("write shard summary: %v", err)
 	}
 	files := map[string]string{
-		"overview.md":          "# As-Is Architecture Overview\n\nEvidence references: reports/as-is/posthog-root/root-overview.md and reports/as-is/posthog-services/services-overview.md.\n",
+		"overview.md":          validArchitectureHomeFixture(),
 		"summary.md":           "# Coverage Summary\n\nShard completeness: planned=2 succeeded=2 failed=0 incomplete=0 from the current-run typed shard summary; no-shard-coverage-blocker because current-run shard coverage is not a blocker.\n\nEvidence density is sufficient for the scoped PostHog shards, with remaining gaps called out per shard.\n",
 		"architect-summary.md": "# Architect Summary\n\nWhat is complete: planned=2 succeeded=2 failed=0 incomplete=0 from the current-run typed shard summary; no-shard-coverage-blocker because current-run shard coverage is not a blocker.\n\nWhat to inspect next: compare services and root-surface evidence before publishing.\n",
 	}
@@ -586,6 +590,45 @@ func TestValidateRequiredManifestAcceptsAsIsDraftShardCompletenessFromTypedSumma
 
 	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile}); err != nil {
 		t.Fatalf("expected typed shard completeness draft to validate: %v", err)
+	}
+}
+
+func validArchitectureHomeFixture() string {
+	return `# Architecture Home
+
+## System at a glance
+The system summary is supported by reports/coverage/summary.md.
+
+## Analyzed scope
+The analyzed repository path is posthog:services/.
+
+## Domains and ownership
+Domain ownership is recorded in model/entities/.
+
+## Key flows
+Key flows are supported by reports/as-is/posthog-root/root-overview.md.
+
+## Integrations and datastores
+Integration evidence is recorded in model/entities/.
+
+## Where to start
+Start with reports/coverage/summary.md.
+
+## Safe-change guidance
+Validate changes against posthog:services/ and its citations.
+
+## Evidence gaps and open questions
+Unconfirmed ownership remains an explicit gap in reports/coverage/summary.md.
+`
+}
+
+func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
+	t.Parallel()
+	if !runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture() + "\nThe runtime provider generated this overview.\n") {
+		t.Fatalf("expected runtime narration to be rejected")
+	}
+	if runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture()) {
+		t.Fatalf("expected evidence-backed Architecture Home to avoid process narration")
 	}
 }
 

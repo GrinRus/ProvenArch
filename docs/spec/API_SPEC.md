@@ -1008,6 +1008,11 @@ pending refresh. Заменённый pending run получает terminal `sta
 ### GET `/api/pipeline/runs/<run_id>/artifacts`
 Возвращает список materialized artifacts для run.
 
+Для `init|refresh` inventory включает `reports/taskruns/<run_id>/source-revisions.json`; для
+`refresh` также включает `reports/taskruns/<run_id>/refresh-impact-plan.json`. Это обычные
+readable taskrun artifacts через существующий endpoint, отдельного HTTP endpoint нет.
+Impact plan имеет `enforcement="advisory"` и не означает, что текущий refresh пропустил шаги.
+
 **200**
 ```json
 {

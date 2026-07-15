@@ -142,6 +142,32 @@ func TestAskRanksFindingsBeforeImportedDocsWhenKeywordsOverlap(t *testing.T) {
 	}
 }
 
+func TestRankContextCandidatesUsesArchitectureHomeAsNavigationTieBreaker(t *testing.T) {
+	t.Parallel()
+
+	candidates := []indexedDocument{
+		{Path: "reports/as-is/domains/payments.md", Content: "payments ownership", Weight: weightForPath("reports/as-is/domains/payments.md", "docs/imports")},
+		{Path: "reports/as-is/overview.md", Content: "payments ownership", Weight: weightForPath("reports/as-is/overview.md", "docs/imports")},
+	}
+	ranked := rankContextCandidates(candidates, tokenize("payments ownership"))
+	if got := ranked[0].Path; got != "reports/as-is/overview.md" {
+		t.Fatalf("expected Architecture Home to lead equal-relevance navigation, got %q", got)
+	}
+}
+
+func TestRankContextCandidatesPreservesRelevanceBeforeArchitectureHome(t *testing.T) {
+	t.Parallel()
+
+	candidates := []indexedDocument{
+		{Path: "reports/as-is/domains/payments.md", Content: "payments settlement ledger ownership", Weight: weightForPath("reports/as-is/domains/payments.md", "docs/imports")},
+		{Path: "reports/as-is/overview.md", Content: "payments navigation", Weight: weightForPath("reports/as-is/overview.md", "docs/imports")},
+	}
+	ranked := rankContextCandidates(candidates, tokenize("payments settlement ledger ownership"))
+	if got := ranked[0].Path; got != "reports/as-is/domains/payments.md" {
+		t.Fatalf("expected more relevant domain evidence before Architecture Home, got %q", got)
+	}
+}
+
 func TestAskUsesConfiguredDocsImportsPath(t *testing.T) {
 	t.Parallel()
 

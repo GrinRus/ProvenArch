@@ -3204,7 +3204,7 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentMissingPython(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read enriched overview: %v", err)
 	}
-	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+	if !strings.Contains(string(raw), "# Architecture Home") {
 		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
 	}
 }
@@ -3441,7 +3441,7 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentPrintedCommandText(t *testing.
 	if err != nil {
 		t.Fatalf("read enriched overview: %v", err)
 	}
-	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+	if !strings.Contains(string(raw), "# Architecture Home") {
 		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
 	}
 }
@@ -3484,7 +3484,7 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentManifestShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read enriched overview: %v", err)
 	}
-	if !strings.Contains(string(raw), "Provider authored as-is draft artifact.") {
+	if !strings.Contains(string(raw), "# Architecture Home") {
 		t.Fatalf("expected second enrichment output, got:\n%s", string(raw))
 	}
 }
@@ -5558,16 +5558,36 @@ func asIsDraftScript(task acpruntime.Task, files []string, tail string) string {
 		"EOF",
 	}
 	for _, name := range files {
-		lines = append(lines,
-			"cat >\"$draft_root/"+name+"\" <<'EOF'",
-			"# "+strings.TrimSuffix(name, filepath.Ext(name)),
+		body := []string{
+			"# " + strings.TrimSuffix(name, filepath.Ext(name)),
 			"",
 			"Provider authored as-is draft artifact.",
-			"EOF",
+		}
+		if name == "overview.md" {
+			body = validAsIsArchitectureHomeLines()
+		}
+		lines = append(lines,
+			"cat >\"$draft_root/"+name+"\" <<'EOF'",
 		)
+		lines = append(lines, body...)
+		lines = append(lines, "EOF")
 	}
 	lines = append(lines, tail)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func validAsIsArchitectureHomeLines() []string {
+	return []string{
+		"# Architecture Home", "",
+		"## System at a glance", "Supported by reports/coverage/summary.md.", "",
+		"## Analyzed scope", "Repository evidence is under README.md.", "",
+		"## Domains and ownership", "Ownership evidence is recorded in model/entities/.", "",
+		"## Key flows", "Flow evidence is recorded in reports/as-is/overview.md.", "",
+		"## Integrations and datastores", "Integration evidence is recorded in model/entities/.", "",
+		"## Where to start", "Start with reports/coverage/summary.md.", "",
+		"## Safe-change guidance", "Validate changes against cited repository paths.", "",
+		"## Evidence gaps and open questions", "Unconfirmed details remain gaps in reports/coverage/summary.md.",
+	}
 }
 
 func asIsBootstrapDraftScript(task acpruntime.Task, tail string) string {
@@ -5631,8 +5651,7 @@ func asIsMalformedThenValidEnrichmentScript(task acpruntime.Task) string {
 		"  exit 0",
 		"fi",
 		"cat >\"$draft_root/overview.md\" <<'EOF'",
-		"# Overview",
-		"",
+		strings.Join(validAsIsArchitectureHomeLines(), "\n"),
 		"Valid overview after markdown syntax retry with reports/taskruns/current/staging/shards/example.md evidence.",
 		"EOF",
 		"cat >\"$draft_root/summary.md\" <<'EOF'",
