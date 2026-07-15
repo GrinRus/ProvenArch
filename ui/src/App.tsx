@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
+import { GuidedSetupPage, GuidedSetupReview, HomePage, RunsPage } from "./components/ProductPages";
 import { ModalDialog } from "./components/ModalDialog";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
@@ -29,16 +30,15 @@ import {
   type RuntimePermissionKey,
   type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
-  type RunStatusResponse,
   type SystemVersionResponse,
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
-import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute } from "./lib/appRoutes";
+import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type SetupStep } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
-import { deriveWorkflowState, type WorkflowDestination, type WorkflowState } from "./lib/workflowState";
+import { deriveWorkflowState, type WorkflowDestination } from "./lib/workflowState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -49,8 +49,10 @@ import { loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 export default function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location, true));
   const destination = route.destination;
+  const setupStep = route.setupStep ?? "workspace";
   const [activeStage, setActiveStageState] = useState<StageId>(() => stageForRoute(parseAppRoute(window.location, true)));
   const [routeNotice, setRouteNotice] = useState("");
+  const [briefSkipConfirmationOpen, setBriefSkipConfirmationOpen] = useState(false);
   const unsavedDraftRef = useRef(false);
   const restoredRouteRunRef = useRef<string | null>(null);
   const restoredArtifactRef = useRef<string | null>(null);
@@ -207,6 +209,7 @@ export default function App() {
     wizardRules,
     wizardStatus,
     wizardContractLoaded,
+    wizardContractReady,
     gitMessage,
     proposalBranch,
     gitStatus,
@@ -441,7 +444,7 @@ export default function App() {
   async function handleOnboardingRunFirstAnalysis() {
     const entered = await handleOnboardingEnterConsole();
     if (entered) {
-      await handleSetupFirstRun("analysis");
+      await startFirstRun("analysis");
     }
   }
 
@@ -545,6 +548,14 @@ export default function App() {
   }
 
   async function handleSetupFirstRun(nextStage: StageId = "analysis") {
+    if (!wizardContractReady) {
+      setBriefSkipConfirmationOpen(true);
+      return;
+    }
+    await startFirstRun(nextStage);
+  }
+
+  async function startFirstRun(nextStage: StageId = "analysis") {
     setFirstRunStatus("");
     const started = await handleRunPipeline("init");
     if (started) {
@@ -552,6 +563,10 @@ export default function App() {
       setActiveStage(nextStage);
     }
   }
+
+  const handleSetupStepChange = useCallback((step: SetupStep) => {
+    navigateRoute({ destination: "setup", setupStep: step, invalid: [] });
+  }, [navigateRoute]);
 
   const handleOpenArtifactAndReview = useCallback(async (path: string) => {
     await handleOpenArtifact(path);
@@ -812,28 +827,24 @@ export default function App() {
         workspaceValid={validateResult?.ok === true}
         onDestinationChange={handleDestinationChange}
         onAsk={() => setActiveStageState("ask")}
-        onSettings={() => { handleDestinationChange("setup"); setActiveStageState("readiness"); }}
+        onSettings={() => navigateRoute({ destination: "setup", setupStep: "runner", invalid: [] })}
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
-	  {destination === "setup" ? (
-		<nav className="destination-tabs" aria-label="Setup sections">
-			  {(["source", "readiness", "charter"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStage(stage)}>{stage === "source" ? "Workspace" : stage === "readiness" ? "Runtime & readiness" : "Charter"}</button>)}
-		</nav>
-	  ) : null}
 	  {destination === "changes" ? (
 		<nav className="destination-tabs" aria-label="Changes sections">
 			  {(["review", "proposals", "publish"] as const).map((stage) => <button key={stage} type="button" data-testid={`stage-${stage}`} aria-current={activeStage === stage ? "page" : undefined} onClick={() => setActiveStage(stage)}>{stage === "review" ? "Review" : stage === "proposals" ? "Proposals" : "Publish"}</button>)}
 		</nav>
 	  ) : null}
 	  {destination === "home" && activeStage !== "ask" ? (
-		<HomePanel workflow={workflow} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
+		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
 	  ) : null}
 	  {destination === "knowledge" && activeStage !== "ask" ? (
 		<KnowledgePanel artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]} evidenceStatus={evidenceSnapshot.status} onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)} />
 	  ) : null}
 
-      {destination === "setup" && activeStage === "source" ? (
+      {destination === "setup" ? <GuidedSetupPage step={setupStep} onStepChange={handleSetupStepChange}>
+      {(setupStep === "workspace" || setupStep === "sources") ? (
         <SourceStagePanel
           busy={busy}
           guidedRepos={guidedRepos}
@@ -857,7 +868,7 @@ export default function App() {
         />
       ) : null}
 
-      {destination === "setup" && activeStage === "readiness" ? (
+      {setupStep === "runner" ? (
         <ReadinessStagePanel
           busy={busy}
           validateResult={validateResult}
@@ -887,7 +898,7 @@ export default function App() {
         />
       ) : null}
 
-      {destination === "setup" && activeStage === "charter" ? (
+      {setupStep === "brief" ? (
         <CharterStagePanel
           wizardProjectName={wizardProjectName}
           wizardScope={wizardScope}
@@ -921,8 +932,13 @@ export default function App() {
           onSave={() => void handleSaveSelectedEditorArtifact()}
         />
       ) : null}
+      {setupStep === "review" ? (
+        <GuidedSetupReview briefReady={wizardContractReady} workspaceReady={validateResult?.ok === true} busy={busy} onStart={() => void handleSetupFirstRun("analysis")} />
+      ) : null}
+      </GuidedSetupPage> : null}
 
       {destination === "runs" && activeStage === "analysis" ? (
+        <RunsPage coordination={coordination}>
         <AnalysisStagePanel
           busy={busy}
           cancelBusy={cancelBusy}
@@ -951,6 +967,7 @@ export default function App() {
           onSelectRun={(id) => void handleSelectRunAndRoute(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
+        </RunsPage>
       ) : null}
 
       {destination === "changes" && activeStage === "review" ? (
@@ -1050,28 +1067,16 @@ export default function App() {
           </div>
         ) : null}
       </ModalDialog>
+      <ModalDialog
+        open={briefSkipConfirmationOpen}
+        title="Start without a saved analysis brief?"
+        description="The run can proceed, but missing project name and scope usually reduces evidence quality and actionability."
+        confirmLabel="Start with quality warning"
+        busy={busy}
+        onCancel={() => setBriefSkipConfirmationOpen(false)}
+        onConfirm={() => { setBriefSkipConfirmationOpen(false); void startFirstRun("analysis"); }}
+      />
     </>
-  );
-}
-
-function HomePanel({ workflow, runStatus, evidenceStatus, gitChanges, onPrimaryAction }: {
-  workflow: WorkflowState;
-  runStatus: RunStatusResponse | null;
-  evidenceStatus: string;
-  gitChanges: number;
-  onPrimaryAction: () => void;
-}) {
-  return (
-    <section className="panel stage-panel home-panel" data-testid="home-panel">
-      <div className="stage-header"><div><h1>Architecture workspace</h1><p className="hint">One current view of readiness, execution, evidence and publication.</p></div><span className={`status ${workflow.status === "blocked" ? "err" : workflow.status === "complete" ? "ok" : "warn"}`}>{workflow.status.replace("_", " ")}</span></div>
-      <div className="home-summary-grid">
-        <article><span className="metric-label">Latest run</span><strong>{runStatus ? `${runStatus.pipeline} · ${runStatus.status}` : "No runs"}</strong></article>
-        <article><span className="metric-label">Evidence</span><strong>{evidenceStatus.replace("_", " ")}</strong></article>
-        <article><span className="metric-label">Workspace changes</span><strong>{gitChanges}</strong></article>
-      </div>
-      <p>{workflow.attention}</p>
-      <button type="button" onClick={onPrimaryAction}>{workflow.nextAction.label}</button>
-    </section>
   );
 }
 

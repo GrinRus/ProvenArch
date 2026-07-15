@@ -490,6 +490,9 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expect(liveDiagnostics).toContainText("Open the failed shard row and raw-output ref");
 
   const shardTable = page.getByTestId("analysis-shard-table");
+  const diagnosticsDrawer = page.getByTestId("runs-diagnostics-drawer");
+  await diagnosticsDrawer.locator("summary").click();
+  await expect(diagnosticsDrawer).toHaveAttribute("open", "");
   await expect(shardTable).toContainText("payments-root-shard");
   await expect(shardTable).toContainText("Runtime only");
   await expect(shardTable).toContainText("authored markdown and shard-pack-manifest are missing");

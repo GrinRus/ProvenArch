@@ -1569,7 +1569,6 @@ export function AnalysisStagePanel({
         blockerCount={blockerRows.length}
         onReviewBlocker={handleReviewBlocker}
       />
-      {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
       <AnalysisFailureRecovery
         busy={busy}
         runStatus={runStatus}
@@ -1600,11 +1599,14 @@ export function AnalysisStagePanel({
         onOpenArtifact={onOpenArtifact}
         onLoadGitDiff={onLoadGitDiff}
       />
-      <AnalysisShardTable rows={shardRows} />
       <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
-
-      <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
-      <PendingPermissionsTable pendingPermissions={pendingPermissions} />
+      <details className="advanced-block runs-diagnostics-drawer" data-testid="runs-diagnostics-drawer" open={showActiveLiveDiagnostics || pendingPermissions.length > 0}>
+        <summary>Diagnostics · shards, raw runtime output, permissions and telemetry</summary>
+        {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
+        <AnalysisShardTable rows={shardRows} />
+        <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
+        <PendingPermissionsTable pendingPermissions={pendingPermissions} />
+      </details>
       <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
     </section>
   );

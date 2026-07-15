@@ -5121,6 +5121,32 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 
 ---
 
+## EP-20260715-20J1-home-guided-setup-runs
+
+### Goal
+- Recompose Home, Guided Setup and Runs around the shared workflow selector and authoritative workspace/run state without a broad 20M refactor.
+
+### Non-goals
+- No Knowledge API, Changes package composition, global Ask modal, persisted contract additions or QA runs in primary history.
+
+### Plan
+- [x] Extract dedicated Home, Guided Setup and Runs page containers from the temporary `App.tsx` composition.
+- [x] Give Home four authoritative axes and exactly one selector-derived primary action.
+- [x] Implement the five-step Guided Setup and persist the brief through the existing Step 0 contract, with an explicit quality-warning confirmation when skipped.
+- [x] Separate Run Studio context/history from a local Diagnostics disclosure and keep coordination/recovery evidence visible.
+- [x] Pass focused tests, full deterministic DoD and mock E2E.
+
+### Acceptance
+- Home never derives a second competing next action outside the shared selector.
+- A saved non-empty project name and scope satisfy brief readiness; an unsaved brief can only be skipped through explicit confirmation.
+- Runs shows server-authored active/pending and historical runtime identity while diagnostic telemetry remains non-authoritative.
+
+### Results
+- Full deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 133 Vitest tests, ShellCheck/typecheck, production build and 7/7 mock Playwright scenarios with critical axe checks.
+- Mock browser coverage now explicitly opens the local Runs Diagnostics disclosure before asserting shard telemetry; workflow recovery remains visible outside it.
+
+---
+
 ## EP-20260710-code-audit-remediation-backlog
 
 ### Context

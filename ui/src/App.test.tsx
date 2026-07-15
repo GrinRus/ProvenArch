@@ -3000,8 +3000,29 @@ describe("App", () => {
     expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("setup-run-first-btn"));
+    expect(await screen.findByRole("dialog", { name: "Start without a saved analysis brief?" })).toHaveTextContent("reduces evidence quality");
+    fireEvent.click(screen.getByRole("button", { name: "Start with quality warning" }));
     await screen.findByTestId("analysis-run-progress");
     expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
+    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+  });
+
+  it("starts from Guided Setup review without a warning after saving the analysis brief", async () => {
+    const fetchMock = createFetchMock({ runID: "run-with-brief" });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderConsoleApp("/setup?step=brief");
+
+    fireEvent.change(await screen.findByLabelText("Project name"), { target: { value: "Payments architecture" } });
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "payments and ledger boundaries" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Step 0 wizard contract" }));
+    expect(await screen.findByText("Saved charter/wizard/step0-contract.json")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("setup-step-review"));
+    expect(await screen.findByTestId("guided-setup-review")).toHaveTextContent("Analysis briefSaved");
+    fireEvent.click(screen.getByTestId("guided-start-analysis"));
+
+    expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Start without a saved analysis brief?" })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
