@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
+import { buildKnowledgeViewModel } from "../features/workbench/viewModels";
 
 export function KnowledgePage({
   knowledge,
@@ -23,15 +24,8 @@ export function KnowledgePage({
   onOpenArtifact: (path: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const entities = knowledge?.entities ?? [];
-  const edges = knowledge?.edges ?? [];
-  const artifacts = knowledge?.artifacts ?? [];
-  const selectedEntity = entities.find((entity) => entity.id === selectedEntityID);
-  const filteredEntities = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return entities;
-    return entities.filter((entity) => `${entity.id} ${entity.name} ${entity.type} ${(entity.tags ?? []).join(" ")}`.toLowerCase().includes(normalized));
-  }, [entities, query]);
+  const model = buildKnowledgeViewModel(knowledge, loading, error, query, selectedEntityID);
+  const { entities, edges, artifacts, filteredEntities, selectedEntity } = model;
 
   return (
     <section className="panel stage-panel knowledge-page" data-testid="knowledge-panel">

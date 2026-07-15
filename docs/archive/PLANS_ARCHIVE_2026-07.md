@@ -916,3 +916,70 @@ EP-20260509-v011-hardening-release
 ---
 
 ### Plan ID
+## EP-20260715-20M-workbench-module-seams
+
+### Goal
+- Move Changes/Knowledge/Publish composition behind typed feature view models while keeping HTTP, Git and workflow behavior unchanged.
+
+### Implementation
+- [x] Add pure Change Review, Knowledge and Publish view models with table-driven tests.
+- [x] Make Changes URL view/source the composition source of truth and remove panel selection from `App.tsx`.
+- [x] Preserve existing data loading/actions in `App.tsx` and current operator-visible behavior.
+- [x] Correct current-shell documentation drift.
+
+### Acceptance
+- Typecheck and focused workbench tests pass; no feature module imports `App.tsx`; no public contract changes.
+
+---
+
+## EP-20260715-20K-semantic-ui-density
+
+### Goal
+- Consolidate the accepted Epic 20 UI around semantic tokens, shared hierarchy/state primitives and comfortable/compact density.
+
+### Implementation
+- [x] Add semantic color/context, type, spacing, radius, control and motion tokens with an explicit system-font contract.
+- [x] Add Button, PageHeader, ContextBar, RecoveryPanel, Metric/DefinitionList, RouteTabs and AsyncState primitives.
+- [x] Apply shared hierarchy to Home, Guided Setup and Changes without changing workflow semantics.
+
+### Acceptance
+- Primitive state/route tests, typecheck, focus styling and reduced-motion behavior pass.
+
+---
+
+## EP-20260715-20L-responsive-shell
+
+### Goal
+- Deliver wide/collapsed/bottom navigation and modal/non-modal context behavior without document-level overflow.
+
+### Implementation
+- [x] Limit PrimaryNav to Home/Runs/Knowledge/Changes and keep Setup contextual.
+- [x] Add expanded/collapsed desktop, compact desktop and tablet/phone bottom navigation layouts.
+- [x] Add persistent wide ContextDrawer and focus-managed modal/fullscreen variants below 1280px.
+- [x] Add first-viewport hierarchy, long-content wrapping and local-scroll rules.
+
+### Acceptance
+- Component tests cover drawer modality/Escape; rendered viewport gates run in mock Playwright.
+
+---
+
+## EP-20260715-20N-epic20-task-exit
+
+### Goal
+- Retire the unreachable Console V2 shell and close Epic 20 through deterministic task, accessibility, responsive and documentation gates.
+
+### Implementation
+- [x] Delete unused AppShell/StageRail/top-status/active-strip/inspector/activity modules and their legacy primitive tests.
+- [x] Preserve deterministic scenarios for snapshot isolation, runtime/demo identity, coordination, partial evidence, Git scope and Ask citation return.
+- [x] Synchronize README, ARCHITECTURE, TESTING_STRATEGY and stakeholder status with the implemented shell.
+- [x] Complete full DoD and mock viewport evidence before marking the epic exit verified.
+
+### Acceptance
+- Full deterministic DoD and mock E2E pass; Epic 18 R3 remains a separate trusted-machine release gate.
+
+### Results
+- `make contracts`, `make test`, `make lint` and `make build` pass with the pinned Node 22 toolchain; the UI unit suite reports 140 passing tests.
+- The deterministic mock E2E gate reports 7 passed / 0 skipped and writes current-behavior evidence under `docs/assets/ui-product-shell/` without replacing target-reference assets.
+- Epic 20 is complete. Epic 18 R3 remains the independent trusted-machine release-readiness gate.
+
+---

@@ -404,7 +404,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
     await expectNoHorizontalOverflow(page);
   }
 
-  await page.setViewportSize({ width: 390, height: 900 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(recovery).toBeVisible();
   await expect(page.getByTestId("qa-run-history")).toBeVisible();
   await expect(page.getByTestId("qa-readonly-safety-panel")).toBeVisible();

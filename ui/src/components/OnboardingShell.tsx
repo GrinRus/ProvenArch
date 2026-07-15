@@ -331,7 +331,7 @@ export function OnboardingShell({
               <span className="step-index">4</span>
               <div>
                 <h2>Ready</h2>
-                <p className="hint">Enter Console V2 when workspace, sources and runner are valid.</p>
+                <p className="hint">Enter the product shell when workspace, sources and runner are valid.</p>
               </div>
             </div>
             <ul className="checklist">
@@ -822,7 +822,7 @@ function buildOnboardingProgressSummary({
   return {
     step: "Step 4 of 4",
     action: "Open the console",
-    blocker: "Setup is ready for Console V2.",
+    blocker: "Setup is ready for the product shell.",
     detail: "Console review can start from the selected workspace.",
     items,
     tone: "ready",

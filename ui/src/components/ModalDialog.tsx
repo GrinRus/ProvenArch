@@ -32,7 +32,7 @@ export function ModalDialog({ open, title, description, confirmLabel, busy, chil
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
       <div
         ref={dialogRef}
         className="modal-dialog"

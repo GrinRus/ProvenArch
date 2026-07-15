@@ -4989,7 +4989,7 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
 | 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
-| 20 Console UX trust and IA reset | in progress (20A–20I2 implemented) | Trustworthy contracts, deliberate queue controls, five-destination shell and deep URL context are implemented; 20J–20N remain open |
+| 20 Console UX trust and IA reset | done | 20A–20N deliver trustworthy contracts, four-destination shell, feature seams, semantic primitives and responsive task gates; Epic 18 trusted-machine release evidence remains separate |
 | 21 Evidence-backed Architecture Home + impact-aware refresh | planned (Wave 1) | Out of MVP; implementation starts only from its separate architecture-home/docs-quality slice |
 
 ---
@@ -5173,6 +5173,11 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 - Changes admits only successful `init|refresh` runs with their own authoritative final index as Change Review packages; other analysis outcomes route to Run Studio and QA remains Ask history.
 - Global Ask is a focus-managed read-only dialog; citations open current-workspace Evidence Viewer and preserve an explicit Return to Ask route.
 - Full deterministic DoD passed on 2026-07-15: contracts, full Go suite, 246 Python tests, 141 Vitest tests, ShellCheck/typecheck, production build and 7/7 mock Playwright scenarios with critical axe checks. Ask was rendered without horizontal overflow at 1440, 1280, 1024 and 390 px.
+
+---
+
+Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
+`docs/archive/PLANS_ARCHIVE_2026-07.md`.
 
 ---
 

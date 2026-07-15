@@ -416,7 +416,7 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "publish-git-recovery-desktop.png");
 
-  await page.setViewportSize({ width: 390, height: 900 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(recovery).toBeVisible();
   await expectNoHorizontalOverflow(page);

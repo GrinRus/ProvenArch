@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
+import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
 import { GuidedSetupPage, GuidedSetupReview, HomePage, RunsPage } from "./components/ProductPages";
-import { ChangesPage } from "./components/ChangesPage";
-import { EvidenceViewer } from "./components/EvidenceViewer";
 import { KnowledgePage } from "./components/KnowledgePage";
 import { ModalDialog } from "./components/ModalDialog";
 import { OnboardingShell } from "./components/OnboardingShell";
@@ -12,10 +11,7 @@ import {
   AnalysisStagePanel,
   AskStagePanel,
   CharterStagePanel,
-  ProposalsStagePanel,
-  PublishStagePanel,
   ReadinessStagePanel,
-  ReviewStagePanel,
   SourceStagePanel,
 } from "./components/StagePanels";
 import { WizardContractPanel } from "./components/WizardContractPanel";
@@ -739,9 +735,9 @@ export default function App() {
     if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
       return;
     }
-    const path = activeStage === "publish" ? undefined : selectedArtifact || undefined;
+    const path = destination === "changes" && route.changesView === "publish" ? undefined : selectedArtifact || undefined;
     void loadGitDiff({ runId, path });
-  }, [activeStage, consoleReady, loadGitDiff, onboardingStatus?.can_enter_console, runId, selectedArtifact]);
+  }, [consoleReady, destination, loadGitDiff, onboardingStatus?.can_enter_console, route.changesView, runId, selectedArtifact]);
 
   const handleLoadGitDiff = useCallback(
     (options: LoadGitDiffOptions) => {
@@ -908,20 +904,31 @@ export default function App() {
         workspaceValid={validateResult?.ok === true}
         onDestinationChange={handleDestinationChange}
         onAsk={() => setAskOpen(true)}
-        onSettings={() => navigateRoute({ destination: "setup", setupStep: "runner", invalid: [] })}
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
 	  {destination === "changes" ? (
-		<ChangesPage
-		  runs={runList}
-		  selectedRunID={runId}
-		  selectedEvidenceStatus={evidenceSnapshot.status}
+		<ChangesWorkspace
 		  view={route.changesView ?? "overview"}
-		  onViewChange={(view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] })}
-		  onSelectChangeReview={(id) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); }}
-		  onOpenRunStudio={(id) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); }}
-		> </ChangesPage>
+		  source={route.source ?? "snapshot"}
+		  page={{
+			runs: runList,
+			selectedRunID: runId,
+			selectedEvidenceStatus: evidenceSnapshot.status,
+			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
+			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
+			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
+		  }}
+		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, runLogs, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
+		  proposals={{ artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, proposalBranch, gitStatus, runLogs, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onOpenArtifact: (path) => void handleOpenArtifactAndReview(path), onGoPublish: () => navigateRoute({ ...route, destination: "changes", changesView: "publish", invalid: [] }) }}
+		  publish={{ busy, gitMessage, proposalBranch, gitStatus, gitError, artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, externalGateItems: publishExternalGateItems, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onGitMessageChange: setGitMessage, onProposalBranchChange: setProposalBranch, onCommit: () => void handleGitCommit(), onCreateProposalBranch: () => void handleCreateProposalBranch(), onPreviewArtifact: (path) => void handleOpenArtifact(path) }}
+		  currentArtifact={currentArtifactPath ? { path: currentArtifactPath, content: currentArtifactContent } : null}
+		  viewerMode={route.mode ?? "rendered"}
+		  askReturnAvailable={askReturnRoute !== null}
+		  onViewerModeChange={(mode: ViewerMode) => navigateRoute({ ...route, mode, invalid: [] })}
+		  onOpenCurrentArtifact={(path) => void handleOpenCurrentArtifact(path)}
+		  onReturnToAsk={() => { if (askReturnRoute) navigateRoute(askReturnRoute); setAskOpen(true); setAskReturnRoute(null); }}
+		/>
 	  ) : null}
 	  {destination === "home" ? (
 		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
@@ -1064,75 +1071,6 @@ export default function App() {
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
         </RunsPage>
-      ) : null}
-
-      {destination === "changes" && activeStage === "review" && route.source === "current" ? (
-        <section className="panel stage-panel current-evidence" data-testid="current-workspace-evidence">
-          {askReturnRoute ? <button type="button" onClick={() => { navigateRoute(askReturnRoute); setAskOpen(true); setAskReturnRoute(null); }}>Return to Ask</button> : null}
-          {currentArtifactPath ? <EvidenceViewer path={currentArtifactPath} content={currentArtifactContent} sourceMode="current_workspace" mode={route.mode ?? "rendered"} onModeChange={(mode: ViewerMode) => navigateRoute({ ...route, mode, invalid: [] })} onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)} /> : <p className="empty-state">Choose a current workspace artifact. No historical run snapshot will be substituted.</p>}
-        </section>
-      ) : null}
-
-      {destination === "changes" && activeStage === "review" && route.source !== "current" ? (
-        <ReviewStagePanel
-          runId={runId}
-          runStatus={runStatus}
-          runList={runList}
-          coverageSummary={coverageSummary}
-          openQuestions={openQuestions}
-          nonDiagramArtifacts={nonDiagramArtifacts}
-          diagramArtifacts={diagramArtifacts}
-          selectedArtifact={selectedArtifact}
-          selectedArtifactContent={selectedArtifactContent}
-          runLogs={runLogs}
-          reviewSummary={runReviewSummary}
-          demo={runStatus?.runtime_mode === "fake"}
-          gitDiff={gitDiff}
-          gitDiffStatus={gitDiffStatus}
-          onLoadGitDiff={handleLoadGitDiff}
-          onSelectRun={(id) => void handleSelectRunAndRoute(id)}
-          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-        />
-      ) : null}
-
-      {destination === "changes" && activeStage === "proposals" ? (
-        <ProposalsStagePanel
-          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
-          selectedArtifact={selectedArtifact}
-          selectedArtifactContent={selectedArtifactContent}
-          openQuestions={openQuestions}
-          proposalBranch={proposalBranch}
-          gitStatus={gitStatus}
-          runLogs={runLogs}
-          gitDiff={gitDiff}
-          gitDiffStatus={gitDiffStatus}
-          onLoadGitDiff={handleLoadGitDiff}
-          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-          onGoPublish={() => setActiveStage("publish")}
-        />
-      ) : null}
-
-      {destination === "changes" && activeStage === "publish" ? (
-        <PublishStagePanel
-          busy={busy}
-          gitMessage={gitMessage}
-          proposalBranch={proposalBranch}
-          gitStatus={gitStatus}
-          gitError={gitError}
-          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
-          selectedArtifact={selectedArtifact}
-          selectedArtifactContent={selectedArtifactContent}
-          openQuestions={openQuestions}
-          externalGateItems={publishExternalGateItems}
-          gitDiff={gitDiff}
-          gitDiffStatus={gitDiffStatus}
-          onLoadGitDiff={handleLoadGitDiff}
-          onGitMessageChange={setGitMessage}
-          onProposalBranchChange={setProposalBranch}
-          onCommit={() => void handleGitCommit()}
-          onCreateProposalBranch={() => void handleCreateProposalBranch()}
-          onPreviewArtifact={(path) => void handleOpenArtifact(path)}
-        />
       ) : null}
 
       {error ? <p className="status err">Error: {error}</p> : null}
