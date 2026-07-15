@@ -182,7 +182,7 @@ Implemented required jobs:
   - `./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
   - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
-  - `make test-stress` (coordinator debounce/queue regression loop)
+  - `make test-stress` (coordinator explicit-queue and pending-supersession regression loop)
   - `go build ./cmd/acp`
 - `ui`
   - `./scripts/run-npm.sh ci --prefix ui`
