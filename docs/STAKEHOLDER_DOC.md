@@ -29,19 +29,19 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts Guided Setup with Workspace, Sources, Analysis brief, Runner/readiness and Review/start; direct `acp serve --workspace` remains compatibility path. |
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20) | The native History shell provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, semantic primitives, responsive navigation/context drawer, current-workspace Knowledge and global read-only Ask. |
-| Evidence-backed architecture home + impact-aware refresh | in progress (21A–21C done) | `reports/as-is/overview.md` is the validated Architecture Home; each analysis run records source revisions and each refresh records an advisory impact plan. No-op/selective execution and surgical promotion remain 21D–21G. |
+| Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Runs and Changes. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
-- follow-up: Epic 20 implementation complete; release readiness remains independently gated by Epic 18 trusted-machine evidence
-- in progress Wave 1: 21 (21A–21C done; 21D–21G open)
+- done: Epic 20 and Epic 21 implementation complete
+- release blocker: Epic 18 R3 trusted-machine composite evidence
 - out of MVP: 12, 13
 
 ---
 
 ## 1. Краткое резюме
 
-Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит **evidence-backed as-is architecture workspace** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. Текущий `refresh` повторно собирает этот workspace; impact-aware selective maintenance запланирован в Wave 1. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
+Мы предлагаем создать **dev-first архитектурный сервис**, который автоматически строит и поддерживает **evidence-backed as-is architecture workspace** для множества репозиториев, даже когда сервисы **не описаны или описаны плохо**. `refresh` сохраняет source revision/impact evidence, безопасно завершает no-op без provider execution и переиспользует только валидные unaffected shard packs. Ключевое отличие: архитектура хранится не как “набор схем”, а как **версионируемая модель**, из которой компилируются отчёты и представления.
 
 **В MVP мы сознательно делаем local-first режим**: пользователь разворачивает сервис локально, локально же у него доступны checkout-папки и/или GitHub/GitLab URL, а все git-операции идут через локальный `git` и уже настроенный доступ пользователя. Документы лежат в workspace (например, вручную выгруженные из Confluence). Это снижает барьер внедрения и откладывает вопросы безопасности/комплаенса на Wave 1+.
 

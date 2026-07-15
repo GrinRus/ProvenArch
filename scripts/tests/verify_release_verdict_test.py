@@ -12,9 +12,12 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
         cls.repo_root = Path(__file__).resolve().parents[2]
         cls.script = cls.repo_root / "scripts" / "verify-release-verdict.py"
 
-    def run_verifier(self, path: Path) -> subprocess.CompletedProcess[str]:
+    def run_verifier(self, *paths: Path) -> subprocess.CompletedProcess[str]:
+        return self.run_verifier_args(*(str(path) for path in paths))
+
+    def run_verifier_args(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(self.script), str(path)],
+            [sys.executable, str(self.script), *args],
             cwd=self.repo_root,
             capture_output=True,
             text=True,
@@ -51,6 +54,12 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
             "records": [{"strict_status": "passed"}],
         }
 
+    def write_ready_evidence(self, root: Path, matrix_id: str) -> Path:
+        payload = {**self.ready_payload(), "matrix_id": matrix_id}
+        path = self.write_verdict(root, payload)
+        self.write_accepted_assessments(root, matrix_id)
+        return path
+
     def test_accepts_pass_ready_verdict_with_accepted_swe_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -66,6 +75,121 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("release evidence ready", result.stdout)
+
+    def test_accepts_composite_release_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = [
+                self.write_ready_evidence(root, "release-full-fast"),
+                self.write_ready_evidence(root, "release-full-long"),
+                self.write_ready_evidence(root, "release-full-ftgo-sentry"),
+            ]
+
+            result = self.run_verifier(*paths)
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("composite release evidence ready: 3 constituent matrices", result.stdout)
+
+    def test_accepts_composite_matrix_ids_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reports = root / "reports"
+            reports.mkdir()
+            matrix_ids = ["release-full-fast", "release-full-long", "release-full-ftgo-sentry"]
+            for matrix_id in matrix_ids:
+                self.write_ready_evidence(reports, matrix_id)
+
+            result = subprocess.run(
+                [sys.executable, str(self.script), "--matrix-ids", ",".join(matrix_ids)],
+                cwd=root,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("composite release evidence ready: 3 constituent matrices", result.stdout)
+
+    def test_rejects_missing_constituent_from_matrix_ids_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(self.script), "--matrix-ids", "release-full-missing"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release verdict file not found", result.stderr)
+
+    def test_rejects_duplicate_matrix_id_in_composite_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = self.write_ready_evidence(root, "release-full-fast")
+
+            result = self.run_verifier(path, path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate matrix_id in composite release evidence", result.stderr)
+
+    def test_rejects_duplicate_matrix_ids_configuration(self) -> None:
+        result = self.run_verifier_args(
+            "--matrix-ids",
+            "release-full-fast,release-full-fast",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate matrix id in ACP_RELEASE_MATRIX_IDS", result.stderr)
+
+    def test_rejects_conflicting_release_evidence_modes(self) -> None:
+        result = self.run_verifier_args(
+            "--matrix-id",
+            "release-fast",
+            "--verdict-path",
+            "reports/release_verdict_release-fast.json",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("set exactly one release evidence mode", result.stderr)
+
+    def test_rejects_empty_matrix_id_configuration(self) -> None:
+        result = self.run_verifier_args("--matrix-ids", "release-full-fast,")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("contains an empty matrix id", result.stderr)
+
+    def test_rejects_composite_when_one_constituent_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ready = self.write_ready_evidence(root, "release-full-fast")
+            failed_payload = {
+                **self.ready_payload(),
+                "matrix_id": "release-full-long",
+                "verdict": "FAIL",
+                "release_state": "RELEASE BLOCKED",
+            }
+            failed = self.write_verdict(root, failed_payload)
+            self.write_accepted_assessments(root, "release-full-long")
+
+            result = self.run_verifier(ready, failed)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release_verdict_release-full-long.json", result.stderr)
+        self.assertIn("verdict must be PASS", result.stderr)
+
+    def test_rejects_composite_when_one_assessment_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ready = self.write_ready_evidence(root, "release-full-fast")
+            missing = self.write_verdict(
+                root,
+                {**self.ready_payload(), "matrix_id": "release-full-long"},
+            )
+
+            result = self.run_verifier(ready, missing)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release_verdict_release-full-long.json", result.stderr)
+        self.assertIn("ux assessment file not found", result.stderr)
 
     def test_rejects_missing_swe_reports(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

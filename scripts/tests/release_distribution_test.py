@@ -82,8 +82,12 @@ class ReleaseDistributionTest(unittest.TestCase):
             for step in verify_job["steps"]
             if "scripts/verify-release-verdict.py" in step.get("run", "")
         )
+        self.assertIn("ACP_RELEASE_MATRIX_IDS", verify_step["env"])
         self.assertIn("ACP_RELEASE_MATRIX_ID", verify_step["env"])
         self.assertIn("ACP_RELEASE_VERDICT_PATH", verify_step["env"])
+        self.assertIn("--matrix-ids", verify_step["run"])
+        self.assertIn("--matrix-id", verify_step["run"])
+        self.assertIn("--verdict-path", verify_step["run"])
 
         self.assertEqual("ubuntu-latest", job["runs-on"])
         self.assertEqual("verify-release-evidence", job["needs"])
