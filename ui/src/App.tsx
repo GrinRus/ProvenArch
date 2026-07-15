@@ -145,6 +145,7 @@ export default function App() {
     runId,
     runStatus,
     runList,
+    coordination,
     selectedArtifact,
     selectedArtifactContent,
     runActionStatus,
@@ -167,6 +168,7 @@ export default function App() {
     handleRunPipeline,
     handleSelectRun,
     handleCancelSelectedRun,
+    handleCancelRun,
     handleOpenArtifact,
   } = runExplorer;
 
@@ -837,6 +839,7 @@ export default function App() {
           runId={runId}
           runStatus={runStatus}
           runList={runList}
+          coordination={coordination}
           runActionStatus={runActionStatus}
           selectedRunWarnings={selectedRunWarnings}
           selectedRunIsActive={selectedRunIsActive}
@@ -852,8 +855,9 @@ export default function App() {
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
           focusBlockerSignal={analysisFocusSignal}
-          onRunPipeline={(pipeline) => void handleRunPipeline(pipeline)}
+          onRunPipeline={(pipeline, intent) => void handleRunPipeline(pipeline, intent)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
+          onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRun(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />

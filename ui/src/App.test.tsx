@@ -3262,6 +3262,60 @@ describe("App", () => {
     expect(startCalls).toBe(1);
   }, 10_000);
 
+  it("disables ordinary starts and confirms explicit refresh queue replacement", async () => {
+    const activeID = "run-active";
+    const pendingID = "run-pending";
+    const replacementID = "run-replacement";
+    const active = {
+      run_id: activeID,
+      pipeline: "init",
+      status: "running",
+      started_at: "2026-07-15T10:00:00Z",
+      warnings: [],
+    };
+    const pending = {
+      run_id: pendingID,
+      pipeline: "refresh",
+      status: "queued",
+      started_at: "2026-07-15T10:01:00Z",
+      warnings: [],
+    };
+    const baseFetch = createFetchMock({ runID: activeID, runStarted: true, runStatus: { [activeID]: active } });
+    let queued = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url === "/api/pipeline/runs?limit=100") {
+        return jsonResponse({
+          coordination: { active_run_id: activeID, pending: { run_id: queued ? replacementID : pendingID, pipeline: "refresh" } },
+          items: queued
+            ? [active, { ...pending, run_id: replacementID }, { ...pending, status: "canceled", error_code: "run_superseded", superseded_by_run_id: replacementID }]
+            : [active, pending],
+        });
+      }
+      if (method === "POST" && url === "/api/pipeline/refresh") {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ intent: "queue" });
+        queued = true;
+        return jsonResponse({ run_id: replacementID, status: "started" }, 202);
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    navigateToStage("analysis");
+    expect(screen.getByTestId("run-init-btn")).toBeDisabled();
+    expect(screen.getByTestId("run-refresh-btn")).toBeDisabled();
+    expect(screen.getByTestId("pending-run-summary")).toHaveTextContent(pendingID);
+
+    fireEvent.click(screen.getByTestId("run-queue-refresh-btn"));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(`pending ${pendingID} will be canceled as run_superseded`);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Replace pending refresh" }));
+
+    expect(await screen.findByText(`Refresh ${replacementID} queued; the selected evidence remains unchanged.`)).toBeInTheDocument();
+    expect(screen.getByTestId("pending-run-summary")).toHaveTextContent(replacementID);
+  });
+
   it("renders pending runtime permission requests for the selected run", async () => {
     const runID = "run-permissions";
     vi.stubGlobal(

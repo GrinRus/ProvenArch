@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentProps, type Rea
 import { BaselineEditorsPanel } from "./BaselineEditorsPanel";
 import { BaselineGitPanel } from "./BaselineGitPanel";
 import { EvidenceViewer } from "./EvidenceViewer";
+import { ModalDialog } from "./ModalDialog";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
@@ -30,6 +31,7 @@ import type {
   RuntimeStepProviderValues,
   RuntimeTimeoutValues,
   RunListItem,
+  RunCoordination,
   RunLogEntry,
   RunReviewStep,
   RunReviewSummaryResponse,
@@ -1405,6 +1407,7 @@ export type AnalysisStageProps = {
   runId: string | null;
   runStatus: RunStatusResponse | null;
   runList: RunListItem[];
+  coordination: RunCoordination;
   runActionStatus: string;
   selectedRunWarnings: string[];
   selectedRunIsActive: boolean;
@@ -1420,8 +1423,9 @@ export type AnalysisStageProps = {
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   focusBlockerSignal: number;
-  onRunPipeline: (pipeline: "init" | "refresh") => void;
+  onRunPipeline: (pipeline: "init" | "refresh", intent?: "start" | "queue") => void;
   onCancelSelectedRun: () => void;
+  onCancelRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
   onOpenArtifact: (path: string) => void;
 };
@@ -1432,6 +1436,7 @@ export function AnalysisStagePanel({
   runId,
   runStatus,
   runList,
+  coordination,
   runActionStatus,
   selectedRunWarnings,
   selectedRunIsActive,
@@ -1449,11 +1454,13 @@ export function AnalysisStagePanel({
   focusBlockerSignal,
   onRunPipeline,
   onCancelSelectedRun,
+  onCancelRun,
   onSelectRun,
   onOpenArtifact,
 }: AnalysisStageProps) {
   const blockerDetailsRef = useRef<HTMLElement>(null);
   const [selectedStepID, setSelectedStepID] = useState("");
+  const [queueConfirmationOpen, setQueueConfirmationOpen] = useState(false);
   const [stepReviewView, setStepReviewView] = useState<"artifacts" | "logs" | "evidence" | "diff">("artifacts");
   const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
   const reviewSteps = runReviewSummary?.steps ?? [];
@@ -1515,17 +1522,42 @@ export function AnalysisStagePanel({
       </div>
 
       <div className="actions">
-        <button type="button" onClick={() => onRunPipeline("init")} disabled={busy} data-testid="run-init-btn">
+        <button type="button" onClick={() => onRunPipeline("init")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-init-btn">
           Run init
         </button>
-        <button type="button" onClick={() => onRunPipeline("refresh")} disabled={busy} data-testid="run-refresh-btn">
+        <button type="button" onClick={() => onRunPipeline("refresh")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-refresh-btn">
           Run refresh
         </button>
+        {coordination.active_run_id ? (
+          <button type="button" onClick={() => setQueueConfirmationOpen(true)} disabled={busy} data-testid="run-queue-refresh-btn">
+            Queue refresh after current run
+          </button>
+        ) : null}
         <button type="button" onClick={onCancelSelectedRun} disabled={busy || cancelBusy || !runId || !selectedRunIsActive} data-testid="run-cancel-btn">
           Cancel selected run
         </button>
       </div>
+      {coordination.active_run_id ? <p className="hint" data-testid="run-active-start-reason">Ordinary start is unavailable while <code>{coordination.active_run_id}</code> is active.</p> : null}
+      {coordination.pending ? (
+        <section className="subsection" data-testid="pending-run-summary">
+          <h2>Pending refresh</h2>
+          <p><code>{coordination.pending.run_id}</code> · {coordination.pending.pipeline}. A newly queued refresh replaces this pending run.</p>
+          <button type="button" onClick={() => onCancelRun(coordination.pending!.run_id)} disabled={busy || cancelBusy}>Cancel pending refresh</button>
+        </section>
+      ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
+
+      <ModalDialog
+        open={queueConfirmationOpen}
+        title={coordination.pending ? "Replace pending refresh" : "Queue refresh"}
+        description={coordination.pending
+          ? `Active run ${coordination.active_run_id}; pending ${coordination.pending.run_id} will be canceled as run_superseded.`
+          : `Refresh will start after active run ${coordination.active_run_id}.`}
+        confirmLabel={coordination.pending ? "Replace pending refresh" : "Queue refresh after current run"}
+        busy={busy}
+        onCancel={() => setQueueConfirmationOpen(false)}
+        onConfirm={() => { setQueueConfirmationOpen(false); onRunPipeline("refresh", "queue"); }}
+      />
 
       <AnalysisRunProgress
         runId={runId}

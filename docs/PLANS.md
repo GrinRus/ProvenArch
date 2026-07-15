@@ -5072,6 +5072,29 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 
 ---
 
+## EP-20260715-20F2-deliberate-queue-ui
+
+### Goal
+- Consume authoritative run coordination in Runs and make queueing a confirmed refresh-only action without losing last-good evidence.
+
+### Non-goals
+- No multi-item queue, init queueing, scheduling policy changes or Home/Run Studio recomposition.
+
+### Plan
+- [x] Persist `coordination` in the frontend run model and send explicit `start|queue` intent.
+- [x] Disable ordinary starts during an active run; confirm queue creation/replacement and expose pending cancellation.
+- [x] Preserve selected evidence until an ordinary start is accepted and refresh coordination after mutations.
+- [x] Pass focused tests and full deterministic DoD.
+
+### Acceptance
+- A stale click cannot silently enqueue; the dialog names active and replaced pending identities.
+- Queue failure or success does not replace the selected last-good snapshot.
+
+### Results
+- Full deterministic DoD passed on 2026-07-15: contracts, Go, 246 Python tests, 128 Vitest tests, lint/typecheck, production build and 7/7 mock Playwright scenarios.
+
+---
+
 ## EP-20260710-code-audit-remediation-backlog
 
 ### Context

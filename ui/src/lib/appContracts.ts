@@ -147,10 +147,12 @@ export type RuntimePermissionDecision = {
 
 export type RunListResponse = {
   items: RunListItem[];
-  coordination?: {
-    active_run_id?: string;
-    pending?: { run_id: string; pipeline: string } | null;
-  };
+  coordination?: RunCoordination;
+};
+
+export type RunCoordination = {
+  active_run_id?: string;
+  pending?: { run_id: string; pipeline: string } | null;
 };
 
 export type Artifact = {
