@@ -257,7 +257,23 @@ Output mapping rules:
 }
 ```
 
-## 8) QA Answer Schema
+## 8) Source Revisions Schema
+
+- **Source of truth:** `schemas/source-revisions.schema.json`
+- Per-run, pre-execution audit artifact at `reports/taskruns/<run_id>/source-revisions.json`.
+- Records `run_id`, pipeline, capture time, nullable validated baseline, analysis-input fingerprint and per-repo configured source identity, current/baseline revisions, worktree state, effective include/exclude, comparison and typed fallback reasons.
+- Absolute resolved checkout paths are not persisted. A configured absolute local path is represented by a stable redacted `external/<name>-<hash>` identity.
+- Dirty/unavailable/non-ancestor states are valid conservative results, not parse failures.
+
+## 9) Refresh Impact Plan Schema
+
+- **Source of truth:** `schemas/refresh-impact-plan.schema.json`
+- Pre-collect refresh audit artifact at `reports/taskruns/<run_id>/refresh-impact-plan.json`.
+- `enforcement` is fixed to `advisory`; decisions are `unchanged_candidate`, `selective_candidate`, or `full_refresh_required`.
+- `repo_deltas[]` preserve complete changed-file status including rename/copy original path, scope and mapped shards/domains. More than 10,000 changed paths records the exact count with `changes_complete=false` and never maps a partial list.
+- Stale/preserved artifacts are candidates only; this schema does not authorize selective execution or promotion.
+
+## 10) QA Answer Schema
 
 - **Source of truth:** `schemas/qa-answer.schema.json`
 - Primary runtime output для async Ask step `qa.ask`.
@@ -279,7 +295,7 @@ Semantic role:
 - file is written only under `reports/taskruns/<run_id>/qa/qa-answer.json`;
 - it is run/audit output, not a promoted canonical architecture artifact.
 
-## 9) Model conventions
+## 11) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -288,14 +304,14 @@ Semantic role:
 - Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
 - Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
-## 10) Charter и skills conventions
+## 12) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
 - Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth; runtime pipeline не пишет в них напрямую.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
-## 11) Изменения схем/контрактов
+## 13) Изменения схем/контрактов
 
 Public HTTP contracts, не представленные JSON Schema, фиксируются в
 `docs/spec/API_SPEC.md` и проверяются handler tests + TypeScript response types. Для Epic 20
@@ -309,7 +325,7 @@ canonical fixture полного Git confirmation/read contract находитс
 - обновлением примеров/фикстур
 - кратким rationale в PR
 
-## 12) Current knowledge API read model
+## 14) Current knowledge API read model
 
 - **Source of truth:** `docs/spec/API_SPEC.md` (`GET /api/knowledge`) и Go response types в `internal/api/knowledge.go`.
 - Это transient read model, а не новая persisted schema: `schemas/*` не меняются.

@@ -1252,6 +1252,8 @@ Suggested PR slices:
     the default decision flow
 ## Epic 21 — Evidence-backed Architecture Home + Impact-aware Refresh (Wave 1)
 
+Status (2026-07-15): `21A`, `21B` and `21C` implemented. `21D`–`21G` remain open; therefore the epic remains in progress. Advisory impact decisions do not yet skip provider work or selectively promote artifacts.
+
 Context:
 - ProvenArch already has the stronger trust and governance foundation: a separate Git-versioned
   architecture workspace, read-only source repositories, staged runtime outputs, validator-gated
@@ -1329,6 +1331,7 @@ Acceptance:
 
 Suggested PR slices:
 - `21A Architecture home + documentation quality baseline`
+  - **done:** canonical Architecture Home sections, validation, fake output and QA navigation priority
   - redefine the existing `reports/as-is/overview.md` authoring policy as the architecture workspace
     home while keeping its canonical path and current Review default selection
   - add the required navigation/content sections and concise human-readable quality rules to
@@ -1337,6 +1340,7 @@ Suggested PR slices:
     explicit gaps, concrete citations and concise answers
   - update fake artifacts plus focused prompt/runtime-draft/QA tests without schema changes
 - `21B Source revision baseline contract`
+  - **done:** persisted schema-validated source revisions, conservative baseline selection and analysis-input fingerprint
   - specify and persist per-repo current revision, previous successful promoted revision, source kind,
     effective scope and conservative-fallback reason under taskrun scope
   - define the exact baseline selection rule: latest successful validator-promoted `init|refresh`, not
@@ -1344,6 +1348,7 @@ Suggested PR slices:
   - treat dirty local worktrees, missing commits and non-ancestor/history-rewrite cases explicitly
   - synchronize schemas, `docs/spec/*`, appendix, examples, fixtures, validators and ADR rationale
 - `21C Deterministic refresh impact plan`
+  - **done:** persisted advisory plan with complete Git delta accounting, mapping and fail-closed fallback
   - compute changed paths before `refresh.step1.collect`
   - map paths to effective include/exclude scope, prior shard path scopes, domain IDs, citations/model
     provenance and canonical document dependencies

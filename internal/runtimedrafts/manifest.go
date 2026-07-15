@@ -248,6 +248,14 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q contains empty evidence reference slots, likely from shell-expanded markdown paths", idx, output.Path))
 		}
 		if strings.TrimSpace(stepID) == "init.step2.asis_docs" || strings.TrimSpace(stepID) == "refresh.step2.asis_docs" {
+			if filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath))) == "reports/as-is/overview.md" {
+				if missing := runtimeDraftArchitectureHomeMissingSections(text); len(missing) > 0 {
+					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home has missing or empty required sections: %s", idx, output.Path, strings.Join(missing, ", ")))
+				}
+				if runtimeDraftArchitectureHomeHasProcessNarration(text) {
+					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language", idx, output.Path))
+				}
+			}
 			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 			}
@@ -269,6 +277,57 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 	}
 	sort.Strings(problems)
 	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
+}
+
+func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
+	lower := strings.ToLower(text)
+	markers := []string{
+		"runtime provider",
+		"provider execution",
+		"provider generated",
+		"manifest recap",
+		"taskrun mechanics",
+		"confidence:",
+		"confidence level",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftArchitectureHomeMissingSections(text string) []string {
+	required := []string{
+		"System at a glance",
+		"Analyzed scope",
+		"Domains and ownership",
+		"Key flows",
+		"Integrations and datastores",
+		"Where to start",
+		"Safe-change guidance",
+		"Evidence gaps and open questions",
+	}
+	sections := map[string]bool{}
+	current := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
+			current = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "## ")))
+			continue
+		}
+		if current != "" && trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			sections[current] = true
+		}
+	}
+	missing := make([]string, 0)
+	for _, heading := range required {
+		if !sections[strings.ToLower(heading)] {
+			missing = append(missing, heading)
+		}
+	}
+	return missing
 }
 
 func validateRelativeDraftPath(value string) error {

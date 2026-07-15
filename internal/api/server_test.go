@@ -4845,7 +4845,7 @@ elif step_id in {"init.step2.asis_docs", "refresh.step2.asis_docs"}:
                 "canonical_path": "reports/as-is/overview.md",
                 "kind": "report",
                 "title": "Stub As-Is Overview",
-                "content": "# Stub As-Is Overview\n\nEvidence references: reports/as-is/overview.md.\n",
+                "content": "# Stub Architecture Home\n\n## System at a glance\nSupported by reports/coverage/summary.md.\n\n## Analyzed scope\nRepository evidence is under README.md.\n\n## Domains and ownership\nOwnership evidence is recorded in model/entities/.\n\n## Key flows\nFlow evidence is recorded in reports/as-is/overview.md.\n\n## Integrations and datastores\nIntegration evidence is recorded in model/entities/.\n\n## Where to start\nStart with reports/coverage/summary.md.\n\n## Safe-change guidance\nValidate changes against cited repository paths.\n\n## Evidence gaps and open questions\nUnconfirmed details remain gaps in reports/coverage/summary.md.\n",
             },
             {
                 "path": "summary.md",
@@ -5320,7 +5320,7 @@ func writeSyntheticServerDraftArtifacts(task acpruntime.Task) error {
 					"canonical_path": "reports/as-is/overview.md",
 					"kind":           "report",
 					"title":          "Stub As-Is Overview",
-					"content":        "# Stub As-Is Overview\n\nEvidence references: reports/as-is/overview.md.\n",
+					"content":        "# Stub Architecture Home\n\n## System at a glance\nSupported by reports/coverage/summary.md.\n\n## Analyzed scope\nRepository evidence is under README.md.\n\n## Domains and ownership\nOwnership evidence is recorded in model/entities/.\n\n## Key flows\nFlow evidence is recorded in reports/as-is/overview.md.\n\n## Integrations and datastores\nIntegration evidence is recorded in model/entities/.\n\n## Where to start\nStart with reports/coverage/summary.md.\n\n## Safe-change guidance\nValidate changes against cited repository paths.\n\n## Evidence gaps and open questions\nUnconfirmed details remain gaps in reports/coverage/summary.md.\n",
 				},
 				{
 					"path":           "summary.md",

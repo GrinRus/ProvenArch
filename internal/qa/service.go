@@ -607,6 +607,8 @@ func isIndexableExtension(ext string) bool {
 
 func weightForPath(path string, importsRoot string) int {
 	switch {
+	case path == "reports/as-is/overview.md":
+		return 9
 	case strings.HasPrefix(path, "reports/findings/"):
 		return 8
 	case strings.HasPrefix(path, "reports/coverage/"):

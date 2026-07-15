@@ -13,6 +13,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
+	"github.com/GrinRus/ProvenArch/internal/refreshplan"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
@@ -442,6 +443,50 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			"run failed: workspace validation",
 			diagnosticMessages(validation.Warnings),
 		)
+	}
+	baselineCandidates := []string{}
+	for _, prior := range s.ListRuns(0) {
+		if prior.RunID == runID || prior.Status != RunStatusSucceeded || (prior.Pipeline != string(PipelineInit) && prior.Pipeline != string(PipelineRefresh)) {
+			continue
+		}
+		baselineCandidates = append(baselineCandidates, prior.RunID)
+	}
+	baseline, priorEvidence := refreshplan.LoadLatestValidBaseline(request.Workspace, baselineCandidates)
+	sourceRevisions := refreshplan.CaptureSourceRevisions(ctx, request.Workspace, validation.ResolvedRepos, string(request.Pipeline), runID, s.clock(), baseline, nil)
+	sourceRaw, err := refreshplan.MarshalSourceRevisions(sourceRevisions)
+	if err == nil {
+		_, err = refreshplan.ParseSourceRevisions(sourceRaw)
+	}
+	if err == nil {
+		err = request.Workspace.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "source-revisions.json")), append(sourceRaw, '\n'))
+	}
+	if err != nil {
+		return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("persist source revisions: %w", err), err, "run failed: source revision capture", nil)
+	}
+	sourceArtifact := Artifact{Path: filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "source-revisions.json")), Kind: "source-revisions", Label: "Source revisions"}
+	if _, exists := artifactIndexFor(initialArtifacts)[sourceArtifact.Path]; !exists {
+		initialArtifacts = append(initialArtifacts, sourceArtifact)
+	}
+	if request.Pipeline == PipelineRefresh {
+		impact := refreshplan.BuildImpactPlan(ctx, sourceRevisions, baseline, validation.ResolvedRepos, priorEvidence, s.clock(), nil)
+		impactRaw, impactErr := refreshplan.MarshalImpactPlan(impact)
+		if impactErr == nil {
+			_, impactErr = refreshplan.ParseImpactPlan(impactRaw)
+		}
+		if impactErr == nil {
+			impactErr = request.Workspace.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "refresh-impact-plan.json")), append(impactRaw, '\n'))
+		}
+		if impactErr != nil {
+			return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("persist refresh impact plan: %w", impactErr), impactErr, "run failed: refresh impact planning", nil)
+		}
+		impactArtifact := Artifact{Path: filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "refresh-impact-plan.json")), Kind: "refresh-impact-plan", Label: "Refresh impact plan"}
+		if _, exists := artifactIndexFor(initialArtifacts)[impactArtifact.Path]; !exists {
+			initialArtifacts = append(initialArtifacts, impactArtifact)
+		}
+	}
+	initialInfo.Warnings = append([]string(nil), initialWarnings...)
+	if err := s.storeRun(runRecord{info: initialInfo, artifacts: append([]Artifact(nil), initialArtifacts...)}); err != nil {
+		return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("store planning artifacts: %w", err), err, "run failed: planning artifact registration", nil)
 	}
 
 	execution := pipelineExecution{

@@ -11,9 +11,54 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/refreshplan"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
+
+func TestRunPersistsRevisionAndAdvisoryImpactArtifactsWithoutSkippingRefresh(t *testing.T) {
+	t.Parallel()
+	ws := createWorkspace(t)
+	service := NewService(WithHistoryWorkspace(ws), WithClock(func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) }))
+	initInfo, initArtifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineInit, NonInteractive: true})
+	if err != nil {
+		t.Fatalf("run init: %v", err)
+	}
+	if initInfo.Status != RunStatusSucceeded || !artifactKindPresent(initArtifacts, "source-revisions") {
+		t.Fatalf("expected source revisions in successful init inventory: info=%+v artifacts=%+v", initInfo, initArtifacts)
+	}
+	refreshInfo, refreshArtifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineRefresh, NonInteractive: true})
+	if err != nil {
+		t.Fatalf("run refresh: %v", err)
+	}
+	if refreshInfo.Status != RunStatusSucceeded || !strings.HasSuffix(refreshInfo.CurrentStep, "step4.proposals") {
+		t.Fatalf("advisory plan must not skip full refresh: %+v", refreshInfo)
+	}
+	if !artifactKindPresent(refreshArtifacts, "source-revisions") || !artifactKindPresent(refreshArtifacts, "refresh-impact-plan") {
+		t.Fatalf("expected planning artifacts in refresh inventory: %+v", refreshArtifacts)
+	}
+	for rel, parser := range map[string]func([]byte) error{
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "source-revisions.json")):    func(raw []byte) error { _, err := refreshplan.ParseSourceRevisions(raw); return err },
+		filepath.ToSlash(filepath.Join("reports/taskruns", refreshInfo.RunID, "refresh-impact-plan.json")): func(raw []byte) error { _, err := refreshplan.ParseImpactPlan(raw); return err },
+	} {
+		raw, err := ws.ReadFile(rel)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if err := parser(raw); err != nil {
+			t.Fatalf("parse %s: %v", rel, err)
+		}
+	}
+}
+
+func artifactKindPresent(artifacts []Artifact, kind string) bool {
+	for _, artifact := range artifacts {
+		if artifact.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
 
 func TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh(t *testing.T) {
 	t.Parallel()

@@ -23,6 +23,8 @@
   - `schemas/final-run-index.schema.json`
   - `schemas/citation-index.schema.json`
   - `schemas/validator-verdict.schema.json`
+  - `schemas/source-revisions.schema.json`
+  - `schemas/refresh-impact-plan.schema.json`
   - `schemas/qa-answer.schema.json`
 - persisted `runtime-execution.json` metadata и artifact-only step contracts проходят parse/semantic validation
 - examples и fixture cases должны парситься и проходить contract validation, где это ожидается
@@ -85,6 +87,7 @@
 
 - `fixtures/workspace/` — manifest и validator cases
 - `examples/*.example.json` + contract tests — docs-first fixtures (manifest/index/citation/verdict)
+- `fixtures/refresh-planning/*` + `internal/refreshplan` tests — revision baseline, complete Git name-status parsing, advisory mapping, legacy baseline rejection, dirty/history/unmapped fallback and exact 10,001-path safety limit
 - `fixtures/scenarios/<name>/workspace/` — central workspace inputs
 - `fixtures/scenarios/<name>/repos/<repo-name>/` — synthetic repos
 - `fixtures/scenarios/<name>/golden/` — expected deterministic snapshot (hash list) + fixture docs

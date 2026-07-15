@@ -36,6 +36,11 @@ func TestAsIsDraftDoesNotLeakRunLocalStagingPaths(t *testing.T) {
 	if strings.Contains(string(raw), "reports/taskruns/") || strings.Contains(string(raw), "/staging/") {
 		t.Fatalf("fake user-visible evidence leaked staging path:\n%s", raw)
 	}
+	for _, heading := range []string{"System at a glance", "Analyzed scope", "Domains and ownership", "Key flows", "Integrations and datastores", "Where to start", "Safe-change guidance", "Evidence gaps and open questions"} {
+		if !strings.Contains(string(raw), "## "+heading) {
+			t.Fatalf("fake Architecture Home is missing %q:\n%s", heading, raw)
+		}
+	}
 }
 
 func TestRunnerWritesShardPackManifestWhenWriteRootProvided(t *testing.T) {

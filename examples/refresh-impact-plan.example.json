@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "run_id": "run_20260715_120000_001",
+  "pipeline": "refresh",
+  "generated_at": "2026-07-15T12:00:01Z",
+  "baseline_run_id": "run_20260714_120000_001",
+  "enforcement": "advisory",
+  "decision": "selective_candidate",
+  "fallback_reasons": [],
+  "repo_deltas": [
+    {
+      "repo": "payments",
+      "baseline_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "current_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "comparison": "ahead",
+      "changes_complete": true,
+      "changed_path_count": 1,
+      "changes": [
+        {
+          "status": "modified",
+          "path": "src/api/handler.go",
+          "in_scope": true,
+          "matched_shards": ["payments-api"],
+          "matched_domains": ["payments"]
+        }
+      ]
+    }
+  ],
+  "affected_shards": ["payments-api"],
+  "affected_domains": ["payments"],
+  "unmapped_paths": [],
+  "stale_artifact_candidates": ["reports/as-is/payments.md"],
+  "preserved_artifact_candidates": ["reports/as-is/overview.md"],
+  "planned_actions": ["candidate_selective_execution", "continue_full_refresh"]
+}

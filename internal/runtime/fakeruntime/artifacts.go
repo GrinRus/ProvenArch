@@ -207,15 +207,31 @@ func writeAsIsDraftManifest(writeRoot string, task acpruntime.Task, summary stri
 		{Path: "architect-summary.md", CanonicalPath: "reports/agent-outputs/architect/summary.md", Kind: "agent-output", Title: "Architect Summary"},
 	}
 	overview := strings.Builder{}
-	overview.WriteString("# As-Is Overview (Runtime Draft)\n\n")
-	overview.WriteString("This deterministic as-is draft summarizes the current workspace evidence for operator review.\n\n")
+	overview.WriteString("# Architecture Home\n\n")
+	overview.WriteString("## System at a glance\n\n")
 	if strings.TrimSpace(summary) != "" {
-		overview.WriteString("- Summary: " + strings.TrimSpace(summary) + "\n")
+		overview.WriteString(strings.TrimSpace(summary) + " Evidence is summarized in `reports/coverage/summary.md`.\n\n")
+	} else {
+		overview.WriteString("The analyzed workspace is represented by the promoted architecture reports and their citations; begin with `reports/coverage/summary.md`.\n\n")
 	}
+	overview.WriteString("## Analyzed scope\n\n")
 	if len(task.RepoScopes) > 0 {
-		overview.WriteString("- Repo scopes: " + strings.Join(task.RepoScopes, ", ") + "\n")
+		overview.WriteString("Repository scopes: `" + strings.Join(task.RepoScopes, "`, `") + "`. Confirm exact included paths in `reports/coverage/summary.md`.\n\n")
+	} else {
+		overview.WriteString("No repository scope was confirmed; treat this as an evidence gap and inspect `reports/coverage/summary.md`.\n\n")
 	}
-	overview.WriteString("- Evidence refs: reports/as-is/overview.md, reports/coverage/summary.md\n")
+	overview.WriteString("## Domains and ownership\n\n")
+	overview.WriteString("Domain boundaries and ownership are recorded in `model/entities/` when supported by collected evidence; unassigned ownership remains an open question.\n\n")
+	overview.WriteString("## Key flows\n\n")
+	overview.WriteString("Validated interactions are represented by canonical entities and edges under `model/`; use their evidence references before changing a flow.\n\n")
+	overview.WriteString("## Integrations and datastores\n\n")
+	overview.WriteString("Confirmed integrations and stores are listed in `model/entities/`; absence from that inventory is not proof that an integration does not exist.\n\n")
+	overview.WriteString("## Where to start\n\n")
+	overview.WriteString("Read `reports/coverage/summary.md`, then follow canonical entity and evidence references for the domain being changed.\n\n")
+	overview.WriteString("## Safe-change guidance\n\n")
+	overview.WriteString("Check affected entity evidence and open questions before editing; validate changes against the cited repository paths and keep unrelated workspace changes separate.\n\n")
+	overview.WriteString("## Evidence gaps and open questions\n\n")
+	overview.WriteString("Coverage gaps remain authoritative in `reports/coverage/summary.md`; unresolved ownership or missing citations must be treated as unknown rather than inferred.\n")
 
 	coverage := strings.Builder{}
 	coverage.WriteString("# Coverage Summary (Runtime Draft)\n\n")
