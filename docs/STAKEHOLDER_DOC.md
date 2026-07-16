@@ -34,7 +34,9 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence
+- release blocker: Epic 18 R3 trusted-machine composite evidence; Codex requalification is green
+  on `4eddf559`, while canonical release execution is currently stopped before product runtime by
+  a reproducible Qwen `headless_probe_timeout` readiness blocker
 - out of MVP: 12, 13
 
 ---
