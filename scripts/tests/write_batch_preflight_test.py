@@ -2,6 +2,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -48,14 +49,20 @@ class WriteBatchPreflightTest(unittest.TestCase):
         result = self.module.probe_provider_readiness("qwen", "not-selected", str(REPO_ROOT))
         self.assertEqual("not_selected", result["status"])
 
-    def test_qwen_headless_probe_remains_read_only_prompt(self) -> None:
+    def test_qwen_readiness_blocks_missing_binary(self) -> None:
+        result = self.module.probe_provider_readiness(
+            "qwen",
+            str(self.root / "missing-qwen"),
+            str(REPO_ROOT),
+        )
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("missing_binary", result["subclass"])
+
+    def test_qwen_skips_text_only_headless_probe(self) -> None:
         args, stdin_text = self.module.headless_probe_invocation("qwen")
 
-        self.assertEqual(2, len(args))
-        self.assertEqual("-p", args[0])
-        self.assertIn("ACP_READY", args[1])
-        self.assertNotIn("--yolo", args)
-        self.assertNotIn("--approval-mode", args)
+        self.assertEqual([], args)
         self.assertEqual("", stdin_text)
 
     def test_codex_headless_probe_uses_runtime_isolation_args(self) -> None:
@@ -164,7 +171,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "qwen-runtime-smoke-stub",
             "#!/bin/sh\n"
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
-            "if [ \"${1:-}\" = \"-p\" ]; then printf '%s\n' 'ACP_READY'; exit 0; fi\n"
+            "if [ \"${1:-}\" = \"-p\" ]; then sleep 3; exit 42; fi\n"
             "if [ \"${1:-}\" = \"--chat-recording\" ] && [ \"${2:-}\" = \"false\" ] && [ \"${3:-}\" = \"--yolo\" ] && [ \"${4:-}\" = \"--channel\" ] && [ \"${5:-}\" = \"CI\" ] && [ \"${6:-}\" = \"--output-format\" ] && [ \"${7:-}\" = \"stream-json\" ] && [ \"${8:-}\" = \"--include-partial-messages\" ] && [ \"${9:-}\" = \"-p\" ]; then\n"
             "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
             "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
@@ -180,9 +187,9 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("", result["subclass"])
         self.assertEqual("passed", result["artifact_smoke"])
 
-    def test_probe_provider_readiness_checks_headless_invocation(self) -> None:
+    def test_probe_provider_readiness_checks_qwen_artifact_smoke_for_quota_markers(self) -> None:
         command = self._write_script(
-            "qwen-headless-quota-stub",
+            "qwen-artifact-quota-stub",
             "#!/bin/sh\n"
             "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
             "printf '%s\n' 'API Error: 429 rate limit'\n",
@@ -563,6 +570,91 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertEqual("unavailable", result["status"])
         self.assertEqual("operational_host_preflight_failed", result["subclass"])
         self.assertEqual("failed", result["artifact_smoke"])
+
+    def test_qwen_artifact_smoke_timeout_without_sentinel_is_single_attempt_blocker(self) -> None:
+        attempts = self.root / "qwen-smoke-attempts"
+        command = self._write_script(
+            "qwen-timeout-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            f"attempts='{attempts}'\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "count=0\n"
+            "if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
+            "printf '%s\\n' \"$((count + 1))\" > \"$attempts\"\n"
+            "sleep 3\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC"] = "1"
+        try:
+            result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC"] = old_timeout
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
+        self.assertIn("attempt 1/1", result["reason"])
+        self.assertIn("timed out", result["reason"])
+        self.assertEqual("1", attempts.read_text(encoding="utf-8").strip())
+
+    def test_qwen_artifact_smoke_rejects_invalid_sentinel(self) -> None:
+        command = self._write_script(
+            "qwen-invalid-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
+            "printf '%s\\n' 'WRONG_SENTINEL' > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
+        self.assertIn("unexpected sentinel content", result["reason"])
+
+    def test_qwen_artifact_smoke_nonzero_exit_is_blocker(self) -> None:
+        command = self._write_script(
+            "qwen-nonzero-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            "printf '%s\\n' 'artifact smoke command failed' >&2\n"
+            "exit 17\n",
+        )
+
+        result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertEqual("failed", result["artifact_smoke"])
+        self.assertIn("artifact smoke command failed", result["reason"])
+
+    def test_qwen_artifact_smoke_timeout_terminates_provider_process_group(self) -> None:
+        orphan_marker = self.root / "qwen-orphan-marker"
+        command = self._write_script(
+            "qwen-orphan-artifact-smoke-stub",
+            "#!/bin/sh\n"
+            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' 'qwen 1.0'; exit 0; fi\n"
+            f"(sleep 2; printf '%s\\n' orphan > '{orphan_marker}') &\n"
+            "sleep 5\n",
+        )
+        old_timeout = os.environ.get("ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC")
+        os.environ["ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC"] = "1"
+        try:
+            result = self.module.probe_provider_readiness("qwen", command, str(REPO_ROOT))
+        finally:
+            if old_timeout is None:
+                os.environ.pop("ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC", None)
+            else:
+                os.environ["ACP_PREFLIGHT_ARTIFACT_SMOKE_TIMEOUT_SEC"] = old_timeout
+
+        time.sleep(2)
+        self.assertEqual("unavailable", result["status"])
+        self.assertEqual("operational_host_preflight_failed", result["subclass"])
+        self.assertFalse(orphan_marker.exists(), "Qwen artifact-smoke child survived process-group cleanup")
 
     def test_qwen_artifact_smoke_uses_runtime_like_tool_args(self) -> None:
         command = self._write_script(

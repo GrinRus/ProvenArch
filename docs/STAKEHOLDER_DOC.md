@@ -36,7 +36,9 @@ Epic matrix:
 - done: Epic 20 and Epic 21 implementation complete
 - release blocker: Epic 18 R3 trusted-machine composite evidence; Codex requalification is green
   on `4eddf559`, while canonical release execution is currently stopped before product runtime by
-  a reproducible Qwen `headless_probe_timeout` readiness blocker
+  a reproducible Qwen text-only `headless_probe_timeout`; the active remediation replaces that
+  unstable signal with the runtime-like Qwen artifact-write smoke while keeping strict failure
+  semantics
 - out of MVP: 12, 13
 
 ---

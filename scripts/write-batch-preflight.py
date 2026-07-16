@@ -146,9 +146,7 @@ def artifact_smoke_timeout_sec() -> int:
 
 def headless_probe_invocation(provider: str) -> tuple[list[str], str]:
     prompt = "ACP live preflight: reply with exactly ACP_READY. Do not write files."
-    if provider == "qwen":
-        return ["-p", prompt], ""
-    if provider == "claude":
+    if provider in {"qwen", "claude"}:
         return [], ""
     if provider == "codex":
         return [

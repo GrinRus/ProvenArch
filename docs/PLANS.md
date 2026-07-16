@@ -5350,6 +5350,46 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 
 ---
 
+## EP-20260716-epic18-r3-qwen-artifact-readiness
+
+### Context
+- Post-requalification standalone `release fast` stopped before product execution because Qwen's
+  bounded read-only `ACP_READY` probe timed out twice.
+- The Qwen runtime uses an artifact-capable command surface with filesystem writes, and preflight
+  already has a runtime-like sentinel smoke for that surface.
+
+### Goals
+- [x] Remove only the text-only Qwen `ACP_READY` probe while preserving the Codex probe.
+- [x] Require successful `qwen --version` and one runtime-like artifact-smoke attempt with
+  `--chat-recording false`, `--yolo`, `--channel CI` and an exact sentinel.
+- [x] Keep the canonical `120s` budget and strict blockers for auth/quota, non-zero exit, timeout,
+  missing sentinel and invalid sentinel.
+- [x] Cover process-group cleanup so a timed-out Qwen smoke cannot leave provider children.
+- [x] Synchronize runbook, testing strategy and Epic 18 tracker status.
+- [x] Pass focused tests and complete deterministic DoD.
+- [ ] Merge the remediation, then restart R3 from direct Codex smoke on the new clean commit.
+
+### Non-goals
+- No runtime/provider contract, HTTP API, schema, workspace, canonical matrix or timeout change.
+- No timeout-success exception, retry expansion, wrapper script or live result claim in this PR.
+- No Epic 18 closure before fresh standalone and composite release evidence passes.
+
+### Acceptance
+- A Qwen text-only invocation may hang without affecting readiness when the runtime-like artifact
+  smoke writes the exact sentinel and exits successfully.
+- Missing binary, auth/quota marker, non-zero command, timeout without sentinel and invalid
+  sentinel remain blockers before product runtime and release verdict execution.
+- Qwen artifact smoke runs once with the canonical `120s` budget and full process-group cleanup.
+- `make contracts`, `make test`, `make lint`, and `make build` pass.
+
+### Progress log
+- 2026-07-16: Qwen readiness now skips the unstable text-only probe and requires the existing
+  runtime-like artifact smoke. Focused readiness tests passed `32/32`, batch preflight/failure
+  classification passed `94/94`, and the complete deterministic DoD passed with 259 Python tests,
+  141 UI tests, the full Go suite, lint/typecheck and the embedded production build.
+
+---
+
 ## EP-20260716-epic18-r3-qwen-stream-repair
 
 ### Context
