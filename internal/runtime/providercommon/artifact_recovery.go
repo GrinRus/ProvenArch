@@ -233,7 +233,7 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 				emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairErr)
 				retrySpec := buildRepairSpec
 				if retryStreamOnlyStall {
-					retryValidationErr := fmt.Errorf("%v: %w", validationErr, ErrStalledBeforeArtifacts)
+					retryValidationErr := fmt.Errorf("collect_pair_repair_stream_retry: %v: %w", validationErr, ErrStalledBeforeArtifacts)
 					retrySpec = func() (CommandSpec, error) {
 						return repairAdapter.CollectArtifactPairRepairCommandSpec(task, retryValidationErr)
 					}
