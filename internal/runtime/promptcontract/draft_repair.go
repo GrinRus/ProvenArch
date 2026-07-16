@@ -357,7 +357,8 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			fmt.Sprintf("- Exact required as-is overview overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "overview.md")),
 			fmt.Sprintf("- Exact required coverage summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "summary.md")),
 			fmt.Sprintf("- Exact required architect summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "architect-summary.md")),
-			"- overview.md must contain: architecture surface summary; concrete repositories, paths, services/modules/integrations or staged artifact references; and explicit coverage gaps.",
+			"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+			"- Populate those Architecture Home sections with concrete repositories, paths, services/modules/integrations or staged artifact references; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 			"- summary.md must contain: planned/succeeded/failed shard completeness; evidence density/readability notes; key citations or staged artifact refs; and remaining gaps.",
 			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
@@ -600,7 +601,8 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		}
 	}
 	lines = append(lines,
-		"- overview.md must summarize the architecture surface with concrete repo/path or staged artifact references plus explicit coverage gaps.",
+		"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+		"- Populate those Architecture Home sections with concrete repo/path or staged artifact references; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 		"- summary.md must summarize shard completeness, evidence density/readability, selected citation or staged artifact refs, and remaining gaps.",
 		"- architect-summary.md must give a decision-ready operator summary: what is complete, what is missing, what to inspect or decide next, and residual risk.",
 		"- Evidence bullets must be path plus paraphrased signal only. Do not paste the first paragraph or heading body from authored shard markdown after the path.",
@@ -789,7 +791,8 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 	case "init.step2.asis_docs", "refresh.step2.asis_docs":
 		lines = append(lines,
 			"- For step2, overwrite overview.md, summary.md, and architect-summary.md.",
-			"- overview.md must summarize architecture surfaces with concrete repo/path or staged-artifact evidence.",
+			"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+			"- Populate those Architecture Home sections with concrete repo/path or staged-artifact evidence; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 			"- summary.md must state shard completeness from typed shard status when visible plus evidence density/readability and gaps.",
 			"- architect-summary.md must state what is complete, what is missing, and what the operator should inspect or decide next.",
 			"- If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",

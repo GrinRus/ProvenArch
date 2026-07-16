@@ -5319,6 +5319,12 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   `collect_pair_repair` emitted active stream telemetry for the full pre-artifact wall-clock but
   wrote no authored files. Follow-up `EP-20260716-epic18-r3-qwen-stream-repair` is the only active
   remediation before repeating smoke and release acceptance from a new clean commit.
+- 2026-07-16: Qwen stream-only remediation merged at `cae4653a`. The required fresh Codex smoke
+  `smoke-tiny-bank-20260716T053113Z` then completed all 10 collect shards but stopped at
+  `init.step2.asis_docs`: focused enrichment replaced bootstrap content with the pre-21A generic
+  overview headings, so strict Architecture Home validation rejected every required section.
+  `EP-20260716-epic18-r3-step2-home-repair` is the active bounded remediation; no release matrix
+  or accepted evidence follows until it is merged and smoke passes from the new clean commit.
 
 ---
 
@@ -5359,6 +5365,44 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 ### Progress log
 - 2026-07-16: Focused providercommon/Qwen/prompt-contract tests and full deterministic DoD passed
   with exact Go `1.25.10` and Node `22.21.1`; tracked embedded UI output remained unchanged.
+
+---
+
+## EP-20260716-epic18-r3-step2-home-repair
+
+### Context
+- The post-remediation Codex smoke passed collect with 10/10 shards and failed in focused
+  `step2.asis_docs` draft enrichment.
+- Strict validation correctly required the 21A Architecture Home sections, but the focused,
+  compact and command-text enrichment prompts still described only the older generic architecture
+  surface/coverage shape.
+- The provider therefore wrote fresh evidence-backed markdown with `Architecture Surface`,
+  `Evidence Used` and `Coverage Gaps`; this was a product prompt-contract drift, not a host blocker.
+
+### Goals
+- [x] Require the exact Architecture Home section set in every step2 draft enrichment prompt mode.
+- [x] Explicitly reject generic substitute headings in prompt guidance without weakening validation.
+- [x] Add focused prompt-contract regressions for normal, compact and command-text retry modes.
+- [x] Pass full deterministic DoD, merge the remediation, then repeat Codex smoke from the new
+  clean commit before restarting standalone release fast.
+
+### Non-goals
+- No validator relaxation, deterministic ACP-authored Architecture Home, timeout override, matrix
+  or curated repo change, schema/API/workspace contract change, or accepted release evidence.
+- No change to step2 evidence scope, write-set, retry count or provider transport.
+
+### Acceptance
+- Normal, compact and command-text step2 enrichment prompts require non-empty `System at a glance`,
+  `Analyzed scope`, `Domains and ownership`, `Key flows`, `Integrations and datastores`,
+  `Where to start`, `Safe-change guidance`, and `Evidence gaps and open questions` sections.
+- Existing strict runtime draft validation remains authoritative and focused tests plus
+  `make contracts`, `make test`, `make lint`, `make build` pass.
+
+### Progress log
+- 2026-07-16: Root cause reproduced from bounded smoke evidence; prompt contract and focused tests
+  updated for all three step2 enrichment modes.
+- 2026-07-16: Full deterministic DoD passed with exact Go `1.25.10`, Node `22.21.1` and npm
+  `10.9.4`; contracts, Go, 256 Python, 141 UI, lint/typecheck and embedded UI build are green.
 
 ---
 
