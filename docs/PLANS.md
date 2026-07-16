@@ -5264,7 +5264,9 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 
 ### Results
 - Full deterministic DoD passed on 2026-07-15: contracts, complete Go suite, 246 Python tests, 141 Vitest tests, lint/typecheck, embedded production build and 7/7 mock Playwright scenarios.
-- Epic 18 R3 remains blocked at trusted-host preflight until this work is committed/merged and canonical `/tmp/provenarch-live-e2e` pinned checkouts are bootstrapped.
+- Epic 18 R3 remains the release-readiness gate. The implementation is committed/merged and
+  canonical `/tmp/provenarch-live-e2e` pinned checkouts are bootstrapped; current progress and
+  operational blockers are recorded in `EP-20260715-epic18-r3-composite-release`.
 
 ---
 
@@ -5280,8 +5282,8 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Add a backward-compatible composite verifier/workflow interface through
   `ACP_RELEASE_MATRIX_IDS` and reject ambiguous or duplicate configuration.
 - [x] Reconcile Epic 21 and Epic 18 status across planning, stakeholder, testing and runbook docs.
-- [ ] Merge the composite-gate slice after full deterministic DoD.
-- [ ] Bootstrap and verify canonical pinned checkouts on the trusted host.
+- [x] Merge the composite-gate slice after full deterministic DoD.
+- [x] Bootstrap and verify canonical pinned checkouts on the trusted host.
 - [ ] Run direct Codex `smoke tiny`, then standalone release fast/long, then fresh release-full
   fast/long/ftgo-sentry constituents; stop on the first product/provider/host failure.
 - [ ] Persist only bounded final release evidence, verify every constituent plus the composite, and
@@ -5331,6 +5333,20 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   `bank-of-anthos-extras` exhausted the allowed stream-only collect-pair retry after ~2.49 MiB of
   thinking telemetry and zero filesystem actions. `EP-20260716-epic18-r3-qwen-tool-first-retry`
   is the only active remediation; release long/full and accepted evidence remain blocked.
+- 2026-07-16: Qwen tool-call-first remediation merged at `4eddf559`. The first post-merge Codex
+  smoke `smoke-tiny-bank-20260716T095549Z` stopped at refresh `9/10` with
+  `runner_unavailable` after Codex exhausted WebSocket TLS reconnects and HTTP fallback; raw
+  evidence classified this as an external provider transport incident, so runtime retry policy
+  was not expanded.
+- 2026-07-16: Requalification smoke `smoke-tiny-bank-20260716T122802Z` ran from the same clean
+  `4eddf559` and passed with `strict_pass_runs=1`, `strict_fail_runs=0`, init/refresh collect
+  `10/10`, no runtime/provider/contract/flow blockers and no partial failures. Standalone
+  `release-fast-20260716T142658Z` then stopped before product execution:
+  Qwen's bounded read-only `ACP_READY` probe timed out after 30 seconds. A separate bounded
+  readiness recheck reproduced `headless_probe_timeout`; Claude and Codex readiness passed.
+  This is an `operational_host_preflight_failed` provider blocker. Release long/full, SWE
+  assessments, bounded evidence PR and Epic 18 closure remain blocked until Qwen readiness is
+  restored on this or another trusted host.
 
 ---
 
@@ -5451,6 +5467,10 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-16: Focused prompt/providercommon regressions pass. Full deterministic DoD passed with
   Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, Go, 256 Python, 141 UI,
   lint/typecheck and tracked embedded UI build are green.
+- 2026-07-16: Merged as `4eddf559`. Post-merge Codex requalification eventually passed as
+  `smoke-tiny-bank-20260716T122802Z`; the following standalone release-fast was blocked in
+  provider readiness before runtime execution because Qwen twice timed out on the bounded
+  headless probe. No further product remediation is inferred from this operational blocker.
 
 ---
 
