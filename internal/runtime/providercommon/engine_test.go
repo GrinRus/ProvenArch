@@ -1899,7 +1899,9 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 	if runner.pairRepairCalls != 2 {
 		t.Fatalf("pair repair calls = %d, want 2", runner.pairRepairCalls)
 	}
-	if len(runner.pairRepairErrors) != 2 || !strings.Contains(runner.pairRepairErrors[1], ErrStalledBeforeArtifacts.Error()) {
+	if len(runner.pairRepairErrors) != 2 ||
+		!strings.Contains(runner.pairRepairErrors[1], ErrStalledBeforeArtifacts.Error()) ||
+		!strings.Contains(runner.pairRepairErrors[1], "collect_pair_repair_stream_retry") {
 		t.Fatalf("expected retry validation error to request compact stall recovery, got %#v", runner.pairRepairErrors)
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {

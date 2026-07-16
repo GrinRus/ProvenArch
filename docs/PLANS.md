@@ -5325,6 +5325,12 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   overview headings, so strict Architecture Home validation rejected every required section.
   `EP-20260716-epic18-r3-step2-home-repair` is the active bounded remediation; no release matrix
   or accepted evidence follows until it is merged and smoke passes from the new clean commit.
+- 2026-07-16: Step2 Architecture Home remediation merged at `435c2ac8`; fresh Codex smoke
+  `smoke-tiny-bank-20260716T065516Z` passed with strict failures `0`. Standalone release-fast
+  `release-fast-20260716T085301Z` then stopped on the first terminal blocker: Qwen shard
+  `bank-of-anthos-extras` exhausted the allowed stream-only collect-pair retry after ~2.49 MiB of
+  thinking telemetry and zero filesystem actions. `EP-20260716-epic18-r3-qwen-tool-first-retry`
+  is the only active remediation; release long/full and accepted evidence remain blocked.
 
 ---
 
@@ -5403,6 +5409,48 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   updated for all three step2 enrichment modes.
 - 2026-07-16: Full deterministic DoD passed with exact Go `1.25.10`, Node `22.21.1` and npm
   `10.9.4`; contracts, Go, 256 Python, 141 UI, lint/typecheck and embedded UI build are green.
+
+---
+
+## EP-20260716-epic18-r3-qwen-tool-first-retry
+
+### Context
+- Post-step2-remediation Codex smoke passed, so standalone release fast restarted from clean
+  commit `435c2ac8` with canonical host/toolchain/provider prerequisites.
+- Qwen collect pair recovery succeeded for two Bank of Anthos shards only after its allowed retry,
+  then shard `bank-of-anthos-extras` exhausted the retry: 180 seconds, ~2.49 MiB stream-thinking,
+  zero authored files and no filesystem tool call.
+- The retry already used the compact path, but its 11.9 KiB schema/checklist surface still let the
+  model reason about the full manifest until the wall-clock cap.
+
+### Goals
+- [x] Mark the stream-only retry explicitly so prompt composition can distinguish it from the
+  first compact collect-pair repair attempt.
+- [x] For Qwen only, replace that retry prompt with an ultra-compact tool-call-first contract under
+  4 KiB: `run_shell_command` first, four evidence candidates, minimal canonical manifest shape.
+- [x] Preserve the single retry, existing wall-clock/write-set/validation gates and terminal
+  repeated-stall classification.
+- [x] Add prompt-size/content and engine marker regressions; synchronize architecture, testing and
+  live-runbook contracts.
+- [x] Pass full deterministic DoD; merge the remediation, then repeat Codex smoke and standalone
+  release fast from the new clean commit.
+
+### Non-goals
+- No timeout increase/override, additional retry, deterministic ACP-authored evidence, canonical
+  matrix/curated repo change, schema/API/workspace/provider contract change or accepted evidence.
+- No relaxation of strict collect validation or write-set enforcement.
+
+### Acceptance
+- The second Qwen stream-only attempt receives the tool-call-first prompt and no bulky canonical
+  shape/checklist/skeleton sections.
+- Success still requires provider-authored markdown plus manifest to pass existing validation;
+  repeated stream-only exhaustion remains `runtime_contract_failed`.
+- `make contracts`, `make test`, `make lint`, `make build` pass with the exact pinned toolchains.
+
+### Progress log
+- 2026-07-16: Focused prompt/providercommon regressions pass. Full deterministic DoD passed with
+  Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, Go, 256 Python, 141 UI,
+  lint/typecheck and tracked embedded UI build are green.
 
 ---
 

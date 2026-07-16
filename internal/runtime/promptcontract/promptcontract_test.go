@@ -920,6 +920,56 @@ func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(
 	}
 }
 
+func TestComposeCollectArtifactPairRepairPromptUsesQwenToolFirstStreamRetry(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Payments\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write evidence file: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "init.step1.collect",
+		ArtifactRoot:      "reports/taskruns/run-1/staging/shards/payments",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/staging/shards/payments",
+		ReadContextRoots:  []string{repoRoot},
+		ShardID:           "payments",
+		DomainID:          "payments",
+		AgentRole:         "shard-analyst",
+		RepoScopes:        []string{"payments-service"},
+		PathScopes:        []string{"README.md"},
+		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
+	}
+
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderQwenCode, task, fmt.Errorf("collect_pair_repair_stream_retry: runtime_stalled_before_artifacts"))
+	if got, max := len([]byte(prompt)), 4*1024; got > max {
+		t.Fatalf("Qwen stream retry prompt is %d bytes, want at most %d", got, max)
+	}
+	for _, token := range []string{
+		"QWEN COLLECT PAIR STREAM RETRY — TOOL CALL FIRST:",
+		"next response block must be a run_shell_command tool call",
+		"Read at most 4 candidates and 4000 bytes per file",
+		"documents[0]: id, kind, title, path=\"root-overview.md\"",
+		"canonical_path=\"reports/as-is/payments/root-overview.md\"",
+		"Repository evidence candidates (choose up to 4):",
+		"- README.md",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected Qwen stream retry prompt token %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"CANONICAL SEMANTIC SHAPE:",
+		"COLLECT PAIR RECOVERY CHECKLIST:",
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"FINAL SELF-CHECK COMMAND:",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("Qwen stream retry prompt must omit bulky token %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestComposeCollectArtifactPairRepairPromptTargetsExistingAuthoredMarkdown(t *testing.T) {
 	t.Parallel()
 

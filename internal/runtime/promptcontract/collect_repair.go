@@ -215,6 +215,9 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	evidencePaths := repairEvidenceCandidates(task)
+	if provider == acpruntime.ProviderQwenCode && strings.Contains(strings.ToLower(errorText(validationErr)), "collect_pair_repair_stream_retry") {
+		return composeQwenStreamRetryCollectArtifactPairPrompt(task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
+	}
 	if useCompactCollectPairRepairPrompt(validationErr) {
 		return composeCompactCollectArtifactPairRepairPrompt(provider, task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
 	}
@@ -310,6 +313,44 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	)
 	if detail := errorText(validationErr); detail != "" {
 		lines = append(lines, fmt.Sprintf("- Previous collect artifact validation failure: %s", detail))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func composeQwenStreamRetryCollectArtifactPairPrompt(task acpruntime.Task, validationErr error, docRel string, docTarget string, manifestTarget string, evidencePaths []string) string {
+	lines := []string{
+		"QWEN COLLECT PAIR STREAM RETRY — TOOL CALL FIRST:",
+		"- The previous focused repair spent its entire window in thinking and wrote no file.",
+		"- Your next response block must be a run_shell_command tool call. Do not emit thinking, a plan, JSON, or prose before that tool call.",
+		"- Use one short shell command (a simple python3 heredoc is allowed): read bounded prefixes from listed repository files, then write both exact targets before returning.",
+		fmt.Sprintf("- Exact markdown target: %q.", docTarget),
+		fmt.Sprintf("- Exact manifest target: %q.", manifestTarget),
+		"- Read at most 4 candidates and 4000 bytes per file. Use only concrete existing files; do not inspect taskruns, raw logs, or sibling shards.",
+		"- Markdown must be concise operator-facing architecture evidence: observed components/config/runtime behavior, concrete file references, and honest gaps. Do not mention repair, bounded reads, providers, or process mechanics.",
+		"- Write markdown first, then a valid JSON manifest. Keep the manifest small; one well-supported entity and one finding are sufficient when the evidence is sparse. edges may be empty.",
+		"MINIMUM MANIFEST SHAPE:",
+		fmt.Sprintf("- Top level: version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q, artifact_root=%q, repo_scopes, path_scopes, summary, documents, citations, semantic.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole), strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf("- documents[0]: id, kind, title, path=%q, canonical_path=%q, topics, citation_ids.", filepath.ToSlash(docRel), steppolicy.CollectManifestCanonicalPath(task, docRel)),
+		"- citations[0]: unique id, repo, concrete file path, non-empty claim_ids, document_ids containing documents[0].id.",
+		"- semantic.coverage: observed[], missing[], notes[]. semantic.questions: objects with id and text.",
+		"- semantic.entities: objects with id, name, type, provenance. semantic.edges and semantic.findings use the same provenance shape.",
+		"- provenance: {kind, numeric confidence, evidence:[{repo,path}]}; finding also needs id, severity, title, description.",
+		"- Do not add alternate/legacy keys. Every evidence path must be an existing repository file, not a directory.",
+		"- Finish the same tool call with test -s checks for both targets. Backend validation is the only success surface.",
+		fmt.Sprintf("- read_context_roots=%q", strings.Join(task.ReadContextRoots, ", ")),
+		fmt.Sprintf("- repo_scopes=%q; path_scopes=%q", strings.Join(task.RepoScopes, ", "), strings.Join(task.PathScopes, ", ")),
+	}
+	if len(evidencePaths) > 0 {
+		lines = append(lines, "Repository evidence candidates (choose up to 4):")
+		for i, rel := range evidencePaths {
+			if i == 4 {
+				break
+			}
+			lines = append(lines, "- "+rel)
+		}
+	}
+	if detail := errorText(validationErr); detail != "" {
+		lines = append(lines, "- Retry reason: "+detail)
 	}
 	return strings.Join(lines, "\n")
 }
