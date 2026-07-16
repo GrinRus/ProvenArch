@@ -4624,14 +4624,19 @@ describe("App", () => {
     expect(liveDiagnostics).toHaveTextContent("provider unavailable before shard ids were emitted");
     expect(liveDiagnostics).toHaveTextContent("Check Readiness provider setup, binary/auth/quota before retrying the same pipeline");
 
-    navigateToStage("publish");
+    fireEvent.click(screen.getByTestId("destination-changes"));
+    await waitFor(() => expect(screen.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page"));
+    fireEvent.click(screen.getByTestId("stage-publish"));
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Provider unavailable");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("run a successful analysis before publishing");
 
     navigateToStage("analysis");
+    await screen.findByTestId("run-status-panel");
     const startCallsBefore = fetchMock.mock.calls.filter((call) => call[0] === "/api/pipeline/init" || call[0] === "/api/pipeline/refresh").length;
-    navigateToStage("readiness");
+    fireEvent.click(screen.getByTestId("setup-utility"));
+    await screen.findByTestId("guided-setup-page");
+    fireEvent.click(screen.getByTestId("stage-readiness"));
     expect(screen.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "page");
     const providerRecovery = screen.getByTestId("provider-readiness-recovery");
     expect(providerRecovery).toHaveTextContent("Provider readiness recovery");

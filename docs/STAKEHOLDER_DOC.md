@@ -34,11 +34,11 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence; Codex requalification is green
-  on `4eddf559`, while canonical release execution is currently stopped before product runtime by
-  a reproducible Qwen text-only `headless_probe_timeout`; the active remediation replaces that
-  unstable signal with the runtime-like Qwen artifact-write smoke while keeping strict failure
-  semantics
+- release blocker: Epic 18 R3 trusted-machine composite evidence; the artifact-readiness change is
+  merged at `57155786`, and Codex smoke `smoke-tiny-bank-20260716T165233Z` is green. Canonical
+  `release-fast-20260716T185527Z` stopped before product runtime because Qwen's single runtime-like
+  smoke did not create the required sentinel. This remains an `operational_host_preflight_failed`
+  provider/host blocker; release long/full and accepted evidence have not started
 - out of MVP: 12, 13
 
 ---
