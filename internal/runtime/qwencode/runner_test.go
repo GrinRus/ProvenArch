@@ -145,6 +145,9 @@ func TestQwenAdapterRetriesZeroOutputPreArtifactStallOnce(t *testing.T) {
 	if !policy.RetryZeroOutputPreArtifactStallOnce {
 		t.Fatalf("expected qwen zero-output pre-artifact retry policy, got %+v", policy)
 	}
+	if !policy.RetryStreamOnlyPreArtifactStallOnce {
+		t.Fatalf("expected qwen stream-only pre-artifact repair retry policy, got %+v", policy)
+	}
 	if !policy.RetryTransientProviderUnavailableRepairOnce {
 		t.Fatalf("expected qwen transient provider-unavailable repair retry policy, got %+v", policy)
 	}

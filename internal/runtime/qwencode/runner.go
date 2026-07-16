@@ -123,6 +123,7 @@ func (a qwenAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPo
 		RepairDraftArtifactEnrichmentOnce:           true,
 		RetryInvalidOrMissingArtifactsOnce:          true,
 		RetryZeroOutputPreArtifactStallOnce:         true,
+		RetryStreamOnlyPreArtifactStallOnce:         true,
 		RetryTransientProviderUnavailableRepairOnce: true,
 		ClassifySilentRetryExhaustionUnavailable:    true,
 	}

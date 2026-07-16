@@ -123,6 +123,7 @@ type RecoveryPolicy struct {
 	RepairDraftArtifactEnrichmentOnce           bool
 	RetryInvalidOrMissingArtifactsOnce          bool
 	RetryZeroOutputPreArtifactStallOnce         bool
+	RetryStreamOnlyPreArtifactStallOnce         bool
 	RetryTransientProviderUnavailableRepairOnce bool
 	ClassifySilentRetryExhaustionUnavailable    bool
 }

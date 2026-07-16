@@ -876,6 +876,9 @@ func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(
 	}
 
 	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderClaudeCode, task, fmt.Errorf("collect pair recovery stalled before valid artifacts were available: runtime_stalled_before_artifacts"))
+	if got, max := len([]byte(prompt)), 12*1024; got > max {
+		t.Fatalf("compact collect pair repair prompt is %d bytes, want at most %d", got, max)
+	}
 	for _, token := range []string{
 		"Compact live recovery path: write first",
 		"COLLECT PAIR WRITE-FIRST EVIDENCE REPAIR:",
