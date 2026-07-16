@@ -221,7 +221,13 @@ Matrix harness также проверяет свободное место пе�
 Matrix preflight также выполняет selected-provider live smoke перед deep batch:
 - `--version` probe;
 - короткий headless `ACP_READY` probe для providers, где он остаётся устойчивым readiness signal;
+- для `qwen` text-only `ACP_READY` probe не используется: readiness подтверждается успешным
+  `qwen --version` и одной runtime-like artifact-smoke командой с `--chat-recording false`,
+  `--yolo`, `--channel CI` и sentinel write;
 - artifact smoke: выбранный provider должен записать sentinel-файл в temp write dir. Для `claude` artifact smoke является основным headless readiness gate, temp write dir передаётся через runtime-like `--add-dir`, потому что отдельный text-only probe может флейкать по latency без проверки filesystem write path; первый timeout/no-output artifact-smoke attempt допускает один bounded retry.
+- Для `qwen` canonical artifact-smoke budget равен `120s`, разрешена ровно одна попытка, а timeout,
+  non-zero exit, missing или invalid sentinel остаются строгим blocker. Sentinel, записанный перед
+  timeout, не превращает Qwen timeout в success.
 - Для `claude` artifact smoke timeout после записи expected sentinel считается ready: это доказывает headless response + filesystem write path, а runtime artifact-only engine умеет controlled stop after valid artifacts. Timeout без expected sentinel остаётся blocker и допускает только bounded retry.
 
 Provider readiness probe/artifact smoke commands run in their own process group. On bounded timeout the preflight terminates the full group before collecting stdout/stderr, so provider children that keep pipes open cannot hang `make contracts test lint build` or leave the matrix profile indefinitely `running`.

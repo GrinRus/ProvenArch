@@ -362,8 +362,10 @@ Status (2026-07-16): deterministic boundary/quality remediation is complete; tru
 release evidence remains open and is the only release-readiness blocker after Epic 21. Codex
 requalification smoke `smoke-tiny-bank-20260716T122802Z` passed from `4eddf559`, but standalone
 release-fast stopped before product execution because Qwen twice failed the bounded headless
-readiness probe with `headless_probe_timeout`. Release long/full and accepted evidence remain
-blocked until Qwen readiness is restored on this or another trusted host.
+readiness probe with `headless_probe_timeout`. The active bounded remediation removes that unstable
+text-only Qwen probe and requires `qwen --version` plus one strict runtime-like artifact smoke with
+an exact sentinel instead. Release long/full and accepted evidence remain blocked until the change
+is merged and the complete R3 sequence passes from the new clean commit.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape
