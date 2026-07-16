@@ -5347,6 +5347,15 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   This is an `operational_host_preflight_failed` provider blocker. Release long/full, SWE
   assessments, bounded evidence PR and Epic 18 closure remain blocked until Qwen readiness is
   restored on this or another trusted host.
+- 2026-07-16: Qwen artifact-readiness remediation merged as `57155786`. Fresh Codex smoke
+  `smoke-tiny-bank-20260716T165233Z` passed with `strict_pass_runs=1`, `strict_fail_runs=0`,
+  init/refresh collect `10/10` and no execution blocker. Standalone
+  `release-fast-20260716T185527Z` then stopped on the first profile before product execution:
+  `qwen --version` passed, but the single canonical runtime-like artifact smoke exited without
+  creating the exact sentinel. The batch correctly materialized
+  `operational_host_preflight_failed`; the automatically started next sweep was interrupted, and
+  release long/full plus accepted evidence remain blocked. No retry, timeout-success exception or
+  product-runtime change is justified by this provider/host readiness result.
 
 ---
 
@@ -5367,7 +5376,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Cover process-group cleanup so a timed-out Qwen smoke cannot leave provider children.
 - [x] Synchronize runbook, testing strategy and Epic 18 tracker status.
 - [x] Pass focused tests and complete deterministic DoD.
-- [ ] Merge the remediation, then restart R3 from direct Codex smoke on the new clean commit.
+- [x] Merge the remediation, then restart R3 from direct Codex smoke on the new clean commit.
 
 ### Non-goals
 - No runtime/provider contract, HTTP API, schema, workspace, canonical matrix or timeout change.
@@ -5387,6 +5396,11 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   runtime-like artifact smoke. Focused readiness tests passed `32/32`, batch preflight/failure
   classification passed `94/94`, and the complete deterministic DoD passed with 259 Python tests,
   141 UI tests, the full Go suite, lint/typecheck and the embedded production build.
+- 2026-07-16: Merged as `57155786`. Codex smoke `smoke-tiny-bank-20260716T165233Z` passed from the
+  clean merge commit. Standalone `release-fast-20260716T185527Z` proved the new fail-closed
+  contract: Qwen version detection succeeded, but the only artifact-smoke attempt produced no
+  sentinel, so preflight stopped as `operational_host_preflight_failed` before any release runtime.
+  Epic 18 remains open pending provider readiness and a fresh complete R3 sequence.
 
 ---
 

@@ -359,13 +359,14 @@ Suggested PR slices:
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
 Status (2026-07-16): deterministic boundary/quality remediation is complete; trusted-machine R3
-release evidence remains open and is the only release-readiness blocker after Epic 21. Codex
-requalification smoke `smoke-tiny-bank-20260716T122802Z` passed from `4eddf559`, but standalone
-release-fast stopped before product execution because Qwen twice failed the bounded headless
-readiness probe with `headless_probe_timeout`. The active bounded remediation removes that unstable
-text-only Qwen probe and requires `qwen --version` plus one strict runtime-like artifact smoke with
-an exact sentinel instead. Release long/full and accepted evidence remain blocked until the change
-is merged and the complete R3 sequence passes from the new clean commit.
+release evidence remains open and is the only release-readiness blocker after Epic 21. The
+artifact-readiness remediation is merged at `57155786`, and fresh Codex smoke
+`smoke-tiny-bank-20260716T165233Z` passed with strict failures `0` and init/refresh collect
+`10/10`. Standalone `release-fast-20260716T185527Z` then stopped before product execution:
+`qwen --version` passed, but the single canonical runtime-like artifact smoke did not create the
+exact sentinel and correctly produced `operational_host_preflight_failed`. Release long/full and
+accepted evidence remain blocked until Qwen artifact readiness succeeds on this or another trusted
+host and the complete R3 sequence is repeated from one clean commit.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape
