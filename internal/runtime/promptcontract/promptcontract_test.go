@@ -1179,7 +1179,9 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md",
-		"overview.md must contain: architecture surface summary",
+		"overview.md is the canonical Architecture Home",
+		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must contain: planned/succeeded/failed shard completeness",
 		"architect-summary.md must contain: decision-ready operator summary",
 		"Do not stop after writing only one markdown target",
@@ -1887,6 +1889,9 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 		"compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
 		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
 		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
+		"overview.md is the canonical Architecture Home",
+		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must summarize shard completeness",
 		"architect-summary.md must give a decision-ready operator summary",
 		"Evidence bullets must be path plus paraphrased signal only.",
@@ -1907,6 +1912,33 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("compact step2 retry prompt must stay narrow and avoid %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptKeepsArchitectureHomeContractInStep2CommandTextRetry(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:             "run-1",
+		StepID:            "refresh.step2.asis_docs",
+		StepContract:      "as_is",
+		AgentRole:         "architect",
+		WriteRoot:         "/tmp/workspace/reports/taskruns/run-1/runtime/step2_as_is",
+		DraftFinalRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is",
+		ExpectedArtifacts: []string{"asis-draft-manifest.json", "overview.md", "summary.md", "architect-summary.md"},
+	}
+	err := errors.New(`draft_artifact_enrichment_command_text_retry: provider printed a command instead of executing it`)
+
+	prompt := ComposeDraftArtifactEnrichmentPrompt(acpruntime.ProviderCodexCode, task, err)
+	for _, token := range []string{
+		"draft artifact enrichment command-text retry mode",
+		"overview.md is the canonical Architecture Home",
+		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected step2 command-text retry prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 }
