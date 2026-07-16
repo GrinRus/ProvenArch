@@ -1827,6 +1827,149 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRetriesStreamOnlyNoFreshCollectPairRepairWithStallFocusedPrompt(t *testing.T) {
+	task := newCollectTask(t, "run-collect-pair-repair-stream-only-retry")
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
+	manifest = strings.Replace(manifest, `"canonical_path": "reports/as-is/bank/overview.md"`, `"canonical_path": "`+steppolicy.CollectManifestCanonicalPath(task, docRel)+`"`, 1)
+	firstPairRepairScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'provider is still analyzing without writing artifacts'
+sleep 5
+`
+	secondPairRepairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, docRel)) + ` <<'EOF'
+# Collect Overview
+
+## Evidence
+- README.md identifies Bank of Anthos as the assigned runtime surface.
+
+## Coverage Gaps
+- Ownership and escalation paths are not confirmed in the observed shard evidence.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &pairRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'initial provider diagnostics without artifacts'
+`),
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      500 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PreArtifactWallClockWindow:  500 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
+				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:       true,
+				RepairCollectArtifactPairOnce:       true,
+				RetryInvalidOrMissingArtifactsOnce:  true,
+				RetryStreamOnlyPreArtifactStallOnce: true,
+			},
+		},
+		pairRepairCommands: []string{
+			writeEngineScript(t, firstPairRepairScript),
+			writeEngineScript(t, secondPairRepairScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected stream-only collect pair repair retry to succeed, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if runner.pairRepairCalls != 2 {
+		t.Fatalf("pair repair calls = %d, want 2", runner.pairRepairCalls)
+	}
+	if len(runner.pairRepairErrors) != 2 || !strings.Contains(runner.pairRepairErrors[1], ErrStalledBeforeArtifacts.Error()) {
+		t.Fatalf("expected retry validation error to request compact stall recovery, got %#v", runner.pairRepairErrors)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected stream-only collect pair repair retry diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderKeepsRepeatedStreamOnlyCollectPairRepairStallAsContractFailure(t *testing.T) {
+	task := newCollectTask(t, "run-collect-pair-repair-stream-only-exhausted")
+	streamOnlyScript := `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'provider is still analyzing without writing artifacts'
+sleep 5
+`
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &pairRepairSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, `#!/usr/bin/env bash
+set -eu
+printf '%s\n' 'initial provider diagnostics without artifacts'
+`),
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      500 * time.Millisecond,
+				RetryPreArtifactStallWindow: 500 * time.Millisecond,
+				PreArtifactWallClockWindow:  500 * time.Millisecond,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
+				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:       true,
+				RepairCollectArtifactPairOnce:       true,
+				RetryInvalidOrMissingArtifactsOnce:  true,
+				RetryStreamOnlyPreArtifactStallOnce: true,
+			},
+		},
+		pairRepairCommands: []string{
+			writeEngineScript(t, streamOnlyScript),
+			writeEngineScript(t, streamOnlyScript),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
+	defer cancel()
+	_, err := RunHeadlessProvider(ctx, task, runner)
+	if err == nil {
+		t.Fatal("expected repeated stream-only collect pair repair stall to fail")
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) {
+		t.Fatalf("expected RunnerError, got %T: %v", err, err)
+	}
+	if runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("expected runtime_contract_failed, got %s (%v)", runnerErr.Code, err)
+	}
+	if runner.pairRepairCalls != 2 {
+		t.Fatalf("pair repair calls = %d, want 2", runner.pairRepairCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "collect_pair_repair") {
+		t.Fatalf("expected exhausted stream-only collect pair repair diagnostic, got %#v", diagnostics)
+	}
+}
+
 func TestRunHeadlessProviderClassifiesExhaustedSilentNoFreshCollectPairRepairUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -4877,6 +5020,7 @@ type sequenceAdapter struct {
 type pairRepairSequenceAdapter struct {
 	testAdapter
 	pairRepairCommands []string
+	pairRepairErrors   []string
 	mu                 sync.Mutex
 	pairRepairCalls    int
 }
@@ -4909,7 +5053,7 @@ func (a *sequenceAdapter) CommandSpec(acpruntime.Task) (CommandSpec, error) {
 	return CommandSpec{Command: a.commands[index], PromptBytes: a.promptBytes}, nil
 }
 
-func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(acpruntime.Task, error) (CommandSpec, error) {
+func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(_ acpruntime.Task, validationErr error) (CommandSpec, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.pairRepairCommands) == 0 {
@@ -4919,6 +5063,7 @@ func (a *pairRepairSequenceAdapter) CollectArtifactPairRepairCommandSpec(acprunt
 	if index >= len(a.pairRepairCommands) {
 		index = len(a.pairRepairCommands) - 1
 	}
+	a.pairRepairErrors = append(a.pairRepairErrors, errorText(validationErr))
 	a.pairRepairCalls++
 	return CommandSpec{Command: a.pairRepairCommands[index]}, nil
 }

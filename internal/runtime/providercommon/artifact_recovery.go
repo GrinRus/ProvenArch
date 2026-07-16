@@ -228,9 +228,17 @@ func recoverCollectArtifactPairRepairWithOptions(ctx context.Context, task acpru
 					return true, recoveredResult, recoveredErr
 				}
 			}
-			if shouldRetrySilentNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic) {
+			retryStreamOnlyStall := shouldRetryStreamOnlyNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic)
+			if shouldRetrySilentNoFreshCollectPairRepair(policy, repairResult, repairStalled.Diagnostic) || retryStreamOnlyStall {
 				emitFocusedArtifactRepairRetryScheduledDiagnostic(task, adapter.Provider(), "collect_pair_repair", repairErr)
-				retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, buildRepairSpec)
+				retrySpec := buildRepairSpec
+				if retryStreamOnlyStall {
+					retryValidationErr := fmt.Errorf("%v: %w", validationErr, ErrStalledBeforeArtifacts)
+					retrySpec = func() (CommandSpec, error) {
+						return repairAdapter.CollectArtifactPairRepairCommandSpec(task, retryValidationErr)
+					}
+				}
+				retryResult, retryErr, retryCommandErr := runCollectArtifactPairRepairCommand(ctx, task, adapter, repairResult, retrySpec)
 				if retryCommandErr != nil {
 					return true, acpruntime.Result{}, retryCommandErr
 				}
@@ -427,6 +435,15 @@ func shouldRetrySilentNoFreshCollectPairRepair(policy RecoveryPolicy, result acp
 	return policy.RetryInvalidOrMissingArtifactsOnce &&
 		policy.RetryZeroOutputPreArtifactStallOnce &&
 		shouldClassifySilentNoFreshArtifactRepairStall(policy, result, diagnostic)
+}
+
+func shouldRetryStreamOnlyNoFreshCollectPairRepair(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {
+	return policy.RetryInvalidOrMissingArtifactsOnce &&
+		policy.RetryStreamOnlyPreArtifactStallOnce &&
+		diagnostic.StallPhase == StallPhasePreArtifact &&
+		strings.TrimSpace(result.Stdout) != "" &&
+		!diagnostic.ArtifactObserved &&
+		diagnostic.AuthoredFileCount == 0
 }
 
 func shouldClassifySilentNoFreshArtifactRepairStall(policy RecoveryPolicy, result acpruntime.Result, diagnostic StallDiagnostic) bool {

@@ -5312,6 +5312,53 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   Opened a bounded remediation: accept the absent legacy quality summary only when the matching
   run-scoped `refresh-execution.json` proves `unchanged_candidate`, `no_op` and skipped providers;
   every missing, malformed or mismatched audit remains a gate failure.
+- 2026-07-16: No-op harness remediation merged at `e9ee719c`; Codex smoke
+  `smoke-tiny-bank-20260715T181251Z` passed. Standalone matrix
+  `release-fast-20260716T043815Z` was stopped on the first live product blocker:
+  `qwen-code` shard `bank-of-anthos-extras` failed with `runtime_contract_failed` after focused
+  `collect_pair_repair` emitted active stream telemetry for the full pre-artifact wall-clock but
+  wrote no authored files. Follow-up `EP-20260716-epic18-r3-qwen-stream-repair` is the only active
+  remediation before repeating smoke and release acceptance from a new clean commit.
+
+---
+
+## EP-20260716-epic18-r3-qwen-stream-repair
+
+### Context
+- Canonical standalone `release fast` reached Qwen live collect after clean host/provider/DoD
+  preflight, then failed one Bank of Anthos shard before any accepted release evidence existed.
+- Raw lifecycle evidence showed a bounded 180-second pre-artifact wall-clock, about 4.1 MiB of
+  stream diagnostics, zero authored files and terminal `runtime_stalled_before_artifacts`.
+- Silent/no-fresh and transient-provider repair retries already exist; active stream-only repair
+  stalls currently skip the compact retry path even though a stall-focused compact prompt exists.
+
+### Goals
+- [x] Add a Qwen-only one-shot retry for focused collect-pair pre-artifact stalls that emitted
+  stream diagnostics but produced no authored files.
+- [x] Build that retry with the existing compact `runtime_stalled_before_artifacts` write-first
+  prompt; do not rerun the same broad repair prompt.
+- [x] Keep the first wall-clock cap, write-set validation and terminal second-stall behavior.
+- [x] Add focused engine, Qwen policy and compact-prompt size regressions.
+- [x] Pass full deterministic DoD; commit/merge the remediation, then repeat Codex smoke before
+  restarting standalone release fast.
+
+### Non-goals
+- No timeout override, canonical matrix/curated repo change, deterministic artifact synthesis,
+  additional provider, schema/API/workspace contract change or release evidence acceptance.
+- No retry after a partial authored write; existing validation and manifest-recovery paths remain
+  authoritative for partial/invalid artifacts.
+
+### Acceptance
+- Stream-only Qwen repair stalls receive exactly one compact retry and can succeed only through
+  provider-authored validated markdown plus `shard-pack-manifest.json`.
+- Silent exhaustion keeps its `runner_unavailable` classification; repeated stream-only exhaustion
+  remains `runtime_contract_failed`.
+- `make contracts`, `make test`, `make lint`, `make build` pass and the tracked embedded UI bundle
+  remains deterministic.
+
+### Progress log
+- 2026-07-16: Focused providercommon/Qwen/prompt-contract tests and full deterministic DoD passed
+  with exact Go `1.25.10` and Node `22.21.1`; tracked embedded UI output remained unchanged.
 
 ---
 
