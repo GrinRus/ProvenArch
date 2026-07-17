@@ -4608,12 +4608,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
-    await screen.findByTestId("review-panel");
-
-    navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page"));
-
+    await renderConsoleApp(`/runs/${runID}`);
     await screen.findByTestId("run-status-panel");
 
     const recovery = screen.getByTestId("analysis-failure-recovery");

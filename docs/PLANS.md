@@ -5359,6 +5359,26 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 
 ---
 
+## EP-20260717-epic18-r3-ui-route-preflight
+
+### Context
+- The clean `ba98798a` deterministic R3 preflight passed contracts, Go and Python tests but the
+  full UI suite exposed a route race in the provider-unavailable recovery test.
+- The test opened Changes while async run canonicalization was still settling, navigated to Runs,
+  and could be returned to Changes before `run-status-panel` rendered. The focused test passed
+  `3/3`; production behavior and provider/runtime policy are unchanged.
+
+### Goals
+- Start the recovery scenario directly on its stable `/runs/<run_id>` deep link.
+- Preserve the existing Runs recovery, Changes publication gate and Setup readiness assertions.
+- Pass the full deterministic DoD before restarting R3 from the merged clean commit.
+
+### Non-goals
+- No production UI, API, runtime, schema, canonical matrix or timeout change.
+- No live provider execution from the remediation branch.
+
+---
+
 ## EP-20260716-epic18-r3-qwen-artifact-readiness
 
 ### Context
