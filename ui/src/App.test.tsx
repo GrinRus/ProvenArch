@@ -1490,8 +1490,38 @@ describe("App", () => {
     expect(action).not.toBeDisabled();
     fireEvent.click(action);
     expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
-    expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/pipeline/init")).toBe(false);
+  });
+
+  it("keeps a direct Home route stable when the latest run has reviewable evidence", async () => {
+    const runID = "run-home-evidence";
+    vi.stubGlobal("fetch", createFetchMock({
+      runID,
+      runList: [{
+        run_id: runID,
+        pipeline: "init",
+        status: "succeeded",
+        started_at: "2026-04-03T12:00:00Z",
+        finished_at: "2026-04-03T12:00:02Z",
+        warnings: [],
+        error_code: null,
+        error: null,
+      }],
+      runArtifacts: {
+        [runID]: {
+          run_id: runID,
+          artifacts: [{ path: "reports/as-is/overview.md", kind: "report", label: "Architecture Home" }],
+        },
+      },
+      artifactText: { "reports/as-is/overview.md": "# Architecture Home\n" },
+    }));
+
+    await renderConsoleApp("/home");
+
+    expect(await screen.findByTestId("home-panel")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/home"));
+    expect(screen.getByTestId("destination-home")).toHaveAttribute("aria-current", "page");
   });
 
   it("renders the Source V2 repo table with guided analysis scope summary", async () => {
@@ -3082,7 +3112,7 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Start without a saved analysis brief?" })).toHaveTextContent("reduces evidence quality");
     fireEvent.click(screen.getByRole("button", { name: "Start with quality warning" }));
     await screen.findByTestId("analysis-run-progress");
-    expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
@@ -3637,7 +3667,7 @@ describe("App", () => {
     await screen.findByTestId("review-panel");
 
     navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
 
     const progress = await screen.findByTestId("analysis-run-progress");
     expect(progress).toHaveTextContent(runID);
@@ -3825,7 +3855,7 @@ describe("App", () => {
     await screen.findByTestId("product-shell");
 
     navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
 
     expect(screen.queryByTestId("analysis-failure-recovery")).not.toBeInTheDocument();
     const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
@@ -4528,7 +4558,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -4547,7 +4577,7 @@ describe("App", () => {
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Retry refresh");
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
-    expect(screen.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 

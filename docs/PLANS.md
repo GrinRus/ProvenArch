@@ -368,7 +368,8 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
   warning; do not treat shape recovery as artifact acceptance.
 - [x] Add validation-specific provider repair guidance as a fallback without inventing findings.
 - [x] Pass focused tests and the full deterministic DoD.
-- [ ] Merge the slice and repeat a direct non-release Claude smoke before restarting R3.
+- [x] Merge the slice; repeat a direct non-release Claude smoke after the ProductShell gate slice
+  so all live qualification uses one final clean commit.
 
 ### Non-goals
 - No schema, HTTP API, workspace, provider command, retry, timeout, canonical matrix or curated
@@ -392,6 +393,62 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 - 2026-07-17: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
   contracts, complete Go suite, 261 Python tests, 141 UI tests, lint/typecheck and embedded UI
   production build are green.
+- 2026-07-17: PR #148 passed required GitHub checks and merged to `main` as `59a94cab`.
+
+## EP-20260717-epic18-r3-product-shell-live-gate
+
+### Context
+- Production UI already uses `Home / Runs / Knowledge / Changes`, contextual Setup and global
+  Ask, but `ui/e2e/live-flow.spec.ts` and the release runbook still assert retired Console V2
+  StageRail, right inspector and activity drawer surfaces.
+- The stale live flow would fail independently of backend/provider quality and cannot produce a
+  trustworthy UX assessment for the current product.
+
+### Goals
+- [x] Replace the last primary-navigation `stage-analysis` test anchor with `destination-runs`
+  across production and deterministic tests.
+- [x] Move live init-inspect to direct ProductShell routes, run deep-link reload/Back restoration,
+  current-workspace Knowledge and snapshot-isolated Changes Evidence/Publish.
+- [x] Verify Step review/Diagnostics instead of the retired global activity drawer.
+- [x] Verify global Ask focus/Escape/return focus plus citation navigation and Return to Ask.
+- [x] Add rendered overflow/first-viewport checks at `1440`, `1280`, `1024`, `390x844`, critical
+  axe assertions and browser console error capture.
+- [x] Rename durable screenshots around product destinations/tasks and synchronize harness tests,
+  architecture, testing strategy and live runbook.
+- [x] Pass focused TypeScript/Python/UI tests, mock E2E and full deterministic DoD.
+- [ ] Merge the slice, then restart trusted-host qualification from the new clean commit.
+
+### Non-goals
+- No new public route, HTTP API, schema, workflow precedence, release matrix, runtime/provider or
+  timeout contract; the existing `/home` route is only prevented from falling back to legacy
+  stage-driven auto-navigation. No visual redesign.
+- Minor spacing/typography polish does not block R3 unless it causes overflow, clipping,
+  inaccessible focus or unreadable evidence.
+
+### Acceptance
+- Live flow has no positive dependency on `stage-rail`, `right-inspector`, `activity-drawer` or
+  `stage-analysis`; explicit negative assertions keep the retired shell nodes out of production DOM.
+- Home, Runs, Knowledge, Changes Evidence/Publish and Ask complete through current public routes
+  and visible task anchors; snapshot source identity remains explicit.
+- Supported viewports have no global horizontal overflow, dialogs remain keyboard-operable,
+  critical axe violations and page/console errors are empty.
+- `make contracts`, `make test`, `make lint`, `make build` and `npm run e2e:mock --prefix ui` pass.
+
+### Result
+- The production-bundle live flow passed against a Git-tracked fake-runtime workspace with nine
+  current ProductShell screenshots, direct/deep routes, reload/Back restoration, snapshot evidence,
+  Ask citation return, four viewport contracts, critical axe checks and an empty browser console.
+- Rendered QA exposed and removed a legacy Home auto-redirect: `/home` now remains the URL source of
+  truth when accepted evidence already exists. Runs history selection uses an explicit Runs route.
+- The common `EvidenceViewer` is now the live assertion surface for Markdown and Mermaid; Publish
+  selects the promoted Architecture Home instead of applying document-quality thresholds to a
+  random runtime inventory entry.
+- A pre-existing providercommon test flake was reproduced once in 25 iterations. Only its synthetic
+  shell-start wall-clock cap was widened from `500ms` to `2s`; runtime/provider budgets are unchanged.
+  The focused stress run then passed `20/20`.
+- Final gates: 19 live-harness contract tests, 142 UI unit tests, 7/7 mock E2E, local production live
+  flow PASS, `make contracts`, `make test` (261 Python tests plus all Go/UI packages), `make lint` and
+  `make build` all pass on Node `22.21.1`.
 
 ### Continuous Backlog Queue Policy
 

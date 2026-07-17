@@ -55,33 +55,37 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertIn("type APIRequestContext", body)
         self.assertIn("fetchRunObservation(api: APIRequestContext", body)
         self.assertIn("UI_E2E_QA_SMOKE", body)
-        self.assertIn("frontend-review-mobile.png", body)
+        self.assertIn("frontend-changes-evidence-mobile.png", body)
         self.assertNotIn("api-context-page-close-smoke", body)
         self.assertNotIn("cancel-refresh", body)
         self.assertNotIn("page.request", body)
         self.assertNotIn("page.waitForTimeout", body)
 
-    def test_live_flow_opens_activity_drawer_before_log_mode_actions(self) -> None:
+    def test_live_flow_opens_runs_diagnostics_and_step_logs(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
-        self.assertIn("expectActivityDrawerOpen", body)
-        self.assertIn('getByTestId("activity-drawer-toggle").click({ timeout: 10_000 })', body)
-        self.assertIn('getByTestId("run-logs-mode-select")).toBeVisible({ timeout: 10_000 })', body)
-        self.assertIn('selectRunLogsMode(page, "events")', body)
-        self.assertIn('selectRunLogsMode(page, "raw")', body)
-        self.assertIn('selectRunLogsMode(page, "all")', body)
-        self.assertNotIn('getByTestId("run-logs-mode-select").selectOption("events")', body)
+        self.assertIn("openRunsDiagnostics", body)
+        self.assertIn('getByTestId("runs-diagnostics-drawer")', body)
+        self.assertIn('getByTestId("analysis-step-tab-logs").click()', body)
+        self.assertNotIn("expectActivityDrawerOpen", body)
+        self.assertNotIn('getByTestId("run-logs-mode-select")', body)
 
-    def test_live_flow_uses_v2_visible_selectors_without_hidden_compat_controls(self) -> None:
+    def test_live_flow_uses_product_shell_destinations_without_retired_shell(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         for selector in [
-            "source-repo-table",
+            "home-panel",
+            "home-primary-action",
             "readiness-summary-cards",
             "readiness-runtime-summary",
+            "runs-page",
             "analysis-run-progress",
             "analysis-run-timeline",
-            "activity-events-table",
+            "runs-diagnostics-drawer",
+            "knowledge-panel",
+            "knowledge-overview",
+            "knowledge-artifacts",
+            "changes-page",
             "review-artifact-explorer",
             "review-evidence-preview",
             "review-citation-coverage",
@@ -89,28 +93,29 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
             "publish-preview-tabs",
             "publish-gate-panel",
             "publish-commit-plan",
-            "git-publication-panel",
-            "runtime-safety-panel",
         ]:
             self.assertIn(f'getByTestId("{selector}")', body)
         self.assertIn("expectHiddenCompatibilityControlsAbsent", body)
-        self.assertIn("expectOperatorInspectorSurfaces", body)
+        self.assertIn("expectProductShellNavigation", body)
+        self.assertIn("expectNoDocumentOverflow", body)
+        self.assertIn("expectNoCriticalAxeViolations", body)
         self.assertIn('getByTestId("tab-settings")).toHaveCount(0)', body)
         self.assertIn('getByTestId("setup-stepper")).toHaveCount(0)', body)
-        self.assertNotIn('getByTestId("run-diagrams-list")', body)
-        self.assertNotIn('getByTestId("results-artifacts-panel")', body)
+        for retired in ["stage-rail", "right-inspector", "activity-drawer", "stage-analysis"]:
+            self.assertNotIn(f'getByTestId("{retired}")', body)
 
-    def test_live_flow_captures_v2_operator_stage_screenshots(self) -> None:
+    def test_live_flow_captures_product_shell_task_screenshots(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         for name in [
-            "frontend-source-desktop.png",
-            "frontend-readiness-desktop.png",
-            "frontend-analysis-desktop.png",
-            "frontend-review-desktop.png",
-            "frontend-publish-desktop.png",
-            "frontend-publish-mobile.png",
-            "frontend-review-mobile.png",
+            "frontend-home-desktop.png",
+            "frontend-setup-desktop.png",
+            "frontend-runs-desktop.png",
+            "frontend-knowledge-desktop.png",
+            "frontend-changes-evidence-desktop.png",
+            "frontend-changes-publish-desktop.png",
+            "frontend-changes-publish-mobile.png",
+            "frontend-changes-evidence-mobile.png",
         ]:
             self.assertIn(name, body)
 
@@ -161,15 +166,17 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertEqual("live", result["artifact_source"])
         self.assertIsNone(result["snapshot_run_id"])
         screenshots = result["diagnostic_refs"]["screenshots"]
-        self.assertEqual(7, len(screenshots))
+        self.assertEqual(9, len(screenshots))
         for name in [
-            "frontend-source-desktop.png",
-            "frontend-readiness-desktop.png",
-            "frontend-analysis-desktop.png",
-            "frontend-review-desktop.png",
-            "frontend-publish-desktop.png",
+            "frontend-home-desktop.png",
+            "frontend-setup-desktop.png",
+            "frontend-runs-desktop.png",
+            "frontend-knowledge-desktop.png",
+            "frontend-changes-evidence-desktop.png",
+            "frontend-changes-publish-desktop.png",
             "frontend-ask-desktop.png",
-            "frontend-review-mobile.png",
+            "frontend-changes-publish-mobile.png",
+            "frontend-changes-evidence-mobile.png",
         ]:
             self.assertTrue(any(str(path).endswith(name) for path in screenshots))
         self.assertEqual("run_stub", result["run_id"])
@@ -406,13 +413,15 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 output_dir = Path(os.environ.get("UI_E2E_OUTPUT_DIR", ""))
                 output_dir.mkdir(parents=True, exist_ok=True)
                 for name in [
-                    "frontend-source-desktop.png",
-                    "frontend-readiness-desktop.png",
-                    "frontend-analysis-desktop.png",
-                    "frontend-review-desktop.png",
-                    "frontend-publish-desktop.png",
+                    "frontend-home-desktop.png",
+                    "frontend-setup-desktop.png",
+                    "frontend-runs-desktop.png",
+                    "frontend-knowledge-desktop.png",
+                    "frontend-changes-evidence-desktop.png",
+                    "frontend-changes-publish-desktop.png",
                     *(["frontend-ask-desktop.png"] if os.environ.get("UI_E2E_QA_SMOKE") == "1" else []),
-                    "frontend-review-mobile.png",
+                    "frontend-changes-publish-mobile.png",
+                    "frontend-changes-evidence-mobile.png",
                 ]:
                     (output_dir / name).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
                 sys.exit(0)

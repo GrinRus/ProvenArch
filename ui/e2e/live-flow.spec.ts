@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from "@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
+import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const qaSmoke = (process.env.UI_E2E_QA_SMOKE ?? "0").trim() === "1";
@@ -173,8 +174,8 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
 }
 
 async function captureRunFailureScreenshot(page: Page): Promise<void> {
-  await page.getByTestId("stage-analysis").click().catch(() => undefined);
-  await captureEvidenceScreenshot(page, "frontend-analysis-failed-desktop.png").catch(() => undefined);
+  await page.getByTestId("destination-runs").click().catch(() => undefined);
+  await captureEvidenceScreenshot(page, "frontend-runs-failed-desktop.png").catch(() => undefined);
 }
 
 async function waitForInitInspectRun(api: APIRequestContext, page: Page, runID: string): Promise<void> {
@@ -278,26 +279,38 @@ async function expectHiddenCompatibilityControlsAbsent(page: Page): Promise<void
   await expect(page.getByTestId("setup-stepper")).toHaveCount(0);
 }
 
-async function expectOperatorInspectorSurfaces(page: Page): Promise<void> {
-  await expect(page.getByTestId("blockers-panel")).toBeVisible();
-  await expect(page.getByTestId("evidence-refs-panel")).toBeVisible();
-  await expect(page.getByTestId("runtime-safety-panel")).toBeVisible();
-  await expect(page.getByTestId("git-publication-panel")).toBeVisible();
-}
-
-async function expectActivityDrawerOpen(page: Page): Promise<void> {
-  const drawer = page.getByTestId("activity-drawer");
-  await expect(drawer).toBeVisible();
-  const isOpen = await drawer.evaluate((element) => element.hasAttribute("open"));
-  if (!isOpen) {
-    await page.getByTestId("activity-drawer-toggle").click({ timeout: 10_000 });
+async function expectProductShellNavigation(page: Page): Promise<void> {
+  await expect(page.getByTestId("product-shell")).toBeVisible();
+  for (const destination of ["home", "runs", "knowledge", "changes"]) {
+    await expect(page.getByTestId(`destination-${destination}`)).toBeVisible();
   }
-  await expect(page.getByTestId("run-logs-mode-select")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("setup-utility")).toBeVisible();
+  await expect(page.getByTestId("stage-ask")).toBeVisible();
+  for (const retired of ["stage-rail", "right-inspector", "activity-drawer"]) {
+    await expect(page.getByTestId(retired)).toHaveCount(0);
+  }
 }
 
-async function selectRunLogsMode(page: Page, mode: "events" | "raw" | "all"): Promise<void> {
-  await expectActivityDrawerOpen(page);
-  await page.getByTestId("run-logs-mode-select").selectOption(mode, { timeout: 10_000 });
+async function expectNoDocumentOverflow(page: Page): Promise<void> {
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), {
+    timeout: 10_000,
+    message: "ProductShell should not create global horizontal overflow",
+  }).toBe(true);
+}
+
+async function expectFirstViewportContent(page: Page, locator: Locator, label: string, maxY = 520): Promise<void> {
+  await expect(locator, `${label} should be visible`).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box, `${label} should have layout bounds`).not.toBeNull();
+  expect(box?.y ?? Number.POSITIVE_INFINITY, `${label} should start in the first viewport`).toBeLessThan(maxY);
+}
+
+async function openRunsDiagnostics(page: Page): Promise<void> {
+  const diagnostics = page.getByTestId("runs-diagnostics-drawer");
+  await expect(diagnostics).toBeVisible();
+  const open = await diagnostics.evaluate((node) => ("open" in node ? Boolean(node.open) : true));
+  if (!open) await diagnostics.locator("summary").click();
+  await expect(page.getByTestId("analysis-shard-panel")).toBeVisible();
 }
 
 async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
@@ -313,60 +326,33 @@ async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
   return explorer;
 }
 
-async function expectAlreadyInitializedWorkspaceNavigation(page: Page): Promise<void> {
-  await page.reload();
-  await expect(page.getByTestId("review-panel")).toBeVisible();
-  await expect(page.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
-
-  await page.getByTestId("stage-source").click();
-  await expect(page.getByTestId("source-repo-table")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-
-  await page.getByTestId("stage-readiness").click();
-  await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
-  await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-
-  await page.getByTestId("stage-analysis").click();
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-
-  await page.getByTestId("stage-review").click();
-  await expect(page.getByTestId("review-panel")).toBeVisible();
-  await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-
-  await page.getByTestId("stage-publish").click();
-  await expect(page.getByTestId("publish-panel")).toBeVisible();
-  await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-}
-
 test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
   const expectedRepoCountRaw = Number.parseInt(process.env.UI_E2E_EXPECTED_REPO_COUNT ?? "1", 10);
   const expectedRepoCount = Number.isFinite(expectedRepoCountRaw) && expectedRepoCountRaw > 0 ? expectedRepoCountRaw : 1;
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
-  await expect(page.getByTestId("product-shell")).toBeVisible();
-  await expect(page.getByTestId("top-status-bar")).toContainText("Proven Arch");
+  await page.goto("/home");
+  await expectProductShellNavigation(page);
+  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await expect(page.getByTestId("home-primary-action")).toHaveCount(1);
+  await expect(page.getByTestId("home-attention-reason")).not.toBeEmpty();
+  await expect(page.getByTestId("top-status-bar")).toContainText("ACP");
   await expect(page.getByTestId("brand-version")).not.toHaveText(/v0\.1\.1 beta/i);
   await expect(page.getByTestId("brand-version")).toHaveText(/^(dev|v?\d|\w)/);
-  await expect(page.getByTestId("stage-rail")).toBeVisible();
-  await expect(page.getByTestId("right-inspector")).toBeVisible();
-  await expect(page.getByTestId("activity-drawer")).toBeVisible();
-  await page.getByTestId("stage-source").click();
-  await expect(page.getByTestId("source-repo-table")).toBeVisible();
-  await expectHiddenCompatibilityControlsAbsent(page);
-  await expectOperatorInspectorSurfaces(page);
-  await captureEvidenceScreenshot(page, "frontend-source-desktop.png");
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-home-desktop.png");
 
-  await page.getByTestId("stage-readiness").click();
+  await page.goto("/setup?step=runner");
+  await expect(page.getByTestId("guided-setup-page")).toBeVisible();
+  await expect(page.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("readiness-summary-cards")).toBeVisible();
   await expect(page.getByTestId("readiness-runtime-summary")).toBeVisible();
+  await expectHiddenCompatibilityControlsAbsent(page);
   const readinessAdvancedSettings = page.getByTestId("readiness-advanced-settings");
   await expect(readinessAdvancedSettings).toBeVisible();
   await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
@@ -375,24 +361,22 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByRole("heading", { name: "Settings: Runtime Execution" })).toBeVisible();
   await page.getByTestId("readiness-advanced-settings").locator("summary").click();
   await expect(readinessAdvancedSettings).not.toHaveAttribute("open", "");
-
-  await page.getByTestId("stage-readiness").click();
   await page.getByTestId("workspace-validate-btn").click();
   await expect(page.getByTestId("workspace-validate-result")).toBeVisible();
   await expect(page.getByText("Status: valid")).toBeVisible();
   const resolvedRepoRows = page.getByTestId("workspace-validate-resolved-repos").locator("li");
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
-  await expectOperatorInspectorSurfaces(page);
-  await captureEvidenceScreenshot(page, "frontend-readiness-desktop.png");
+  await captureEvidenceScreenshot(page, "frontend-setup-desktop.png");
 
-  await page.getByTestId("stage-analysis").click();
+  await page.goto("/runs");
+  await expect(page.getByTestId("runs-page")).toBeVisible();
+  await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   let runID = "";
   if (artifactSource === "snapshot") {
     runID = await resolveSnapshotRunID(request);
-    const snapshotRunButton = page.getByRole("button", { name: runID }).first();
-    await expect(snapshotRunButton, `snapshot run ${runID} should be selectable`).toBeVisible({ timeout: 30_000 });
-    await snapshotRunButton.click();
+    await page.goto(`/runs/${encodeURIComponent(runID)}`);
+    await expect(page.getByTestId("runs-page")).toBeVisible();
     const snapshotObservation = await fetchRunObservation(request, runID);
     expect(snapshotObservation.status, `snapshot run ${runID} should be succeeded`).toBe("succeeded");
   } else {
@@ -408,42 +392,48 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   });
   if (artifactSource !== "snapshot") {
     await waitForInitInspectRun(request, page, runID);
+    await page.goto(`/runs/${encodeURIComponent(runID)}`);
   }
 
-  await page.getByTestId("stage-analysis").click();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  const selectedRunButton = page.getByRole("button", { name: runID }).first();
-  await expect(selectedRunButton).toBeVisible();
-  await selectedRunButton.click();
-
-  await selectRunLogsMode(page, "events");
-  const logsContent = page.getByTestId("run-logs-content");
-  await expect
-    .poll(async () => (await logsContent.textContent()) ?? "", { timeout: 30_000 })
-    .toContain("[EVENT]");
-
-  await selectRunLogsMode(page, "raw");
-  await expect
-    .poll(
-      async () => {
-        const hasLogsContent = (await logsContent.count()) > 0;
-        const content = hasLogsContent ? ((await logsContent.textContent()) ?? "") : "";
-        const noLogsVisible = (await page.getByText("No run logs yet.").count()) > 0;
-        return content.includes("[RAW]") || noLogsVisible;
-      },
-      { timeout: 30_000 }
-    )
-    .toBe(true);
-
-  await selectRunLogsMode(page, "all");
-  await expect(page.getByTestId("activity-events-table")).toBeVisible();
-  await page.getByTestId("stage-analysis").click();
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
+  await expect(page.getByTestId("run-status-run-id")).toHaveText(runID);
   await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
-  await expectOperatorInspectorSurfaces(page);
-  await captureEvidenceScreenshot(page, "frontend-analysis-desktop.png");
+  await expect(page.getByTestId("analysis-step-review-panel")).toBeVisible();
+  const stepCards = page.getByTestId("analysis-step-review-card");
+  if ((await stepCards.count()) > 0) {
+    await stepCards.first().click();
+    await page.getByTestId("analysis-step-tab-logs").click();
+    await expect(page.getByTestId("analysis-step-review-panel")).toContainText(/No logs are available|Provider is silent|INFO|WARN|ERROR/i);
+  }
+  await openRunsDiagnostics(page);
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-runs-desktop.png");
 
-  await page.getByTestId("stage-review").click();
+  await page.reload();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
+  await page.getByTestId("destination-home").click();
+  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
+
+  await page.goto("/knowledge?view=overview&source=current");
+  await expect(page.getByTestId("knowledge-panel")).toBeVisible();
+  await expect(page.getByTestId("destination-knowledge")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("knowledge-panel")).toContainText("Current workspace");
+  await expect(page.getByTestId("knowledge-overview")).toBeVisible();
+  await page.getByRole("button", { name: "Artifacts", exact: true }).click();
+  await expect(page.getByTestId("knowledge-artifacts")).toBeVisible();
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-knowledge-desktop.png");
+
+  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
+  await expect(page.getByTestId("changes-page")).toBeVisible();
+  await expect(page.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("changes-page")).toContainText(`Run snapshot · ${runID}`);
+  await expect(page.getByTestId("stage-evidence")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("review-panel")).toBeVisible();
   await expect(page.getByTestId("review-artifact-explorer")).toBeVisible();
   await expect(page.getByTestId("review-evidence-preview")).toBeVisible();
@@ -462,9 +452,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await diagramButtons.first().click();
   }
 
-  const diagramPanel = page.getByTestId("run-diagram-content-panel");
+  const diagramPanel = page.getByTestId("evidence-viewer");
   await expect(diagramPanel).toBeVisible();
-  const selectedDiagramPath = page.getByTestId("run-diagram-selected-path");
+  const selectedDiagramPath = diagramPanel.locator(".evidence-source-header strong");
   await expect
     .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
     .toMatch(/reports\/diagrams\//i);
@@ -478,15 +468,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
         const svgVisible = (await diagramPanel.locator(".diagram-svg svg").count()) > 0;
         const renderingVisible = (await diagramPanel.getByText(/Rendering/i).count()) > 0;
         const renderErrorVisible = (await diagramPanel.getByText(/Diagram render error:/i).count()) > 0;
-        const plainTextLocator = page.getByTestId("run-diagram-content");
-        const plainText =
-          (await plainTextLocator.count()) > 0 ? (((await plainTextLocator.textContent()) ?? "").trim()) : "";
-        return (
-          svgVisible ||
-          renderingVisible ||
-          renderErrorVisible ||
-          (plainText !== "" && !/^Select a `\.mmd` diagram artifact to preview\.$/.test(plainText))
-        );
+        return svgVisible || renderingVisible || renderErrorVisible;
       },
       { timeout: 30_000 }
     )
@@ -506,22 +488,27 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(preferredReadableArtifactButton).toBeVisible();
   await preferredReadableArtifactButton.click();
 
-  const artifactContent = page.getByTestId("run-artifact-content");
-  await expect(artifactContent).toBeVisible();
-  await expect
-    .poll(async () => (await artifactContent.textContent())?.trim() ?? "")
-    .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
-  const selectedArtifactPath = ((await page.getByTestId("run-artifact-selected-path").textContent()) ?? "").trim();
-  const selectedArtifactText = ((await artifactContent.textContent()) ?? "").trim();
+  const artifactViewer = page.getByTestId("evidence-viewer");
+  await expect(artifactViewer).toBeVisible();
+  const selectedArtifactPath = ((await artifactViewer.locator(".evidence-source-header strong").textContent()) ?? "").trim();
+  const selectedArtifactText = await fetchArtifactText(request, selectedArtifactPath);
   expectReadableArtifactText(selectedArtifactPath, selectedArtifactText);
-  await expectReadableViewportPanel(page, page.getByTestId("run-artifact-content-panel"), "Review artifact preview panel");
-  await expectReadableViewportPanel(page, artifactContent, "Review artifact text preview", 120);
+  await expectReadableViewportPanel(page, artifactViewer, "Review artifact preview panel");
+  await expectReadableViewportPanel(page, artifactViewer.locator(".markdown-evidence"), "Review artifact text preview", 120);
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-changes-evidence-desktop.png");
 
-  await expectOperatorInspectorSurfaces(page);
-  await captureEvidenceScreenshot(page, "frontend-review-desktop.png");
+  const askTrigger = page.getByTestId("stage-ask");
+  await askTrigger.focus();
+  await askTrigger.click();
+  await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toHaveCount(0);
+  await expect(askTrigger).toBeFocused();
 
   if (qaSmoke) {
-    await page.getByTestId("stage-ask").click();
+    await askTrigger.click();
+    await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toBeVisible();
     await expect(page.getByTestId("qa-run-history")).toBeVisible();
     await expect(page.getByTestId("qa-readonly-safety-panel")).toContainText("no canonical writes");
     await page.getByTestId("qa-question-input").fill("What are the main architecture coverage gaps?");
@@ -546,11 +533,19 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await expect(page.getByRole("button", { name: /context-pack\.json/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /runtime-execution\.json/i })).toBeVisible();
     await captureEvidenceScreenshot(page, "frontend-ask-desktop.png");
-    await page.getByTestId("stage-review").click();
+    const citationButton = page.getByTestId("qa-citations-panel").locator("button").first();
+    await expect(citationButton).toBeVisible();
+    await citationButton.click();
+    await expect(page.getByTestId("current-workspace-evidence")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Return to Ask" })).toBeVisible();
+    await page.getByRole("button", { name: "Return to Ask" }).click();
+    await expect(page.getByRole("dialog", { name: "Ask current workspace" })).toBeVisible();
+    await page.keyboard.press("Escape");
   }
 
-  await page.getByTestId("stage-publish").click();
+  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=publish&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("Publication set");
@@ -559,6 +554,10 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();
   await expect(page.getByTestId("publish-gate-panel")).toBeVisible();
   await expect(page.getByTestId("publish-commit-plan")).toBeVisible();
+  const publishArtifactList = page.getByRole("list", { name: "publish artifact preview list" });
+  const architectureHomePreview = publishArtifactList.getByRole("button", { name: /reports\/as-is\/overview\.md/i }).first();
+  await expect(architectureHomePreview).toBeVisible();
+  await architectureHomePreview.click();
   const publishPreviewContent = page.getByTestId("publish-selected-preview-content");
   await expect(publishPreviewContent).toBeVisible();
   await expect
@@ -567,39 +566,33 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   expectReadableArtifactText("Publish selected artifact preview", ((await publishPreviewContent.textContent()) ?? "").trim(), 240);
   await expectReadableViewportPanel(page, page.getByTestId("publish-preview-panel"), "Publish preview panel");
   await expectReadableViewportPanel(page, publishPreviewContent, "Publish selected artifact preview", 120);
-  await expect(page.getByTestId("git-publication-panel")).toContainText("proposal/beta-refresh");
-  await expectOperatorInspectorSurfaces(page);
-  await page.locator(".work-area").evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await captureEvidenceScreenshot(page, "frontend-publish-desktop.png");
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-changes-publish-desktop.png");
 
-  await page.setViewportSize({ width: 390, height: 1200 });
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    await expect(page.getByTestId("publish-panel")).toBeVisible();
+    await expectNoDocumentOverflow(page);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-section-jumps")).toBeVisible();
   await expect(page.getByTestId("publish-section-jumps")).toContainText("Gate");
   await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
-  await expectReadableViewportPanel(page, page.getByTestId("publish-preview-panel"), "Mobile Publish preview panel", 180, 300);
-  await expectReadableViewportPanel(page, publishPreviewContent, "Mobile Publish selected artifact preview", 120, 300);
-  await captureEvidenceScreenshot(page, "frontend-publish-mobile.png");
-  await page.setViewportSize({ width: 1280, height: 720 });
+  await expectFirstViewportContent(page, page.getByTestId("publish-readiness-summary"), "Mobile publish state");
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-changes-publish-mobile.png");
 
-  await expectAlreadyInitializedWorkspaceNavigation(page);
-
-  await page.getByTestId("stage-review").click();
-  await page.setViewportSize({ width: 390, height: 1200 });
+  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("review-panel")).toBeVisible();
-  const mobileArtifactContent = page.getByTestId("run-artifact-content");
-  await expect
-    .poll(async () => (await mobileArtifactContent.textContent())?.trim() ?? "", { timeout: 30_000 })
-    .not.toMatch(/^(Select artifact to inspect\.|Loading\.\.\.)$/);
-  await expectReadableViewportPanel(page, page.getByTestId("review-evidence-preview"), "Mobile Review evidence preview", 180, 300);
-  await expectReadableViewportPanel(page, mobileArtifactContent, "Mobile Review artifact text", 140, 300);
-  const mobileBodyText = (((await page.locator("body").innerText()) ?? "").replace(/\s+/g, ""));
-  expect(mobileBodyText).not.toContain("SetupBaselineRunsResultsSettingsCoverageArtifactsDiagrams");
-  await captureEvidenceScreenshot(page, "frontend-review-mobile.png");
+  await expectFirstViewportContent(page, page.getByTestId("stage-evidence"), "Mobile evidence navigation");
+  await expectNoDocumentOverflow(page);
+  await captureEvidenceScreenshot(page, "frontend-changes-evidence-mobile.png");
 
   await expect(page.locator("p.status.err")).toHaveCount(0);
+  await expectNoCriticalAxeViolations(page);
+  expect(consoleErrors, "live ProductShell should not emit browser console errors").toEqual([]);
   await test.info().attach("runtime-provider", {
     body: runtimeProvider,
     contentType: "text/plain"
