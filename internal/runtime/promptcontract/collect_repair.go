@@ -173,6 +173,12 @@ func collectManifestRepairValidationFocus(validationErr error) []string {
 		return nil
 	}
 	lines := []string{}
+	if strings.Contains(detail, "/semantic") && strings.Contains(detail, "required: missing properties: 'findings'") {
+		lines = append(lines,
+			"- Terminal shape focus: semantic must contain the required findings array. Preserve every existing manifest value and add semantic.findings as [] when no evidence-backed findings were observed.",
+			"- Do not invent findings to satisfy the shape; run a local JSON check that semantic.findings exists and is an array before exiting 0.",
+		)
+	}
 	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
 		lines = append(lines,
 			"- Terminal shape focus: rewrite every semantic.questions[] item as an object with both id and text; do not use question, title-only, or id-only question objects.",

@@ -563,6 +563,39 @@ func TestComposeCollectManifestRepairPromptUsesValidationSpecificShapeFocus(t *t
 	}
 }
 
+func TestComposeCollectManifestRepairPromptFocusesMissingFindingsWithoutInventingContent(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root",
+		WriteRoot:    t.TempDir(),
+		ShardID:      "root",
+		DomainID:     "root",
+		AgentRole:    "shard-analyst",
+		RepoScopes:   []string{"repo"},
+		PathScopes:   []string{"README.md"},
+	}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte("# Root Overview\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt := ComposeCollectManifestRepairPrompt(
+		acpruntime.ProviderClaudeCode,
+		task,
+		errors.New(`shard-pack-manifest.schema.json: /semantic: required: missing properties: 'findings'`),
+	)
+	for _, token := range []string{
+		"semantic must contain the required findings array",
+		"add semantic.findings as [] when no evidence-backed findings were observed",
+		"Do not invent findings to satisfy the shape",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected missing-findings focus %q, got:\n%s", token, prompt)
+		}
+	}
+}
+
 func TestCollectRepairEvidenceCandidatesSkipLargeAndGeneratedFiles(t *testing.T) {
 	t.Parallel()
 

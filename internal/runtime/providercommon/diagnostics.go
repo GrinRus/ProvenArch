@@ -217,6 +217,43 @@ func emitCollectManifestShapeCleanupExhaustedDiagnostic(task acpruntime.Task, pr
 	emitDiagnostic(task, "collect manifest shape cleanup exhausted", fields)
 }
 
+func emitCollectManifestMissingFindingsRecoveryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":       string(provider),
+		"shard_id":       strings.TrimSpace(task.ShardID),
+		"recovery_mode":  collectManifestMissingFindingsRecoveryMode,
+		"inserted_field": "semantic.findings",
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest missing findings recovery scheduled", fields)
+}
+
+func emitCollectManifestMissingFindingsRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestMissingFindingsRecoveryReport) {
+	emitDiagnostic(task, "collect manifest missing findings recovery completed", map[string]any{
+		"provider":       string(provider),
+		"shard_id":       strings.TrimSpace(task.ShardID),
+		"recovery_mode":  collectManifestMissingFindingsRecoveryMode,
+		"inserted_field": "semantic.findings",
+		"before_digest":  report.BeforeDigest,
+		"after_digest":   report.AfterDigest,
+	})
+}
+
+func emitCollectManifestMissingFindingsRecoveryFailedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":       string(provider),
+		"shard_id":       strings.TrimSpace(task.ShardID),
+		"recovery_mode":  collectManifestMissingFindingsRecoveryMode,
+		"inserted_field": "semantic.findings",
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest missing findings recovery failed", fields)
+}
+
 func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestRuntimeRecoveryReport) {
 	fields := map[string]any{
 		"provider":       string(provider),

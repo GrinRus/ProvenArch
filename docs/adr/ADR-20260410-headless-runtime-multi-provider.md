@@ -37,6 +37,11 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
 - Docs and runbooks must describe provider-aware behavior consistently.
 - Required CI continues to rely on `--runtime fake`; live provider checks remain optional smoke/e2e surfaces.
 - Batch quality reporting and semantic hard-fail checks are documented as evaluator behavior, not single-run runtime contract changes.
+- Shared runtime may perform a narrowly allowlisted, diagnostic-marked shape recovery when an
+  otherwise valid provider-authored collect manifest omits required `semantic.findings`: insert
+  only an empty array, atomically revalidate the complete artifact set, and restore the original
+  bytes on any remaining defect. This does not authorize general artifact normalization or
+  semantic synthesis and still requires manual artifact-quality acceptance.
 
 ## Follow-ups
 
