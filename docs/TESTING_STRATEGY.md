@@ -331,12 +331,11 @@ Release workflow hardening:
   source recovery, onboarding recovery, permission recovery, provider stream, failed-shard analysis,
   Publish Git recovery and QA recovery. These scenarios use mocked `/api/**` responses only; live
   providers, external repositories and network runtime checks stay out of required CI.
-- UI run logs surface:
-  - compact activity drawer render
-  - log polling/append without duplicates
-  - view toggle `line | line+fields`
-  - mode toggle `event timeline | raw agent stream | all`
-  - collapsed runtime execution artifact quick actions
+- UI run diagnostics surface:
+  - Runs Step review tabs for artifacts/logs/evidence/diff
+  - log polling/append without duplicates and selected-step filtering
+  - local non-modal Diagnostics disclosure for shards, raw runtime output, permissions and telemetry
+  - runtime execution artifact refs remain secondary to workflow acceptance
 - UI results diagrams surface:
   - navigation through `Review`
   - diagram artifact listing and Mermaid preview render
@@ -417,8 +416,9 @@ Release workflow hardening:
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_ARTIFACT_SOURCE=snapshot`, `UI_E2E_SNAPSHOT_RUN_ID`, `UI_E2E_OUTPUT_DIR`
-  - release-facing `init-inspect` validates the product journey over the copied backend refresh snapshot: `Setup -> Runs -> Changes -> Publish`
-  - durable V2 screenshot refs are diagnostic evidence only: `frontend-source-desktop.png`, `frontend-readiness-desktop.png`, `frontend-analysis-desktop.png`, `frontend-review-desktop.png`, `frontend-publish-desktop.png`, default Ask evidence `frontend-ask-desktop.png`, and `frontend-review-mobile.png`
+  - release-facing `init-inspect` validates the current ProductShell over the copied backend refresh snapshot: contextual Setup, `Home / Runs / Knowledge / Changes`, run deep-link reload/Back restoration, snapshot-isolated Evidence/Publish and global Ask citation return
+  - rendered acceptance covers `1440`, `1280`, `1024`, `390x844`, global overflow, first-viewport state/action, keyboard focus/Escape/return focus, critical axe results and browser console errors
+  - durable ProductShell screenshot refs are diagnostic evidence only: `frontend-home-desktop.png`, `frontend-setup-desktop.png`, `frontend-runs-desktop.png`, `frontend-knowledge-desktop.png`, `frontend-changes-evidence-desktop.png`, `frontend-changes-publish-desktop.png`, default Ask evidence `frontend-ask-desktop.png`, `frontend-changes-publish-mobile.png`, and `frontend-changes-evidence-mobile.png`
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate
   - init inspect обязан различать `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`, `server_exited` и fallback `playwright_failed`, чтобы backend run failure, browser lifecycle, API/server lifecycle и productive runtime timeout не выглядели одним failure class
   - long-running run polling использует independent API request context и не зависит от lifetime browser page, которая нужна только для UI assertions

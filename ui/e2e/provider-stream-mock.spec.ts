@@ -394,9 +394,9 @@ test("provider stream mock: Analysis diagnostics remain readable", async ({ page
   await installProviderStreamMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/");
+  await page.goto("/runs");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await expect(page.getByTestId("stage-analysis")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
 
   const liveDiagnostics = page.getByTestId("analysis-live-diagnostics");
   await expect(liveDiagnostics).toBeVisible();

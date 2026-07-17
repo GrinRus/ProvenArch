@@ -69,10 +69,10 @@
    - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе newest completed run в history
-   - При bootstrap UI остаётся на `Source` для пустого workspace, но автоматически открывает `Analysis` для active run и `Review` для выбранного completed run с уже доступными artifacts
+   - При bootstrap `/` канонизируется в contextual Setup для пустого workspace, `/runs/<run_id>` восстанавливает active/selected Run Studio, а `/changes?run=<id>&source=snapshot` открывает completed run evidence без fallback на current workspace
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
-   - Bottom activity drawer показывает compact recent logs для выбранного run (`timestamp/level/step/domain/message`) с dual-view `event timeline | raw agent stream | all`, переключателем `line | line+fields`, collapsed runtime execution artifact refs, quick actions `Copy logs`, `Download logs` and terminal canceled/recovered empty-log copy before generic failure wording
+   - Runs Step review показывает artifacts/logs/evidence/diff выбранного шага, а shards, raw runtime output, permissions и telemetry находятся в локальном non-modal Diagnostics disclosure; retired global activity drawer отсутствует
    - `Review` объединяет evidence tabs, primary review queue, selected markdown/Mermaid preview, secondary grouped artifact explorer, coverage/open-question/trust summary и artifact-derived Domain Map на основе `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states для sparse model data; `Proposals` показывает review room для proposal/changelog artifacts с package list, proposal package recovery для incomplete proposal/changelog packages, preview/evidence/changelog/diff tabs, quality blockers и publication path
    - Global `Ask` вызывает async `POST /api/qa/runs`, poll-ит `GET /api/qa/runs/<run_id>`, загружает history через `GET /api/qa/runs?limit=20` и показывает selected answer, runtime/provider identity, confidence, citations, unresolved assumptions, related-entity partial state, provider-unavailable Readiness guidance, terminal canceled/restart-reconciled answer recovery and read-only safety/audit artifact links; live frontend shell собирает этот flow по умолчанию как SWE UX evidence (`UI_E2E_QA_SMOKE=1`), а explicit `UI_E2E_QA_SMOKE=0` считается diagnostic residual risk; legacy deterministic `POST /api/qa/ask` остаётся compatibility endpoint для CLI/API consumers
    - `Publish` stage показывает Git Review Room: publication readiness summary, mobile section jumps, folder-level artifact summary from selected-run refs, selected artifact preview, explicit partial state for unavailable line-level Git diff, publish gate/checklist, commit plan, prepared commit-message copy action, failed Git action recovery and existing commit/proposal-branch mutations
@@ -86,7 +86,7 @@
    - Runtime Permissions settings panel:
      - load/save/reset через `GET/PUT /api/runtime/permissions`
      - показывает persisted/effective/source для `trusted_full_access|managed` и `fail_fast|ui`
-   - `Analysis` показывает pending runtime permission requests выбранного run вместе с triage summary, target/reason, `decision/rule_id` и next actions; right inspector mirrors the actionable blocker detail with step, rule, target and reason; approve/deny broker остаётся отдельным будущим slice
+   - Runs показывает pending runtime permission requests выбранного run вместе с triage summary, target/reason, `decision/rule_id` и next actions внутри Run Studio/Diagnostics; approve/deny broker остаётся отдельным будущим slice
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
@@ -305,7 +305,7 @@
    - `GET /api/workspace/health` computes a read-only snapshot over published workspace artifacts on demand
    - scanner не пишет `reports/health/*` и не участвует в promotion gate; K2a health is advisory only
    - initial deterministic checks cover observation model provenance without evidence, orphan domain outputs, proposal review sections and unresolved coverage question count
-   - UI surfaces status/counts in `Readiness` and detailed items in the right inspector; `pass|warn|fail` is health signal, not release verdict
+   - UI surfaces status/counts in contextual Setup readiness and current-workspace Knowledge; `pass|warn|fail` is health signal, not release verdict
 
 ## Agent Topology Artifacts (MVP)
 - `charter/cards/domains/<domain-id>.md`

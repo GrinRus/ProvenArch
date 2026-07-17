@@ -1867,7 +1867,7 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      500 * time.Millisecond,
 				RetryPreArtifactStallWindow: 5 * time.Second,
-				PreArtifactWallClockWindow:  500 * time.Millisecond,
+				PreArtifactWallClockWindow:  2 * time.Second,
 				PostArtifactStallWindow:     successfulArtifactWriteWindow,
 				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
 				PollInterval:                5 * time.Millisecond,

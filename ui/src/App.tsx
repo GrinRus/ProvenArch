@@ -63,8 +63,6 @@ export default function App() {
   const restoredRouteRunRef = useRef<string | null>(null);
   const restoredArtifactRef = useRef<string | null>(null);
   const defaultChangesRunRef = useRef<string | null>(null);
-  const userSelectedStageRef = useRef(false);
-  const autoOpenedStageRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupRuntime, setSetupRuntime] = useState("fake");
@@ -629,6 +627,11 @@ export default function App() {
     await handleSelectRun(id);
   }
 
+  async function handleSelectRunInRuns(id: string) {
+    navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
+    await handleSelectRun(id);
+  }
+
   useEffect(() => {
     if (!consoleReady || runList.length === 0) return;
     if (route.runId) {
@@ -715,22 +718,6 @@ export default function App() {
   const validationErrors = useMemo(() => diagnostics.filter((diagnostic) => diagnostic.level === "error"), [diagnostics]);
   const doctorFailures = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "fail") ?? [], [setupDoctorResult]);
   const artifactCount = nonDiagramArtifacts.length + diagramArtifacts.length;
-  useEffect(() => {
-    if (destination !== "home") return;
-    if (userSelectedStageRef.current || autoOpenedStageRef.current) {
-      return;
-    }
-    if (selectedRunIsActive) {
-      autoOpenedStageRef.current = true;
-      setActiveStage("analysis");
-      return;
-    }
-    if (artifactCount > 0) {
-      autoOpenedStageRef.current = true;
-      setActiveStage("review");
-    }
-  }, [artifactCount, destination, selectedRunIsActive, setActiveStage]);
-
   useEffect(() => {
     if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
       return;
@@ -1067,7 +1054,7 @@ export default function App() {
           onRunPipeline={(pipeline, intent) => void handleRunPipeline(pipeline, intent)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onCancelRun={(id) => void handleCancelRun(id)}
-          onSelectRun={(id) => void handleSelectRunAndRoute(id)}
+          onSelectRun={(id) => void handleSelectRunInRuns(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
         />
         </RunsPage>
