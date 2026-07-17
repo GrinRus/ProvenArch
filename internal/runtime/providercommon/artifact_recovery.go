@@ -518,6 +518,19 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 		}
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "collect_pair_repair", "collect pair recovery is required when partial collect output contains no authored markdown", validationErr)
 	}
+	if isCollectManifestMissingFindingsOnlyCandidate(validationErr) {
+		emitCollectManifestMissingFindingsRecoveryScheduledDiagnostic(task, adapter.Provider(), validationErr)
+		if report, recoveryErr := recoverCollectManifestMissingFindings(task, validationErr); recoveryErr == nil {
+			if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, collectManifestMissingFindingsRecoveryMode, "missing-findings recovery wrote outside shard-pack-manifest.json", err)
+			}
+			emitCollectManifestMissingFindingsRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+			result = markCollectManifestMissingFindingsRecovered(result, report)
+			return true, result, nil
+		} else {
+			emitCollectManifestMissingFindingsRecoveryFailedDiagnostic(task, adapter.Provider(), recoveryErr)
+		}
+	}
 	if collectManifestFileMissing(task) ||
 		isCollectManifestSemanticScaffoldFailure(validationErr) ||
 		isCollectManifestEmptyPayloadFailure(validationErr) ||
@@ -580,6 +593,26 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	}
 	emitCollectManifestRepairCompletedDiagnostic(task, adapter.Provider(), "")
 	return true, repairResult, nil
+}
+
+func markCollectManifestMissingFindingsRecovered(result acpruntime.Result, report collectManifestMissingFindingsRecoveryReport) acpruntime.Result {
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics[collectManifestMissingFindingsRecoveryMode] = map[string]any{
+		"recovery_mode":       collectManifestMissingFindingsRecoveryMode,
+		"source":              "runtime_shape_recovery",
+		"provider_authored":   false,
+		"inserted_field":      "semantic.findings",
+		"before_digest":       report.BeforeDigest,
+		"after_digest":        report.AfterDigest,
+		"manual_quality_gate": "artifact_quality_assessment",
+	}
+	warning := "runtime_recovery: collect_manifest_missing_findings_recovery inserted an empty semantic.findings collection; treat as shape recovery evidence, not artifact-quality acceptance"
+	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
+		result.Execution.Warnings = append(result.Execution.Warnings, warning)
+	}
+	return result
 }
 
 func runCollectManifestShapeCleanup(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, repairAdapter CollectManifestRepairAdapter, baseResult acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, validationErr error, repairPolicy ActivityPolicy, policy RecoveryPolicy) (acpruntime.Result, error, bool) {

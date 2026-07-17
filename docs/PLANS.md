@@ -347,6 +347,52 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 - 2026-07-13: Implemented slice in a focused patch; full DoD pending after targeted verification.
 - 2026-07-13: Focused Go/Python/shell checks passed; full DoD (`make contracts test lint build`) passed with `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin` after installing UI deps in this worktree.
 
+## EP-20260717-epic18-r3-missing-findings-shape-recovery
+
+### Context
+- Standalone `release-fast-20260717T114416Z` passed Qwen collection and reached Claude Bank
+  collection before the first product blocker.
+- Claude authored a non-bootstrap evidence document and otherwise rich manifest, but omitted the
+  schema-required `semantic.findings` collection. The generic manifest-only repair then stalled.
+- The schema deliberately permits an empty findings array, so this is a narrow shape defect; it
+  does not authorize ACP to invent findings or normalize any other provider content.
+
+### Goals
+- [x] Add a deterministic fixture for a valid collect artifact set whose only defect is missing
+  `semantic.findings`.
+- [x] Atomically add `semantic.findings: []` only for that exact failure and repeat full strict
+  collect validation, including documents and repo evidence paths.
+- [x] Restore the original manifest and continue existing provider repair/fail-closed behavior if
+  any other validation error remains.
+- [x] Emit before/after digests, recovery diagnostics and an explicit manual artifact-quality
+  warning; do not treat shape recovery as artifact acceptance.
+- [x] Add validation-specific provider repair guidance as a fallback without inventing findings.
+- [x] Pass focused tests and the full deterministic DoD.
+- [ ] Merge the slice and repeat a direct non-release Claude smoke before restarting R3.
+
+### Non-goals
+- No schema, HTTP API, workspace, provider command, retry, timeout, canonical matrix or curated
+  repository change.
+- No normalization of malformed JSON, wrong types, missing coverage, citations, evidence paths,
+  document content or nested semantic objects.
+- No accepted release evidence from the remediation branch.
+
+### Acceptance
+- Existing manifest values are structurally identical before and after recovery except for the
+  inserted empty `semantic.findings` array.
+- Recovery writes only `shard-pack-manifest.json`; candidate validation failure restores the exact
+  original bytes and leaves provider-authored repair authoritative.
+- The tracked fixture and focused engine/prompt tests run offline and deterministically.
+- `make contracts`, `make test`, `make lint`, and `make build` pass.
+
+### Progress log
+- 2026-07-17: The tracked missing-findings fixture, engine integration, rollback/determinism,
+  atomic-write cleanup and validation-specific prompt tests pass. Focused tests also passed with
+  repeated counts (`providercommon` 20x, `promptcontract` 10x).
+- 2026-07-17: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
+  contracts, complete Go suite, 261 Python tests, 141 UI tests, lint/typecheck and embedded UI
+  production build are green.
+
 ### Continuous Backlog Queue Policy
 
 Epics 19, 20 and 21 are complete in `main`. `docs/BACKLOG.md` remains the reference/acceptance

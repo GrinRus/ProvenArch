@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "run_id": "__RUN_ID__",
+  "step_id": "init.step1.collect",
+  "shard_id": "bank",
+  "domain_id": "bank",
+  "agent_role": "shard-analyst",
+  "artifact_root": "__ARTIFACT_ROOT__",
+  "repo_scopes": ["bank-of-anthos"],
+  "path_scopes": ["."],
+  "documents": [
+    {
+      "id": "doc.bank.overview",
+      "kind": "report",
+      "title": "Bank Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/bank/overview.md",
+      "topics": ["bank"],
+      "citation_ids": ["cite.bank.readme"]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.bank.readme",
+      "repo": "bank-of-anthos",
+      "path": "README.md",
+      "claim_ids": ["claim.bank.readme"],
+      "document_ids": ["doc.bank.overview"]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": ["repository entrypoints"],
+      "missing": ["owner mapping"],
+      "notes": ["bounded collect evidence"]
+    },
+    "questions": [
+      {
+        "id": "q.bank.owner",
+        "text": "Who owns bank-of-anthos?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.bank",
+        "name": "bank",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.8,
+          "evidence": [
+            {
+              "repo": "bank-of-anthos",
+              "path": "README.md"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": []
+  }
+}
