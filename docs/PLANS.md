@@ -5884,7 +5884,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Harden first-pass, normal, compact and command-text step2 prompt modes.
 - [x] Synchronize architecture, pipeline, testing and live-gate documentation.
 - [x] Pass focused regressions and full deterministic DoD.
-- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+- [x] Merge the remediation and restart Claude qualification from the new clean merge commit.
 
 ### Non-goals
 - No sanitizer, deterministic narrative rewrite, schema/API/provider-contract change, retry/timeout
@@ -5903,6 +5903,8 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: After PR #153 removed the independent stream-capture race, focused draft/prompt/
   step-policy/providercommon suites and full deterministic DoD passed with Go `1.25.10`, Node
   `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, lint and build are green.
+- 2026-07-18: Merged as PR #154 at `d2018a03`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T121334Z` restarted from that clean merge commit.
 
 ---
 
@@ -5927,7 +5929,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   pair after the first file appears.
 - [x] Pass both stream-only lifecycle cases for 20 consecutive runs.
 - [x] Pass full deterministic DoD.
-- [ ] Merge the isolated test remediation.
+- [x] Merge the isolated test remediation.
 
 ### Non-goals
 - No production retry, timeout, lifecycle, provider, schema, API or canonical matrix change.
@@ -5943,3 +5945,47 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   collect retry passed 50 consecutive focused runs after its test-only partial-write window fix.
 - 2026-07-18: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
   contracts, full Go, 261 Python, 142 UI, lint and embedded UI build are green.
+- 2026-07-18: Merged as PR #155 at `89dec41e`; the Architecture Home evidence-path slice resumed
+  from that clean merge commit.
+
+---
+
+## EP-20260718-epic18-r3-architecture-home-evidence-paths
+
+### Context
+- Post-PR #154 Claude smoke `smoke-tiny-bank-20260718T121334Z` completed collect `10/10` and
+  passed step2 structural/content validation, but its staged Architecture Home published four
+  plausible `bank-of-anthos:<path>` references that do not exist in the pinned repository.
+- The matrix was stopped before promotion/acceptance; none of its results are reusable release
+  evidence. This is a product truthfulness gap, not a provider-readiness or host failure.
+
+### Goals
+- [x] Preserve the live-observed missing repository references in a minimized fixture.
+- [x] Resolve operator-visible Architecture Home `repo:path` references against current task repo
+  roots, accepting existing files/directories and rejecting missing or escaping paths.
+- [x] Harden every normal/focused step2 prompt path to state missing evidence as a gap rather than
+  publishing a guessed path.
+- [x] Synchronize architecture, pipeline, testing and live-gate documentation.
+- [x] Pass focused regressions and full deterministic DoD.
+- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+
+### Non-goals
+- No schema, HTTP API, provider contract, retry/timeout or canonical matrix change.
+- No ACP-authored correction of provider narrative and no acceptance of missing evidence paths.
+- Canonical-document references and repository-root directory references remain valid.
+
+### Acceptance
+- The live fixture fails with the exact missing `repo:path` identities before promotion.
+- Existing files and directories pass; absolute, traversal and symlink-escaped paths fail closed.
+- Validation is read-only and does not mutate source repositories or runtime drafts.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: Inspected the staged step2 draft immediately after strict validation, confirmed four
+  missing repository references, stopped the smoke during step4 and terminated all matrix/provider
+  process groups without orphan processes or workspace mutation.
+- 2026-07-18: After PR #155 stabilized the independent loaded-suite fixtures, focused draft,
+  providercommon, step-policy and prompt suites passed on `89dec41e`. Full deterministic DoD passed
+  with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, lint
+  and embedded UI build are green. One shutdown-lifecycle test flaked once under load, passed 50/50
+  focused and passed in the required repeated full suite, so no unrelated timeout change was made.

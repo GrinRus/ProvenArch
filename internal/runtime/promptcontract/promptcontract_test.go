@@ -1263,6 +1263,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md",
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md",
 		"overview.md is the canonical Architecture Home",
+		"Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths",
 		"In overview.md, never use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording",
@@ -1976,6 +1977,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 		"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.",
 		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
 		"overview.md is the canonical Architecture Home",
+		"Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths",
 		"In overview.md, never use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording",
@@ -2023,6 +2025,7 @@ func TestComposeDraftArtifactEnrichmentPromptKeepsArchitectureHomeContractInStep
 	for _, token := range []string{
 		"draft artifact enrichment command-text retry mode",
 		"overview.md is the canonical Architecture Home",
+		"Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths",
 		"In overview.md, never use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording",
