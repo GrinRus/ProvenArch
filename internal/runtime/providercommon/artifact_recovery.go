@@ -1240,6 +1240,8 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_downstream_index_retry")
 				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+				} else if shouldRetryDraftArchitectureHomeCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_architecture_home_cleanup")
 				} else if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
 				}
@@ -1282,6 +1284,9 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+		}
+		if shouldRetryDraftArchitectureHomeCleanupEnrichment(stage, task, beforeDraftRoot, err) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_architecture_home_cleanup")
 		}
 		if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
@@ -1562,6 +1567,20 @@ func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool 
 		strings.Contains(text, "does not report exact current-run shard status") ||
 		strings.Contains(text, "does not report exact current-run proposal shard completeness") ||
 		strings.Contains(text, "does not report exact current-run shard completeness")
+}
+
+func shouldRetryDraftArchitectureHomeCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
+	if strings.TrimSpace(stage) == "draft_artifact_enrichment_architecture_home_cleanup" || err == nil {
+		return false
+	}
+	stepID := strings.TrimSpace(task.StepID)
+	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
+		return false
+	}
+	if !strings.Contains(err.Error(), "Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language") {
+		return false
+	}
+	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
 }
 
 func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {

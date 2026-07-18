@@ -3759,6 +3759,81 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentShardStatusCleanup(t *testing.
 	}
 }
 
+func TestRunHeadlessProviderRetriesDraftEnrichmentArchitectureHomeCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-architecture-home-cleanup")
+	task.StepID = "refresh.step2.asis_docs"
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	processNarrationScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >>\"$draft_root/overview.md\" <<'EOF'",
+		"",
+		"The repository is scoped to the current run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{processNarrationScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected Architecture Home cleanup enrichment retry to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_architecture_home_cleanup") {
+		t.Fatalf("expected Architecture Home cleanup retry stage diagnostic, got %#v", diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair exhausted", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("successful Architecture Home cleanup must not emit exhausted draft enrichment diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestShouldRetryDraftArchitectureHomeCleanupEnrichmentIsNarrowAndNonRecursive(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-architecture-home-cleanup-policy")
+	task.StepID = "refresh.step2.asis_docs"
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Before\n"), 0o644); err != nil {
+			t.Fatalf("write initial %s: %v", name, err)
+		}
+	}
+	before, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		t.Fatalf("snapshot draft root: %v", err)
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Fresh\n"), 0o644); err != nil {
+			t.Fatalf("rewrite %s: %v", name, err)
+		}
+	}
+	contractErr := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "overview.md" Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language`)
+	if !shouldRetryDraftArchitectureHomeCleanupEnrichment("draft_artifact_enrichment", task, before, contractErr) {
+		t.Fatal("expected fresh step2 Architecture Home narration failure to schedule cleanup")
+	}
+	if shouldRetryDraftArchitectureHomeCleanupEnrichment("draft_artifact_enrichment_architecture_home_cleanup", task, before, contractErr) {
+		t.Fatal("Architecture Home cleanup must not recursively schedule itself")
+	}
+	task.StepID = "refresh.step4.proposals"
+	if shouldRetryDraftArchitectureHomeCleanupEnrichment("draft_artifact_enrichment", task, before, contractErr) {
+		t.Fatal("Architecture Home cleanup must not apply outside step2")
+	}
+}
+
 func TestShouldRetryDraftShardStatusCleanupEnrichmentMatchesShardCompleteness(t *testing.T) {
 	t.Parallel()
 

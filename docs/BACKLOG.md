@@ -368,10 +368,13 @@ exact sentinel and correctly produced `operational_host_preflight_failed`. Relea
 accepted evidence remain blocked until Qwen artifact readiness succeeds on this or another trusted
 host and the complete R3 sequence is repeated from one clean commit. A later standalone
 `release-fast-20260717T114416Z` passed Qwen collection and exposed a product contract-shape defect
-in Claude collection: an otherwise rich manifest omitted required `semantic.findings`, then the
-generic repair stalled. The bounded missing-findings remediation and the ProductShell live-gate
-alignment must merge before the sequence restarts; no release evidence from the stopped matrix is
-accepted.
+in Claude collection; its bounded missing-findings remediation and the ProductShell live-gate
+alignment are now merged. Proposal staging-path leakage found by promoted-evidence review was also
+fixed in PR #160. Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and
+refresh collect `10/10`, then failed because a focused step2 rewrite fixed invalid repo refs but
+left `scoped to the current run` in Architecture Home and had no bounded changed-error cleanup.
+That narrow recovery remediation must merge before the complete sequence restarts; no evidence
+from stopped matrices is accepted.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape

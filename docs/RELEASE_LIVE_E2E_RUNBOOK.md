@@ -1044,3 +1044,7 @@ Evidence:
 `current run`/`current-run`, `typed shard`, `shard pack`/`shard-pack-manifest` или exact
 `planned=... succeeded=... failed=... incomplete=...` counters. Эти данные допустимы
 в `reports/coverage/summary.md` и `reports/agent-outputs/architect/summary.md`, но не в Architecture Home.
+Если first focused step2 enrichment исправил repo/path errors, но оставил такую process-фразу в
+freshly rewritten Architecture Home, runtime разрешает один non-recursive provider-authored
+`draft_artifact_enrichment_architecture_home_cleanup`; повторное нарушение остаётся strict
+`runtime_contract_failed`, а остановленный matrix нельзя продолжать или использовать как evidence.

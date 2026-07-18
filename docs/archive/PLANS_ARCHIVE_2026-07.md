@@ -915,6 +915,23 @@ EP-20260509-v011-hardening-release
 
 ---
 
+## EP-20260718-epic18-proposal-staging-path-guard
+
+### Goal
+- Prevent current taskrun staging locators from leaking into user-visible proposal/changelog navigation.
+
+### Implementation
+- [x] Reject `reports/taskruns/**`, `staging/final/**` and `staging/shards/**` in step4 markdown.
+- [x] Keep staging paths as provider input while requiring canonical report paths, finding/citation IDs and stable repo evidence in output.
+- [x] Add live-observed fixture coverage and a bounded provider-authored marker-cleanup retry.
+- [x] Synchronize architecture, testing and release-runbook contracts.
+
+### Results
+- Focused recovery stress and the full deterministic DoD passed on Node 22.21.1.
+- PR #160 merged as `cea5fe99`; the subsequent independent Architecture Home recovery gap is tracked by the active R3 remediation plan.
+
+---
+
 ## EP-20260718-epic18-step2-silent-enrichment-retry
 
 ### Context

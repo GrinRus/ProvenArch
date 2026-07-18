@@ -60,48 +60,42 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260718-epic18-proposal-staging-path-guard
+EP-20260718-epic18-architecture-home-repair
 
 ### Context
-Post-merge Claude smoke `smoke-tiny-bank-20260718T174204Z` passed machine execution and artifact
-gates, but promoted-evidence-first review found that both init and refresh proposal/changelog
-markdown copied `reports/taskruns/<run_id>/staging/final/**` input locators into user-visible
-canonical files. Final indexes legitimately retain staged identity, but proposal navigation must
-use canonical report paths, finding/citation IDs and stable repo evidence.
+Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and refresh collect
+`10/10`, then failed `refresh.step2.asis_docs`. The first focused rewrite repaired invalid
+repository references but left the otherwise substantive Architecture Home sentence
+`scoped to the current run`. Strict validation correctly rejected the process narration, while
+the enrichment lifecycle had no bounded retry for a changed Architecture Home truthfulness error.
 
 ### Goals (must have)
-- [x] Reject taskrun/staging paths in step4 proposal and changelog markdown before promotion.
-- [x] Keep staging paths available as read-only provider inputs while making output navigation
-      canonical and operator-facing.
-- [x] Route a fresh contaminated enrichment through the existing bounded marker-cleanup retry.
-- [x] Add the live-observed Claude fixture and preserve canonical-reference acceptance coverage.
-- [x] Synchronize prompt, architecture, testing and release-runbook contracts.
-- [ ] Pass focused stress and full deterministic DoD, merge the remediation PR, then restart the
-      complete smoke/release sequence from the new merge commit.
+- [x] Preserve strict rejection of runtime/process narration in Architecture Home.
+- [x] Add one non-recursive provider-authored cleanup retry only after all step2 markdown targets
+      were freshly rewritten and the remaining failure is the Architecture Home narration class.
+- [x] Add the live-observed current-run fixture and end-to-end recovery regression.
+- [x] Synchronize architecture, testing, release-runbook and tracker contracts.
+- [ ] Merge the remediation PR, then restart R3
+      qualification from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not change final-run index staged-path identity or persisted schemas/API contracts.
-- [x] Do not rewrite already generated smoke evidence or accept it as release evidence.
-- [x] Do not weaken findings/actionability, citation, snapshot or promotion validation.
+- [x] Do not accept or deterministically rewrite invalid Architecture Home content.
+- [x] Do not change schemas, HTTP APIs, provider contracts, timeout policy or canonical matrices.
+- [x] Do not reuse the failed smoke as release evidence.
 
 ### Acceptance criteria
-- [x] `reports/taskruns/**`, `staging/final/**` and `staging/shards/**` in step4 user markdown are
-      strict validation failures and cannot reach canonical proposals/changelog.
-- [x] Canonical `reports/findings/findings.md`, `reports/coverage/summary.md`, finding/citation IDs
-      and stable repo:path evidence remain valid.
+- [x] A fresh step2 enrichment rejected only for Architecture Home process narration receives one
+      focused cleanup call and passes only after complete strict revalidation.
+- [x] Repeated narration, unchanged drafts, non-step2 failures and any other contract error remain
+      terminal.
 - [x] Focused tests/stress and `make contracts`, `make test`, `make lint`, `make build` pass.
 
 ### Progress log
-- 2026-07-18: Claude smoke passed `strict_pass_runs=1`, init/refresh collect `10/10`, snapshot-only
-  evidence and zero execution failures. Manual promoted-evidence review then found taskrun staging
-  paths in canonical `proposals/runtime-recommendations.md` and
-  `reports/changelog/runtime-proposals.md`; release progression was stopped before Codex smoke.
-- 2026-07-18: Added step4 staging-path validation, provider output instructions, bounded cleanup
-  routing and a fixture derived from the promoted Claude proposal.
-- 2026-07-18: Focused validator/prompt/policy tests passed; marker-cleanup recovery stress passed
-  10/10 with the live-observed staging-path contamination and canonical rewrite.
-- 2026-07-18: Full deterministic DoD passed on pinned Node 22.21.1: contract validation, Go
-  packages, 261 Python tests, 142 UI tests, shellcheck/typecheck, deterministic UI and Go builds.
+- 2026-07-18: Captured the failed smoke verdict and exact live sentence; source checkout remained
+  clean and the failed refresh did not replace the successful init promotion.
+- 2026-07-18: Added the one-shot cleanup stage, live fixture and provider-engine regression.
+- 2026-07-18: Focused recovery and validation tests passed 20/20; full deterministic DoD passed
+  with Go 1.25.10, Node 22.21.1 and npm 10.9.4 (261 Python tests, 142 UI tests).
 
 ### Plan ID
 EP-20260715-architecture-change-review-ui-migration-wave

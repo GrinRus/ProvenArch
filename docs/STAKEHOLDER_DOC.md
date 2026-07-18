@@ -35,10 +35,11 @@ Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
 - release blocker: Epic 18 R3 trusted-machine composite evidence. Standalone
-  `release-fast-20260717T114416Z` passed Qwen collection and found a narrow Claude collect shape
-  defect (missing required `semantic.findings`) plus stale live UI selectors for the retired
-  StageRail. Both bounded remediations must merge before fresh smoke/fast/long/full evidence; the
-  stopped matrix and all earlier standalone results are not accepted release evidence.
+  remediations for Claude collect shape, ProductShell live selectors and proposal staging-path
+  leakage are merged. Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and
+  refresh collect `10/10`, then exposed a narrow changed-error Architecture Home recovery gap: the
+  repaired overview retained `scoped to the current run`. That remediation must merge before fresh
+  smoke/fast/long/full evidence; stopped matrices are not accepted release evidence.
 - out of MVP: 12, 13
 
 ---
