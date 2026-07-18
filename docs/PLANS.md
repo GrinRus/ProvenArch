@@ -5967,7 +5967,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   publishing a guessed path.
 - [x] Synchronize architecture, pipeline, testing and live-gate documentation.
 - [x] Pass focused regressions and full deterministic DoD.
-- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+- [x] Merge the remediation and restart Claude qualification from the new clean merge commit.
 
 ### Non-goals
 - No schema, HTTP API, provider contract, retry/timeout or canonical matrix change.
@@ -5989,3 +5989,39 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, lint
   and embedded UI build are green. One shutdown-lifecycle test flaked once under load, passed 50/50
   focused and passed in the required repeated full suite, so no unrelated timeout change was made.
+- 2026-07-18: Merged as PR #156 at `9e1c93ad`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T142040Z` restarted from that clean merge commit.
+
+---
+
+## EP-20260718-epic18-r3-orchestrator-lifecycle-fixture-budget
+
+### Context
+- The canonical Claude qualification from PR #156 stopped during its deterministic precheck before
+  provider execution. Under the loaded full Go suite, both async lifecycle fixtures timed out after
+  one second before their runner goroutine was scheduled (`calls=0`).
+- The shutdown fixture had already passed 50 consecutive focused runs after one earlier loaded-suite
+  miss. The paired panic fixture now showed the same scheduling-sensitive test budget; production
+  orchestration did not start and no live artifact was produced.
+
+### Goals
+- [x] Give only the two runner-start assertions a bounded loaded-suite scheduling budget.
+- [x] Preserve the existing runner call-count, pending-run, panic and shutdown assertions.
+- [x] Pass focused stress and full deterministic DoD.
+- [ ] Merge the isolated test remediation and restart Claude qualification from the new merge commit.
+
+### Non-goals
+- No production lifecycle, queue, shutdown, retry, timeout, schema, API, provider or matrix change.
+- No acceptance of a runner that never starts; the fixture remains bounded and fail-closed.
+
+### Acceptance
+- Both lifecycle cases pass repeated focused execution and still prove the pending-run invariants.
+- The full loaded suite no longer depends on a one-second goroutine scheduling window.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: `smoke-tiny-bank-20260718T142040Z` stopped in precheck with both runner-start
+  assertions at `calls=0`; harness classified the matrix as failed before provider execution.
+- 2026-07-18: Both lifecycle cases passed 100 consecutive focused runs. Full deterministic DoD
+  passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python,
+  142 UI, lint and embedded UI build are green.

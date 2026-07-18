@@ -17,6 +17,8 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
+const asyncRunnerStartTimeout = 10 * time.Second
+
 func TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts(t *testing.T) {
 	t.Parallel()
 	ws := createWorkspace(t)
@@ -331,7 +333,7 @@ func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start first async run: %v", err)
 	}
-	waitForRunnerCalls(t, runner, 1, time.Second)
+	waitForRunnerCalls(t, runner, 1, asyncRunnerStartTimeout)
 	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
@@ -414,7 +416,7 @@ func TestServiceShutdownFailsPendingRunWithoutStartingIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start first async run: %v", err)
 	}
-	waitForRunnerCalls(t, runner, 1, time.Second)
+	waitForRunnerCalls(t, runner, 1, asyncRunnerStartTimeout)
 	secondRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
 		Workspace:      ws,
 		Pipeline:       PipelineRefresh,
