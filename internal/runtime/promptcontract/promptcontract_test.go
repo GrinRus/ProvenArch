@@ -1582,6 +1582,8 @@ func TestComposeDraftArtifactEnrichmentPromptForProposalsRequiresWriteFirstTarge
 		"If staged evidence is sparse, write the gap explicitly",
 		"Do not treat proposals-draft-manifest.json summary text, canonical_path examples, or bootstrap output metadata as findings/proposals",
 		"staging/final/reports/",
+		"Staged paths are input-only locators",
+		"never copy reports/taskruns/**/staging/**, staging/final/**, or staging/shards/** into final markdown",
 		"Do not read reports/taskruns/<run_id>/reports/findings/findings.md as the current-run source",
 		"record an explicit no-actionable-proposal gap",
 		"bullet-only Top Actionable Findings section",

@@ -1570,7 +1570,8 @@ func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task,
 	}
 	text := err.Error()
 	if !strings.Contains(text, "bootstrap-only placeholder draft content") &&
-		!strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") {
+		!strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") &&
+		!strings.Contains(text, "proposal content references taskrun staging paths") {
 		return false
 	}
 	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot) && draftMarkdownContainsMarkerCleanupCandidate(task)
@@ -1629,6 +1630,9 @@ func draftMarkdownHasDirectScaffoldMarker(lower string) bool {
 
 func draftMarkdownHasProcessMarkerCleanupCandidate(lower string) bool {
 	markers := []string{
+		"reports/taskruns/",
+		"staging/final/",
+		"staging/shards/",
 		"bounded read root",
 		"bounded read roots",
 		"bounded staged evidence",

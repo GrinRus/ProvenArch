@@ -60,71 +60,48 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260718-epic18-step2-silent-enrichment-retry
+EP-20260718-epic18-proposal-staging-path-guard
 
 ### Context
-Canonical Claude Bank smoke `smoke-tiny-bank-20260718T161023Z` produced a substantive step2 draft,
-which strict validation correctly rejected for runtime-process narration and nonexistent repository
-references. The first focused enrichment then stalled before any artifact mutation with empty
-stdout/stderr. Existing bounded write-first and compact-step2 retries were incorrectly reachable
-only when the retained validation error was bootstrap/no-op, so this valid recovery opportunity
-terminated immediately as `runtime_contract_failed`.
+Post-merge Claude smoke `smoke-tiny-bank-20260718T174204Z` passed machine execution and artifact
+gates, but promoted-evidence-first review found that both init and refresh proposal/changelog
+markdown copied `reports/taskruns/<run_id>/staging/final/**` input locators into user-visible
+canonical files. Final indexes legitimately retain staged identity, but proposal navigation must
+use canonical report paths, finding/citation IDs and stable repo evidence.
 
 ### Goals (must have)
-- [x] Route a silent pre-artifact no-fresh enrichment stall into the existing one-shot write-first
-      retry for any already-proven strict draft validation failure.
-- [x] Preserve the existing compact step2 fallback when the write-first retry also stalls silently.
-- [x] Keep strict content/path validation, retry counts, activity windows, schemas, provider
-      contracts and canonical matrices unchanged.
-- [x] Add regression coverage for substantive invalid evidence drafts, valid-artifact exclusion,
-      non-recursion, stdout/post-artifact exclusion and fresh-mutation exclusion.
-- [x] Synchronize architecture and testing behavior documentation.
-- [x] Complete focused stress checks and the full deterministic repository DoD.
-- [ ] Merge the remediation PR, then restart canonical Claude smoke from the clean merge commit.
+- [x] Reject taskrun/staging paths in step4 proposal and changelog markdown before promotion.
+- [x] Keep staging paths available as read-only provider inputs while making output navigation
+      canonical and operator-facing.
+- [x] Route a fresh contaminated enrichment through the existing bounded marker-cleanup retry.
+- [x] Add the live-observed Claude fixture and preserve canonical-reference acceptance coverage.
+- [x] Synchronize prompt, architecture, testing and release-runbook contracts.
+- [ ] Pass focused stress and full deterministic DoD, merge the remediation PR, then restart the
+      complete smoke/release sequence from the new merge commit.
 
 ### Non-goals
-- [x] Do not accept the invalid retained draft or synthesize provider content in ACP.
-- [x] Do not weaken Architecture Home truthfulness, repository-reference or contamination checks.
-- [x] Do not add a generic runtime retry, timeout override, schema/API change or matrix edit.
-- [x] Do not resume release matrices until the post-merge Claude smoke passes.
-
-### Approach
-1) Reproduce the routing decision with live-observed truthfulness/path validation failures.
-2) Evaluate the silent/no-write predicates before the bootstrap/no-op-specific repair branch.
-3) Keep retries bounded by existing stage names and require pre-artifact silence plus unchanged
-   referenced markdown.
-4) Run focused stress, full DoD, review/merge, then requalify the live Claude path.
-
-### Files expected to change
-- `internal/runtime/providercommon/artifact_recovery.go`
-- `internal/runtime/providercommon/engine_test.go`
-- `docs/ARCHITECTURE.md`
-- `docs/TESTING_STRATEGY.md`
-- `docs/PLANS.md`
+- [x] Do not change final-run index staged-path identity or persisted schemas/API contracts.
+- [x] Do not rewrite already generated smoke evidence or accept it as release evidence.
+- [x] Do not weaken findings/actionability, citation, snapshot or promotion validation.
 
 ### Acceptance criteria
-- [x] A substantive invalid step2 draft with a silent first enrichment schedules exactly one
-      `draft_artifact_enrichment_write_first_retry`.
-- [x] Repeated silence may schedule exactly one compact step2 retry and then fails closed.
-- [x] Valid artifacts, provider output, post-artifact stalls and fresh mutations do not use this
-      recovery path.
-- [x] Focused stress and `make contracts`, `make test`, `make lint`, `make build` pass.
-
-### Risks
-- Broader validation-error eligibility could hide invalid evidence; retries only request a fresh
-  provider rewrite, and unchanged invalid artifacts remain rejected by the same strict validator.
-- Recursive retries could extend runtime unpredictably; existing stage-prefix checks and exact
-  compact-stage matching keep the sequence finite.
+- [x] `reports/taskruns/**`, `staging/final/**` and `staging/shards/**` in step4 user markdown are
+      strict validation failures and cannot reach canonical proposals/changelog.
+- [x] Canonical `reports/findings/findings.md`, `reports/coverage/summary.md`, finding/citation IDs
+      and stable repo:path evidence remain valid.
+- [x] Focused tests/stress and `make contracts`, `make test`, `make lint`, `make build` pass.
 
 ### Progress log
-- 2026-07-18: Confirmed the live failure retained substantive but invalid step2 markdown, emitted
-  no provider stdout/stderr, made no fresh draft mutation and stopped in `pre_artifact`; traced the
-  missed recovery to the bootstrap/no-op-only dispatch guard.
-- 2026-07-18: Moved the existing silent retry predicates ahead of the no-op-specific branch,
-  retained all fail-closed conditions and added regression assertions plus synchronized docs.
-- 2026-07-18: Focused helper regression stress passed 100/100; providercommon and promptcontract
-  package tests passed. Full deterministic DoD passed on pinned Node 22.21.1: contracts, Go tests,
-  261 Python tests, 142 UI tests, shellcheck/typecheck, deterministic UI build and Go build.
+- 2026-07-18: Claude smoke passed `strict_pass_runs=1`, init/refresh collect `10/10`, snapshot-only
+  evidence and zero execution failures. Manual promoted-evidence review then found taskrun staging
+  paths in canonical `proposals/runtime-recommendations.md` and
+  `reports/changelog/runtime-proposals.md`; release progression was stopped before Codex smoke.
+- 2026-07-18: Added step4 staging-path validation, provider output instructions, bounded cleanup
+  routing and a fixture derived from the promoted Claude proposal.
+- 2026-07-18: Focused validator/prompt/policy tests passed; marker-cleanup recovery stress passed
+  10/10 with the live-observed staging-path contamination and canonical rewrite.
+- 2026-07-18: Full deterministic DoD passed on pinned Node 22.21.1: contract validation, Go
+  packages, 261 Python tests, 142 UI tests, shellcheck/typecheck, deterministic UI and Go builds.
 
 ### Plan ID
 EP-20260715-architecture-change-review-ui-migration-wave

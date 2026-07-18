@@ -196,6 +196,7 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 			"- Read the current-run staged final findings markdown before writing final proposal text: reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, or the absolute staging/final findings path listed in read_context_roots. Finding IDs are markdown fields like '- ID: `finding.example`'; copy exact current-run IDs into proposal and changelog when any such line exists.",
 			"- Do not look for current-run findings under reports/taskruns/<run_id>/reports/findings/findings.md; before publish, current-run findings and coverage are staged under reports/taskruns/<run_id>/staging/final/reports/.",
 			"- Do not shorten the staged findings file to staging/final/reports/findings.md. The exact file is staging/final/reports/findings/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			"- Staged paths are read-only input locators. Final proposal/changelog markdown must never publish reports/taskruns/**, staging/final/**, staging/shards/**, write_root, or draft_final_root paths; use canonical reports/findings/findings.md, reports/coverage/summary.md, proposal/report paths, exact finding/citation IDs, and stable repo:path evidence instead.",
 			"- If findings include Severity: `high` or Severity: `medium`, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding.",
 			"- Each actionable finding bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path copied from Related IDs/Evidence, Recommended operator action with a concrete verb such as update, add, document, assign, or remediate, and Residual gap.",
 			"- Do not split one finding across multiple bullets; a separate Description bullet after a Finding ID bullet does not satisfy actionability. Do not write Severity: unspecified when findings.md has a - Severity: field; copy high/medium/low exactly from the referenced finding. Example: - Finding ID: `finding.example`; Severity: `medium`; Affected surface/path: `svc.example` / `repo:path`; Recommended operator action: document the owner and escalation path; Residual gap: production evidence remains unconfirmed.",
@@ -392,6 +393,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Also read current-run staged final reports/findings/findings.md and reports/coverage/summary.md when present, under reports/taskruns/<run_id>/staging/final/reports/. If findings.md contains one or more `- ID: finding...` entries, proposal.md and changelog.md must reference at least one current-run finding ID.",
 			"- Do not read reports/taskruns/<run_id>/reports/findings/findings.md as the current-run source; that path is not the staged final evidence surface used before publish.",
 			"- Do not shorten the staged findings file to staging/final/reports/findings.md. The exact file is staging/final/reports/findings/findings.md; strip backticks from '- ID: `...`' lines and never emit synthetic placeholders such as no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
+			"- Staged paths are input-only locators: never copy reports/taskruns/**/staging/**, staging/final/**, or staging/shards/** into final markdown. Use canonical reports/findings/findings.md, reports/coverage/summary.md, proposal/report paths, exact finding/citation IDs, and stable repo:path evidence instead.",
 			"- For non-empty current-run findings, proposal.md must include severity summary, top actionable findings, affected surfaces/paths, recommended operator action, and residual gaps; do not write that no structured finding summary was present.",
 			"- If findings.md contains any Severity: `high` or Severity: `medium` item, proposal.md must include a bullet-only Top Actionable Findings section with one bullet per high/medium finding.",
 			"- Each actionable finding bullet must keep all required fields on the same bullet line: exact Finding ID, copied Severity value from that finding block, Affected surface/path copied from Related IDs/Evidence, Recommended operator action with a concrete verb such as update, add, document, assign, or remediate, and Residual gap.",
@@ -503,6 +505,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			case "init.step4.proposals", "refresh.step4.proposals":
 				lines = append(lines,
 					"- For step4, rewrite both proposal.md and changelog.md so they discuss proposal decisions, evidence files, shard completeness, citation/index counts, risks, and gaps without saying \"bounded read roots\" or describing the provider's recovery process.",
+					"- Remove every reports/taskruns/**, staging/final/**, and staging/shards/** path from user-visible markdown. Replace findings/coverage navigation with canonical reports/findings/findings.md and reports/coverage/summary.md; cite exact finding/citation IDs or stable repo:path evidence for everything else.",
 					"- If finding summaries are absent, write \"No structured finding summary was present in current-run proposal evidence\" rather than mentioning bounded roots.",
 				)
 			}
@@ -846,7 +849,8 @@ func draftEnrichmentValidationMentionsMarkerCleanup(err error) bool {
 	}
 	text := err.Error()
 	return strings.Contains(text, "bootstrap-only placeholder draft content") ||
-		strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content")
+		strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") ||
+		strings.Contains(text, "proposal content references taskrun staging paths")
 }
 
 func isStep0DraftEnrichmentStep(stepID string) bool {

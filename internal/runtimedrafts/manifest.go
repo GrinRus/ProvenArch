@@ -347,7 +347,7 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 				if runtimeDraftArchitectureHomeHasProcessNarration(text) {
 					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language", idx, output.Path))
 				}
-				if runtimeDraftArchitectureHomeHasTaskrunStagingReference(text) {
+				if runtimeDraftTextHasTaskrunStagingReference(text) {
 					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home references taskrun staging paths instead of canonical or repository evidence", idx, output.Path))
 				}
 				if runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(text) {
@@ -359,6 +359,9 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 			}
 		}
 		if strings.TrimSpace(stepID) == "init.step4.proposals" || strings.TrimSpace(stepID) == "refresh.step4.proposals" {
+			if runtimeDraftTextHasTaskrunStagingReference(text) {
+				problems = append(problems, fmt.Sprintf("outputs[%d].path %q proposal content references taskrun staging paths instead of canonical or repository evidence", idx, output.Path))
+			}
 			if mismatch := runtimeDraftTextProposalCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
 			}
@@ -423,9 +426,12 @@ func runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(text string) bool {
 	return strings.Contains(normalized, "/.acp/repos/")
 }
 
-func runtimeDraftArchitectureHomeHasTaskrunStagingReference(text string) bool {
+func runtimeDraftTextHasTaskrunStagingReference(text string) bool {
 	for _, line := range strings.Split(strings.ToLower(text), "\n") {
 		normalized := strings.ReplaceAll(line, `\`, "/")
+		if strings.Contains(normalized, "staging/final/") || strings.Contains(normalized, "staging/shards/") {
+			return true
+		}
 		searchFrom := 0
 		for {
 			rel := strings.Index(normalized[searchFrom:], "reports/taskruns/")
