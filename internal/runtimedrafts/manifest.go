@@ -255,6 +255,9 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 				if runtimeDraftArchitectureHomeHasProcessNarration(text) {
 					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language", idx, output.Path))
 				}
+				if runtimeDraftArchitectureHomeHasTaskrunStagingReference(text) {
+					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home references taskrun staging paths instead of canonical or repository evidence", idx, output.Path))
+				}
 			}
 			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
@@ -293,6 +296,25 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
 			return true
+		}
+	}
+	return false
+}
+
+func runtimeDraftArchitectureHomeHasTaskrunStagingReference(text string) bool {
+	for _, line := range strings.Split(strings.ToLower(text), "\n") {
+		normalized := strings.ReplaceAll(line, `\`, "/")
+		searchFrom := 0
+		for {
+			rel := strings.Index(normalized[searchFrom:], "reports/taskruns/")
+			if rel < 0 {
+				break
+			}
+			start := searchFrom + rel + len("reports/taskruns/")
+			if strings.Contains(normalized[start:], "/staging") {
+				return true
+			}
+			searchFrom = start
 		}
 	}
 	return false

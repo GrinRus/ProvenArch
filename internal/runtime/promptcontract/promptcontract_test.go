@@ -1264,6 +1264,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md",
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must contain: planned/succeeded/failed shard completeness",
 		"architect-summary.md must contain: decision-ready operator summary",
@@ -1974,6 +1975,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 		`overview.md -> reports/as-is/overview.md; exact target "/tmp/workspace/reports/taskruns/run-1/staging/drafts/step2_as_is/overview.md"`,
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must summarize shard completeness",
 		"architect-summary.md must give a decision-ready operator summary",
@@ -2018,6 +2020,7 @@ func TestComposeDraftArtifactEnrichmentPromptKeepsArchitectureHomeContractInStep
 		"draft artifact enrichment command-text retry mode",
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
+		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 	} {
 		if !strings.Contains(prompt, token) {
