@@ -639,6 +639,10 @@ func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
 	if !runtimeDraftArchitectureHomeHasProcessNarration(typedShardRecapOverview) {
 		t.Fatalf("expected live-observed typed-shard recap variants to be rejected")
 	}
+	currentRunScopeOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_current_run_scope_overview.md")))
+	if !runtimeDraftArchitectureHomeHasProcessNarration(currentRunScopeOverview) {
+		t.Fatalf("expected live-observed current-run scope narration to be rejected")
+	}
 	if runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture()) {
 		t.Fatalf("expected evidence-backed Architecture Home to avoid process narration")
 	}
@@ -708,6 +712,11 @@ func TestValidateRequiredManifestRejectsArchitectureHomeExecutionReferences(t *t
 		{
 			name:      "typed shard recap and false zero inventory",
 			fixture:   "claude_step2_bank_typed_shard_recap_overview.md",
+			wantError: "contains runtime/process narration",
+		},
+		{
+			name:      "current-run scope narration",
+			fixture:   "claude_step2_bank_current_run_scope_overview.md",
 			wantError: "contains runtime/process narration",
 		},
 	}
