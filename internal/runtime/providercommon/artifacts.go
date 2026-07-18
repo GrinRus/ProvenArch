@@ -44,7 +44,7 @@ func ValidateDraftArtifacts(task acpruntime.Task) error {
 }
 
 func ValidateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimedrafts.Manifest, []byte, error) {
-	return runtimedrafts.ValidateRequiredManifest(
+	manifest, raw, err := runtimedrafts.ValidateRequiredManifest(
 		task.WriteRoot,
 		task.DraftFinalRoot,
 		task.RunID,
@@ -52,6 +52,15 @@ func ValidateRequiredRuntimeDraftArtifacts(task acpruntime.Task) (runtimedrafts.
 		task.StepContract,
 		task.ExpectedArtifacts,
 	)
+	if err != nil {
+		return runtimedrafts.Manifest{}, nil, err
+	}
+	if strings.TrimSpace(task.StepID) == "init.step2.asis_docs" || strings.TrimSpace(task.StepID) == "refresh.step2.asis_docs" {
+		if err := runtimedrafts.ValidateArchitectureHomeRepositoryReferences(task.DraftFinalRoot, manifest, collectTaskRepoRoots(task)); err != nil {
+			return runtimedrafts.Manifest{}, nil, err
+		}
+	}
+	return manifest, raw, nil
 }
 
 func ValidateValidatorArtifacts(task acpruntime.Task) error {

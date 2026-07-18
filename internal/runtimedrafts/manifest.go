@@ -30,6 +30,7 @@ var (
 		regexp.MustCompile(`(?i)\b(\d+)\s+citation(?:s| entries)?\b`),
 	}
 	architectureHomeRunIDPattern            = regexp.MustCompile(`(?i)\brun[_-]\d{8}(?:[_-]\d{6})?`)
+	architectureHomeInlineCodePattern       = regexp.MustCompile("`([^`\\n]+)`")
 	architectureHomeProcessIdentityPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\bcurrent[- ]run\b`),
 		regexp.MustCompile(`(?i)\btyped[- ]shard\b`),
@@ -47,6 +48,90 @@ type Manifest struct {
 	Summary      string   `json:"summary,omitempty"`
 	UpdatedAt    string   `json:"updated_at,omitempty"`
 	Outputs      []Output `json:"outputs"`
+}
+
+// ValidateArchitectureHomeRepositoryReferences ensures that operator-visible
+// repo:path references in the canonical Architecture Home resolve inside the
+// corresponding repository root. It is intentionally separate from the
+// generic manifest validator because only the runtime task owns repo roots.
+func ValidateArchitectureHomeRepositoryReferences(draftRoot string, manifest Manifest, repoRoots map[string]string) error {
+	if len(repoRoots) == 0 {
+		return nil
+	}
+	problems := []string{}
+	for _, output := range manifest.Outputs {
+		if filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath))) != "reports/as-is/overview.md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(filepath.Clean(draftRoot), filepath.Clean(output.Path)))
+		if err != nil {
+			return fmt.Errorf("read Architecture Home for repository reference validation: %w", err)
+		}
+		seen := map[string]struct{}{}
+		for _, match := range architectureHomeInlineCodePattern.FindAllStringSubmatch(string(raw), -1) {
+			value := strings.TrimSpace(match[1])
+			repo, relPath, found := strings.Cut(value, ":")
+			root, knownRepo := repoRoots[strings.TrimSpace(repo)]
+			if !found || !knownRepo {
+				continue
+			}
+			ref := strings.TrimSpace(repo) + ":" + strings.TrimSpace(relPath)
+			if _, duplicate := seen[ref]; duplicate {
+				continue
+			}
+			seen[ref] = struct{}{}
+			if err := validateRepositoryReference(root, relPath); err != nil {
+				problems = append(problems, fmt.Sprintf("Architecture Home repository reference %q is unavailable: %v", ref, err))
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("runtime draft manifest outputs are invalid: %s", strings.Join(problems, "; "))
+}
+
+func validateRepositoryReference(root string, relPath string) error {
+	root = strings.TrimSpace(root)
+	relPath = strings.TrimSpace(relPath)
+	if root == "" {
+		return fmt.Errorf("repository root is empty")
+	}
+	if relPath == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if filepath.IsAbs(filepath.FromSlash(relPath)) {
+		return fmt.Errorf("path must be repository-relative")
+	}
+	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
+	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path escapes the repository root")
+	}
+	cleanRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(cleanRoot)
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+	candidate := filepath.Join(cleanRoot, cleanRel)
+	if _, err := os.Stat(candidate); err != nil {
+		return err
+	}
+	resolvedCandidate, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return err
+	}
+	relToRoot, err := filepath.Rel(resolvedRoot, resolvedCandidate)
+	if err != nil {
+		return fmt.Errorf("resolve repository-relative path: %w", err)
+	}
+	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) || filepath.IsAbs(relToRoot) {
+		return fmt.Errorf("path resolves outside the repository root")
+	}
+	return nil
 }
 
 type Output struct {
