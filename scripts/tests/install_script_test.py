@@ -1,6 +1,5 @@
 import hashlib
 import os
-import platform
 import subprocess
 import tarfile
 import tempfile
@@ -9,20 +8,26 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+TEST_OS = "darwin"
+TEST_ARCH = "arm64"
 
 
 def release_asset_name() -> str:
-    os_name = platform.system().lower()
-    machine = platform.machine().lower()
-    if machine in {"x86_64", "amd64"}:
-        arch = "amd64"
-    elif machine in {"arm64", "aarch64"}:
-        arch = "arm64"
-    else:
-        raise unittest.SkipTest(f"unsupported test architecture: {machine}")
-    if os_name not in {"darwin", "linux"}:
-        raise unittest.SkipTest(f"unsupported test OS: {os_name}")
-    return f"acp_{os_name}_{arch}.tar.gz"
+    return f"acp_{TEST_OS}_{TEST_ARCH}.tar.gz"
+
+
+def write_mock_uname(bin_dir: Path) -> None:
+    fake_uname = bin_dir / "uname"
+    fake_uname.write_text(
+        "#!/usr/bin/env sh\n"
+        "case \"${1:-}\" in\n"
+        "  -s) printf '%s\\n' 'Darwin' ;;\n"
+        "  -m) printf '%s\\n' 'arm64' ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_uname.chmod(0o755)
 
 
 def write_mock_release(release_dir: Path, archive_name: str, checksum_ok: bool = True) -> None:
@@ -60,9 +65,13 @@ class InstallScriptTest(unittest.TestCase):
             release_dir = root / "release"
             release_dir.mkdir()
             install_dir = root / "bin"
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            write_mock_uname(fake_bin)
             write_mock_release(release_dir, archive_name)
 
             env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
             env["ACP_INSTALL_BASE_URL"] = release_dir.as_uri()
             env["INSTALL_DIR"] = str(install_dir)
             result = subprocess.run(
@@ -96,9 +105,13 @@ class InstallScriptTest(unittest.TestCase):
             release_dir = root / "release"
             release_dir.mkdir()
             install_dir = root / "bin"
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            write_mock_uname(fake_bin)
             write_mock_release(release_dir, archive_name, checksum_ok=False)
 
             env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
             env["ACP_INSTALL_BASE_URL"] = release_dir.as_uri()
             env["INSTALL_DIR"] = str(install_dir)
             result = subprocess.run(
@@ -123,6 +136,7 @@ class InstallScriptTest(unittest.TestCase):
             install_dir = root / "bin"
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
+            write_mock_uname(fake_bin)
             curl_log = root / "curl.log"
             write_mock_release(release_dir, archive_name)
 
@@ -199,6 +213,7 @@ esac
             install_dir = root / "bin"
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
+            write_mock_uname(fake_bin)
             curl_log = root / "curl.log"
             write_mock_release(release_dir, archive_name)
 

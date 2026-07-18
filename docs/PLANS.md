@@ -6008,7 +6008,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Give only the two runner-start assertions a bounded loaded-suite scheduling budget.
 - [x] Preserve the existing runner call-count, pending-run, panic and shutdown assertions.
 - [x] Pass focused stress and full deterministic DoD.
-- [ ] Merge the isolated test remediation and restart Claude qualification from the new merge commit.
+- [x] Merge the isolated test remediation and restart Claude qualification from the new merge commit.
 
 ### Non-goals
 - No production lifecycle, queue, shutdown, retry, timeout, schema, API, provider or matrix change.
@@ -6025,3 +6025,40 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: Both lifecycle cases passed 100 consecutive focused runs. Full deterministic DoD
   passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python,
   142 UI, lint and embedded UI build are green.
+- 2026-07-18: Merged as PR #157 at `727f6d26`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T144339Z` restarted from that clean merge commit.
+
+---
+
+## EP-20260718-epic18-r3-install-fixture-platform
+
+### Context
+- The post-PR #157 Claude qualification passed the full Go precheck but stopped before provider
+  execution when three installer fixture cases disagreed on the release asset architecture.
+- The Python fixture created its mock archive from in-process `platform.machine()`, while the
+  production installer intentionally resolves the target through child `sh`/`uname`. The live
+  precheck observed Python `arm64` versus child-shell `amd64`; the installer correctly rejected the
+  absent mock asset. A focused run and 500 shell probes passed afterward, so production installer
+  behavior is not implicated.
+
+### Goals
+- [x] Make the installer fixture platform deterministic through a test-local `uname` executable.
+- [x] Keep archive URL, checksum and installation behavior covered without changing `install.sh`.
+- [x] Pass focused stress and full deterministic DoD.
+- [ ] Merge the isolated test remediation and restart Claude qualification from the new merge commit.
+
+### Non-goals
+- No installer interface, release artifact naming, runtime, provider, schema, API or matrix change.
+- No acceptance of missing assets or checksum failures.
+
+### Acceptance
+- All installer tests use the same explicit OS/architecture identity seen by the installer process.
+- Success, checksum rejection, explicit version and latest-release URL cases retain their assertions.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: `smoke-tiny-bank-20260718T144339Z` stopped in deterministic Python precheck with
+  three missing/mock-URL failures for `acp_darwin_amd64.tar.gz`; provider execution never started.
+- 2026-07-18: All four installer cases passed 20 consecutive focused runs with the deterministic
+  test-local platform. Full DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
+  contracts, full Go, 261 Python, 142 UI, lint and embedded UI build are green.
