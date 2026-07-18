@@ -120,11 +120,11 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 	streamDone := make(chan struct{})
 	go func() {
 		defer wg.Done()
-		captureErr(captureTrackedCommandStream(&activityTrackingReader{reader: stdoutPipe, tracker: activityTracker}, stdout, task, acpruntime.OutputStreamStdout))
+		captureErr(captureTrackedCommandStream(stdoutPipe, stdout, activityTracker, task, acpruntime.OutputStreamStdout))
 	}()
 	go func() {
 		defer wg.Done()
-		captureErr(captureTrackedCommandStream(&activityTrackingReader{reader: stderrPipe, tracker: activityTracker}, stderr, task, acpruntime.OutputStreamStderr))
+		captureErr(captureTrackedCommandStream(stderrPipe, stderr, activityTracker, task, acpruntime.OutputStreamStderr))
 	}()
 	go func() {
 		wg.Wait()
@@ -624,11 +624,6 @@ type commandActivityTracker struct {
 	lastRead time.Time
 }
 
-type activityTrackingReader struct {
-	reader  io.Reader
-	tracker *commandActivityTracker
-}
-
 type commandOutputBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -658,17 +653,6 @@ func (t *commandActivityTracker) LastRead() time.Time {
 	return t.lastRead
 }
 
-func (r *activityTrackingReader) Read(p []byte) (int, error) {
-	if r == nil || r.reader == nil {
-		return 0, io.EOF
-	}
-	n, err := r.reader.Read(p)
-	if n > 0 && r.tracker != nil {
-		r.tracker.Note(time.Now().UTC())
-	}
-	return n, err
-}
-
 func (b *commandOutputBuffer) WriteString(value string) {
 	if b == nil {
 		return
@@ -687,7 +671,7 @@ func (b *commandOutputBuffer) String() string {
 	return b.buf.String()
 }
 
-func captureTrackedCommandStream(reader io.Reader, sink *commandOutputBuffer, task acpruntime.Task, stream acpruntime.OutputStream) error {
+func captureTrackedCommandStream(reader io.Reader, sink *commandOutputBuffer, tracker *commandActivityTracker, task acpruntime.Task, stream acpruntime.OutputStream) error {
 	if sink == nil {
 		return errors.New("capture sink is nil")
 	}
@@ -697,6 +681,7 @@ func captureTrackedCommandStream(reader io.Reader, sink *commandOutputBuffer, ta
 		part, err := bufReader.ReadString('\n')
 		if len(part) > 0 {
 			sink.WriteString(part)
+			tracker.Note(time.Now().UTC())
 			forwardStreamOutput(task, stream, part, budget)
 		}
 		if err != nil {
@@ -751,11 +736,19 @@ func closeCommandPipe(file *os.File) {
 }
 
 func waitForCommandStreams(stdoutPipe *os.File, stderrPipe *os.File, streamDone <-chan struct{}, timeout time.Duration) {
-	closeCommandPipe(stdoutPipe)
-	closeCommandPipe(stderrPipe)
+	if timeout <= 0 {
+		closeCommandPipe(stdoutPipe)
+		closeCommandPipe(stderrPipe)
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-streamDone:
-	case <-time.After(timeout):
+		return
+	case <-timer.C:
+		closeCommandPipe(stdoutPipe)
+		closeCommandPipe(stderrPipe)
 	}
 }
 

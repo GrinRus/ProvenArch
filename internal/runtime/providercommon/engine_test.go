@@ -1834,8 +1834,10 @@ func TestRunHeadlessProviderRetriesStreamOnlyNoFreshCollectPairRepairWithStallFo
 	manifest = strings.Replace(manifest, `"canonical_path": "reports/as-is/bank/overview.md"`, `"canonical_path": "`+steppolicy.CollectManifestCanonicalPath(task, docRel)+`"`, 1)
 	firstPairRepairScript := `#!/usr/bin/env bash
 set -eu
-printf '%s\n' 'provider is still analyzing without writing artifacts'
-sleep 5
+while true; do
+  printf '%s\n' 'provider is still analyzing without writing artifacts'
+  sleep 0.05
+done
 `
 	secondPairRepairScript := `#!/usr/bin/env bash
 set -eu
@@ -1913,8 +1915,10 @@ func TestRunHeadlessProviderKeepsRepeatedStreamOnlyCollectPairRepairStallAsContr
 	task := newCollectTask(t, "run-collect-pair-repair-stream-only-exhausted")
 	streamOnlyScript := `#!/usr/bin/env bash
 set -eu
-printf '%s\n' 'provider is still analyzing without writing artifacts'
-sleep 5
+while true; do
+  printf '%s\n' 'provider is still analyzing without writing artifacts'
+  sleep 0.05
+done
 `
 	diagnostics := []acpruntime.DiagnosticEvent{}
 	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
