@@ -915,6 +915,31 @@ EP-20260509-v011-hardening-release
 
 ---
 
+## EP-20260718-epic18-step2-silent-enrichment-retry
+
+### Context
+Canonical Claude Bank smoke `smoke-tiny-bank-20260718T161023Z` produced substantive step2 drafts
+that strict validation rejected for runtime-process narration and nonexistent repository references.
+The first focused enrichment stalled silently before artifact mutation, but existing bounded
+write-first and compact retries were reachable only for bootstrap/no-op errors.
+
+### Completed scope
+- Routed silent pre-artifact, no-fresh-mutation enrichment stalls through the existing bounded
+  write-first and compact step2 retries for any proven strict draft validation failure.
+- Preserved strict validation, retry counts, activity budgets, schemas, provider contracts and
+  canonical matrices.
+- Added non-recursion, valid-artifact, provider-output, post-artifact and fresh-mutation exclusions.
+- Synchronized architecture/testing documentation and completed full deterministic DoD.
+
+### Results
+- Focused helper stress passed 100/100; providercommon and promptcontract packages passed.
+- Full DoD passed on pinned Node 22.21.1: contracts, Go tests, 261 Python tests, 142 UI tests,
+  shellcheck/typecheck, deterministic UI build and Go build.
+- PR #159 merged as `4febe970`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T174204Z` passed with init and refresh collect both at 10/10.
+
+---
+
 ### Plan ID
 ## EP-20260715-20M-workbench-module-seams
 

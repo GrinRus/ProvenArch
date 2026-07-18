@@ -660,11 +660,26 @@ func TestArchitectureHomeRejectsTaskrunStagingReference(t *testing.T) {
 	t.Parallel()
 
 	liveOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_staging_path_overview.md")))
-	if !runtimeDraftArchitectureHomeHasTaskrunStagingReference(liveOverview) {
+	if !runtimeDraftTextHasTaskrunStagingReference(liveOverview) {
 		t.Fatalf("expected live-observed taskrun staging reference to be rejected")
 	}
-	if runtimeDraftArchitectureHomeHasTaskrunStagingReference(validArchitectureHomeFixture()) {
+	if runtimeDraftTextHasTaskrunStagingReference(validArchitectureHomeFixture()) {
 		t.Fatalf("expected canonical and repository evidence references to remain valid")
+	}
+}
+
+func TestProposalRejectsTaskrunStagingReference(t *testing.T) {
+	t.Parallel()
+
+	liveProposal := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step4_bank_staging_path_proposal.md")))
+	if !runtimeDraftTextHasTaskrunStagingReference(liveProposal) {
+		t.Fatalf("expected live-observed proposal taskrun staging references to be rejected")
+	}
+	canonicalProposal := strings.ReplaceAll(liveProposal, "reports/taskruns/run_20260718_182610_001/staging/final/reports/findings/findings.md", "reports/findings/findings.md")
+	canonicalProposal = strings.ReplaceAll(canonicalProposal, "reports/taskruns/run_20260718_182610_001/staging/final/reports/coverage/summary.md", "reports/coverage/summary.md")
+	canonicalProposal = strings.ReplaceAll(canonicalProposal, "reports/taskruns/run_20260718_182610_001/staging/final/citation-index.json", "citation-index.json")
+	if runtimeDraftTextHasTaskrunStagingReference(canonicalProposal) {
+		t.Fatalf("expected canonical proposal evidence references to remain valid")
 	}
 }
 
@@ -1260,11 +1275,11 @@ func TestValidateRequiredManifestAcceptsProposalPlaceholderCredentialFinding(t *
 		"proposal.md": `# Runtime Recommendations
 
 ## Decision / recommended operator action
-Prioritize the security remediation from ` + "`staging/final/reports/findings/findings.md`" + ` before publishing the FTGO runtime baseline.
+Prioritize the security remediation from ` + "`reports/findings/findings.md`" + ` before publishing the FTGO runtime baseline.
 
 ## Evidence used
-- ` + "`staging/final/final-run-index.json`" + `
-- ` + "`staging/final/citation-index.json`" + `
+- ` + "`reports/findings/findings.md`" + `
+- ` + "`citation-index.json`" + `
 - ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + `
 
 ## Proposed changes / follow-up plan
@@ -1282,7 +1297,7 @@ Prioritize the security remediation from ` + "`staging/final/reports/findings/fi
 - Placeholder AWS credentials from ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + ` are converted into a concrete security follow-up.
 
 ## Evidence index or citation references
-- ` + "`staging/final/citation-index.json`" + `
+- ` + "`citation-index.json`" + `
 - ` + "`cite.ftgo.orderhistory.secrets.placeholder`" + `
 
 ## Residual coverage gaps
@@ -1311,6 +1326,26 @@ Prioritize the security remediation from ` + "`staging/final/reports/findings/fi
 
 	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err != nil {
 		t.Fatalf("expected placeholder credential finding to validate: %v", err)
+	}
+
+	proposalPath := filepath.Join(draftRoot, "proposal.md")
+	proposalRaw, err := os.ReadFile(proposalPath)
+	if err != nil {
+		t.Fatalf("read proposal: %v", err)
+	}
+	contaminated := strings.Replace(
+		string(proposalRaw),
+		"reports/findings/findings.md",
+		"reports/taskruns/run-1/staging/final/reports/findings/findings.md",
+		1,
+	)
+	if err := os.WriteFile(proposalPath, []byte(contaminated), 0o644); err != nil {
+		t.Fatalf("write contaminated proposal: %v", err)
+	}
+	if _, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run-1", "refresh.step4.proposals", "proposals", []string{ProposalsManifestFile}); err == nil {
+		t.Fatalf("expected proposal taskrun staging path to be rejected")
+	} else if !strings.Contains(err.Error(), "proposal content references taskrun staging paths") {
+		t.Fatalf("expected proposal staging-path validation error, got %v", err)
 	}
 }
 
@@ -1431,7 +1466,7 @@ func TestValidateRequiredManifestRejectsSyntheticFindingPlaceholderWhenFindingsE
 Document the missing escalation path before promotion.
 
 ## Evidence used
-- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`reports/findings/findings.md`" + `
 - ` + "`final-run-index.json`" + `
 
 ## Top Actionable Findings
@@ -1452,7 +1487,7 @@ Document the missing escalation path before promotion.
 - The current proposal uses synthetic finding no-current-run-finding-id instead of an exact current-run finding ID.
 
 ## Evidence index or citation references
-- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`reports/findings/findings.md`" + `
 
 ## Residual coverage gaps
 - Finding linkage remains unresolved.
@@ -1526,7 +1561,7 @@ func TestValidateRequiredManifestRejectsPlaceholderFindingIDNoneInActionableSect
 Proceed with a proposal that tracks ` + "`finding.bank.frontend.central.dependency`" + `.
 
 ## Evidence used
-- Current-run findings source: ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `.
+- Current-run findings source: ` + "`reports/findings/findings.md`" + `.
 - Proposal linkage includes current-run finding ID ` + "`finding.bank.frontend.central.dependency`" + `.
 
 ## Top Actionable Findings
@@ -1550,7 +1585,7 @@ Proceed with a proposal that tracks ` + "`finding.bank.frontend.central.dependen
 - Finding ID: ` + "`none`" + `; Severity: ` + "`low`" + `; Affected surface/path: ` + "`reports/findings/findings.md`" + `; Recommended operator action: monitor coverage only; Residual gap: no high or medium current-run findings were present.
 
 ## Evidence index or citation references
-- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`reports/findings/findings.md`" + `
 
 ## Residual coverage gaps
 - Low-severity proposal evidence remains visible.
@@ -2038,7 +2073,7 @@ func TestValidateRequiredManifestRejectsSplitActionableFindingBullets(t *testing
 Document escalation ownership before publishing ` + "`finding.bank.runtime.escalation.gap`" + `.
 
 ## Evidence used
-- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`reports/findings/findings.md`" + `
 
 ## Top Actionable Findings
 - Finding ID: ` + "`finding.bank.runtime.escalation.gap`" + `; Severity: ` + "`medium`" + `; Affected surface/path: ` + "`svc.bank.ledgerwriter`" + `
@@ -2059,7 +2094,7 @@ Document escalation ownership before publishing ` + "`finding.bank.runtime.escal
 - ` + "`finding.bank.runtime.escalation.gap`" + ` requires an owner/escalation proposal update.
 
 ## Evidence index or citation references
-- ` + "`reports/taskruns/run-1/staging/final/reports/findings/findings.md`" + `
+- ` + "`reports/findings/findings.md`" + `
 
 ## Residual coverage gaps
 - Production escalation evidence remains unconfirmed.
