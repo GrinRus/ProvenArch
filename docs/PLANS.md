@@ -5691,3 +5691,52 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   slice-count checks. Full DoD was not repeated because this slice changes no code,
   schemas/spec contracts or fixtures; the same exact code baseline DoD is recorded as passing
   in the immediately preceding audit ExecPlan.
+
+---
+
+## EP-20260718-epic18-r3-architecture-home-staging-reference
+
+### Context
+- Canonical Claude `smoke tiny` from clean ProductShell baseline `5c93ff61` completed init collect
+  and promoted a structurally complete Architecture Home, but its operator guidance linked to
+  `reports/taskruns/run_20260718_063551_001/staging/shards/`.
+- Promoted and staged-final overview bytes were identical, proving that strict draft validation
+  allowed an internal execution path onto the user-visible canonical surface.
+- The release sequence stopped before accepting the smoke; no matrix result from that run is
+  reusable release evidence.
+
+### Goals
+- [x] Add the live-observed Architecture Home as a deterministic contract-rejection fixture.
+- [x] Reject taskrun staging references in canonical Architecture Home before promotion while
+  continuing to allow canonical artifact and concrete repository paths.
+- [x] Harden first-pass, normal enrichment, compact retry and command-text retry prompts so staged
+  evidence remains input-only and operator navigation uses canonical/repository references.
+- [x] Synchronize architecture, testing and live-gate documentation.
+- [x] Pass focused regressions and full deterministic DoD.
+- [ ] Merge the remediation, rerun canonical Claude smoke from the new clean commit, inspect
+  promoted/UI-visible artifacts, then restart Codex qualification and the full R3 sequence.
+
+### Non-goals
+- No deterministic rewriting or sanitizing of provider-authored Architecture Home content.
+- No schema, HTTP API, workspace, provider-contract, retry-budget, canonical matrix or curated
+  repository change.
+- No acceptance of runtime success as artifact-quality success; the promoted/UI-visible evidence
+  remains the assessment source of truth.
+
+### Acceptance
+- Any `reports/taskruns/**/staging/**` reference in `reports/as-is/overview.md` fails the existing
+  strict runtime draft contract before promotion and routes through existing provider repair or
+  terminal fail-closed behavior.
+- Canonical `reports/`, `model/`, `proposals/` references and concrete repository paths validate.
+- Prompt contract tests cover first-pass and every supported step2 enrichment mode.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned Go/Node toolchains.
+
+### Progress log
+- 2026-07-18: Reproduced the live contamination from matrix
+  `smoke-tiny-bank-20260718T062735Z`; terminated the run at the first artifact-quality blocker and
+  started the minimal fail-closed remediation on a dedicated branch.
+- 2026-07-18: Focused runtime-draft, prompt and step-policy suites pass. The two affected
+  providercommon lifecycle tests each passed 20 consecutive runs after replacing the obsolete
+  synthetic staging reference. Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1`
+  and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI
+  build are green.

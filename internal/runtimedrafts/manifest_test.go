@@ -632,6 +632,65 @@ func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
 	}
 }
 
+func TestArchitectureHomeRejectsTaskrunStagingReference(t *testing.T) {
+	t.Parallel()
+
+	liveOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_staging_path_overview.md")))
+	if !runtimeDraftArchitectureHomeHasTaskrunStagingReference(liveOverview) {
+		t.Fatalf("expected live-observed taskrun staging reference to be rejected")
+	}
+	if runtimeDraftArchitectureHomeHasTaskrunStagingReference(validArchitectureHomeFixture()) {
+		t.Fatalf("expected canonical and repository evidence references to remain valid")
+	}
+}
+
+func TestValidateRequiredManifestRejectsArchitectureHomeTaskrunStagingReference(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	writeRoot := filepath.Join(tempDir, "write-root")
+	draftRoot := filepath.Join(tempDir, "draft-root")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	if err := os.MkdirAll(draftRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	files := map[string][]byte{
+		"overview.md":          readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_staging_path_overview.md")),
+		"summary.md":           []byte("# Coverage Summary\n\nEvidence is recorded in reports/coverage/summary.md.\n"),
+		"architect-summary.md": []byte("# Architect Summary\n\nInspect reports/as-is/overview.md before publication.\n"),
+	}
+	for relPath, content := range files {
+		if err := os.WriteFile(filepath.Join(draftRoot, relPath), content, 0o644); err != nil {
+			t.Fatalf("write draft file %s: %v", relPath, err)
+		}
+	}
+	manifest := `{
+  "version": 1,
+  "run_id": "run_20260718_063551_001",
+  "step_id": "init.step2.asis_docs",
+  "step_contract": "as_is",
+  "agent_role": "architect",
+  "outputs": [
+    {"path": "overview.md", "canonical_path": "reports/as-is/overview.md", "kind": "report", "title": "System Overview"},
+    {"path": "summary.md", "canonical_path": "reports/coverage/summary.md", "kind": "report", "title": "Coverage Summary"},
+    {"path": "architect-summary.md", "canonical_path": "reports/agent-outputs/architect/summary.md", "kind": "agent-output", "title": "Architect Summary"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(writeRoot, AsIsManifestFile), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260718_063551_001", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
+	if err == nil {
+		t.Fatalf("expected taskrun staging reference to fail Architecture Home validation")
+	}
+	if !strings.Contains(err.Error(), "references taskrun staging paths") {
+		t.Fatalf("expected taskrun staging reference error, got %v", err)
+	}
+}
+
 func TestValidateRequiredManifestRejectsAsIsDraftEmptyEvidenceSlots(t *testing.T) {
 	t.Parallel()
 

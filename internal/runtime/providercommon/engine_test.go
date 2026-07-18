@@ -5799,7 +5799,7 @@ func asIsMalformedThenValidEnrichmentScript(task acpruntime.Task) string {
 		"fi",
 		"cat >\"$draft_root/overview.md\" <<'EOF'",
 		strings.Join(validAsIsArchitectureHomeLines(), "\n"),
-		"Valid overview after markdown syntax retry with reports/taskruns/current/staging/shards/example.md evidence.",
+		"Valid overview after markdown syntax retry with reports/as-is/example/component-overview.md evidence.",
 		"EOF",
 		"cat >\"$draft_root/summary.md\" <<'EOF'",
 		"# Summary",
