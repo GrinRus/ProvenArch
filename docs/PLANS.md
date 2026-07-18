@@ -5825,3 +5825,39 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: Focused runtime-draft/prompt/step-policy tests and full deterministic DoD passed
   with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI,
   shellcheck/typecheck and embedded UI build are green.
+
+---
+
+## EP-20260718-epic18-r3-command-stream-drain
+
+### Context
+- Full deterministic DoD for the next Architecture Home remediation reproduced a provider
+  lifecycle race: collect-pair stdout activity was observed, but termination could close the local
+  pipe reader before those bytes entered `Result.Stdout`.
+- The false zero-output result skipped the one allowed stream-only focused retry and made the
+  timing-sensitive contract test fail repeatedly. This is an independent runtime defect.
+
+### Goals
+- [x] Capture a stream chunk before advancing the activity timestamp used by the stall monitor.
+- [x] Allow the capture goroutines a bounded drain before forcibly closing local pipe readers.
+- [x] Make both stream-only retry fixtures emit sustained diagnostics until termination.
+- [x] Pass the focused pair-repair lifecycle tests for 20 consecutive runs.
+- [x] Pass full deterministic DoD.
+- [ ] Merge the isolated remediation.
+
+### Non-goals
+- No new retry, timeout, provider, schema, API or canonical matrix behavior.
+- No acceptance of missing/invalid artifacts; the second stream-only stall remains a strict
+  `runtime_contract_failed` result.
+
+### Acceptance
+- Observed pipe activity cannot be published as zero captured output because of local ordering.
+- The successful fixture performs exactly two focused calls; repeated stalls exhaust after exactly
+  two calls and remain contract failures.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: Reproduced the failure in full DoD and focused stress runs, isolated the capture-order
+  race, and passed both affected providercommon cases for 20 consecutive runs after the fix.
+- 2026-07-18: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
+  contracts, full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI build are green.

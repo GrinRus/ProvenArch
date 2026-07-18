@@ -232,6 +232,10 @@ Matrix preflight также выполняет selected-provider live smoke пе
 
 Provider readiness probe/artifact smoke commands run in their own process group. On bounded timeout the preflight terminates the full group before collecting stdout/stderr, so provider children that keep pipes open cannot hang `make contracts test lint build` or leave the matrix profile indefinitely `running`.
 
+Provider runtime stall handling similarly drains stdout/stderr before forcibly closing local pipe readers.
+`last_pipe_activity_at` is advanced only after the corresponding bytes are captured, so a bounded
+stream-only collect repair is eligible for its documented retry even when termination races with output.
+
 Artifact smoke failure или timeout считается `operational_host_preflight_failed` и должен останавливать batch/matrix до запуска дорогой runtime matrix. Это host/provider readiness blocker, а не ACP product verdict.
 
 ### 2.2) One-time canonical path bootstrap
