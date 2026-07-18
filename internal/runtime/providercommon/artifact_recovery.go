@@ -1215,21 +1215,18 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
 				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_shard_status_cleanup")
+				} else if shouldRetryDraftSilentWriteFirstEnrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteFirstRetryError(err), "draft_artifact_enrichment_write_first_retry")
+				} else if shouldRetryDraftCompactStep2Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep2RetryError(err), "draft_artifact_enrichment_compact_step2_retry")
+				} else if shouldRetryDraftCompactStep4Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
+					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep4RetryError(err), "draft_artifact_enrichment_compact_step4_retry")
 				} else if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 					if shouldRetryDraftMissingPythonEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_python3_retry")
 					}
 					if shouldRetryDraftPrintedCommandEnrichment(stage, enrichmentResult, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCommandTextRetryError(err), "draft_artifact_enrichment_command_text_retry")
-					}
-					if shouldRetryDraftSilentWriteFirstEnrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
-						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteFirstRetryError(err), "draft_artifact_enrichment_write_first_retry")
-					}
-					if shouldRetryDraftCompactStep2Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
-						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep2RetryError(err), "draft_artifact_enrichment_compact_step2_retry")
-					}
-					if shouldRetryDraftCompactStep4Enrichment(stage, task, beforeDraftRoot, enrichmentResult, enrichmentStalled.Diagnostic, err) {
-						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftCompactStep4RetryError(err), "draft_artifact_enrichment_compact_step4_retry")
 					}
 					if shouldRetryDraftMarkerCleanupEnrichment(stage, task, beforeDraftRoot, err) {
 						return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_marker_cleanup")
@@ -1683,7 +1680,7 @@ func shouldRetryDraftPrintedCommandEnrichment(stage string, result acpruntime.Re
 
 func shouldRetryDraftSilentWriteFirstEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
 	trimmedStage := strings.TrimSpace(stage)
-	if strings.HasPrefix(trimmedStage, "draft_artifact_enrichment_") || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+	if strings.HasPrefix(trimmedStage, "draft_artifact_enrichment_") || err == nil {
 		return false
 	}
 	if diagnostic.StallPhase != StallPhasePreArtifact {
@@ -1696,7 +1693,7 @@ func shouldRetryDraftSilentWriteFirstEnrichment(stage string, task acpruntime.Ta
 }
 
 func shouldRetryDraftCompactStep2Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
-	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || err == nil {
 		return false
 	}
 	switch strings.TrimSpace(task.StepID) {
@@ -1714,7 +1711,7 @@ func shouldRetryDraftCompactStep2Enrichment(stage string, task acpruntime.Task, 
 }
 
 func shouldRetryDraftCompactStep4Enrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, result acpruntime.Result, diagnostic StallDiagnostic, err error) bool {
-	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || !isDraftEnrichmentNoopOrScaffoldFailure(err) {
+	if strings.TrimSpace(stage) != "draft_artifact_enrichment_write_first_retry" || err == nil {
 		return false
 	}
 	switch strings.TrimSpace(task.StepID) {
