@@ -259,6 +259,9 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 				if runtimeDraftArchitectureHomeHasTaskrunStagingReference(text) {
 					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home references taskrun staging paths instead of canonical or repository evidence", idx, output.Path))
 				}
+				if runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(text) {
+					problems = append(problems, fmt.Sprintf("outputs[%d].path %q Architecture Home references runtime checkout paths instead of stable repository-relative evidence", idx, output.Path))
+				}
 			}
 			if mismatch := runtimeDraftTextAsIsShardCompletenessMismatch(text, cleanDraftRoot, runID, output); mismatch != "" {
 				problems = append(problems, fmt.Sprintf("outputs[%d].path %q %s", idx, output.Path, mismatch))
@@ -296,6 +299,15 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 		"current run collect",
 		"current-run collect",
 		"collect pass",
+		"current run analyzed",
+		"current analysis covers",
+		"staged in the current run",
+		"typed shard plan",
+		"typed shard summary",
+		"shard plan/summary",
+		"shard-pack manifest",
+		"shard completeness for this run",
+		"based on the staged source",
 		"confidence:",
 		"confidence level",
 	}
@@ -308,6 +320,11 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 		return true
 	}
 	return false
+}
+
+func runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(text string) bool {
+	normalized := strings.ReplaceAll(strings.ToLower(text), `\`, "/")
+	return strings.Contains(normalized, "/.acp/repos/")
 }
 
 func runtimeDraftArchitectureHomeHasTaskrunStagingReference(text string) bool {

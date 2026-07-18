@@ -5713,7 +5713,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   evidence remains input-only and operator navigation uses canonical/repository references.
 - [x] Synchronize architecture, testing and live-gate documentation.
 - [x] Pass focused regressions and full deterministic DoD.
-- [ ] Merge the remediation, rerun canonical Claude smoke from the new clean commit, inspect
+- [x] Merge the remediation, rerun canonical Claude smoke from the new clean commit, inspect
   promoted/UI-visible artifacts, then restart Codex qualification and the full R3 sequence.
 
 ### Non-goals
@@ -5740,6 +5740,8 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   synthetic staging reference. Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1`
   and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI
   build are green.
+- 2026-07-18: Merged as PR #150. The post-merge Claude smoke reached collect `10/10` and exposed
+  the next independent Architecture Home narration defect; that smoke was stopped and not accepted.
 
 ---
 
@@ -5760,7 +5762,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Harden first-pass, normal enrichment, compact retry and command-text retry prompts.
 - [x] Synchronize architecture, testing and live-gate documentation.
 - [x] Pass focused regressions and full deterministic DoD.
-- [ ] Merge the remediation and restart Claude smoke from the new clean merge commit.
+- [x] Merge the remediation and restart Claude smoke from the new clean merge commit.
 
 ### Non-goals
 - No sanitizer, deterministic narrative rewrite, schema/API/provider-contract change, retry/timeout
@@ -5780,3 +5782,46 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: Focused draft-validator, prompt, step-policy, providercommon and docsync suites pass.
   Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts,
   full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI build are green.
+- 2026-07-18: Merged as PR #151 at `f0d9dead`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T090734Z` restarted from that clean commit.
+
+---
+
+## EP-20260718-epic18-r3-architecture-home-runtime-checkout
+
+### Context
+- Post-PR #151 Claude smoke `smoke-tiny-bank-20260718T090734Z` completed collect `10/10` and
+  produced all eight required Architecture Home sections, but step2 embedded absolute
+  `/tmp/.../.acp/repos/...` checkout paths throughout the operator-facing document.
+- The same document narrated current-run assembly through typed shard plan/summary, shard-pack
+  manifests and completeness counters. Those execution facts belong in coverage/diagnostics, not
+  the canonical architecture entry point.
+- The matrix was terminated at this first artifact-quality blocker before acceptance or release use.
+
+### Goals
+- [x] Add a minimized fixture preserving the live absolute checkout and current-run recap patterns.
+- [x] Reject `.acp/repos` runtime checkout references and the observed typed-shard/current-run
+  narration before Architecture Home promotion.
+- [x] Require stable `<repo>:<path>` or canonical document references in first-pass, normal,
+  compact and command-text step2 prompt modes.
+- [x] Synchronize architecture, pipeline, testing and live-gate documentation.
+- [x] Pass focused regressions and full deterministic DoD.
+- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+
+### Non-goals
+- No sanitizer, hidden deterministic rewrite, schema/API/provider-contract change, retry/timeout
+  adjustment, canonical matrix edit or accepted release evidence.
+- Shard completeness remains valid in coverage/architect summary; only Architecture Home rejects it.
+
+### Acceptance
+- The live fixture fails strict draft validation for runtime checkout references and process recap.
+- Canonical artifact links and stable repo-relative refs continue to validate.
+- All step2 prompt modes prohibit runtime checkout paths and current-run typed-shard mechanics.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: Stopped the canonical Claude smoke after staged-final inspection exposed absolute
+  runtime checkout paths and current-run shard mechanics; no result from that matrix is reusable.
+- 2026-07-18: Focused runtime-draft/prompt/step-policy tests and full deterministic DoD passed
+  with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI,
+  shellcheck/typecheck and embedded UI build are green.

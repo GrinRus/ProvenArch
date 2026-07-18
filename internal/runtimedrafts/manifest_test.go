@@ -631,8 +631,24 @@ func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
 	if !runtimeDraftArchitectureHomeHasProcessNarration(liveOverview) {
 		t.Fatalf("expected live-observed run/collect narration to be rejected")
 	}
+	runtimeCheckoutOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_runtime_checkout_overview.md")))
+	if !runtimeDraftArchitectureHomeHasProcessNarration(runtimeCheckoutOverview) {
+		t.Fatalf("expected live-observed current-run/shard narration to be rejected")
+	}
 	if runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture()) {
 		t.Fatalf("expected evidence-backed Architecture Home to avoid process narration")
+	}
+}
+
+func TestArchitectureHomeRejectsRuntimeCheckoutReference(t *testing.T) {
+	t.Parallel()
+
+	liveOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_runtime_checkout_overview.md")))
+	if !runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(liveOverview) {
+		t.Fatalf("expected live-observed .acp runtime checkout reference to be rejected")
+	}
+	if runtimeDraftArchitectureHomeHasRuntimeCheckoutReference(validArchitectureHomeFixture()) {
+		t.Fatalf("expected stable repository and canonical evidence references to remain valid")
 	}
 }
 
@@ -664,6 +680,11 @@ func TestValidateRequiredManifestRejectsArchitectureHomeExecutionReferences(t *t
 			name:      "run and collect narration",
 			fixture:   "claude_step2_bank_run_narration_overview.md",
 			wantError: "contains runtime/process narration",
+		},
+		{
+			name:      "runtime checkout and current-run recap",
+			fixture:   "claude_step2_bank_runtime_checkout_overview.md",
+			wantError: "references runtime checkout paths",
 		},
 	}
 	for _, tt := range tests {
