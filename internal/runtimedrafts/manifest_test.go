@@ -627,6 +627,10 @@ func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
 	if !runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture() + "\nThe runtime provider generated this overview.\n") {
 		t.Fatalf("expected runtime narration to be rejected")
 	}
+	liveOverview := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_run_narration_overview.md")))
+	if !runtimeDraftArchitectureHomeHasProcessNarration(liveOverview) {
+		t.Fatalf("expected live-observed run/collect narration to be rejected")
+	}
 	if runtimeDraftArchitectureHomeHasProcessNarration(validArchitectureHomeFixture()) {
 		t.Fatalf("expected evidence-backed Architecture Home to avoid process narration")
 	}
@@ -644,8 +648,35 @@ func TestArchitectureHomeRejectsTaskrunStagingReference(t *testing.T) {
 	}
 }
 
-func TestValidateRequiredManifestRejectsArchitectureHomeTaskrunStagingReference(t *testing.T) {
+func TestValidateRequiredManifestRejectsArchitectureHomeExecutionReferences(t *testing.T) {
 	t.Parallel()
+	tests := []struct {
+		name      string
+		fixture   string
+		wantError string
+	}{
+		{
+			name:      "taskrun staging path",
+			fixture:   "claude_step2_bank_staging_path_overview.md",
+			wantError: "references taskrun staging paths",
+		},
+		{
+			name:      "run and collect narration",
+			fixture:   "claude_step2_bank_run_narration_overview.md",
+			wantError: "contains runtime/process narration",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			testValidateArchitectureHomeFixtureRejected(t, tt.fixture, tt.wantError)
+		})
+	}
+}
+
+func testValidateArchitectureHomeFixtureRejected(t *testing.T, fixture, wantError string) {
+	t.Helper()
 
 	tempDir := t.TempDir()
 	writeRoot := filepath.Join(tempDir, "write-root")
@@ -657,7 +688,7 @@ func TestValidateRequiredManifestRejectsArchitectureHomeTaskrunStagingReference(
 		t.Fatalf("mkdir draft root: %v", err)
 	}
 	files := map[string][]byte{
-		"overview.md":          readRuntimeFixture(t, filepath.Join("contract-rejection", "claude_step2_bank_staging_path_overview.md")),
+		"overview.md":          readRuntimeFixture(t, filepath.Join("contract-rejection", fixture)),
 		"summary.md":           []byte("# Coverage Summary\n\nEvidence is recorded in reports/coverage/summary.md.\n"),
 		"architect-summary.md": []byte("# Architect Summary\n\nInspect reports/as-is/overview.md before publication.\n"),
 	}
@@ -684,10 +715,10 @@ func TestValidateRequiredManifestRejectsArchitectureHomeTaskrunStagingReference(
 
 	_, _, err := ValidateRequiredManifest(writeRoot, draftRoot, "run_20260718_063551_001", "init.step2.asis_docs", "as_is", []string{AsIsManifestFile})
 	if err == nil {
-		t.Fatalf("expected taskrun staging reference to fail Architecture Home validation")
+		t.Fatalf("expected Architecture Home fixture %s to fail validation", fixture)
 	}
-	if !strings.Contains(err.Error(), "references taskrun staging paths") {
-		t.Fatalf("expected taskrun staging reference error, got %v", err)
+	if !strings.Contains(err.Error(), wantError) {
+		t.Fatalf("expected %q error for %s, got %v", wantError, fixture, err)
 	}
 }
 
