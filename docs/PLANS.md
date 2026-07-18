@@ -5903,3 +5903,43 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: After PR #153 removed the independent stream-capture race, focused draft/prompt/
   step-policy/providercommon suites and full deterministic DoD passed with Go `1.25.10`, Node
   `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, lint and build are green.
+
+---
+
+## EP-20260718-epic18-r3-stream-only-fixture-budget
+
+### Context
+- Full DoD for the Architecture Home evidence-path slice reproduced one failure in the
+  stream-only collect-pair exhaustion fixture: the shell process did not emit its first line
+  inside the test-only 500 ms wall-clock, so the fixture observed a silent rather than stream-only
+  stall and correctly skipped the stream-only retry.
+- A focused 20-count stress run reproduced the timing miss once. Production focused repair budgets
+  and behavior are not implicated.
+- The next loaded full-suite run exposed the same fixture-class issue in the zero-output collect
+  recovery test: its successful retry could be stopped in the 20 ms interval between authored
+  markdown and manifest writes. The isolated slice also gives that test-only partial pair a bounded
+  loaded-suite write window.
+
+### Goals
+- [x] Give only the repeated stream-only test fixture enough startup budget to emit diagnostics
+  reliably under loaded-suite scheduling.
+- [x] Give only the successful zero-output collect retry fixture enough time to finish its two-file
+  pair after the first file appears.
+- [x] Pass both stream-only lifecycle cases for 20 consecutive runs.
+- [x] Pass full deterministic DoD.
+- [ ] Merge the isolated test remediation.
+
+### Non-goals
+- No production retry, timeout, lifecycle, provider, schema, API or canonical matrix change.
+- No weakening of repeated-stall failure semantics; the fixture must still exhaust as
+  `runtime_contract_failed` after exactly two focused calls.
+
+### Acceptance
+- Focused stress observes exactly two pair-repair calls in both success and repeated-stall cases.
+- Full DoD is green with pinned Go/Node toolchains.
+
+### Progress log
+- 2026-07-18: Stream-only success/exhaustion passed 20 consecutive focused runs; zero-output
+  collect retry passed 50 consecutive focused runs after its test-only partial-write window fix.
+- 2026-07-18: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
+  contracts, full Go, 261 Python, 142 UI, lint and embedded UI build are green.

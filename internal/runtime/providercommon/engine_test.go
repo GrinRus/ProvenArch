@@ -1935,12 +1935,15 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      500 * time.Millisecond,
 				RetryPreArtifactStallWindow: 500 * time.Millisecond,
-				PreArtifactWallClockWindow:  500 * time.Millisecond,
-				PostArtifactStallWindow:     successfulArtifactWriteWindow,
-				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
-				PollInterval:                5 * time.Millisecond,
-				PostTerminateDrain:          10 * time.Millisecond,
-				TerminateGrace:              10 * time.Millisecond,
+				// Keep this above normal loaded-suite process startup latency so
+				// the fixture deterministically exercises stream-only, not silent,
+				// pre-artifact exhaustion. Production repair budgets are unchanged.
+				PreArtifactWallClockWindow: 2 * time.Second,
+				PostArtifactStallWindow:    successfulArtifactWriteWindow,
+				PartialArtifactStallWindow: successfulArtifactWriteWindow,
+				PollInterval:               5 * time.Millisecond,
+				PostTerminateDrain:         10 * time.Millisecond,
+				TerminateGrace:             10 * time.Millisecond,
 			},
 			recovery: RecoveryPolicy{
 				AcceptValidArtifactsAfterStop:       true,
@@ -2903,10 +2906,13 @@ EOF
 				MonitorPreArtifact:          true,
 				PreArtifactStallWindow:      20 * time.Millisecond,
 				RetryPreArtifactStallWindow: successfulZeroOutputRetryWindow,
-				PostArtifactStallWindow:     20 * time.Millisecond,
-				PollInterval:                5 * time.Millisecond,
-				PostTerminateDrain:          10 * time.Millisecond,
-				TerminateGrace:              10 * time.Millisecond,
+				// Once the retry starts writing its pair, allow loaded-suite
+				// scheduling between the markdown and manifest writes.
+				PostArtifactStallWindow:    successfulArtifactWriteWindow,
+				PartialArtifactStallWindow: successfulArtifactWriteWindow,
+				PollInterval:               5 * time.Millisecond,
+				PostTerminateDrain:         10 * time.Millisecond,
+				TerminateGrace:             10 * time.Millisecond,
 			},
 			recovery: RecoveryPolicy{
 				AcceptValidArtifactsAfterStop:            true,
