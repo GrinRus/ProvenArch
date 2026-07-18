@@ -1039,3 +1039,8 @@ Evidence:
 ```
 
 В execution report для смешанных сигналов обязательно указывать `primary failure class` отдельно от secondary evidence (например `runtime_contract_failed` + `runner_unavailable`).
+
+Для `reports/as-is/overview.md` live artifact review считает blocker-ом любой execution recap через
+`current run`/`current-run`, `typed shard`, `shard pack`/`shard-pack-manifest` или exact
+`planned=... succeeded=... failed=... incomplete=...` counters. Эти данные допустимы
+в `reports/coverage/summary.md` и `reports/agent-outputs/architect/summary.md`, но не в Architecture Home.

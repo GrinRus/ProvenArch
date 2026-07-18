@@ -5806,7 +5806,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   compact and command-text step2 prompt modes.
 - [x] Synchronize architecture, pipeline, testing and live-gate documentation.
 - [x] Pass focused regressions and full deterministic DoD.
-- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+- [x] Merge the remediation and restart Claude qualification from the new clean merge commit.
 
 ### Non-goals
 - No sanitizer, hidden deterministic rewrite, schema/API/provider-contract change, retry/timeout
@@ -5825,6 +5825,8 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: Focused runtime-draft/prompt/step-policy tests and full deterministic DoD passed
   with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI,
   shellcheck/typecheck and embedded UI build are green.
+- 2026-07-18: Merged as PR #152 at `3df8ecd3`; canonical Claude smoke
+  `smoke-tiny-bank-20260718T102026Z` restarted from that clean commit.
 
 ---
 
@@ -5843,7 +5845,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - [x] Make both stream-only retry fixtures emit sustained diagnostics until termination.
 - [x] Pass the focused pair-repair lifecycle tests for 20 consecutive runs.
 - [x] Pass full deterministic DoD.
-- [ ] Merge the isolated remediation.
+- [x] Merge the isolated remediation.
 
 ### Non-goals
 - No new retry, timeout, provider, schema, API or canonical matrix behavior.
@@ -5861,3 +5863,43 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   race, and passed both affected providercommon cases for 20 consecutive runs after the fix.
 - 2026-07-18: Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
   contracts, full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI build are green.
+- 2026-07-18: Merged as PR #153 at `4958382d`; the Architecture Home shard-recap slice resumed
+  from that clean merge commit.
+
+---
+
+## EP-20260718-epic18-r3-architecture-home-shard-recap
+
+### Context
+- Post-PR #152 Claude smoke `smoke-tiny-bank-20260718T102026Z` completed collect `10/10` and
+  produced stable repository-relative evidence references, but Architecture Home still described
+  the current run, typed shard packs and exact planned/succeeded/failed/incomplete counters.
+- The same recap falsely reported zero files for shard-pack manifests despite successful collect.
+  The matrix was stopped before promotion; none of its results are reusable release evidence.
+
+### Goals
+- [x] Add a minimized fixture preserving the live semantic recap variants.
+- [x] Reject current-run, typed-shard, shard-pack and exact completeness-counter language in
+  Architecture Home while keeping coverage and architect summaries unchanged.
+- [x] Harden first-pass, normal, compact and command-text step2 prompt modes.
+- [x] Synchronize architecture, pipeline, testing and live-gate documentation.
+- [x] Pass focused regressions and full deterministic DoD.
+- [ ] Merge the remediation and restart Claude qualification from the new clean merge commit.
+
+### Non-goals
+- No sanitizer, deterministic narrative rewrite, schema/API/provider-contract change, retry/timeout
+  adjustment, canonical matrix edit or accepted release evidence.
+- Shard execution details remain valid in coverage and architect summary artifacts.
+
+### Acceptance
+- The live fixture fails strict draft validation for process narration.
+- Stable repository references and the same wording outside Architecture Home remain valid.
+- All step2 prompt modes explicitly prohibit the semantic recap variants.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-18: Stopped the post-#152 Claude smoke at the first remaining artifact-quality blocker
+  after collect `10/10`; terminated the matrix and orphan provider process groups cleanly.
+- 2026-07-18: After PR #153 removed the independent stream-capture race, focused draft/prompt/
+  step-policy/providercommon suites and full deterministic DoD passed with Go `1.25.10`, Node
+  `22.21.1` and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, lint and build are green.

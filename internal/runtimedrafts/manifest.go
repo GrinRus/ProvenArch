@@ -29,7 +29,13 @@ var (
 	citationIndexCountPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(\d+)\s+citation(?:s| entries)?\b`),
 	}
-	architectureHomeRunIDPattern = regexp.MustCompile(`(?i)\brun[_-]\d{8}(?:[_-]\d{6})?`)
+	architectureHomeRunIDPattern            = regexp.MustCompile(`(?i)\brun[_-]\d{8}(?:[_-]\d{6})?`)
+	architectureHomeProcessIdentityPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bcurrent[- ]run\b`),
+		regexp.MustCompile(`(?i)\btyped[- ]shard\b`),
+		regexp.MustCompile(`(?i)\bshard[- ]packs?(?:[- ]manifests?)?\b`),
+		regexp.MustCompile(`(?i)\bplanned\s*=\s*\d+\b.*\bsucceeded\s*=\s*\d+\b.*\bfailed\s*=\s*\d+\b.*\bincomplete\s*=\s*\d+\b`),
+	}
 )
 
 type Manifest struct {
@@ -318,6 +324,11 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 	}
 	if architectureHomeRunIDPattern.MatchString(text) {
 		return true
+	}
+	for _, pattern := range architectureHomeProcessIdentityPatterns {
+		if pattern.MatchString(text) {
+			return true
+		}
 	}
 	return false
 }
