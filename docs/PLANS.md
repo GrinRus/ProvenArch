@@ -5740,3 +5740,43 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   synthetic staging reference. Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1`
   and npm `10.9.4`: contracts, full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI
   build are green.
+
+---
+
+## EP-20260718-epic18-r3-architecture-home-run-narration
+
+### Context
+- After PR #150 merged, canonical Claude smoke `smoke-tiny-bank-20260718T075924Z` completed
+  collect `10/10` and step2 strict validation, but the staged-final Architecture Home said it was
+  “derived from the run `run_20260718_080853_001` collect pass”.
+- All eight required sections and concrete repository references were present and no staging path
+  leaked, but user-visible process narration remained. The smoke stopped before promotion and is
+  not reusable release evidence.
+
+### Goals
+- [x] Add the second live-observed Claude output as a deterministic rejection fixture.
+- [x] Reject run IDs and pipeline/collect/repair narration in canonical Architecture Home before
+  promotion while preserving direct repository facts and evidence gaps.
+- [x] Harden first-pass, normal enrichment, compact retry and command-text retry prompts.
+- [x] Synchronize architecture, testing and live-gate documentation.
+- [x] Pass focused regressions and full deterministic DoD.
+- [ ] Merge the remediation and restart Claude smoke from the new clean merge commit.
+
+### Non-goals
+- No sanitizer, deterministic narrative rewrite, schema/API/provider-contract change, retry/timeout
+  adjustment, matrix edit or accepted release evidence.
+
+### Acceptance
+- The exact live phrase and stable `run_YYYYMMDD_HHMMSS_NNN` identity are strict draft-contract
+  failures in `reports/as-is/overview.md`.
+- Canonical documents and concrete repository evidence remain valid.
+- All step2 prompt variants explicitly prohibit execution narration.
+- Full deterministic DoD passes with pinned toolchains before merge.
+
+### Progress log
+- 2026-07-18: Stopped the post-#150 Claude smoke at the first remaining artifact-quality blocker,
+  preserved the staged-final overview under `/tmp/provenarch-remediation-evidence/`, and started a
+  second minimal fail-closed remediation branch.
+- 2026-07-18: Focused draft-validator, prompt, step-policy, providercommon and docsync suites pass.
+  Full deterministic DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`: contracts,
+  full Go, 261 Python, 142 UI, shellcheck/typecheck and embedded UI build are green.

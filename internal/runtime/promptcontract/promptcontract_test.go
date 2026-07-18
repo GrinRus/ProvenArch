@@ -1265,6 +1265,7 @@ func TestComposeDraftArtifactEnrichmentPromptAvoidsBootstrapHeredoc(t *testing.T
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
+		"In overview.md, never mention run IDs, pipeline step names, collect passes, repair/enrichment attempts",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must contain: planned/succeeded/failed shard completeness",
 		"architect-summary.md must contain: decision-ready operator summary",
@@ -1976,6 +1977,7 @@ func TestComposeDraftArtifactEnrichmentPromptAddsCompactStep2RetryMode(t *testin
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
+		"In overview.md, never mention run IDs, pipeline step names, collect passes, repair/enrichment attempts",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 		"summary.md must summarize shard completeness",
 		"architect-summary.md must give a decision-ready operator summary",
@@ -2021,6 +2023,7 @@ func TestComposeDraftArtifactEnrichmentPromptKeepsArchitectureHomeContractInStep
 		"overview.md is the canonical Architecture Home",
 		"System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions",
 		"In overview.md, never publish reports/taskruns/** or taskrun staging paths",
+		"In overview.md, never mention run IDs, pipeline step names, collect passes, repair/enrichment attempts",
 		"do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps",
 	} {
 		if !strings.Contains(prompt, token) {

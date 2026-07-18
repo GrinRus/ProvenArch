@@ -29,6 +29,7 @@ var (
 	citationIndexCountPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(\d+)\s+citation(?:s| entries)?\b`),
 	}
+	architectureHomeRunIDPattern = regexp.MustCompile(`(?i)\brun[_-]\d{8}(?:[_-]\d{6})?`)
 )
 
 type Manifest struct {
@@ -290,6 +291,11 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 		"provider generated",
 		"manifest recap",
 		"taskrun mechanics",
+		"derived from the run",
+		"derived from run",
+		"current run collect",
+		"current-run collect",
+		"collect pass",
 		"confidence:",
 		"confidence level",
 	}
@@ -297,6 +303,9 @@ func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 		if strings.Contains(lower, marker) {
 			return true
 		}
+	}
+	if architectureHomeRunIDPattern.MatchString(text) {
+		return true
 	}
 	return false
 }
