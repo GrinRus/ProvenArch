@@ -3427,10 +3427,17 @@ func TestShouldRetryDraftSilentWriteFirstEnrichmentOnlyForPreArtifactNoFreshMuta
 		t.Fatalf("snapshot draft root: %v", err)
 	}
 	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	truthfulnessErr := errors.New("overview.md: repository evidence reference bank-of-anthos:src/accounts-service does not exist")
 	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
 
 	if !shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
 		t.Fatal("expected silent pre-artifact noop/scaffold enrichment to allow one write-first retry")
+	}
+	if !shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, truthfulnessErr) {
+		t.Fatal("expected silent pre-artifact enrichment over an invalid evidence draft to allow one write-first retry")
+	}
+	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_repair_invalid", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, nil) {
+		t.Fatal("valid artifacts must not trigger a silent write-first retry")
 	}
 	if shouldRetryDraftSilentWriteFirstEnrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
 		t.Fatal("write-first retry must not retry itself")
@@ -3468,10 +3475,17 @@ func TestShouldRetryDraftCompactStep2EnrichmentOnlyAfterSilentWriteFirstRetry(t 
 		t.Fatalf("snapshot draft root: %v", err)
 	}
 	noopErr := errors.New("draft_artifact_enrichment_noop_or_scaffold: bootstrap-only placeholder draft content")
+	truthfulnessErr := errors.New("overview.md: runtime/shard process narration is not allowed")
 	preArtifact := StallDiagnostic{StallPhase: StallPhasePreArtifact}
 
 	if !shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
 		t.Fatal("expected silent no-fresh write-first step2 retry to schedule compact step2 enrichment")
+	}
+	if !shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, truthfulnessErr) {
+		t.Fatal("expected invalid evidence draft to retain the bounded compact step2 fallback after repeated silence")
+	}
+	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_write_first_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, nil) {
+		t.Fatal("valid artifacts must not trigger compact step2 enrichment")
 	}
 	if shouldRetryDraftCompactStep2Enrichment("draft_artifact_enrichment_compact_step2_retry", task, beforeDraftRoot, acpruntime.Result{}, preArtifact, noopErr) {
 		t.Fatal("compact step2 retry must not recursively schedule itself")

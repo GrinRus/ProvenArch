@@ -60,6 +60,73 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260718-epic18-step2-silent-enrichment-retry
+
+### Context
+Canonical Claude Bank smoke `smoke-tiny-bank-20260718T161023Z` produced a substantive step2 draft,
+which strict validation correctly rejected for runtime-process narration and nonexistent repository
+references. The first focused enrichment then stalled before any artifact mutation with empty
+stdout/stderr. Existing bounded write-first and compact-step2 retries were incorrectly reachable
+only when the retained validation error was bootstrap/no-op, so this valid recovery opportunity
+terminated immediately as `runtime_contract_failed`.
+
+### Goals (must have)
+- [x] Route a silent pre-artifact no-fresh enrichment stall into the existing one-shot write-first
+      retry for any already-proven strict draft validation failure.
+- [x] Preserve the existing compact step2 fallback when the write-first retry also stalls silently.
+- [x] Keep strict content/path validation, retry counts, activity windows, schemas, provider
+      contracts and canonical matrices unchanged.
+- [x] Add regression coverage for substantive invalid evidence drafts, valid-artifact exclusion,
+      non-recursion, stdout/post-artifact exclusion and fresh-mutation exclusion.
+- [x] Synchronize architecture and testing behavior documentation.
+- [x] Complete focused stress checks and the full deterministic repository DoD.
+- [ ] Merge the remediation PR, then restart canonical Claude smoke from the clean merge commit.
+
+### Non-goals
+- [x] Do not accept the invalid retained draft or synthesize provider content in ACP.
+- [x] Do not weaken Architecture Home truthfulness, repository-reference or contamination checks.
+- [x] Do not add a generic runtime retry, timeout override, schema/API change or matrix edit.
+- [x] Do not resume release matrices until the post-merge Claude smoke passes.
+
+### Approach
+1) Reproduce the routing decision with live-observed truthfulness/path validation failures.
+2) Evaluate the silent/no-write predicates before the bootstrap/no-op-specific repair branch.
+3) Keep retries bounded by existing stage names and require pre-artifact silence plus unchanged
+   referenced markdown.
+4) Run focused stress, full DoD, review/merge, then requalify the live Claude path.
+
+### Files expected to change
+- `internal/runtime/providercommon/artifact_recovery.go`
+- `internal/runtime/providercommon/engine_test.go`
+- `docs/ARCHITECTURE.md`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] A substantive invalid step2 draft with a silent first enrichment schedules exactly one
+      `draft_artifact_enrichment_write_first_retry`.
+- [x] Repeated silence may schedule exactly one compact step2 retry and then fails closed.
+- [x] Valid artifacts, provider output, post-artifact stalls and fresh mutations do not use this
+      recovery path.
+- [x] Focused stress and `make contracts`, `make test`, `make lint`, `make build` pass.
+
+### Risks
+- Broader validation-error eligibility could hide invalid evidence; retries only request a fresh
+  provider rewrite, and unchanged invalid artifacts remain rejected by the same strict validator.
+- Recursive retries could extend runtime unpredictably; existing stage-prefix checks and exact
+  compact-stage matching keep the sequence finite.
+
+### Progress log
+- 2026-07-18: Confirmed the live failure retained substantive but invalid step2 markdown, emitted
+  no provider stdout/stderr, made no fresh draft mutation and stopped in `pre_artifact`; traced the
+  missed recovery to the bootstrap/no-op-only dispatch guard.
+- 2026-07-18: Moved the existing silent retry predicates ahead of the no-op-specific branch,
+  retained all fail-closed conditions and added regression assertions plus synchronized docs.
+- 2026-07-18: Focused helper regression stress passed 100/100; providercommon and promptcontract
+  package tests passed. Full deterministic DoD passed on pinned Node 22.21.1: contracts, Go tests,
+  261 Python tests, 142 UI tests, shellcheck/typecheck, deterministic UI build and Go build.
+
+### Plan ID
 EP-20260715-architecture-change-review-ui-migration-wave
 
 ### Context
