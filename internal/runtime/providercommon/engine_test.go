@@ -3802,6 +3802,56 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentArchitectureHomeCleanup(t *tes
 	}
 }
 
+func TestRunHeadlessProviderAcceptsTargetedArchitectureHomeRewrite(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-targeted-architecture-home-rewrite")
+	task.StepID = "refresh.step2.asis_docs"
+	initialScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >>\"$draft_root/overview.md\" <<'EOF'",
+		"",
+		"The repository is scoped to the current run.",
+		"EOF",
+		"exit 0",
+	}, "\n")))
+	cleanupLines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"cat >\"$draft_root/overview.md\" <<'EOF'",
+	}
+	cleanupLines = append(cleanupLines, validAsIsArchitectureHomeLines()...)
+	cleanupLines = append(cleanupLines, "EOF", "exit 0")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: initialScript,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{writeEngineScript(t, strings.Join(cleanupLines, "\n")+"\n")},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected targeted Architecture Home rewrite to recover, got %v", err)
+	}
+	if runner.draftCalls != 1 {
+		t.Fatalf("expected one targeted draft enrichment call, got %d", runner.draftCalls)
+	}
+	for _, name := range []string{"summary.md", "architect-summary.md"} {
+		got, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, name))
+		if err != nil {
+			t.Fatalf("read unchanged %s: %v", name, err)
+		}
+		want := "# " + strings.TrimSuffix(name, filepath.Ext(name)) + "\n\nProvider authored as-is draft artifact.\n"
+		if string(got) != want {
+			t.Fatalf("targeted Architecture Home recovery changed %s: got %q want %q", name, got, want)
+		}
+	}
+}
+
 func TestRunHeadlessProviderRollsBackEmptyDraftSidecarBeforeArchitectureHomeCleanup(t *testing.T) {
 	t.Parallel()
 
