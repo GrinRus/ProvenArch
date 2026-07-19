@@ -546,11 +546,17 @@ func overviewLooksPlaceholder(text string) bool {
 	placeholderMarkers := []string{
 		"provider wrote this draft artifact under the required draft_final_root",
 		"draft artifact under the required draft_final_root",
-		"placeholder",
-		"todo",
 	}
 	for _, marker := range placeholderMarkers {
 		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		trimmed := strings.TrimSpace(strings.TrimLeft(line, "#-* "))
+		if trimmed == "placeholder" || trimmed == "todo" ||
+			strings.HasPrefix(trimmed, "placeholder:") || strings.HasPrefix(trimmed, "todo:") ||
+			strings.Contains(trimmed, "[placeholder]") || strings.Contains(trimmed, "[todo]") {
 			return true
 		}
 	}

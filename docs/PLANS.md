@@ -6138,3 +6138,60 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-18: All four installer cases passed 20 consecutive focused runs with the deterministic
   test-local platform. Full DoD passed with Go `1.25.10`, Node `22.21.1` and npm `10.9.4`:
   contracts, full Go, 261 Python, 142 UI, lint and embedded UI build are green.
+
+---
+
+## EP-20260719-epic18-r3-snapshot-live-gate-remediation
+
+### Context
+- Claude qualification `smoke-tiny-bank-20260719T042213Z` completed init and refresh successfully;
+  refresh collect was `10/10` and validator-gated promotion completed.
+- Matrix aggregation still failed. ProductShell selected the first final-index suffix from a mixed
+  refresh artifact inventory, which was the older init index, then correctly rejected the foreign
+  `run_id` and showed zero snapshot artifacts. The live flow additionally required an optional
+  diagram document.
+- The promoted Architecture Home is 99 lines of concrete architecture evidence, but its legitimate
+  guidance to replace a checked-in demo-secret placeholder triggered a substring-only placeholder
+  heuristic and produced the sole `artifact_quality.*` blocker.
+
+### Goals
+- [x] Select only the exact selected-run final index and retain strict run/staged-path isolation.
+- [x] Add a mixed-inventory regression with a foreign index ordered first.
+- [x] Keep diagram rendering checks when diagrams exist and require substantive Report inspection
+  when the selected snapshot has no diagram documents.
+- [x] Restrict placeholder detection to known scaffold/process phrases and standalone markers while
+  accepting evidence-backed safe-change language.
+- [x] Synchronize architecture, testing, stakeholder and live-gate documentation.
+- [x] Pass focused UI/Go tests, mock E2E, keyboard/axe coverage and full deterministic DoD.
+- [ ] Merge the remediation and restart canonical qualification from the clean merge commit.
+
+### Non-goals
+- No HTTP API, persisted schema, provider contract, retry/timeout, canonical matrix or artifact
+  acceptance weakening.
+- Runtime repair/stall telemetry remains visible and can cap the qualitative label; only the false
+  promoted-artifact blocker and cross-run UI selection are corrected.
+- No generated diagram is inserted into a historical run index after validation.
+
+### Acceptance
+- A refresh inventory containing init and refresh indexes renders only refresh staged documents.
+- A mismatched or missing exact index remains `not_produced/error`; current workspace is never used
+  as historical fallback.
+- The live flow proves ProductShell routes and reads an indexed Architecture Home whether or not the
+  snapshot contains diagrams.
+- The observed substantive Architecture Home has no `artifact_quality.overview_placeholder` signal;
+  known scaffold and standalone TODO/placeholder fixtures still fail.
+- `make contracts`, `make test`, `make lint`, `make build`, and UI mock E2E pass with pinned
+  toolchains.
+
+### Progress log
+- 2026-07-19: Inspected the failed ProductShell screenshot, live API and copied snapshot. The refresh
+  final index contains 47 canonical documents and 166 staged files, but suffix-first lookup chose
+  the older init index from the 531-entry persisted inventory. The promoted overview is substantive;
+  its only heuristic trigger was the word `placeholder` in secret-rotation guidance.
+- 2026-07-19: Focused Go and UI regressions pass. The ProductShell live diagnostic passes against
+  the saved refresh snapshot on desktop and `390x844`; Home/Runs/Knowledge/Changes are present,
+  legacy shell controls are absent, and Publish prioritizes Architecture Home. Snapshot source and
+  frontend-copy indexes contain the same 47 documents with byte-identical staged-final digests,
+  same-run citation identity, no foreign staged paths, and no taskrun-path contamination.
+- 2026-07-19: Full deterministic DoD is green with the pinned toolchains: contracts, Go/Python/UI
+  tests (including 142 UI tests), lint, embedded UI build, and mock E2E `7/7` all pass.

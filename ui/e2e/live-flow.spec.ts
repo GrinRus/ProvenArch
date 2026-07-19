@@ -443,37 +443,39 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(diagramsFilter).toBeVisible();
   await diagramsFilter.click();
   const diagramButtons = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\//i });
-  await expect(diagramButtons.first()).toBeVisible();
+  if ((await diagramButtons.count()) > 0) {
+    const c4ContextButton = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
+    if ((await c4ContextButton.count()) > 0) {
+      await c4ContextButton.first().click();
+    } else {
+      await diagramButtons.first().click();
+    }
 
-  const c4ContextButton = reviewArtifactExplorer.getByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
-  if ((await c4ContextButton.count()) > 0) {
-    await c4ContextButton.first().click();
+    const diagramPanel = page.getByTestId("evidence-viewer");
+    await expect(diagramPanel).toBeVisible();
+    const selectedDiagramPath = diagramPanel.locator(".evidence-source-header strong");
+    await expect
+      .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
+      .toMatch(/reports\/diagrams\//i);
+    const selectedDiagramPathText = ((await selectedDiagramPath.textContent()) ?? "").trim();
+    const selectedDiagramRaw = await fetchArtifactText(request, selectedDiagramPathText);
+    expectReadableDiagramArtifact(selectedDiagramPathText, selectedDiagramRaw);
+
+    await expect
+      .poll(
+        async () => {
+          const svgVisible = (await diagramPanel.locator(".diagram-svg svg").count()) > 0;
+          const renderingVisible = (await diagramPanel.getByText(/Rendering/i).count()) > 0;
+          const renderErrorVisible = (await diagramPanel.getByText(/Diagram render error:/i).count()) > 0;
+          return svgVisible || renderingVisible || renderErrorVisible;
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(true);
+    await expectReadableViewportPanel(page, diagramPanel, "Review Mermaid/C4 preview");
   } else {
-    await diagramButtons.first().click();
+    await expect(reviewArtifactExplorer.getByRole("tabpanel", { name: "Diagrams" })).toContainText(/No selected-run artifacts/i);
   }
-
-  const diagramPanel = page.getByTestId("evidence-viewer");
-  await expect(diagramPanel).toBeVisible();
-  const selectedDiagramPath = diagramPanel.locator(".evidence-source-header strong");
-  await expect
-    .poll(async () => ((await selectedDiagramPath.textContent()) ?? "").trim(), { timeout: 30_000 })
-    .toMatch(/reports\/diagrams\//i);
-  const selectedDiagramPathText = ((await selectedDiagramPath.textContent()) ?? "").trim();
-  const selectedDiagramRaw = await fetchArtifactText(request, selectedDiagramPathText);
-  expectReadableDiagramArtifact(selectedDiagramPathText, selectedDiagramRaw);
-
-  await expect
-    .poll(
-      async () => {
-        const svgVisible = (await diagramPanel.locator(".diagram-svg svg").count()) > 0;
-        const renderingVisible = (await diagramPanel.getByText(/Rendering/i).count()) > 0;
-        const renderErrorVisible = (await diagramPanel.getByText(/Diagram render error:/i).count()) > 0;
-        return svgVisible || renderingVisible || renderErrorVisible;
-      },
-      { timeout: 30_000 }
-    )
-    .toBe(true);
-  await expectReadableViewportPanel(page, diagramPanel, "Review Mermaid/C4 preview");
 
   const reportsFilter = reviewArtifactExplorer.getByRole("tab", { name: "Reports" });
   await expect(reportsFilter).toBeVisible();
