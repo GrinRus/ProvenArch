@@ -1048,3 +1048,7 @@ Evidence:
 freshly rewritten Architecture Home, runtime разрешает один non-recursive provider-authored
 `draft_artifact_enrichment_architecture_home_cleanup`; повторное нарушение остаётся strict
 `runtime_contract_failed`, а остановленный matrix нельзя продолжать или использовать как evidence.
+Если focused enrichment одновременно создаёт новый пустой sidecar вне manifest `outputs[]`, runtime
+может удалить его только когда pre-command snapshot доказывает, что это новый regular zero-byte файл
+внутри `draft_final_root`. После rollback обязательны полная write-set и strict artifact validation;
+непустой/modified/deleted/directory/symlink/out-of-root файл остаётся terminal contract failure.

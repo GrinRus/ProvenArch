@@ -1192,10 +1192,22 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		return true, acpruntime.Result{}, commandErr
 	}
 	if writeSetErr := validateDraftArtifactRepairWriteSetForStage(task, beforeWriteRoot, beforeDraftRoot, stage); writeSetErr != nil {
-		if shouldRetryDraftWriteSetCleanupEnrichment(stage, task, beforeWriteRoot, beforeDraftRoot, writeSetErr) {
-			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteSetCleanupRetryError(writeSetErr), "draft_artifact_enrichment_write_set_cleanup")
+		rolledBack, rollbackErr := rollbackCreatedEmptyDraftSidecars(task, beforeWriteRoot, beforeDraftRoot, stage, writeSetErr)
+		if rollbackErr != nil {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment empty-sidecar rollback failed", rollbackErr)
 		}
-		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", writeSetErr)
+		if rolledBack {
+			emitDiagnostic(task, "draft enrichment empty sidecars rolled back", map[string]any{
+				"provider":       adapter.Provider(),
+				"recovery_mode":  "draft_artifact_enrichment",
+				"recovery_stage": stage,
+				"reason":         writeSetErr.Error(),
+			})
+		} else if shouldRetryDraftWriteSetCleanupEnrichment(stage, task, beforeWriteRoot, beforeDraftRoot, writeSetErr) {
+			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, draftWriteSetCleanupRetryError(writeSetErr), "draft_artifact_enrichment_write_set_cleanup")
+		} else {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, enrichmentResult, "draft_artifact_enrichment", "draft enrichment wrote outside the draft artifact write set", writeSetErr)
+		}
 	}
 	if strings.TrimSpace(stage) == "draft_artifact_enrichment_write_set_cleanup" {
 		if leftovers := draftWriteRootOutputFiles(task); len(leftovers) > 0 {
@@ -1376,6 +1388,54 @@ func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Tas
 		}
 	}
 	return true
+}
+
+func rollbackCreatedEmptyDraftSidecars(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, stage string, writeSetErr error) (bool, error) {
+	if writeSetErr == nil || !strings.Contains(writeSetErr.Error(), "draft repair wrote forbidden draft_final_root files") {
+		return false, nil
+	}
+	afterWriteRoot, err := snapshotWriteRootFiles(task.WriteRoot)
+	if err != nil {
+		return false, err
+	}
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	writeRootChanges := unexpectedRepairMutationDetails(beforeWriteRoot, afterWriteRoot, func(change repairMutation) bool {
+		return strings.TrimSpace(manifestFile) != "" && change.Path == manifestFile
+	})
+	if len(writeRootChanges) > 0 {
+		return false, nil
+	}
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false, err
+	}
+	allowedDraftRootChange := allowedDraftRootRepairMutation(task)
+	changes := unexpectedRepairMutationDetails(beforeDraftRoot, afterDraftRoot, func(change repairMutation) bool {
+		return allowedDraftRootChange(change.Path, change.State)
+	})
+	if len(changes) == 0 {
+		return false, nil
+	}
+	for _, change := range changes {
+		if change.Op != "created" || change.State.IsDir || !change.State.Mode.IsRegular() || change.State.Size != 0 {
+			return false, nil
+		}
+	}
+	cleanRoot := filepath.Clean(strings.TrimSpace(task.DraftFinalRoot))
+	for _, change := range changes {
+		path := filepath.Join(cleanRoot, filepath.FromSlash(change.Path))
+		contained, err := filepath.Rel(cleanRoot, path)
+		if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) || filepath.IsAbs(contained) {
+			return false, fmt.Errorf("refuse empty-sidecar rollback outside draft_final_root: %s", change.Path)
+		}
+		if err := os.Remove(path); err != nil {
+			return false, fmt.Errorf("remove created empty draft sidecar %q: %w", change.Path, err)
+		}
+	}
+	if err := validateDraftArtifactRepairWriteSetForStage(task, beforeWriteRoot, beforeDraftRoot, stage); err != nil {
+		return false, fmt.Errorf("revalidate draft write set after empty-sidecar rollback: %w", err)
+	}
+	return true, nil
 }
 
 func shouldRetryDraftStep0CanonicalDuplicateCleanup(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
