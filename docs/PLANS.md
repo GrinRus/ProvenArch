@@ -60,42 +60,44 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260718-epic18-architecture-home-repair
+EP-20260719-epic18-draft-empty-sidecar-rollback
 
 ### Context
-Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and refresh collect
-`10/10`, then failed `refresh.step2.asis_docs`. The first focused rewrite repaired invalid
-repository references but left the otherwise substantive Architecture Home sentence
-`scoped to the current run`. Strict validation correctly rejected the process narration, while
-the enrichment lifecycle had no bounded retry for a changed Architecture Home truthfulness error.
+Post-PR #161 Claude smoke `smoke-tiny-bank-20260718T225118Z` proved the new Architecture Home
+cleanup during init and completed refresh collect `10/10`. Refresh step2 then failed closed before
+that cleanup could run because the provider-authored focused rewrite created an unreferenced empty
+file named `amp` under `draft_final_root`. The write-set guard correctly rejected it, but a newly
+created zero-byte sidecar can be safely rolled back to the pre-command state without accepting it.
 
 ### Goals (must have)
-- [x] Preserve strict rejection of runtime/process narration in Architecture Home.
-- [x] Add one non-recursive provider-authored cleanup retry only after all step2 markdown targets
-      were freshly rewritten and the remaining failure is the Architecture Home narration class.
-- [x] Add the live-observed current-run fixture and end-to-end recovery regression.
-- [x] Synchronize architecture, testing, release-runbook and tracker contracts.
-- [ ] Merge the remediation PR, then restart R3
-      qualification from the new clean merge commit.
+- [x] Roll back only newly created regular zero-byte sidecars inside `draft_final_root`.
+- [x] Re-run the full write-set and strict artifact validation after rollback.
+- [x] Preserve terminal failure for non-empty, modified/deleted, directory, symlink, write-root,
+      traversal and out-of-root mutations.
+- [x] Add the live-observed `amp` recovery regression and focused stress coverage.
+- [x] Synchronize architecture, pipeline, testing, release-runbook and tracker documentation.
+- [x] Pass full deterministic DoD.
+- [ ] Merge the remediation and restart qualification from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not accept or deterministically rewrite invalid Architecture Home content.
+- [x] Do not add `amp` or arbitrary sidecars to the allowed output set.
+- [x] Do not accept invalid Architecture Home content or skip provider-authored cleanup.
 - [x] Do not change schemas, HTTP APIs, provider contracts, timeout policy or canonical matrices.
-- [x] Do not reuse the failed smoke as release evidence.
+- [x] Do not reuse the stopped smoke as release evidence.
 
 ### Acceptance criteria
-- [x] A fresh step2 enrichment rejected only for Architecture Home process narration receives one
-      focused cleanup call and passes only after complete strict revalidation.
-- [x] Repeated narration, unchanged drafts, non-step2 failures and any other contract error remain
-      terminal.
-- [x] Focused tests/stress and `make contracts`, `make test`, `make lint`, `make build` pass.
+- [x] A created empty sidecar is absent after rollback and the next strict recovery stage can run.
+- [x] Existing forbidden non-empty-file regression remains `runtime_contract_failed`.
+- [x] Focused recovery sequence passes 20 consecutive runs.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
 
 ### Progress log
-- 2026-07-18: Captured the failed smoke verdict and exact live sentence; source checkout remained
-  clean and the failed refresh did not replace the successful init promotion.
-- 2026-07-18: Added the one-shot cleanup stage, live fixture and provider-engine regression.
-- 2026-07-18: Focused recovery and validation tests passed 20/20; full deterministic DoD passed
-  with Go 1.25.10, Node 22.21.1 and npm 10.9.4 (261 Python tests, 142 UI tests).
+- 2026-07-19: Preserved bounded failure evidence, confirmed refresh collect `10/10`, and isolated
+  the terminal write-set mutation to newly created zero-byte `draft_final_root/amp`.
+- 2026-07-19: Added rollback plus strict revalidation and proved the empty-sidecar → Architecture
+  Home cleanup sequence 20/20 while the non-empty extra-file case remained terminal.
+- 2026-07-19: Full deterministic DoD passed with Go 1.25.10, Node 22.21.1 and npm 10.9.4:
+  contracts, full Go, 261 Python, 142 UI, lint and embedded UI build are green.
 
 ### Plan ID
 EP-20260715-architecture-change-review-ui-migration-wave

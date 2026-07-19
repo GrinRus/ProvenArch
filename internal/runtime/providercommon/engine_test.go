@@ -3802,6 +3802,53 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentArchitectureHomeCleanup(t *tes
 	}
 }
 
+func TestRunHeadlessProviderRollsBackEmptyDraftSidecarBeforeArchitectureHomeCleanup(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-empty-sidecar-rollback")
+	task.StepID = "refresh.step2.asis_docs"
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	processNarrationWithSidecar := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, strings.Join([]string{
+		"cat >>\"$draft_root/overview.md\" <<'EOF'",
+		"",
+		"The repository is scoped to the current run.",
+		"EOF",
+		"touch \"$draft_root/amp\"",
+		"exit 0",
+	}, "\n")))
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{processNarrationWithSidecar, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected empty sidecar rollback followed by Architecture Home cleanup to recover, got %v", err)
+	}
+	if runner.draftCalls != 2 {
+		t.Fatalf("expected two draft enrichment calls, got %d", runner.draftCalls)
+	}
+	if _, err := os.Stat(filepath.Join(task.DraftFinalRoot, "amp")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected created empty sidecar to be rolled back, got err=%v", err)
+	}
+	if !hasDiagnosticField(diagnostics, "draft enrichment empty sidecars rolled back", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected empty-sidecar rollback diagnostic, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_architecture_home_cleanup") {
+		t.Fatalf("expected Architecture Home cleanup after sidecar rollback, got %#v", diagnostics)
+	}
+}
+
 func TestShouldRetryDraftArchitectureHomeCleanupEnrichmentIsNarrowAndNonRecursive(t *testing.T) {
 	t.Parallel()
 

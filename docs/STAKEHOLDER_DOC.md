@@ -35,11 +35,12 @@ Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
 - release blocker: Epic 18 R3 trusted-machine composite evidence. Standalone
-  remediations for Claude collect shape, ProductShell live selectors and proposal staging-path
-  leakage are merged. Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and
-  refresh collect `10/10`, then exposed a narrow changed-error Architecture Home recovery gap: the
-  repaired overview retained `scoped to the current run`. That remediation must merge before fresh
-  smoke/fast/long/full evidence; stopped matrices are not accepted release evidence.
+  remediations for Claude collect shape, ProductShell live selectors, proposal staging-path leakage
+  and changed-error Architecture Home cleanup are merged. Post-merge Claude smoke
+  `smoke-tiny-bank-20260718T225118Z` proved init cleanup and refresh collect `10/10`, then failed
+  closed because focused step2 repair created an unreferenced zero-byte `amp` sidecar before the
+  Architecture Home cleanup stage. The current narrow remediation rolls back only that proven
+  empty created mutation and revalidates strictly; the stopped matrix is not release evidence.
 - out of MVP: 12, 13
 
 ---

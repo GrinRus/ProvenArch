@@ -932,6 +932,21 @@ EP-20260509-v011-hardening-release
 
 ---
 
+## EP-20260718-epic18-architecture-home-repair
+
+### Goal
+- Preserve strict rejection of runtime/process narration while allowing one non-recursive,
+  provider-authored cleanup after every step2 markdown target was freshly rewritten.
+
+### Results
+- Added the live-observed `scoped to the current run` fixture and strict recovery regression.
+- Focused recovery passed 20/20 and full deterministic DoD passed with Go 1.25.10, Node 22.21.1
+  and npm 10.9.4 (261 Python tests, 142 UI tests).
+- PR #161 merged; post-merge smoke proved the cleanup stage during init. The independent empty
+  draft-sidecar write-set blocker is tracked by the active R3 remediation plan.
+
+---
+
 ## EP-20260718-epic18-step2-silent-enrichment-retry
 
 ### Context
