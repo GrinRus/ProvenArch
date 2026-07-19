@@ -60,6 +60,41 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260719-epic18-targeted-architecture-home-repair
+
+### Context
+Post-PR #162 Claude smoke `smoke-tiny-bank-20260719T005002Z` completed init and refresh collect
+`10/10`. Refresh step2 then failed after the provider removed the sole invalid Architecture Home
+sentence from `overview.md`: the complete draft contract was valid, but the shared enrichment guard
+still required byte changes in the already-valid `summary.md` and `architect-summary.md`.
+
+### Goals (must have)
+- [x] Accept a partial markdown write set only for the exact step2 Architecture Home validation
+      error, when `overview.md` is freshly changed and the complete draft contract passes.
+- [x] Preserve the all-markdown rewrite requirement for every other enrichment/retry path.
+- [x] Add the live-observed targeted-rewrite regression and focused stress coverage.
+- [x] Synchronize runtime/testing/live-gate documentation and pass full deterministic DoD.
+- [ ] Merge the remediation and restart qualification from the new clean merge commit.
+
+### Non-goals
+- [x] Do not sanitize provider content or accept a still-invalid Architecture Home.
+- [x] Do not relax write-set containment, sidecar handling, schema validation or other draft steps.
+- [x] Do not change schemas, HTTP APIs, provider contracts, timeout policy or canonical matrices.
+
+### Acceptance criteria
+- [x] A fresh `overview.md` repair with byte-identical valid sibling documents is accepted only after
+      strict full-set validation.
+- [x] Existing partial/noop enrichment tests remain terminal outside the narrow Architecture Home case.
+- [x] Focused recovery sequence passes 20 consecutive runs.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-19: Preserved the failed smoke, confirmed refresh collect `10/10`, and isolated the
+  terminal error to the shared all-markdown-change guard after a successful targeted overview repair.
+- 2026-07-19: Added the exact-error/fresh-overview/full-validation policy, proved it 20/20, and
+  completed deterministic DoD with 261 Python and 142 UI tests plus lint and embedded UI build.
+
+### Plan ID
 EP-20260719-epic18-draft-empty-sidecar-rollback
 
 ### Context
@@ -77,7 +112,8 @@ created zero-byte sidecar can be safely rolled back to the pre-command state wit
 - [x] Add the live-observed `amp` recovery regression and focused stress coverage.
 - [x] Synchronize architecture, pipeline, testing, release-runbook and tracker documentation.
 - [x] Pass full deterministic DoD.
-- [ ] Merge the remediation and restart qualification from the new clean merge commit.
+- [x] Merge the remediation and restart qualification from the new clean merge commit.
+- [ ] Archive this completed remediation during the next tracker reconciliation.
 
 ### Non-goals
 - [x] Do not add `amp` or arbitrary sidecars to the allowed output set.

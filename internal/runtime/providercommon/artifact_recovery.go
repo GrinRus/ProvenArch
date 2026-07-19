@@ -1219,7 +1219,7 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		var enrichmentStalled StallError
 		if errors.As(enrichmentErr, &enrichmentStalled) {
 			if policy.AcceptValidArtifactsAfterStop {
-				if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err == nil {
+				if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), validationErr, stage); err == nil {
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
@@ -1267,7 +1267,7 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 		}
 		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, enrichmentResult, enrichmentErr)
 	}
-	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), stage); err != nil {
+	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), validationErr, stage); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
 		if shouldRetryDraftManifestShapeEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
@@ -1324,7 +1324,7 @@ func draftArtifactEnrichmentActivityPolicy(task acpruntime.Task, policy Activity
 	return policy
 }
 
-func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, validationErr error, stage string) error {
+func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, validationErr error, recoveryCause error, stage string) error {
 	if validationErr != nil {
 		if isDraftBootstrapOnlyValidationFailure(validationErr) {
 			return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: %w", validationErr)
@@ -1338,9 +1338,29 @@ func validateDraftArtifactEnrichmentOutcome(task acpruntime.Task, beforeWriteRoo
 		}
 	}
 	if !allDraftMarkdownOutputsChanged(task, beforeDraftRoot) {
+		if targetedArchitectureHomeRewriteIsValid(task, beforeDraftRoot, recoveryCause) {
+			return nil
+		}
 		return fmt.Errorf("draft_artifact_enrichment_noop_or_scaffold: not all referenced markdown draft files changed")
 	}
 	return nil
+}
+
+func targetedArchitectureHomeRewriteIsValid(task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, recoveryCause error) bool {
+	stepID := strings.TrimSpace(task.StepID)
+	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
+		return false
+	}
+	if recoveryCause == nil || !strings.Contains(recoveryCause.Error(), `outputs[0].path "overview.md" Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language`) {
+		return false
+	}
+	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if err != nil {
+		return false
+	}
+	beforeState, beforeExists := beforeDraftRoot["overview.md"]
+	afterState, afterExists := afterDraftRoot["overview.md"]
+	return afterExists && (beforeExists != afterExists || beforeState != afterState)
 }
 
 func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
