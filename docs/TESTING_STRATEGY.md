@@ -146,6 +146,12 @@ Baseline scenario set:
   - `reports/changelog/*` draft files are activated through the journaled file path while preserving existing changelog history; stale managed artifact registry entries are removed only after successful activation
 - UI route-shell seams:
   - feature-owned Changes/Knowledge/Publish view models receive authoritative route/data inputs; ProductShell, semantic primitives and ContextDrawer have focused component coverage
+  - historical snapshot tests inject a foreign-run final index before the selected-run index and
+    require the UI to open only the exact selected-run staged paths; the live ProductShell flow
+    accepts an empty optional Diagrams group but must still open and inspect substantive indexed
+    Reports from the selected snapshot
+  - artifact-quality tests distinguish standalone/scaffold placeholder markers from substantive
+    safe-change guidance that names an observed repository value as a placeholder
 - docs truth-sync gate проверяет:
   - согласованность runtime policy/Q&A boundary и ссылок на canonical stakeholder matrix;
   - prompt-layer truth: exact merge order (`provider header -> artifact-only/filesystem policy -> step-specific policy -> workspace prompt pack -> provider completion footer`) и invariant `workspace prompt pack = editable content layer only`;

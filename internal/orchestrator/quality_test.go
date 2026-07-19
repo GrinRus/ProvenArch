@@ -18,6 +18,31 @@ func TestAssessLiveReportSurfaceSignalsOverviewPlaceholder(t *testing.T) {
 	assertQualitySignal(t, signals, "artifact_quality.overview_placeholder")
 }
 
+func TestAssessLiveReportSurfaceSignalsOverviewAllowsSubstantivePlaceholderGuidance(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"reports/as-is/overview.md": strings.Join([]string{
+			"# Architecture Home",
+			"",
+			"## System at a glance",
+			"The payment API serves HTTP requests and persists transactions in PostgreSQL (`payments:services/api/main.go`).",
+			"",
+			"## Safe-change guidance",
+			"Treat the checked-in demo secret as a placeholder that must be replaced before production deployment.",
+			"",
+			"## Evidence gaps and open questions",
+			"Service ownership is not confirmed in the scoped repository evidence.",
+			"",
+		}, "\n"),
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+	for _, signal := range signals {
+		if signal.Code == "artifact_quality.overview_placeholder" {
+			t.Fatalf("substantive safe-change guidance must not be classified as placeholder: %+v", signals)
+		}
+	}
+}
+
 func TestAssessLiveReportSurfaceSignalsEmptyFindingsWithCriticalGaps(t *testing.T) {
 	ws := qualitySignalWorkspace(t, map[string]string{
 		"reports/findings/findings.md": "# Findings\n\nNo findings reported.\n",

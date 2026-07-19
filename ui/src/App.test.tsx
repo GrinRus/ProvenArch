@@ -2484,6 +2484,13 @@ describe("App", () => {
     await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
+    navigateToStage("publish");
+    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("publish-preview-panel")).toHaveTextContent("reports/as-is/overview.md");
+      expect(screen.getByTestId("publish-selected-preview-content")).toHaveTextContent("# As-is overview");
+    });
+
     navigateToStage("proposals");
     const proposalList = await screen.findByTestId("proposals-artifact-list");
     expect(proposalList).toHaveTextContent("proposals/proposal-baseline");
@@ -4243,9 +4250,13 @@ describe("App", () => {
           });
         }
         if (method === "GET" && url === `/api/pipeline/runs/${runID}/artifacts`) {
+          const foreignRunID = runID === "run-old" ? "run-new" : "run-old";
           return jsonResponse({
             run_id: runID,
-            artifacts: [{ path: finalIndexPath(runID), kind: "taskrun", label: "Final run index" }],
+            artifacts: [
+              { path: finalIndexPath(foreignRunID), kind: "taskrun", label: "Foreign run index" },
+              { path: finalIndexPath(runID), kind: "taskrun", label: "Final run index" },
+            ],
           });
         }
         if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {

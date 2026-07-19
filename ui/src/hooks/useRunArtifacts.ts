@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchJSON } from "../lib/api";
-import { dedupeArtifactsByPath, indexArtifactPath } from "../lib/runState";
+import { dedupeArtifactsByPath } from "../lib/runState";
 import type { Artifact, ArtifactsResponse, FinalRunIndex } from "../lib/appContracts";
 import { isAbortError, useRequestGate } from "./useRequestGate";
 
@@ -247,8 +247,9 @@ type RunSnapshotIndex = {
 async function fetchRunSnapshotIndex(id: string, signal?: AbortSignal): Promise<RunSnapshotIndex | null> {
   const payload = await fetchJSON<ArtifactsResponse>(`/api/pipeline/runs/${id}/artifacts`, { signal });
   const runArtifacts = payload.artifacts ?? [];
-  const finalRunIndexPath = indexArtifactPath(runArtifacts, "/staging/final/final-run-index.json");
-  if (!finalRunIndexPath) {
+  const finalRunIndexPath = `reports/taskruns/${id}/staging/final/final-run-index.json`;
+  const hasSelectedRunIndex = runArtifacts.some((artifact) => artifact.path.trim() === finalRunIndexPath);
+  if (!hasSelectedRunIndex) {
     return null;
   }
 

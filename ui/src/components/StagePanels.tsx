@@ -5341,7 +5341,9 @@ export function PublishStagePanel({
   const [localSelectedPath, setLocalSelectedPath] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [artifactFilter, setArtifactFilter] = useState<PublishArtifactFilter>("all");
-  const publishArtifacts = artifacts.filter((artifact) => artifact.path.trim().length > 0);
+  const publishArtifacts = artifacts
+    .filter((artifact) => artifact.path.trim().length > 0)
+    .sort(comparePublishArtifactPriority);
   const changedPathSet = new Set(gitDiff?.files.map((file) => file.path) ?? []);
   const filteredPublishArtifacts = publishArtifacts.filter((artifact) => publishArtifactMatchesFilter(artifact, artifactFilter, changedPathSet));
   const visibleChangedFiles = artifactFilter === "all" || artifactFilter === "changed" ? (gitDiff?.files ?? []) : [];
@@ -5764,6 +5766,25 @@ function publishArtifactMatchesFilter(artifact: Artifact, filter: PublishArtifac
     return artifact.kind === "taskrun" || path.startsWith("reports/taskruns/");
   }
   return true;
+}
+
+function comparePublishArtifactPriority(left: Artifact, right: Artifact): number {
+  const priority = (artifact: Artifact): number => {
+    switch (artifact.path) {
+      case "reports/as-is/overview.md":
+        return 0;
+      case "reports/findings/findings.md":
+        return 1;
+      case "reports/coverage/summary.md":
+        return 2;
+      case "reports/coverage/open-questions.md":
+        return 3;
+      default:
+        return artifact.path.startsWith("proposals/") ? 4 : 5;
+    }
+  };
+  const priorityDelta = priority(left) - priority(right);
+  return priorityDelta !== 0 ? priorityDelta : left.path.localeCompare(right.path);
 }
 
 function publishArtifactFilterLabel(filter: PublishArtifactFilter): string {

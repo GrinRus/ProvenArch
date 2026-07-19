@@ -37,12 +37,12 @@ Epic matrix:
 - release blocker: Epic 18 R3 trusted-machine composite evidence. Standalone
   remediations for Claude collect shape, ProductShell live selectors, proposal staging-path leakage,
   changed-error Architecture Home cleanup and empty draft-sidecar rollback are merged. Post-merge
-  Claude smoke `smoke-tiny-bank-20260719T005002Z` completed init and refresh collect `10/10`, then
-  exposed one narrower shared-runtime defect: Claude fresh-rewrote the sole invalid `overview.md`
-  and the full draft contract became valid, but the enrichment guard still required artificial
-  byte changes in already-valid sibling markdown. The active remediation accepts only that exact
-  targeted Architecture Home repair after strict full-set validation; the stopped matrix is not
-  release evidence.
+  Claude smoke `smoke-tiny-bank-20260719T042213Z` completed init and refresh collect `10/10` and
+  both pipelines succeeded, but strict matrix aggregation exposed three release-gate defects: a
+  mixed run inventory selected an older final index in ProductShell, the live flow required an
+  optional diagram artifact, and substantive secret-replacement guidance triggered the generic
+  placeholder heuristic. The active narrow remediation preserves strict run/path validation and
+  promoted-evidence quality checks; this failed smoke is not reusable release evidence.
 - out of MVP: 12, 13
 
 ---

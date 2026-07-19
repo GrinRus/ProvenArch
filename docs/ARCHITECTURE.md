@@ -137,10 +137,18 @@
    - canonical publish для `step0/2/4` выполняется только из validated runtime draft artifacts через deterministic compile/publish path; direct orchestrator writer больше не является альтернативным source of truth
    - Собирает staged final doc set в `reports/taskruns/<run_id>/staging/final/`; internal docflow builder принимает `DocflowBuildInput` и возвращает `DocflowBuildResult` (`artifacts`, `citation-index`, `final-run-index`, `semantic snapshot`), после чего execution state mutates только в thin adapter/promotion path
    - Генерирует и валидирует `final-run-index.json` и `citation-index.json`
+   - Historical UI evidence resolves the final index by the exact selected-run path
+     `reports/taskruns/<run_id>/staging/final/final-run-index.json`. A mixed persisted artifact
+     inventory may contain older taskrun indexes, but suffix-first selection and fallback to a
+     foreign run/current workspace are forbidden; the index `run_id` and every staged path are
+     still validated before any snapshot content is shown.
    - `final-run-index.json` и `citation-index.json` используют один deterministic `document_id` mapping: unique staged document ids берутся из `manifest.Documents[*].id`, repeated provider-authored ids across distinct `canonical_path` values remap-ятся к stable canonical-path-derived ids, а citation/final-index стороны используют один canonical namespace
    - Runtime proposal/changelog draft outputs stage into the final doc set before promotion, so `final-run-index.json` represents both analysis reports and published `proposals/*` / `reports/changelog/*`
    - `citation-index.json.claim_ids` трактуются как global staged-final namespace; duplicate claim ids в validator scope детерминированно repair-ятся на index/reference уровне с shard suffix без semantic rewrite authored docs
    - Для единственного schema-shape случая `semantic.findings` missing shared runtime может до provider repair атомарно добавить пустой required array. Recovery разрешена только для process-clean authored set, повторно проходит полную document/repo-evidence validation, откатывает original bytes при любом другом дефекте и маркируется diagnostic/runtime warning с before/after digest. Это не semantic synthesis, normal provider authorship или artifact-quality acceptance.
+   - Architecture Home placeholder quality checks match scaffold/process markers and standalone
+     TODO/placeholder markers. Evidence-backed operator guidance may legitimately describe a
+     repository secret or sample value as a placeholder without failing the promoted artifact.
    - Artifact ownership разделён явно: provider-authored artifacts включают normal shard manifests, runtime draft manifests/files и validator verdict; runtime-recovered collect manifests являются contract-recovery artifacts, derived только из provider-authored shard docs и bounded repo/path evidence, и помечаются в diagnostics; orchestrator-authored artifacts включают staged indexes, run logs/history, shard plans/summaries; compiler-derived artifacts включают `model/*`, diagrams и normalized report/proposal renderers после validator-gated promotion. `model/*` filenames are deterministic and bounded with a hash suffix when canonical ids exceed filesystem filename limits; full ids remain inside YAML.
    - Step 3 runtime primary output: `validator-verdict.json`
    - `validator-verdict.json` использует canonical contract с обязательными `version=1`, `run_id`, `generated_at`, `verdict`, `checked_paths`; validator findings сохраняют `title + description + provenance`, а observation evidence требует non-empty `repo/path`
