@@ -210,6 +210,9 @@ Output mapping rules:
 - `outputs[].canonical_path` values must be unique when a step-specific publish surface is constrained
 
 `asis-draft-manifest.json` specifics:
+- normal step2 authoring writes all referenced Markdown first, verifies all three files are free of
+  runtime/recovery narration, and writes the manifest last; this is content validation over the
+  existing manifest shape, not an additional persisted field;
 - `step_contract="as_is"`
 - required canonical mappings:
   - `overview.md` -> `reports/as-is/overview.md`

@@ -60,45 +60,44 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260720-epic18-architecture-home-concrete-evidence-refs
+EP-20260720-epic18-step2-first-pass-marker-free
 
 ### Context
-The clean post-remediation Codex qualification smoke `smoke-tiny-bank-20260720T143329Z` passed
-init/refresh, collect `10/10`, strict validation and the ProductShell frontend gate. The matrix still
-reported release-quality blockers because provider-authored Architecture Home drafts used
-`bank-of-anthos:.` and `bank-of-anthos:src/*`. Both are rejected by the existing public evidence
-contract, but normal and focused prompts described only "existing paths" and did not explicitly
-exclude repository-root shorthand or wildcard syntax. This is a product prompt-contract defect;
-the regression and remediation must remain provider-free and independent of live matrix identity.
+The post-PR #167 qualification `smoke-tiny-bank-20260720T172737Z` completed init/refresh collect
+`10/10`, strict validation and the ProductShell frontend flow with machine `PASS`. Release-quality
+acceptance still stopped because `init.step2.asis_docs` needed three focused repairs and one actual
+stall. The first provider work unit authored useful content, but `architect-summary.md` described a
+"bounded evidence read" and the following attempt put runtime/process narration in Architecture
+Home. These are ordinary operator-document contract defects, independent of live matrix identity.
 
 ### Goals (must have)
-- [x] Require exact non-root repo:path references in normal, repair, compact and command-text step2
-      prompts; explicitly prohibit root shorthand and wildcard/glob syntax.
-- [x] Preserve strict validation and improve its deterministic diagnostics for those two invalid
-      reference classes without weakening containment, existence or symlink checks.
-- [x] Add the reduced authored fixture plus exact-valid/invalid validator and prompt-contract tests.
-- [x] Synchronize product/runtime/testing/live-gate docs and pass full deterministic DoD.
+- [x] Make the normal step2 first work unit scan all three authored Markdown targets for the exact
+      runtime/recovery marker classes before writing `asis-draft-manifest.json` last.
+- [x] Require offending sentences to be rewritten as architecture facts, coverage gaps or operator
+      decisions in the same provider command, without relying on focused repair.
+- [x] Add a reduced provider-free authored fixture and prompt/validator regressions.
+- [x] Synchronize runtime/testing/live-gate documentation and pass full deterministic DoD.
 - [ ] Merge the remediation and restart R3 from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not rewrite or guess provider-authored evidence references.
+- [x] Do not sanitize, synthesize or manually repair provider-authored Markdown.
 - [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
 - [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
 
 ### Acceptance criteria
-- [x] `repo:.`, `repo:./` and wildcard/glob repo references are explicitly prohibited by every
-      step2 authoring/recovery prompt surface.
-- [x] Exact existing file/directory references continue to validate.
-- [x] Provider-free fixtures reproduce both live-observed invalid reference forms.
+- [x] The first normal step2 command checks `overview.md`, `summary.md` and
+      `architect-summary.md`, not only Architecture Home, before manifest completion.
+- [x] Live-observed `bounded evidence read` / runtime-assembly narration is rejected by a
+      provider-free fixture while equivalent operator-facing architecture language remains valid.
 - [x] Focused tests and `make contracts`, `make test`, `make lint`, `make build` pass.
 
 ### Progress log
-- 2026-07-20: Stopped the release sequence after the new smoke passed machine/frontend gates but
-  reported `runtime_quality.repair_heavy` and `runtime_quality.stall_pressure`; taskrun diagnostics
-  isolated the causes to repository-root shorthand and wildcard Architecture Home references.
-- 2026-07-20: Added exact-path prompt contracts and deterministic validator diagnostics with a
-  reduced provider-free authored fixture. Focused exact/invalid reference coverage passed 20/20;
-  full deterministic DoD passed with 261 Python and 142 UI tests plus lint and embedded UI build.
+- 2026-07-20: Stopped before standalone release-fast despite machine `PASS`; final matrix evidence
+  reported `runtime_quality.repair_heavy=1` and `runtime_quality.stall_pressure=1`, both isolated to
+  init step2 first-pass runtime/recovery narration. Main and the pinned Bank checkout remained clean.
+- 2026-07-20: Added the same-command three-target marker scan, a reduced provider-free architect
+  summary fixture and prompt/validator coverage. Focused stress passed 20/20; full DoD passed with
+  261 Python and 142 UI tests, lint, typecheck and embedded UI build.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair
