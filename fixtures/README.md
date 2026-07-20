@@ -26,3 +26,8 @@ Generated artifacts policy:
 
 Required CI использует только local fixtures, synthetic repos и recorded artifacts.
 Live headless provider runs в этом контуре не требуются.
+
+Provider-free runtime contract fixtures under `internal/runtime/testdata/contract-rejection/`
+include reduced authored Architecture Home examples. The concrete-evidence case records invalid
+repository-root shorthand and wildcard references; tests reject them without importing matrix or
+live-harness state and retain exact existing file/directory references as the valid baseline.

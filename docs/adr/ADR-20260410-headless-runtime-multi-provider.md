@@ -47,6 +47,10 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
   share physical lines. Runtime may insert only heading/body line boundaries, then must repeat the
   complete strict draft validation and restore original bytes on any remaining defect. Partial or
   ambiguous documents continue through provider-authored repair or fail closed.
+- Architecture Home repository evidence identity is provider-independent: every `repo:path` token
+  names an exact existing non-root file or directory. Root shorthand and wildcard/glob tokens are
+  rejected rather than guessed or normalized; prompts must direct providers to a concrete path or
+  an explicit evidence gap.
 
 ## Follow-ups
 

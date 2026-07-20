@@ -915,6 +915,30 @@ EP-20260509-v011-hardening-release
 
 ---
 
+## EP-20260720-epic18-architecture-home-inline-heading-repair
+
+### Context
+Qualification smoke from clean merge SHA `8889f059` completed collect `10/10`, then step2 rejected a
+substantive Architecture Home because the provider placed each required H2 label and its body on the
+same physical line. Markdown correctly parsed the entire line as a heading, so all eight canonical
+sections appeared missing and the subsequent provider enrichment stalled. This is a product-level
+document-shape defect exposed by live evidence; the regression and remediation remain entirely
+provider-free and independent of matrix identity or live-harness state.
+
+### Completed
+- [x] Recover only the exact all-eight inline H2/body shape in canonical order with no other error.
+- [x] Preserve authored content, insert only Markdown boundaries, write atomically and revalidate.
+- [x] Restore original bytes and retain provider repair/fail-closed behavior on every ambiguity.
+- [x] Add provider-free fixture, focused/stress regressions, diagnostics and synchronized docs.
+- [x] Pass full deterministic DoD, merge PR #166 and restart R3 from merge SHA `5718f3f4`.
+
+### Results
+- Focused recovery passed 20/20; full deterministic DoD passed with pinned Node `22.21.1`.
+- The post-merge smoke reached init/refresh collect `10/10`, validating the remediation before the
+  next independent concrete-evidence-reference defect was isolated.
+
+---
+
 ### Plan ID
 EP-20260720-epic18-collect-manifest-task-identity
 

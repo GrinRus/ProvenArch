@@ -220,6 +220,9 @@ Output mapping rules:
   Pipeline Spec. The JSON manifest shape does not change. A deterministic recovery may only split
   an exact all-eight `H2 + inline authored body` form and must revalidate the complete draft set;
   it does not add sections or content.
+- Architecture Home `repo:path` references are content-level evidence identities, not additional
+  manifest fields. They must name an exact existing non-root file or directory; root shorthand and
+  wildcard/glob syntax are invalid and are never expanded or normalized by the runtime.
 
 `proposals-draft-manifest.json` specifics:
 - `step_contract="proposals"`
