@@ -60,44 +60,47 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260720-epic18-step2-first-pass-marker-free
+EP-20260720-epic18-step2-direct-literal-first-pass
 
 ### Context
-The post-PR #167 qualification `smoke-tiny-bank-20260720T172737Z` completed init/refresh collect
-`10/10`, strict validation and the ProductShell frontend flow with machine `PASS`. Release-quality
-acceptance still stopped because `init.step2.asis_docs` needed three focused repairs and one actual
-stall. The first provider work unit authored useful content, but `architect-summary.md` described a
-"bounded evidence read" and the following attempt put runtime/process narration in Architecture
-Home. These are ordinary operator-document contract defects, independent of live matrix identity.
+The clean post-PR #168 qualification `smoke-tiny-bank-20260720T201011Z` completed init collect
+`10/10`, but `init.step2.asis_docs` exhausted five focused repairs and failed the runtime contract.
+The first provider command tried to combine evidence discovery, content generation, marker cleanup and
+four artifact writes in one large inline Python program. A nested f-string quote produced a
+`SyntaxError`, so the normal turn never authored the required files and recovery started from the
+bootstrap draft. This is a provider-independent product prompt-contract defect: the normal contract
+encouraged a generated program and required the complete read/write lifecycle in one command.
 
 ### Goals (must have)
-- [x] Make the normal step2 first work unit scan all three authored Markdown targets for the exact
-      runtime/recovery marker classes before writing `asis-draft-manifest.json` last.
-- [x] Require offending sentences to be rewritten as architecture facts, coverage gaps or operator
-      decisions in the same provider command, without relying on focused repair.
-- [x] Add a reduced provider-free authored fixture and prompt/validator regressions.
-- [x] Synchronize runtime/testing/live-gate documentation and pass full deterministic DoD.
+- [x] Split normal step2 startup into at most one bounded evidence read/list command followed
+      immediately by one mechanically simple direct-literal write command.
+- [x] Require single-quoted heredocs for all four first-pass artifacts and prohibit Python, Node,
+      Ruby, Perl, awk, jq, template programs and nested quote tricks before the write set exists.
+- [x] Preserve manifest-last ordering, marker checks, exact shard counts and strict validation.
+- [x] Pass focused stress and the full deterministic DoD.
 - [ ] Merge the remediation and restart R3 from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not sanitize, synthesize or manually repair provider-authored Markdown.
+- [x] Do not synthesize or sanitize provider-authored architecture prose in ACP.
 - [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
 - [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
+- [x] Do not reuse the failed smoke as qualification or release evidence.
 
 ### Acceptance criteria
-- [x] The first normal step2 command checks `overview.md`, `summary.md` and
-      `architect-summary.md`, not only Architecture Home, before manifest completion.
-- [x] Live-observed `bounded evidence read` / runtime-assembly narration is rejected by a
-      provider-free fixture while equivalent operator-facing architecture language remains valid.
-- [x] Focused tests and `make contracts`, `make test`, `make lint`, `make build` pass.
+- [x] Normal Claude/Qwen/Codex step2 prompts are provider-independent and require the same
+      direct-literal first-pass contract.
+- [x] Provider-free prompt tests reject the inline-program path while preserving bounded evidence
+      reads, direct heredocs, manifest-last order and strict self-checks.
+- [x] Focused tests pass repeatedly and `make contracts`, `make test`, `make lint`, `make build` pass.
 
 ### Progress log
-- 2026-07-20: Stopped before standalone release-fast despite machine `PASS`; final matrix evidence
-  reported `runtime_quality.repair_heavy=1` and `runtime_quality.stall_pressure=1`, both isolated to
-  init step2 first-pass runtime/recovery narration. Main and the pinned Bank checkout remained clean.
-- 2026-07-20: Added the same-command three-target marker scan, a reduced provider-free architect
-  summary fixture and prompt/validator coverage. Focused stress passed 20/20; full DoD passed with
-  261 Python and 142 UI tests, lint, typecheck and embedded UI build.
+- 2026-07-20: Stopped R3 after strict smoke failure. Machine evidence reported
+  `runtime_contract_failed`, `repair_exhausted=1`, five step2 repair attempts and nine actual stalls.
+  Raw provider output showed the first filesystem command exited with an inline Python
+  `SyntaxError`; main `ff140f44` and the pinned Bank checkout remained clean and unchanged.
+- 2026-07-20: Replaced the monolithic-command guidance with the provider-independent bounded-read
+  then direct-literal-write sequence. Focused prompt suites passed 20 consecutive runs; full DoD
+  passed with 261 Python and 142 UI tests, exact Node 22.21.1/npm 10.9.4, lint and embedded UI build.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

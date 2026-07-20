@@ -5,6 +5,50 @@ Closed ExecPlans archived from `docs/PLANS.md` in July 2026.
 This archive preserves implementation-complete plan evidence; residual trusted-host, live-quality, owner/admin and owner-decision workstreams remain active in `docs/PLANS.md`.
 
 ### Plan ID
+EP-20260720-epic18-step2-first-pass-marker-free
+
+### Context
+The post-PR #167 qualification `smoke-tiny-bank-20260720T172737Z` completed init/refresh collect
+`10/10`, strict validation and the ProductShell frontend flow with machine `PASS`. Release-quality
+acceptance still stopped because `init.step2.asis_docs` needed three focused repairs and one actual
+stall. The first provider work unit authored useful content, but `architect-summary.md` described a
+"bounded evidence read" and the following attempt put runtime/process narration in Architecture
+Home. These are ordinary operator-document contract defects, independent of live matrix identity.
+
+### Goals (must have)
+- [x] Make the normal step2 first work unit scan all three authored Markdown targets for the exact
+      runtime/recovery marker classes before writing `asis-draft-manifest.json` last.
+- [x] Require offending sentences to be rewritten as architecture facts, coverage gaps or operator
+      decisions in the same provider command, without relying on focused repair.
+- [x] Add a reduced provider-free authored fixture and prompt/validator regressions.
+- [x] Synchronize runtime/testing/live-gate documentation and pass full deterministic DoD.
+- [x] Merge the remediation and restart R3 from the new clean merge commit.
+
+### Non-goals
+- [x] Do not sanitize, synthesize or manually repair provider-authored Markdown.
+- [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
+- [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
+
+### Acceptance criteria
+- [x] The first normal step2 command checks `overview.md`, `summary.md` and
+      `architect-summary.md`, not only Architecture Home, before manifest completion.
+- [x] Live-observed `bounded evidence read` / runtime-assembly narration is rejected by a
+      provider-free fixture while equivalent operator-facing architecture language remains valid.
+- [x] Focused tests and `make contracts`, `make test`, `make lint`, `make build` pass.
+
+### Progress log
+- 2026-07-20: Stopped before standalone release-fast despite machine `PASS`; final matrix evidence
+  reported `runtime_quality.repair_heavy=1` and `runtime_quality.stall_pressure=1`, both isolated to
+  init step2 first-pass runtime/recovery narration. Main and the pinned Bank checkout remained clean.
+- 2026-07-20: Added the same-command three-target marker scan, a reduced provider-free architect
+  summary fixture and prompt/validator coverage. Focused stress passed 20/20; full DoD passed with
+  261 Python and 142 UI tests, lint, typecheck and embedded UI build.
+- 2026-07-20: PR #168 merged as `ff140f44`; the next clean smoke exposed the separate inline-program
+  command construction defect before step2 artifacts were authored.
+
+---
+
+### Plan ID
 EP-20260720-epic18-architecture-home-concrete-evidence-refs
 
 ### Context
