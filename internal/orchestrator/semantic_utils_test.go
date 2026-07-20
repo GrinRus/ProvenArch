@@ -74,6 +74,7 @@ func TestApplyCollectRuntimeExecutionUsesGuardedRefreshSemantic(t *testing.T) {
 		RunID:        "run-refresh",
 		StepID:       "refresh.step1.collect",
 		ShardID:      "payments",
+		DomainID:     "payments-service",
 		AgentRole:    "shard-analyst",
 		ArtifactRoot: "reports/taskruns/run-refresh/staging/shards/payments",
 		RepoScopes:   []string{"payments-service"},

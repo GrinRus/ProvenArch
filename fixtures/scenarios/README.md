@@ -24,5 +24,10 @@ Baseline scenarios для MVP:
 - `refresh-artifact-quality`
 - `validator-duplicate-claim`
 
+Provider-free contract regressions могут хранить минимальную authored artifact pair без полного
+workspace/golden дерева. `collect-manifest-wrong-artifact-root` фиксирует structurally valid collect
+manifest с foreign task identity и существующим authored document; runtime обязан reject-нуть его
+до downstream materialization и разрешает только обычный provider-authored repair.
+
 Required CI использует только synthetic scenarios, staged manifests/verdicts и golden snapshots.
 Live headless provider runs в этом контуре не требуются.

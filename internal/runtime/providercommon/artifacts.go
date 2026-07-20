@@ -35,7 +35,25 @@ func ValidateRuntimeArtifacts(task acpruntime.Task, provider acpruntime.Provider
 }
 
 func ValidateCollectArtifacts(task acpruntime.Task, provider acpruntime.Provider) error {
-	return artifactquality.ValidateCollectManifestInRootWithRepoRoots(task.WriteRoot, collectTaskRepoRoots(task))
+	if err := artifactquality.ValidateCollectManifestInRootWithRepoRoots(task.WriteRoot, collectTaskRepoRoots(task)); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Clean(task.WriteRoot), ShardPackManifestFileName))
+	if err != nil {
+		return err
+	}
+	manifest, err := contracts.ParseShardPackManifest(raw)
+	if err != nil {
+		return err
+	}
+	return artifactquality.ValidateCollectManifestTaskIdentity(
+		manifest,
+		task.RunID,
+		task.StepID,
+		task.ShardID,
+		task.DomainID,
+		task.ArtifactRoot,
+	)
 }
 
 func ValidateDraftArtifacts(task acpruntime.Task) error {

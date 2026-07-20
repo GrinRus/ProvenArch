@@ -10,6 +10,45 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
 
+func TestValidateCollectManifestTaskIdentityRequiresEveryAssignedField(t *testing.T) {
+	t.Parallel()
+
+	manifest := contracts.ShardPackManifest{
+		RunID:        "run-actual",
+		StepID:       "init.step1.collect",
+		ShardID:      "actual-shard",
+		DomainID:     "actual-domain",
+		ArtifactRoot: "reports/taskruns/run-actual/staging/shards/actual-shard",
+	}
+	err := ValidateCollectManifestTaskIdentity(
+		manifest,
+		"run-expected",
+		"refresh.step1.collect",
+		"expected-shard",
+		"expected-domain",
+		"reports/taskruns/run-expected/staging/shards/expected-shard",
+	)
+	if err == nil {
+		t.Fatal("expected every assigned task identity mismatch to fail")
+	}
+	for _, field := range []string{"artifact_root", "domain_id", "run_id", "shard_id", "step_id"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Fatalf("expected %s mismatch in deterministic error, got %v", field, err)
+		}
+	}
+
+	if err := ValidateCollectManifestTaskIdentity(
+		manifest,
+		manifest.RunID,
+		manifest.StepID,
+		manifest.ShardID,
+		manifest.DomainID,
+		manifest.ArtifactRoot,
+	); err != nil {
+		t.Fatalf("expected exact task identity to validate: %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *testing.T) {
 	t.Parallel()
 

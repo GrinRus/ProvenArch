@@ -28,6 +28,20 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 		})
 		return runtimeTaskExecution{}, err
 	}
+	if err := artifactquality.ValidateCollectManifestTaskIdentity(
+		manifest,
+		collectManifestIdentityValue(execution.RunID, task.RunID),
+		collectManifestIdentityValue(execution.StepID, task.StepID),
+		collectManifestIdentityValue(execution.ShardID, task.ShardID),
+		collectManifestIdentityValue(execution.DomainID, task.DomainID),
+		collectManifestIdentityValue(execution.ArtifactRoot, task.ArtifactRoot),
+	); err != nil {
+		e.logError(stepID, domainID, "shard pack manifest task identity failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
+		return runtimeTaskExecution{}, err
+	}
 	if artifactquality.CollectManifestBootstrapOnly(manifest, collectManifestDocumentTexts(task.WriteRoot, manifest.Documents)) {
 		warning := fmt.Sprintf(
 			"artifact_quality: collect shard %s retained unchanged bootstrap first-action artifacts; provider did not enrich repository evidence",
@@ -119,6 +133,15 @@ func (e *pipelineExecution) applyCollectRuntimeExecution(
 		Apply:          applyReport,
 		ShardManifest:  &manifest,
 	}, nil
+}
+
+func collectManifestIdentityValue(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func collectManifestDocumentTexts(writeRoot string, documents []contracts.AuthoredDocument) map[string]string {

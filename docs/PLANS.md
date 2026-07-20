@@ -60,6 +60,47 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260720-epic18-collect-manifest-task-identity
+
+### Context
+Standalone `release fast` from qualification SHA `aea3950a` reached Qwen collect `10/10`, but one
+otherwise valid provider-authored shard manifest carried an `artifact_root` for a different spelling
+of the public task run identity. The referenced document existed under the actual task `write_root`,
+so file validation passed and downstream step2 later tried to resolve the foreign root. This is a
+product contract gap: a collect manifest must describe the task that authored it. The live harness
+only exposed the defect and remains outside the product implementation and provider-free regression.
+
+### Goals (must have)
+- [x] Require exact manifest `run_id`, `step_id`, `shard_id`, `domain_id`, and `artifact_root`
+      equality with the current collect task before provider success.
+- [x] Repeat the same validation defensively before orchestrator materialization.
+- [x] Add a provider-free fixture and regressions for rejection plus ordinary provider repair.
+- [x] Synchronize architecture, pipeline, testing, and live-gate documentation.
+- [x] Pass focused stress coverage and full deterministic DoD.
+- [ ] Merge the remediation and restart qualification from the new clean merge commit.
+
+### Non-goals
+- [x] Do not change schemas, HTTP API, provider contracts, retry budgets, or canonical matrices.
+- [x] Do not normalize or manually rewrite a provider manifest in the live harness.
+- [x] Do not expose matrix IDs, release verdicts, assessments, or live environment in product code.
+
+### Acceptance criteria
+- [x] A structurally valid manifest with a foreign task identity is rejected before step2.
+- [x] Focused provider repair can replace the manifest and pass the same strict validation.
+- [x] Existing manifest values and document content are not synthesized or normalized by ACP.
+- [x] Product/runtime boundary tests and full deterministic DoD pass.
+
+### Progress log
+- 2026-07-20: Stopped `release-fast-20260720T104426Z` after the first run failure and isolated an
+  exact `artifact_root` identity mismatch while the authored document remained present under the
+  actual task write root. No live artifact was edited or copied into product behavior.
+- 2026-07-20: Added shared task-identity validation at the provider acceptance and orchestrator
+  materialization boundaries with a provider-free regression fixture.
+- 2026-07-20: Proved provider-authored repair 20/20, preserved selective-refresh baseline packs
+  byte-identically by validating them against their persisted authoring execution, and passed full
+  deterministic DoD: contracts, Go/API, 261 Python boundary tests, 142 UI tests, lint, and build.
+
+### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair
 
 ### Context
