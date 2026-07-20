@@ -1485,6 +1485,12 @@ draft_root = first_non_empty(task, ["draft_final_root", "DraftFinalRoot"]) or fr
 step_contract = first_non_empty(task, ["step_contract", "StepContract"]) or from_prompt("step_contract") or from_prompt("StepContract")
 agent_role = first_non_empty(task, ["agent_role", "AgentRole"]) or from_prompt("agent_role") or from_prompt("AgentRole") or "architect"
 shard_id = first_non_empty(task, ["shard_id", "ShardID"]) or from_prompt("shard_id") or from_prompt("ShardID") or slugify(step_id)
+domain_id = first_non_empty(task, ["domain_id", "DomainID"]) or from_prompt("domain_id") or from_prompt("DomainID")
+if artifact_root and os.path.isabs(artifact_root):
+    normalized_root = artifact_root.replace(os.sep, "/")
+    marker = "/reports/taskruns/"
+    if marker in normalized_root:
+        artifact_root = "reports/taskruns/" + normalized_root.split(marker, 1)[1]
 repo_scopes = first_non_empty_list(task, ["repo_scopes", "RepoScopes"])
 if not repo_scopes:
     repo_scope = first_non_empty(task, ["repo_scope", "RepoScope"]) or from_prompt("repo_scope") or from_prompt("RepoScope")
@@ -1637,8 +1643,9 @@ if step_id in {"init.step1.collect", "refresh.step1.collect"} and write_root:
         "run_id": run_id or "run-1",
         "step_id": step_id,
         "shard_id": shard_id,
+        "domain_id": domain_id,
         "agent_role": "shard-analyst",
-        "artifact_root": write_root,
+        "artifact_root": artifact_root,
         "repo_scopes": repo_scopes,
         "path_scopes": path_scopes,
         "summary": "stub shard pack",
@@ -1737,6 +1744,12 @@ step_contract = policy_value("step_contract") or "draft"
 current_step = step_id()
 run_id = run_id_from_path(write_root or draft_root or "/tmp/run-1")
 repo_scope = policy_value("repo_scope") or policy_value("RepoScope") or "sample"
+domain_id = policy_value("domain_id") or policy_value("DomainID")
+if artifact_root and os.path.isabs(artifact_root):
+    normalized_root = artifact_root.replace(os.sep, "/")
+    marker = "/reports/taskruns/"
+    if marker in normalized_root:
+        artifact_root = "reports/taskruns/" + normalized_root.split(marker, 1)[1]
 
 def shard_completeness_line():
     if not draft_root or not run_id:
@@ -1879,6 +1892,7 @@ else:
         "run_id": run_id,
         "step_id": current_step,
         "shard_id": shard_id,
+        "domain_id": domain_id,
         "agent_role": "shard-analyst",
         "artifact_root": artifact_root,
         "repo_scopes": [repo_scope] if repo_scope else [],

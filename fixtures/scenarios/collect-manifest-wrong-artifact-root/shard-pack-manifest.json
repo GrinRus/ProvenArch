@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "run_id": "run-collect-identity",
+  "step_id": "init.step1.collect",
+  "shard_id": "payments-src",
+  "domain_id": "payments",
+  "agent_role": "shard-analyst",
+  "artifact_root": "reports/taskruns/run-collectTidentity/staging/shards/payments-src",
+  "repo_scopes": [
+    "payments"
+  ],
+  "path_scopes": [
+    "src"
+  ],
+  "summary": "Evidence-backed payments shard.",
+  "documents": [
+    {
+      "id": "doc.payments.overview",
+      "kind": "report",
+      "title": "Payments Overview",
+      "path": "overview.md",
+      "canonical_path": "reports/as-is/payments-src/overview.md",
+      "topics": [
+        "payments"
+      ],
+      "citation_ids": [
+        "cite.payments.handler"
+      ]
+    }
+  ],
+  "citations": [
+    {
+      "id": "cite.payments.handler",
+      "repo": "payments",
+      "path": "src/payment_handler.go",
+      "claim_ids": [
+        "claim.payments.handler"
+      ],
+      "document_ids": [
+        "doc.payments.overview"
+      ]
+    }
+  ],
+  "semantic": {
+    "coverage": {
+      "observed": [
+        "payments API"
+      ],
+      "missing": [
+        "owner mapping"
+      ],
+      "notes": [
+        "The manifest is structurally valid but carries the wrong task artifact root."
+      ]
+    },
+    "questions": [
+      {
+        "id": "question.payments.owner",
+        "text": "Which team owns the payments API?"
+      }
+    ],
+    "entities": [
+      {
+        "id": "service.payments",
+        "name": "Payments API",
+        "type": "service",
+        "provenance": {
+          "kind": "observation",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "repo": "payments",
+              "path": "src/payment_handler.go"
+            }
+          ]
+        }
+      }
+    ],
+    "edges": [],
+    "findings": []
+  }
+}

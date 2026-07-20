@@ -240,6 +240,53 @@ func TestValidateCollectArtifactsRejectsMissingRepoEvidencePath(t *testing.T) {
 	}
 }
 
+func TestValidateCollectArtifactsRejectsManifestTaskIdentityDrift(t *testing.T) {
+	root := t.TempDir()
+	writeRoot := filepath.Join(root, "reports", "taskruns", "run-collect-identity", "staging", "shards", "payments-src")
+	if err := os.MkdirAll(writeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir write root: %v", err)
+	}
+	fixtureRoot := filepath.Join("..", "..", "..", "fixtures", "scenarios", "collect-manifest-wrong-artifact-root")
+	for _, name := range []string{"overview.md", ShardPackManifestFileName} {
+		raw, err := os.ReadFile(filepath.Join(fixtureRoot, name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(writeRoot, name), raw, 0o644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+
+	task := acpruntime.Task{
+		RunID:        "run-collect-identity",
+		StepID:       "init.step1.collect",
+		ShardID:      "payments-src",
+		DomainID:     "payments",
+		WriteRoot:    writeRoot,
+		ArtifactRoot: "reports/taskruns/run-collect-identity/staging/shards/payments-src",
+	}
+	err := ValidateCollectArtifacts(task, acpruntime.ProviderQwenCode)
+	if err == nil {
+		t.Fatalf("expected artifact_root task identity drift to fail validation")
+	}
+	if !strings.Contains(err.Error(), `artifact_root "reports/taskruns/run-collectTidentity/staging/shards/payments-src" does not match task artifact_root "reports/taskruns/run-collect-identity/staging/shards/payments-src"`) {
+		t.Fatalf("expected exact artifact_root identity error, got %v", err)
+	}
+
+	manifestPath := filepath.Join(writeRoot, ShardPackManifestFileName)
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read copied manifest: %v", err)
+	}
+	fixed := strings.ReplaceAll(string(raw), "run-collectTidentity", "run-collect-identity")
+	if err := os.WriteFile(manifestPath, []byte(fixed), 0o644); err != nil {
+		t.Fatalf("write fixed manifest: %v", err)
+	}
+	if err := ValidateCollectArtifacts(task, acpruntime.ProviderQwenCode); err != nil {
+		t.Fatalf("expected exact task identity to validate: %v", err)
+	}
+}
+
 func TestRuntimeArtifactSnapshotRejectsDirectoryRepoEvidencePath(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, "workspace")

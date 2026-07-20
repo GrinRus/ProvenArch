@@ -46,6 +46,44 @@ func ValidateCollectManifestBytes(raw []byte) error {
 	return err
 }
 
+func ValidateCollectManifestTaskIdentity(
+	manifest contracts.ShardPackManifest,
+	runID string,
+	stepID string,
+	shardID string,
+	domainID string,
+	artifactRoot string,
+) error {
+	type identityField struct {
+		name     string
+		expected string
+		actual   string
+	}
+	fields := []identityField{
+		{name: "run_id", expected: runID, actual: manifest.RunID},
+		{name: "step_id", expected: stepID, actual: manifest.StepID},
+		{name: "shard_id", expected: shardID, actual: manifest.ShardID},
+		{name: "domain_id", expected: domainID, actual: manifest.DomainID},
+		{name: "artifact_root", expected: artifactRoot, actual: manifest.ArtifactRoot},
+	}
+	problems := make([]string, 0, len(fields))
+	for _, field := range fields {
+		expected := strings.TrimSpace(field.expected)
+		if expected == "" {
+			continue
+		}
+		actual := strings.TrimSpace(field.actual)
+		if actual != expected {
+			problems = append(problems, fmt.Sprintf("%s %q does not match task %s %q", field.name, actual, field.name, expected))
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("shard pack manifest task identity is invalid: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
 func validateCollectManifestDocumentFiles(writeRoot string, documents []contracts.AuthoredDocument) error {
 	root := filepath.Clean(writeRoot)
 	problems := []string{}

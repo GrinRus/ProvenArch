@@ -1072,6 +1072,49 @@ EOF
 	}
 }
 
+func TestRunHeadlessProviderRepairsCollectManifestArtifactRootIdentity(t *testing.T) {
+	task := newCollectTask(t, "run-collect-repair-artifact-root")
+	wrongRoot := strings.Replace(task.ArtifactRoot, task.RunID, "run-collectTrepair-artifact-root", 1)
+	badManifest := strings.Replace(collectManifestJSON(task), task.ArtifactRoot, wrongRoot, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+printf '%s\n' '# Bank Overview' '' '## Observations' '- README.md documents the banking application entrypoint.' > ` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + collectManifestJSON(task) + `
+EOF
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected artifact_root identity repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatalf("read repaired manifest: %v", err)
+	}
+	if strings.Contains(string(raw), wrongRoot) || !strings.Contains(string(raw), `"artifact_root": "`+task.ArtifactRoot+`"`) {
+		t.Fatalf("expected repair to restore exact task artifact_root, got %s", raw)
+	}
+}
+
 func TestRunHeadlessProviderRejectsStructuralInvalidCollectManifestAfterRepairExhaustion(t *testing.T) {
 	t.Parallel()
 
