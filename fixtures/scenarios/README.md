@@ -28,6 +28,9 @@ Provider-free contract regressions могут хранить минимальн�
 workspace/golden дерева. `collect-manifest-wrong-artifact-root` фиксирует structurally valid collect
 manifest с foreign task identity и существующим authored document; runtime обязан reject-нуть его
 до downstream materialization и разрешает только обычный provider-authored repair.
+`architecture-home-inline-headings` фиксирует substantive Architecture Home, где обязательные H2 и
+их authored bodies ошибочно находятся на одной строке; runtime может исправить только Markdown
+границу и обязан повторно применить полный строгий draft contract.
 
 Required CI использует только synthetic scenarios, staged manifests/verdicts и golden snapshots.
 Live headless provider runs в этом контуре не требуются.

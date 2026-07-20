@@ -60,45 +60,46 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260720-epic18-collect-manifest-task-identity
+EP-20260720-epic18-architecture-home-inline-heading-repair
 
 ### Context
-Standalone `release fast` from qualification SHA `aea3950a` reached Qwen collect `10/10`, but one
-otherwise valid provider-authored shard manifest carried an `artifact_root` for a different spelling
-of the public task run identity. The referenced document existed under the actual task `write_root`,
-so file validation passed and downstream step2 later tried to resolve the foreign root. This is a
-product contract gap: a collect manifest must describe the task that authored it. The live harness
-only exposed the defect and remains outside the product implementation and provider-free regression.
+Qualification smoke from clean merge SHA `8889f059` completed collect `10/10`, then step2 rejected a
+substantive Architecture Home because the provider placed each required H2 label and its body on the
+same physical line. Markdown correctly parsed the entire line as a heading, so all eight canonical
+sections appeared missing and the subsequent provider enrichment stalled. This is a product-level
+document-shape defect exposed by live evidence; the regression and remediation must remain entirely
+provider-free and must not depend on matrix identity or live-harness state.
 
 ### Goals (must have)
-- [x] Require exact manifest `run_id`, `step_id`, `shard_id`, `domain_id`, and `artifact_root`
-      equality with the current collect task before provider success.
-- [x] Repeat the same validation defensively before orchestrator materialization.
-- [x] Add a provider-free fixture and regressions for rejection plus ordinary provider repair.
-- [x] Synchronize architecture, pipeline, testing, and live-gate documentation.
-- [x] Pass focused stress coverage and full deterministic DoD.
-- [ ] Merge the remediation and restart qualification from the new clean merge commit.
+- [x] Recover only the exact shape where all required Architecture Home H2 labels occur once, in
+      canonical order, with non-empty inline bodies and no other contract error.
+- [x] Preserve authored body text, insert only the heading/body Markdown boundary, write atomically,
+      and repeat the complete strict draft validation.
+- [x] Restore the original bytes and retain the existing provider repair/fail-closed behavior for
+      ambiguous input, write failure, or any remaining validation error.
+- [x] Add provider-free fixture, focused/stress regressions, diagnostics, and synchronized docs.
+- [ ] Pass full deterministic DoD, merge the remediation, and restart R3 from the new merge SHA.
 
 ### Non-goals
+- [x] Do not synthesize Architecture Home content or weaken section/content validation.
 - [x] Do not change schemas, HTTP API, provider contracts, retry budgets, or canonical matrices.
-- [x] Do not normalize or manually rewrite a provider manifest in the live harness.
-- [x] Do not expose matrix IDs, release verdicts, assessments, or live environment in product code.
+- [x] Do not expose matrix IDs, verdicts, assessments, or live-only environment to product code.
 
 ### Acceptance criteria
-- [x] A structurally valid manifest with a foreign task identity is rejected before step2.
-- [x] Focused provider repair can replace the manifest and pass the same strict validation.
-- [x] Existing manifest values and document content are not synthesized or normalized by ACP.
-- [x] Product/runtime boundary tests and full deterministic DoD pass.
+- [x] Exact inline-heading shape validates after deterministic normalization without provider repair.
+- [x] Original section bodies remain byte-for-byte equal apart from inserted Markdown separators.
+- [x] Partial, duplicate, out-of-order, empty, malformed, or multiply-invalid documents fail closed.
+- [x] Failed candidate validation leaves the original document byte-identical.
+- [x] Focused stress coverage and `make contracts/test/lint/build` pass.
 
 ### Progress log
-- 2026-07-20: Stopped `release-fast-20260720T104426Z` after the first run failure and isolated an
-  exact `artifact_root` identity mismatch while the authored document remained present under the
-  actual task write root. No live artifact was edited or copied into product behavior.
-- 2026-07-20: Added shared task-identity validation at the provider acceptance and orchestrator
-  materialization boundaries with a provider-free regression fixture.
-- 2026-07-20: Proved provider-authored repair 20/20, preserved selective-refresh baseline packs
-  byte-identically by validating them against their persisted authoring execution, and passed full
-  deterministic DoD: contracts, Go/API, 261 Python boundary tests, 142 UI tests, lint, and build.
+- 2026-07-20: Stopped `smoke-tiny-bank-20260720T122732Z` at the first product failure after collect
+  `10/10`; preserved the provider-authored output and confirmed that all eight substantive section
+  bodies were present inline after their required H2 labels.
+- 2026-07-20: Implemented provider-independent, atomic heading/body boundary recovery with strict
+  full-set revalidation, digest diagnostics and a tracked authored fixture. Focused recovery passed
+  20/20; full deterministic DoD passed with pinned Node `22.21.1`: contracts, Go/API/runtime,
+  261 Python boundary tests, 142 UI tests, lint/typecheck and embedded UI build.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

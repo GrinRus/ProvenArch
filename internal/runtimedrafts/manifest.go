@@ -449,16 +449,6 @@ func runtimeDraftTextHasTaskrunStagingReference(text string) bool {
 }
 
 func runtimeDraftArchitectureHomeMissingSections(text string) []string {
-	required := []string{
-		"System at a glance",
-		"Analyzed scope",
-		"Domains and ownership",
-		"Key flows",
-		"Integrations and datastores",
-		"Where to start",
-		"Safe-change guidance",
-		"Evidence gaps and open questions",
-	}
 	sections := map[string]bool{}
 	current := ""
 	for _, line := range strings.Split(text, "\n") {
@@ -472,7 +462,7 @@ func runtimeDraftArchitectureHomeMissingSections(text string) []string {
 		}
 	}
 	missing := make([]string, 0)
-	for _, heading := range required {
+	for _, heading := range architectureHomeRequiredSections {
 		if !sections[strings.ToLower(heading)] {
 			missing = append(missing, heading)
 		}

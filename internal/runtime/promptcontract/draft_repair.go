@@ -359,6 +359,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			fmt.Sprintf("- Exact required coverage summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "summary.md")),
 			fmt.Sprintf("- Exact required architect summary overwrite target: %q.", filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "architect-summary.md")),
 			"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+			"- Put each required Architecture Home heading on its own Markdown H2 line, then start the substantive body on following lines; never append body text to the heading line.",
 			"- Populate those Architecture Home sections with concrete repositories, paths, services/modules/integrations, or canonical artifact references; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 			"- Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root. If a candidate cannot be resolved, record the missing evidence category as a gap without publishing the missing path as evidence.",
 			"- In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths; staged evidence is an input only and operator navigation must use canonical reports/model/proposals paths or stable repo-relative references such as bank-of-anthos:src/frontend.",
@@ -608,6 +609,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 	}
 	lines = append(lines,
 		"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+		"- Put each required Architecture Home heading on its own Markdown H2 line, then start the substantive body on following lines; never append body text to the heading line.",
 		"- Populate those Architecture Home sections with concrete repo/path or canonical artifact references; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 		"- Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root. Unresolved candidates must be described as gaps, not published as evidence references.",
 		"- In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths; staged evidence is an input only and operator navigation must use canonical reports/model/proposals paths or stable repo-relative references such as bank-of-anthos:src/frontend.",
@@ -801,6 +803,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 		lines = append(lines,
 			"- For step2, overwrite overview.md, summary.md, and architect-summary.md.",
 			"- overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.",
+			"- Put each required Architecture Home heading on its own Markdown H2 line, then start the substantive body on following lines; never append body text to the heading line.",
 			"- Populate those Architecture Home sections with concrete repo/path or canonical artifact references; do not substitute generic headings such as Architecture Surface, Evidence Used, or Coverage Gaps.",
 			"- Every repo:path reference in overview.md must resolve to an existing file or directory under that repository's current read root. Unresolved candidates must be described as gaps, not published as evidence references.",
 			"- In overview.md, never publish reports/taskruns/**, taskrun staging paths, absolute runtime checkout paths, or .acp/repos paths; staged evidence is an input only and operator navigation must use canonical reports/model/proposals paths or stable repo-relative references such as bank-of-anthos:src/frontend.",

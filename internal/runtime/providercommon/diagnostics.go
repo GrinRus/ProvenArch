@@ -279,6 +279,27 @@ func emitCollectManifestDeterministicRecoveryFailedDiagnostic(task acpruntime.Ta
 	emitDiagnostic(task, "collect manifest runtime recovery failed", fields)
 }
 
+func emitArchitectureHomeInlineHeadingRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report architectureHomeInlineHeadingRecoveryReport) {
+	emitDiagnostic(task, "Architecture Home inline headings recovered", map[string]any{
+		"provider":            string(provider),
+		"recovery_mode":       architectureHomeInlineHeadingRecoveryMode,
+		"normalized_sections": append([]string(nil), report.NormalizedSections...),
+		"before_digest":       report.BeforeDigest,
+		"after_digest":        report.AfterDigest,
+	})
+}
+
+func emitArchitectureHomeInlineHeadingRecoveryFailedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"recovery_mode": architectureHomeInlineHeadingRecoveryMode,
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "Architecture Home inline heading recovery rejected", fields)
+}
+
 func emitFocusedArtifactRepairScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, mode string, stage string, snapshot artifactSnapshot, cause error) {
 	fields := snapshot.diagnosticFields()
 	fields["provider"] = string(provider)

@@ -42,6 +42,11 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
   only an empty array, atomically revalidate the complete artifact set, and restore the original
   bytes on any remaining defect. This does not authorize general artifact normalization or
   semantic synthesis and still requires manual artifact-quality acceptance.
+- The same non-semantic rule permits one Architecture Home Markdown correction only when all eight
+  exact required H2 labels and their non-empty authored bodies exist once in canonical order but
+  share physical lines. Runtime may insert only heading/body line boundaries, then must repeat the
+  complete strict draft validation and restore original bytes on any remaining defect. Partial or
+  ambiguous documents continue through provider-authored repair or fail closed.
 
 ## Follow-ups
 
