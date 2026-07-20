@@ -5,6 +5,51 @@ Closed ExecPlans archived from `docs/PLANS.md` in July 2026.
 This archive preserves implementation-complete plan evidence; residual trusted-host, live-quality, owner/admin and owner-decision workstreams remain active in `docs/PLANS.md`.
 
 ### Plan ID
+EP-20260720-epic18-architecture-home-concrete-evidence-refs
+
+### Context
+The clean post-remediation Codex qualification smoke `smoke-tiny-bank-20260720T143329Z` passed
+init/refresh, collect `10/10`, strict validation and the ProductShell frontend gate. The matrix still
+reported release-quality blockers because provider-authored Architecture Home drafts used
+`bank-of-anthos:.` and `bank-of-anthos:src/*`. Both are rejected by the existing public evidence
+contract, but normal and focused prompts described only "existing paths" and did not explicitly
+exclude repository-root shorthand or wildcard syntax. This is a product prompt-contract defect;
+the regression and remediation must remain provider-free and independent of live matrix identity.
+
+### Goals (must have)
+- [x] Require exact non-root repo:path references in normal, repair, compact and command-text step2
+      prompts; explicitly prohibit root shorthand and wildcard/glob syntax.
+- [x] Preserve strict validation and improve its deterministic diagnostics for those two invalid
+      reference classes without weakening containment, existence or symlink checks.
+- [x] Add the reduced authored fixture plus exact-valid/invalid validator and prompt-contract tests.
+- [x] Synchronize product/runtime/testing/live-gate docs and pass full deterministic DoD.
+- [x] Merge the remediation and restart R3 from the new clean merge commit.
+
+### Non-goals
+- [x] Do not rewrite or guess provider-authored evidence references.
+- [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
+- [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
+
+### Acceptance criteria
+- [x] `repo:.`, `repo:./` and wildcard/glob repo references are explicitly prohibited by every
+      step2 authoring/recovery prompt surface.
+- [x] Exact existing file/directory references continue to validate.
+- [x] Provider-free fixtures reproduce both live-observed invalid reference forms.
+- [x] Focused tests and `make contracts`, `make test`, `make lint`, `make build` pass.
+
+### Progress log
+- 2026-07-20: Stopped the release sequence after the new smoke passed machine/frontend gates but
+  reported `runtime_quality.repair_heavy` and `runtime_quality.stall_pressure`; taskrun diagnostics
+  isolated the causes to repository-root shorthand and wildcard Architecture Home references.
+- 2026-07-20: Added exact-path prompt contracts and deterministic validator diagnostics with a
+  reduced provider-free authored fixture. Focused exact/invalid reference coverage passed 20/20;
+  full deterministic DoD passed with 261 Python and 142 UI tests plus lint and embedded UI build.
+- 2026-07-20: PR #167 merged as `4caa5cd0`; the fresh qualification proved exact repository refs
+  on init and refresh, then exposed the separate first-pass runtime-narration defect.
+
+---
+
+### Plan ID
 
 EP-20260708-console-source-hydration-recovery
 

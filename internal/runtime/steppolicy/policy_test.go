@@ -618,6 +618,8 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`Never publish repository-root shorthand such as repo:. or repo:./, and never use glob or wildcard syntax such as repo:src/*`,
 		`Architecture Home must not use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording`,
 		`those execution details belong only in summary.md and architect-summary.md`,
+		`All three markdown targets must be operator-facing and marker-free on the first pass`,
+		`the same first filesystem command must scan all three completed markdown targets for those forbidden markers before it writes asis-draft-manifest.json`,
 		`AS-IS DRAFT MANIFEST SHAPE GUIDE:`,
 		`omit downstream index availability entirely`,
 		`"run_id": "run-1"`,
@@ -633,6 +635,7 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`summary.md and architect-summary.md contain the exact planned=<n> succeeded=<n> failed=<n> incomplete=<n> literal`,
 		`explicit no-shard-coverage-blocker statement that current-run shard coverage is not a blocker`,
 		`architect-summary.md says what is complete, what is missing, what the operator should inspect or decide next, and residual risk`,
+		`Before the manifest write, the same command checked overview.md, summary.md, and architect-summary.md case-insensitively`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(section, needle) {

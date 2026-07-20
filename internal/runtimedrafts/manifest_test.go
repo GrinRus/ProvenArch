@@ -648,6 +648,20 @@ func TestArchitectureHomeRejectsRuntimeNarration(t *testing.T) {
 	}
 }
 
+func TestRuntimeDraftRejectsFirstPassRuntimeNarrationOutsideArchitectureHome(t *testing.T) {
+	t.Parallel()
+
+	liveArchitectSummary := string(readRuntimeFixture(t, filepath.Join("contract-rejection", "codex_step2_bank_first_pass_runtime_narration_architect_summary.md")))
+	if !runtimeDraftTextBootstrapOnly(liveArchitectSummary) {
+		t.Fatalf("expected live-observed first-pass runtime narration to be rejected in architect summary")
+	}
+	cleanArchitectSummary := strings.ReplaceAll(liveArchitectSummary, "The first-pass as-is artifacts were built from a bounded evidence read of the staged shard area.", "The architecture summary covers the repository services and the remaining contract gaps.")
+	cleanArchitectSummary = strings.ReplaceAll(cleanArchitectSummary, "The runtime assembled the required report outputs for the current analysis run.", "The architecture reports identify the primary service boundaries and navigation paths.")
+	if runtimeDraftTextBootstrapOnly(cleanArchitectSummary) {
+		t.Fatalf("expected operator-facing architecture and gap language to remain valid")
+	}
+}
+
 func TestArchitectureHomeRejectsRuntimeCheckoutReference(t *testing.T) {
 	t.Parallel()
 

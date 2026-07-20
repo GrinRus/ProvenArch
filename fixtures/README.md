@@ -31,3 +31,5 @@ Provider-free runtime contract fixtures under `internal/runtime/testdata/contrac
 include reduced authored Architecture Home examples. The concrete-evidence case records invalid
 repository-root shorthand and wildcard references; tests reject them without importing matrix or
 live-harness state and retain exact existing file/directory references as the valid baseline.
+The step2 first-pass case separately records runtime/recovery narration in an architect summary;
+tests keep that content invalid while allowing equivalent operator-facing architecture and gap text.
