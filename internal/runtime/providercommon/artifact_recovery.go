@@ -138,6 +138,19 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 }
 
 func recoverFocusedArtifactRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
+	if report, attempted, recoveryErr := recoverArchitectureHomeInlineHeadings(task, func() error {
+		return adapter.ValidateArtifacts(task)
+	}, validationErr); attempted {
+		if recoveryErr == nil {
+			emitArchitectureHomeInlineHeadingRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+			return true, markArchitectureHomeInlineHeadingsRecovered(result, report), nil
+		}
+		emitArchitectureHomeInlineHeadingRecoveryFailedDiagnostic(task, adapter.Provider(), recoveryErr)
+		var unsafeRestore architectureHomeUnsafeRestoreError
+		if errors.As(recoveryErr, &unsafeRestore) {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, architectureHomeInlineHeadingRecoveryMode, "Architecture Home normalization could not restore original bytes", recoveryErr)
+		}
+	}
 	if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepair(ctx, task, adapter, result, validationErr, stage); recovered {
 		return true, recoveredResult, recoveredErr
 	}
