@@ -33,3 +33,7 @@ repository-root shorthand and wildcard references; tests reject them without imp
 live-harness state and retain exact existing file/directory references as the valid baseline.
 The step2 first-pass case separately records runtime/recovery narration in an architect summary;
 tests keep that content invalid while allowing equivalent operator-facing architecture and gap text.
+The normal step2 prompt-contract regression also remains provider-free: it forbids inline language
+generators and nested quoting before the complete write set exists, and requires one bounded read
+followed by direct single-quoted heredoc writes. Raw live command transcripts are diagnostic inputs,
+not tracked product fixtures or production behavior switches.

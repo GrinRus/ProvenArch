@@ -213,6 +213,10 @@ Output mapping rules:
 - normal step2 authoring writes all referenced Markdown first, verifies all three files are free of
   runtime/recovery narration, and writes the manifest last; this is content validation over the
   existing manifest shape, not an additional persisted field;
+- the normal provider-independent prompt allows at most one bounded evidence read/list command,
+  followed immediately by direct single-quoted heredoc writes. Inline language generators,
+  templates and nested quote construction are prohibited until the complete write set exists;
+  this changes execution guidance only and adds no schema field;
 - `step_contract="as_is"`
 - required canonical mappings:
   - `overview.md` -> `reports/as-is/overview.md`

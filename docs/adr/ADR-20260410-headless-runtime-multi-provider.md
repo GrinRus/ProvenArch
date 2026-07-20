@@ -51,6 +51,10 @@ ACP MVP runtime policy is **headless multi-provider + fake baseline**:
   names an exact existing non-root file or directory. Root shorthand and wildcard/glob tokens are
   rejected rather than guessed or normalized; prompts must direct providers to a concrete path or
   an explicit evidence gap.
+- Normal step2 command construction is also provider-independent: after at most one bounded evidence
+  read/list action, providers write the three Markdown files and manifest directly with literal shell
+  heredocs. ACP does not ask any provider to generate and execute a nested Python/Node/template
+  program as the normal artifact writer; strict backend validation remains the source of truth.
 
 ## Follow-ups
 
