@@ -104,8 +104,14 @@ func validateRepositoryReference(root string, relPath string) error {
 	if filepath.IsAbs(filepath.FromSlash(relPath)) {
 		return fmt.Errorf("path must be repository-relative")
 	}
+	if strings.ContainsAny(relPath, "*?") {
+		return fmt.Errorf("path must not contain glob or wildcard syntax")
+	}
 	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
-	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+	if cleanRel == "." {
+		return fmt.Errorf("repository-root shorthand is not a concrete evidence path")
+	}
+	if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes the repository root")
 	}
 	cleanRoot, err := filepath.Abs(filepath.Clean(root))

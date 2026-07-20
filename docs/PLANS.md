@@ -60,46 +60,45 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260720-epic18-architecture-home-inline-heading-repair
+EP-20260720-epic18-architecture-home-concrete-evidence-refs
 
 ### Context
-Qualification smoke from clean merge SHA `8889f059` completed collect `10/10`, then step2 rejected a
-substantive Architecture Home because the provider placed each required H2 label and its body on the
-same physical line. Markdown correctly parsed the entire line as a heading, so all eight canonical
-sections appeared missing and the subsequent provider enrichment stalled. This is a product-level
-document-shape defect exposed by live evidence; the regression and remediation must remain entirely
-provider-free and must not depend on matrix identity or live-harness state.
+The clean post-remediation Codex qualification smoke `smoke-tiny-bank-20260720T143329Z` passed
+init/refresh, collect `10/10`, strict validation and the ProductShell frontend gate. The matrix still
+reported release-quality blockers because provider-authored Architecture Home drafts used
+`bank-of-anthos:.` and `bank-of-anthos:src/*`. Both are rejected by the existing public evidence
+contract, but normal and focused prompts described only "existing paths" and did not explicitly
+exclude repository-root shorthand or wildcard syntax. This is a product prompt-contract defect;
+the regression and remediation must remain provider-free and independent of live matrix identity.
 
 ### Goals (must have)
-- [x] Recover only the exact shape where all required Architecture Home H2 labels occur once, in
-      canonical order, with non-empty inline bodies and no other contract error.
-- [x] Preserve authored body text, insert only the heading/body Markdown boundary, write atomically,
-      and repeat the complete strict draft validation.
-- [x] Restore the original bytes and retain the existing provider repair/fail-closed behavior for
-      ambiguous input, write failure, or any remaining validation error.
-- [x] Add provider-free fixture, focused/stress regressions, diagnostics, and synchronized docs.
-- [ ] Pass full deterministic DoD, merge the remediation, and restart R3 from the new merge SHA.
+- [x] Require exact non-root repo:path references in normal, repair, compact and command-text step2
+      prompts; explicitly prohibit root shorthand and wildcard/glob syntax.
+- [x] Preserve strict validation and improve its deterministic diagnostics for those two invalid
+      reference classes without weakening containment, existence or symlink checks.
+- [x] Add the reduced authored fixture plus exact-valid/invalid validator and prompt-contract tests.
+- [x] Synchronize product/runtime/testing/live-gate docs and pass full deterministic DoD.
+- [ ] Merge the remediation and restart R3 from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not synthesize Architecture Home content or weaken section/content validation.
-- [x] Do not change schemas, HTTP API, provider contracts, retry budgets, or canonical matrices.
-- [x] Do not expose matrix IDs, verdicts, assessments, or live-only environment to product code.
+- [x] Do not rewrite or guess provider-authored evidence references.
+- [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
+- [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
 
 ### Acceptance criteria
-- [x] Exact inline-heading shape validates after deterministic normalization without provider repair.
-- [x] Original section bodies remain byte-for-byte equal apart from inserted Markdown separators.
-- [x] Partial, duplicate, out-of-order, empty, malformed, or multiply-invalid documents fail closed.
-- [x] Failed candidate validation leaves the original document byte-identical.
-- [x] Focused stress coverage and `make contracts/test/lint/build` pass.
+- [x] `repo:.`, `repo:./` and wildcard/glob repo references are explicitly prohibited by every
+      step2 authoring/recovery prompt surface.
+- [x] Exact existing file/directory references continue to validate.
+- [x] Provider-free fixtures reproduce both live-observed invalid reference forms.
+- [x] Focused tests and `make contracts`, `make test`, `make lint`, `make build` pass.
 
 ### Progress log
-- 2026-07-20: Stopped `smoke-tiny-bank-20260720T122732Z` at the first product failure after collect
-  `10/10`; preserved the provider-authored output and confirmed that all eight substantive section
-  bodies were present inline after their required H2 labels.
-- 2026-07-20: Implemented provider-independent, atomic heading/body boundary recovery with strict
-  full-set revalidation, digest diagnostics and a tracked authored fixture. Focused recovery passed
-  20/20; full deterministic DoD passed with pinned Node `22.21.1`: contracts, Go/API/runtime,
-  261 Python boundary tests, 142 UI tests, lint/typecheck and embedded UI build.
+- 2026-07-20: Stopped the release sequence after the new smoke passed machine/frontend gates but
+  reported `runtime_quality.repair_heavy` and `runtime_quality.stall_pressure`; taskrun diagnostics
+  isolated the causes to repository-root shorthand and wildcard Architecture Home references.
+- 2026-07-20: Added exact-path prompt contracts and deterministic validator diagnostics with a
+  reduced provider-free authored fixture. Focused exact/invalid reference coverage passed 20/20;
+  full deterministic DoD passed with 261 Python and 142 UI tests plus lint and embedded UI build.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

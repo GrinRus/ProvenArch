@@ -672,6 +672,66 @@ func TestArchitectureHomeRejectsTaskrunStagingReference(t *testing.T) {
 	}
 }
 
+func TestArchitectureHomeRejectsNonConcreteRepositoryReferences(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src", "frontend"), 0o755); err != nil {
+		t.Fatalf("create repository fixture: %v", err)
+	}
+	draftRoot := t.TempDir()
+	fixture := readRuntimeFixture(t, filepath.Join("contract-rejection", "codex_step2_bank_nonconcrete_repo_refs_overview.md"))
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), fixture, 0o644); err != nil {
+		t.Fatalf("write Architecture Home fixture: %v", err)
+	}
+	manifest := Manifest{Outputs: []Output{{Path: "overview.md", CanonicalPath: "reports/as-is/overview.md"}}}
+	err := ValidateArchitectureHomeRepositoryReferences(draftRoot, manifest, map[string]string{"bank-of-anthos": repoRoot})
+	if err == nil {
+		t.Fatalf("expected root shorthand and wildcard repository references to fail")
+	}
+	for _, want := range []string{
+		`Architecture Home repository reference "bank-of-anthos:." is unavailable: repository-root shorthand is not a concrete evidence path`,
+		`Architecture Home repository reference "bank-of-anthos:src/*" is unavailable: path must not contain glob or wildcard syntax`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to include %s, got %v", want, err)
+		}
+	}
+}
+
+func TestArchitectureHomeAcceptsExactExistingRepositoryReferences(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, "src", "frontend"), 0o755); err != nil {
+		t.Fatalf("create repository fixture: %v", err)
+	}
+	draftRoot := t.TempDir()
+	content := strings.ReplaceAll(validArchitectureHomeFixture(), "posthog:services/", "bank-of-anthos:src/frontend")
+	if err := os.WriteFile(filepath.Join(draftRoot, "overview.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write Architecture Home fixture: %v", err)
+	}
+	manifest := Manifest{Outputs: []Output{{Path: "overview.md", CanonicalPath: "reports/as-is/overview.md"}}}
+	if err := ValidateArchitectureHomeRepositoryReferences(draftRoot, manifest, map[string]string{"bank-of-anthos": repoRoot}); err != nil {
+		t.Fatalf("expected exact existing repository reference to pass: %v", err)
+	}
+}
+
+func TestValidateRepositoryReferenceRejectsNonConcreteSyntax(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	for _, relPath := range []string{".", "./", "src/*", "src/?"} {
+		relPath := relPath
+		t.Run(relPath, func(t *testing.T) {
+			t.Parallel()
+			if err := validateRepositoryReference(repoRoot, relPath); err == nil {
+				t.Fatalf("expected %q to be rejected", relPath)
+			}
+		})
+	}
+}
+
 func TestProposalRejectsTaskrunStagingReference(t *testing.T) {
 	t.Parallel()
 
