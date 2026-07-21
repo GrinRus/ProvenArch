@@ -1642,9 +1642,45 @@ func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) boo
 	if strings.TrimSpace(stage) == "draft_artifact_enrichment_downstream_index_retry" || err == nil {
 		return false
 	}
+	problems := runtimeDraftValidationProblems(err)
+	if len(problems) == 0 {
+		return false
+	}
+	for _, problem := range problems {
+		if !isDraftDownstreamIndexClaimProblem(problem) {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimeDraftValidationProblems(err error) []string {
+	if err == nil {
+		return nil
+	}
 	text := err.Error()
-	return strings.Contains(text, "claims current-run final/citation indexes are unavailable") ||
-		strings.Contains(text, "claims current-run final-run-index has zero observed documents")
+	const marker = "runtime draft manifest outputs are invalid:"
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		return nil
+	}
+	text = strings.TrimSpace(text[idx+len(marker):])
+	if text == "" {
+		return nil
+	}
+	parts := strings.Split(text, "; ")
+	problems := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if problem := strings.TrimSpace(part); problem != "" {
+			problems = append(problems, problem)
+		}
+	}
+	return problems
+}
+
+func isDraftDownstreamIndexClaimProblem(problem string) bool {
+	return strings.Contains(problem, "claims current-run final/citation indexes are unavailable") ||
+		strings.Contains(problem, "claims current-run final-run-index has zero observed documents")
 }
 
 func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool {

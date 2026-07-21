@@ -3845,6 +3845,81 @@ func TestRunHeadlessProviderRetriesDraftEnrichmentArchitectureHomeCleanup(t *tes
 	}
 }
 
+func TestRunHeadlessProviderRoutesMixedStep2CleanupToArchitectureHomeFirst(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-mixed-cleanup")
+	task.StepID = "refresh.step2.asis_docs"
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	fixtureRoot, err := filepath.Abs(filepath.Join("..", "..", "..", "fixtures", "scenarios", "step2-mixed-recovery-routing"))
+	if err != nil {
+		t.Fatalf("resolve mixed cleanup fixture: %v", err)
+	}
+	mixedEnrichmentLines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"fixture_root=" + shellQuote(fixtureRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/asis-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+		"cp \"$fixture_root/overview.md\" \"$draft_root/overview.md\"",
+		"cp \"$fixture_root/summary.md\" \"$draft_root/summary.md\"",
+		"cp \"$fixture_root/architect-summary.md\" \"$draft_root/architect-summary.md\"",
+		"exit 0",
+	}
+	mixedEnrichmentScript := writeEngineScript(t, strings.Join(mixedEnrichmentLines, "\n")+"\n")
+	validScript := writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0"))
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: writeEngineScript(t, asIsBootstrapDraftScript(task, "exit 0")),
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{mixedEnrichmentScript, validScript},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected mixed step2 cleanup to recover, got %v", err)
+	}
+	expectedStageRaw, err := os.ReadFile(filepath.Join(fixtureRoot, "expected-recovery-stage.txt"))
+	if err != nil {
+		t.Fatalf("read expected recovery stage: %v", err)
+	}
+	expectedStage := strings.TrimSpace(string(expectedStageRaw))
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", expectedStage) {
+		t.Fatalf("expected %s retry stage, got %#v", expectedStage, diagnostics)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_stage", "draft_artifact_enrichment_downstream_index_retry") {
+		t.Fatalf("mixed validation failures must not use downstream-only retry, got %#v", diagnostics)
+	}
+}
+
+func TestShouldRetryDraftDownstreamIndexClaimEnrichmentRequiresOnlyIndexProblems(t *testing.T) {
+	t.Parallel()
+
+	pure := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "overview.md" claims current-run final/citation indexes are unavailable instead of omitting downstream index status; outputs[1].path "summary.md" claims current-run final-run-index has zero observed documents without validated zero-document evidence`)
+	if !shouldRetryDraftDownstreamIndexClaimEnrichment("draft_artifact_enrichment", pure) {
+		t.Fatal("expected homogeneous downstream-index failures to use focused retry")
+	}
+	mixed := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "overview.md" Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language; outputs[1].path "summary.md" claims current-run final/citation indexes are unavailable instead of omitting downstream index status`)
+	if shouldRetryDraftDownstreamIndexClaimEnrichment("draft_artifact_enrichment", mixed) {
+		t.Fatal("mixed validation failures must not use downstream-only retry")
+	}
+	unrelated := errors.New(`provider stopped after saying it claims current-run final/citation indexes are unavailable`)
+	if shouldRetryDraftDownstreamIndexClaimEnrichment("draft_artifact_enrichment", unrelated) {
+		t.Fatal("non-validation failures must not use downstream-only retry")
+	}
+}
+
 func TestRunHeadlessProviderAcceptsTargetedArchitectureHomeRewrite(t *testing.T) {
 	t.Parallel()
 
