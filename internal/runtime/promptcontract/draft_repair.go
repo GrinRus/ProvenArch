@@ -387,6 +387,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- If staged evidence is sparse, write the exact missing staged surface or shard coverage gap instead of keeping bootstrap scaffold.",
 			"- Final self-check: overview.md, summary.md, and architect-summary.md were freshly overwritten in this focused call, name concrete staged evidence or repo/path references when available, and contain none of the banned scaffold markers.",
 		)
+		lines = append(lines, steppolicy.ArchitectureHomeEvidenceReferenceLines(task)...)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			"- Enrich proposal and changelog drafts from validated staged findings, coverage gaps, questions, citations, and proposal candidates.",
@@ -430,6 +431,15 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		)
 	}
 	if validationErr != nil {
+		if draftEnrichmentValidationMentionsArchitectureHomeRepositoryReference(validationErr) {
+			lines = append(lines,
+				"ARCHITECTURE HOME EXACT-REFERENCE RETRY:",
+				"- The previous overview published a repo:path that is not available under the repository read root.",
+				"- Rewrite overview.md, summary.md, and architect-summary.md with one mechanically simple shell command using single-quoted literal heredocs; do not use Python, Node, Ruby, Perl, generated source strings, interpolation, or nested quote tricks.",
+				"- Remove the unavailable reference. Use only byte-for-byte repo:path values from the validated current-run allowlist above; never shorten a nested path to its basename or move it to the repository root.",
+				"- If no allowlisted reference supports a statement, keep the architectural statement conservative and record the evidence category as a gap without naming a guessed path.",
+			)
+		}
 		if draftEnrichmentValidationMentionsManifestShape(validationErr) {
 			lines = append(lines,
 				"DRAFT ENRICHMENT MANIFEST SHAPE RETRY:",
@@ -623,6 +633,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		"- Final markdown must not include scaffold or process markers: Runtime draft recovery initialized; Drafted required runtime artifacts for this step; Treat this as diagnostic evidence until; Use collected shard manifests; current draft manifest; manifest target remains; draft_final_root; bounded staged evidence; bounded evidence read; bounded read roots; recovery pass; enrichment read; bootstrap-only placeholder; placeholder draft content; replace placeholder; replacing placeholders.",
 		"- Final self-check inside the command: overview.md, summary.md, and architect-summary.md were freshly overwritten, have balanced backticks/fences, include current-run evidence or explicit gaps, and contain none of the banned markers.",
 	)
+	lines = append(lines, steppolicy.ArchitectureHomeEvidenceReferenceLines(task)...)
 	if validationErr != nil {
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
@@ -819,6 +830,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 			"- Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 		)
+		lines = append(lines, steppolicy.ArchitectureHomeEvidenceReferenceLines(task)...)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			"- For step4, overwrite proposal.md and changelog.md.",
@@ -932,6 +944,10 @@ func draftEnrichmentValidationMentionsShardStatusCleanup(err error) bool {
 		strings.Contains(text, "claims staging shard evidence is empty") ||
 		strings.Contains(text, "does not include concrete repo/path, citation, or staged artifact evidence references") ||
 		strings.Contains(text, "does not include a decision-ready operator summary")
+}
+
+func draftEnrichmentValidationMentionsArchitectureHomeRepositoryReference(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Architecture Home repository reference")
 }
 
 func draftEnrichmentShardStatusCleanupFocusTarget(err error) string {

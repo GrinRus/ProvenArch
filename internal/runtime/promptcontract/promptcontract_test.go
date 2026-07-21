@@ -10,6 +10,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/runtime/steppolicy"
 )
 
 func TestComposeArtifactOnlyPromptKeepsSharedOrderAcrossProviders(t *testing.T) {
@@ -2043,6 +2044,61 @@ func TestComposeDraftArtifactEnrichmentPromptKeepsArchitectureHomeContractInStep
 		if !strings.Contains(prompt, token) {
 			t.Fatalf("expected step2 command-text retry prompt to contain %q, got:\n%s", token, prompt)
 		}
+	}
+}
+
+func TestComposeDraftArtifactEnrichmentPromptUsesLiteralExactReferenceRetry(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runID := "run-step2-exact-reference"
+	finalRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	manifestRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "shards", "ledger")
+	if err := os.MkdirAll(manifestRoot, 0o755); err != nil {
+		t.Fatalf("mkdir manifest root: %v", err)
+	}
+	collectTask := acpruntime.Task{
+		RunID:        runID,
+		StepID:       "init.step1.collect",
+		ArtifactRoot: filepath.ToSlash(manifestRoot),
+		RepoScopes:   []string{"bank-of-anthos"},
+		PathScopes:   []string{"src/ledger"},
+		ShardID:      "ledger",
+		DomainID:     "ledger",
+		AgentRole:    "shard-analyst",
+	}
+	raw := steppolicy.CollectManifestTaskSkeleton(collectTask, []string{"ledger-overview.md"}, []string{"src/ledger/cloudbuild.yaml"})
+	if err := os.WriteFile(filepath.Join(manifestRoot, "shard-pack-manifest.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:            runID,
+		StepID:           "init.step2.asis_docs",
+		StepContract:     "as_is",
+		Workspace:        workspace,
+		WriteRoot:        filepath.Join(workspace, "reports", "taskruns", runID, "runtime", "step2_as_is"),
+		DraftFinalRoot:   finalRoot,
+		ReadContextRoots: []string{finalRoot},
+		AgentRole:        "architect",
+	}
+	prompt := ComposeDraftArtifactEnrichmentPrompt(
+		acpruntime.ProviderClaudeCode,
+		task,
+		errors.New(`Architecture Home repository reference "bank-of-anthos:cloudbuild.yaml" is unavailable`),
+	)
+	for _, want := range []string{
+		"ARCHITECTURE HOME EXACT-REFERENCE RETRY:",
+		"`bank-of-anthos:src/ledger/cloudbuild.yaml`",
+		"single-quoted literal heredocs",
+		"do not use Python, Node, Ruby, Perl",
+		"never shorten a nested path to its basename",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected exact-reference repair prompt to contain %q, got:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "`bank-of-anthos:cloudbuild.yaml`") {
+		t.Fatalf("repair prompt must not allow inferred root basename:\n%s", prompt)
 	}
 }
 
