@@ -330,7 +330,7 @@ func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool 
 	validationError := diagnosticFieldString(fields, "validation_error")
 	switch message {
 	case "retry scheduled":
-		return action == "terminate_and_validate"
+		return action == "terminate_and_validate" && !diagnosticArtifactValid(fields)
 	case "retry exhausted":
 		return true
 	case "retry completed":
@@ -360,6 +360,10 @@ func diagnosticArtifactValid(fields map[string]any) bool {
 		return true
 	}
 	switch diagnosticFieldString(fields, "artifact_state") {
+	case "valid", "succeeded", "success":
+		return true
+	}
+	switch diagnosticFieldString(fields, "manifest_state") {
 	case "valid", "succeeded", "success":
 		return true
 	default:

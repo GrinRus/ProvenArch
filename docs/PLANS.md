@@ -60,47 +60,48 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260720-epic18-step2-direct-literal-first-pass
+EP-20260721-epic18-valid-artifact-stall-accounting
 
 ### Context
-The clean post-PR #168 qualification `smoke-tiny-bank-20260720T201011Z` completed init collect
-`10/10`, but `init.step2.asis_docs` exhausted five focused repairs and failed the runtime contract.
-The first provider command tried to combine evidence discovery, content generation, marker cleanup and
-four artifact writes in one large inline Python program. A nested f-string quote produced a
-`SyntaxError`, so the normal turn never authored the required files and recovery started from the
-bootstrap draft. This is a provider-independent product prompt-contract defect: the normal contract
-encouraged a generated program and required the complete read/write lifecycle in one command.
+The clean post-PR #169 qualification `smoke-tiny-bank-20260720T214844Z` completed init and refresh,
+both collect phases reached `10/10`, ProductShell frontend inspection passed and the machine verdict
+was strict `PASS`. R3 still stopped because both run quality summaries emitted
+`runtime_quality.stall_pressure`: each provider lifecycle stop after valid artifacts was correctly
+counted as `valid_artifact_controlled_stops`, then the paired `retry scheduled` event was counted a
+second time as an actual post-artifact stall. The paired event carries `manifest_state=valid`; this
+is a product telemetry classification defect independent of the live harness or provider identity.
 
 ### Goals (must have)
-- [x] Split normal step2 startup into at most one bounded evidence read/list command followed
-      immediately by one mechanically simple direct-literal write command.
-- [x] Require single-quoted heredocs for all four first-pass artifacts and prohibit Python, Node,
-      Ruby, Perl, awk, jq, template programs and nested quote tricks before the write set exists.
-- [x] Preserve manifest-last ordering, marker checks, exact shard counts and strict validation.
+- [x] Treat `retry scheduled / terminate_and_validate` with valid `manifest_state` as the paired
+      completion of a valid-artifact controlled stop, not independent stall pressure.
+- [x] Keep invalid, missing and pre-artifact terminate/validate events as actual stall pressure.
+- [x] Add provider-free regression coverage for the exact paired event sequence.
 - [x] Pass focused stress and the full deterministic DoD.
 - [ ] Merge the remediation and restart R3 from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not synthesize or sanitize provider-authored architecture prose in ACP.
-- [x] Do not change schemas, HTTP APIs, provider contracts, timeouts or canonical matrices.
-- [x] Do not expose matrix IDs, verdicts, assessments or live-only environment to product code.
-- [x] Do not reuse the failed smoke as qualification or release evidence.
+- [x] Do not change provider timeout/retry policy, artifact validation or canonical matrices.
+- [x] Do not add matrix IDs, release verdicts, assessments or live-only environment to product code.
+- [x] Do not accept invalid artifacts or suppress genuine no-artifact/invalid-artifact stalls.
+- [x] Do not reuse this diagnostic smoke as qualification or release evidence.
 
 ### Acceptance criteria
-- [x] Normal Claude/Qwen/Codex step2 prompts are provider-independent and require the same
-      direct-literal first-pass contract.
-- [x] Provider-free prompt tests reject the inline-program path while preserving bounded evidence
-      reads, direct heredocs, manifest-last order and strict self-checks.
-- [x] Focused tests pass repeatedly and `make contracts`, `make test`, `make lint`, `make build` pass.
+- [x] A valid provider-command stop plus its valid terminate/validate event produces one
+      `valid_artifact_controlled_stop`, zero stalls and no `runtime_quality.stall_pressure`.
+- [x] The same terminate/validate event with invalid/empty artifact state still produces
+      post-artifact stall pressure.
+- [x] Existing runtime-quality and batch-report regressions remain green.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
 
 ### Progress log
-- 2026-07-20: Stopped R3 after strict smoke failure. Machine evidence reported
-  `runtime_contract_failed`, `repair_exhausted=1`, five step2 repair attempts and nine actual stalls.
-  Raw provider output showed the first filesystem command exited with an inline Python
-  `SyntaxError`; main `ff140f44` and the pinned Bank checkout remained clean and unchanged.
-- 2026-07-20: Replaced the monolithic-command guidance with the provider-independent bounded-read
-  then direct-literal-write sequence. Focused prompt suites passed 20 consecutive runs; full DoD
-  passed with 261 Python and 142 UI tests, exact Node 22.21.1/npm 10.9.4, lint and embedded UI build.
+- 2026-07-21: Stopped R3 after the strict smoke PASS because its qualitative gate remained
+  review-needed. Public taskrun logs proved five valid provider-command controlled stops and five
+  paired terminate/validate events; totals incorrectly reported both `stall_count=5` and
+  `valid_artifact_controlled_stops=5`. Product main and the pinned Bank checkout remained clean.
+- 2026-07-21: Runtime-quality accounting now recognizes `manifest_state=valid` on the paired
+  terminate/validate event. The exact valid/invalid event regressions passed 20 repetitions, and
+  the full deterministic DoD passed with Go 1.25.10, Node 22.21.1, npm 10.9.4, 261 Python tests and
+  142 UI tests. No provider, live harness or network dependency is used by this regression.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair
