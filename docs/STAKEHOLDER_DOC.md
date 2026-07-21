@@ -34,15 +34,14 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence. Standalone
-  remediations for Claude collect shape, ProductShell live selectors, proposal staging-path leakage,
-  changed-error Architecture Home cleanup and empty draft-sidecar rollback are merged. Post-merge
-  Claude smoke `smoke-tiny-bank-20260719T042213Z` completed init and refresh collect `10/10` and
-  both pipelines succeeded, but strict matrix aggregation exposed three release-gate defects: a
-  mixed run inventory selected an older final index in ProductShell, the live flow required an
-  optional diagram artifact, and substantive secret-replacement guidance triggered the generic
-  placeholder heuristic. The active narrow remediation preserves strict run/path validation and
-  promoted-evidence quality checks; this failed smoke is not reusable release evidence.
+- release blocker: Epic 18 R3 trusted-machine composite evidence. ProductShell/snapshot,
+  artifact-quality and step2 first-pass remediations are merged through PR #169. Clean Codex smoke
+  `smoke-tiny-bank-20260720T214844Z` completed init and refresh collect `10/10`, both pipelines and
+  ProductShell frontend inspection passed, and the machine result was strict `PASS`. Qualification
+  still stopped because runtime-quality telemetry double-counted each valid-artifact controlled
+  stop through its paired `retry scheduled / terminate_and_validate` event. The active narrow,
+  provider-free remediation fixes that general lifecycle invariant; after merge the full R3
+  sequence restarts from the new clean commit. No stopped smoke is reusable release evidence.
 - out of MVP: 12, 13
 
 ---

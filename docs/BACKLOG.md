@@ -358,23 +358,17 @@ Suggested PR slices:
 
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
-Status (2026-07-17): deterministic boundary/quality remediation is complete; trusted-machine R3
-release evidence remains open and is the only release-readiness blocker after Epic 21. The
-artifact-readiness remediation is merged at `57155786`, and fresh Codex smoke
-`smoke-tiny-bank-20260716T165233Z` passed with strict failures `0` and init/refresh collect
-`10/10`. Standalone `release-fast-20260716T185527Z` then stopped before product execution:
-`qwen --version` passed, but the single canonical runtime-like artifact smoke did not create the
-exact sentinel and correctly produced `operational_host_preflight_failed`. Release long/full and
-accepted evidence remain blocked until Qwen artifact readiness succeeds on this or another trusted
-host and the complete R3 sequence is repeated from one clean commit. A later standalone
-`release-fast-20260717T114416Z` passed Qwen collection and exposed a product contract-shape defect
-in Claude collection; its bounded missing-findings remediation and the ProductShell live-gate
-alignment are now merged. Proposal staging-path leakage found by promoted-evidence review was also
-fixed in PR #160. Post-merge Claude smoke `smoke-tiny-bank-20260718T210050Z` completed init and
-refresh collect `10/10`, then failed because a focused step2 rewrite fixed invalid repo refs but
-left `scoped to the current run` in Architecture Home and had no bounded changed-error cleanup.
-That narrow recovery remediation must merge before the complete sequence restarts; no evidence
-from stopped matrices is accepted.
+Status (2026-07-21): trusted-machine R3 release evidence remains open and is the only
+release-readiness blocker after Epic 21. ProductShell/snapshot, artifact-quality and step2
+first-pass remediations are merged through PR #169. Clean Codex smoke
+`smoke-tiny-bank-20260720T214844Z` completed init and refresh collect `10/10`, both pipelines and
+ProductShell frontend inspection passed, and the machine result was strict `PASS`. Qualification
+still stopped because runtime-quality telemetry counted five valid-artifact controlled stops and
+then counted the same five paired `retry scheduled / terminate_and_validate` events as
+`stall_pressure`. The active provider-free remediation makes valid `manifest_state` part of the
+single controlled-stop lifecycle while preserving invalid/missing artifact stalls. After merge the
+complete R3 sequence restarts from the new clean commit; no evidence from stopped matrices is
+accepted.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape

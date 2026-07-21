@@ -48,6 +48,26 @@ Home. These are ordinary operator-document contract defects, independent of live
 
 ---
 
+## EP-20260720-epic18-step2-direct-literal-first-pass
+
+### Context
+- Clean qualification `smoke-tiny-bank-20260720T201011Z` completed init collect `10/10`, then
+  `init.step2.asis_docs` exhausted five repairs after a provider-authored inline Python generator
+  failed with a nested f-string `SyntaxError` before producing the required write set.
+
+### Results
+- Normal step2 startup now permits at most one bounded evidence read/list command and immediately
+  requires one mechanically simple direct-literal single-quoted-heredoc write of all Markdown
+  targets, marker check and manifest-last output.
+- Provider-free prompt regressions preserve the same Claude/Qwen/Codex contract and prohibit inline
+  generators, templates and nested quote tricks before the complete write set exists.
+- Focused tests passed 20 consecutive runs and full deterministic DoD passed with Go 1.25.10,
+  Node 22.21.1, npm 10.9.4, 261 Python tests and 142 UI tests.
+- Merged as PR #169. The next clean smoke completed init and refresh step2 on the normal first pass
+  with zero repairs; R3 then stopped on a separate valid-artifact stall-accounting defect.
+
+---
+
 ### Plan ID
 EP-20260720-epic18-architecture-home-concrete-evidence-refs
 

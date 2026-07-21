@@ -137,6 +137,14 @@ func TestRuntimeDiagnosticCountersIgnoreValidArtifactControlledStop(t *testing.T
 		},
 	})
 	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "retry scheduled",
+		Fields: map[string]any{
+			"action":         "terminate_and_validate",
+			"stall_phase":    "post_artifact",
+			"manifest_state": "valid",
+		},
+	})
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
 		Message: "focused artifact repair completed",
 		Fields: map[string]any{
 			"recovery_mode": "draft_artifact_enrichment",
@@ -153,6 +161,32 @@ func TestRuntimeDiagnosticCountersIgnoreValidArtifactControlledStop(t *testing.T
 	}
 	if signals := runtimeRecoveryQualitySignals(counters, 0); hasRunQualitySignal(signals, "runtime_quality.stall_pressure") {
 		t.Fatalf("valid controlled stop must not emit stall pressure: %#v", signals)
+	}
+}
+
+func TestRuntimeDiagnosticCountersKeepInvalidTerminateAndValidateAsStallPressure(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{}
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "retry scheduled",
+		Fields: map[string]any{
+			"action":           "terminate_and_validate",
+			"stall_phase":      "post_artifact",
+			"manifest_state":   "invalid",
+			"validation_error": "manifest contract failed",
+		},
+	})
+
+	counters := execution.runtimeRecoveryCounters
+	if counters.StallCount != 1 || counters.PostArtifactStalls != 1 {
+		t.Fatalf("invalid post-artifact stop must remain stall pressure: %+v", counters)
+	}
+	if counters.ValidArtifactControlledStops != 0 {
+		t.Fatalf("invalid artifact must not count as a valid controlled stop: %+v", counters)
+	}
+	if signals := runtimeRecoveryQualitySignals(counters, 0); !hasRunQualitySignal(signals, "runtime_quality.stall_pressure") {
+		t.Fatalf("invalid post-artifact stop must emit stall pressure: %#v", signals)
 	}
 }
 
