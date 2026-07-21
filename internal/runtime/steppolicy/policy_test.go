@@ -746,6 +746,56 @@ func TestDocFirstFilesystemPolicyIncludesCurrentRunEvidenceIndex(t *testing.T) {
 	}
 }
 
+func TestArchitectureHomeEvidenceReferenceLinesUseExactCurrentRunManifestPaths(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runID := "run-architecture-home-refs"
+	finalRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "final")
+	manifestRoot := filepath.Join(workspace, "reports", "taskruns", runID, "staging", "shards", "ledger")
+	if err := os.MkdirAll(manifestRoot, 0o755); err != nil {
+		t.Fatalf("mkdir manifest root: %v", err)
+	}
+	task := acpruntime.Task{
+		RunID:            runID,
+		StepID:           "init.step2.asis_docs",
+		Workspace:        workspace,
+		ReadContextRoots: []string{finalRoot},
+	}
+	collectTask := acpruntime.Task{
+		RunID:        runID,
+		StepID:       "init.step1.collect",
+		ArtifactRoot: filepath.ToSlash(manifestRoot),
+		RepoScopes:   []string{"bank-of-anthos"},
+		PathScopes:   []string{"src/ledger"},
+		ShardID:      "ledger",
+		DomainID:     "ledger",
+		AgentRole:    "shard-analyst",
+	}
+	raw := CollectManifestTaskSkeleton(collectTask, []string{"ledger-overview.md"}, []string{"src/ledger/cloudbuild.yaml"})
+	if err := os.WriteFile(filepath.Join(manifestRoot, "shard-pack-manifest.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got := strings.Join(ArchitectureHomeEvidenceReferenceLines(task), "\n")
+	for _, want := range []string{
+		"Validated current-run repository evidence reference allowlist",
+		"`bank-of-anthos:src/ledger/cloudbuild.yaml`",
+		"copied exactly from it",
+		"Do not shorten paths, move path components, substitute a basename",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected exact-reference guidance %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "`bank-of-anthos:cloudbuild.yaml`") {
+		t.Fatalf("must not infer a repository-root basename from nested evidence:\n%s", got)
+	}
+	if got2 := strings.Join(ArchitectureHomeEvidenceReferenceLines(task), "\n"); got2 != got {
+		t.Fatalf("expected deterministic evidence reference guidance\nfirst:\n%s\nsecond:\n%s", got, got2)
+	}
+}
+
 func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,19 @@ Closed ExecPlans archived from `docs/PLANS.md` in July 2026.
 This archive preserves implementation-complete plan evidence; residual trusted-host, live-quality, owner/admin and owner-decision workstreams remain active in `docs/PLANS.md`.
 
 ### Plan ID
+EP-20260721-epic18-valid-artifact-stall-accounting
+
+### Result
+- PR #170 merged at `a99f3099` and made paired `retry scheduled / terminate_and_validate` with
+  `manifest_state=valid` part of the single valid-artifact controlled-stop lifecycle.
+- Invalid/missing artifacts remain actual stall pressure. Exact valid/invalid provider-free
+  regressions passed 20 repetitions and the full deterministic DoD passed.
+- Clean qualification `smoke-tiny-bank-20260721T004350Z` confirmed the accounting fix: five valid
+  controlled stops were no longer counted as stalls; only two actual invalid/repair stalls remained.
+
+---
+
+### Plan ID
 EP-20260720-epic18-step2-first-pass-marker-free
 
 ### Context

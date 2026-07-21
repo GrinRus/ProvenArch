@@ -34,14 +34,14 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence. ProductShell/snapshot,
-  artifact-quality and step2 first-pass remediations are merged through PR #169. Clean Codex smoke
-  `smoke-tiny-bank-20260720T214844Z` completed init and refresh collect `10/10`, both pipelines and
-  ProductShell frontend inspection passed, and the machine result was strict `PASS`. Qualification
-  still stopped because runtime-quality telemetry double-counted each valid-artifact controlled
-  stop through its paired `retry scheduled / terminate_and_validate` event. The active narrow,
-  provider-free remediation fixes that general lifecycle invariant; after merge the full R3
-  sequence restarts from the new clean commit. No stopped smoke is reusable release evidence.
+- release blocker: Epic 18 R3 trusted-machine composite evidence. PR #170 fixed valid-artifact
+  stall accounting and clean smoke `smoke-tiny-bank-20260721T004350Z` confirmed only actual invalid/
+  repair events remain stalls. That qualification stopped at init step2 after collect `10/10`:
+  provider-authored Architecture Home shortened nested evidence to unavailable root
+  `bank-of-anthos:cloudbuild.yaml`, then focused repair emitted invalid inline Python. The active
+  provider-free remediation exposes exact current-run repo/path identities and requires literal
+  missing-reference repair without changing strict validation or live/product boundaries. The full
+  R3 sequence restarts after merge; stopped matrices are not reusable evidence.
 - out of MVP: 12, 13
 
 ---

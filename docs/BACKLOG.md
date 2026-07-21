@@ -359,16 +359,14 @@ Suggested PR slices:
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
 Status (2026-07-21): trusted-machine R3 release evidence remains open and is the only
-release-readiness blocker after Epic 21. ProductShell/snapshot, artifact-quality and step2
-first-pass remediations are merged through PR #169. Clean Codex smoke
-`smoke-tiny-bank-20260720T214844Z` completed init and refresh collect `10/10`, both pipelines and
-ProductShell frontend inspection passed, and the machine result was strict `PASS`. Qualification
-still stopped because runtime-quality telemetry counted five valid-artifact controlled stops and
-then counted the same five paired `retry scheduled / terminate_and_validate` events as
-`stall_pressure`. The active provider-free remediation makes valid `manifest_state` part of the
-single controlled-stop lifecycle while preserving invalid/missing artifact stalls. After merge the
-complete R3 sequence restarts from the new clean commit; no evidence from stopped matrices is
-accepted.
+release-readiness blocker after Epic 21. PR #170 fixed valid-artifact stall accounting. Clean
+qualification `smoke-tiny-bank-20260721T004350Z` confirmed the fix and reached init collect `10/10`,
+but stopped at step2 because Architecture Home shortened observed nested evidence
+`src/ledger/cloudbuild.yaml` to unavailable root `cloudbuild.yaml`; focused repair then emitted an
+unterminated inline Python string. The active provider-free remediation gives every step2 prompt
+path a deterministic allowlist of exact current-run repo/path identities and requires direct
+literal missing-reference repair. Strict validation remains unchanged. After merge the complete R3
+sequence restarts from the new clean commit; no evidence from stopped matrices is accepted.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape

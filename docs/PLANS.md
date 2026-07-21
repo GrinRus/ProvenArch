@@ -60,48 +60,51 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260721-epic18-valid-artifact-stall-accounting
+EP-20260721-epic18-step2-exact-evidence-references
 
 ### Context
-The clean post-PR #169 qualification `smoke-tiny-bank-20260720T214844Z` completed init and refresh,
-both collect phases reached `10/10`, ProductShell frontend inspection passed and the machine verdict
-was strict `PASS`. R3 still stopped because both run quality summaries emitted
-`runtime_quality.stall_pressure`: each provider lifecycle stop after valid artifacts was correctly
-counted as `valid_artifact_controlled_stops`, then the paired `retry scheduled` event was counted a
-second time as an actual post-artifact stall. The paired event carries `manifest_state=valid`; this
-is a product telemetry classification defect independent of the live harness or provider identity.
+After PR #170 fixed valid-artifact stall accounting, clean qualification
+`smoke-tiny-bank-20260721T004350Z` reached init collect `10/10` and reported only actual invalid/
+repair stalls. `init.step2.asis_docs` then failed closed because the provider shortened the observed
+nested evidence path `src/ledger/cloudbuild.yaml` to unavailable root `cloudbuild.yaml`; focused
+repair subsequently emitted an unterminated inline Python string. This is a general evidence-
+identity and command-construction defect, not live-harness behavior.
 
 ### Goals (must have)
-- [x] Treat `retry scheduled / terminate_and_validate` with valid `manifest_state` as the paired
-      completion of a valid-artifact controlled stop, not independent stall pressure.
-- [x] Keep invalid, missing and pre-artifact terminate/validate events as actual stall pressure.
-- [x] Add provider-free regression coverage for the exact paired event sequence.
+- [x] Build a deterministic bounded allowlist from exact repo/path identities in valid current-run
+      shard-manifest citations and semantic provenance.
+- [x] Put the same allowlist and no-shortening rule in normal, repair, enrichment, compact and
+      command-text step2 prompt paths.
+- [x] Require repository-reference repair to use direct literal heredocs rather than inline
+      generated programs.
+- [x] Preserve the Bank-shaped nested-path failure in provider-free regressions.
 - [x] Pass focused stress and the full deterministic DoD.
 - [ ] Merge the remediation and restart R3 from the new clean merge commit.
 
 ### Non-goals
-- [x] Do not change provider timeout/retry policy, artifact validation or canonical matrices.
-- [x] Do not add matrix IDs, release verdicts, assessments or live-only environment to product code.
-- [x] Do not accept invalid artifacts or suppress genuine no-artifact/invalid-artifact stalls.
-- [x] Do not reuse this diagnostic smoke as qualification or release evidence.
+- [x] Do not synthesize or rewrite Architecture Home prose in ACP.
+- [x] Do not weaken strict repository-reference validation or accept guessed paths.
+- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry policy or matrices.
+- [x] Do not add live matrix identity or environment behavior to product code/tests.
 
 ### Acceptance criteria
-- [x] A valid provider-command stop plus its valid terminate/validate event produces one
-      `valid_artifact_controlled_stop`, zero stalls and no `runtime_quality.stall_pressure`.
-- [x] The same terminate/validate event with invalid/empty artifact state still produces
-      post-artifact stall pressure.
-- [x] Existing runtime-quality and batch-report regressions remain green.
-- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+- [x] Exact nested citation `bank-of-anthos:src/ledger/cloudbuild.yaml` appears in guidance while
+      inferred `bank-of-anthos:cloudbuild.yaml` does not.
+- [x] Allowlist output is deterministic and ignores invalid/foreign-run manifests.
+- [x] Missing-reference focused repair forbids Python/Node/template assembly and requires literal
+      writes plus full strict revalidation.
+- [ ] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
 
 ### Progress log
-- 2026-07-21: Stopped R3 after the strict smoke PASS because its qualitative gate remained
-  review-needed. Public taskrun logs proved five valid provider-command controlled stops and five
-  paired terminate/validate events; totals incorrectly reported both `stall_count=5` and
-  `valid_artifact_controlled_stops=5`. Product main and the pinned Bank checkout remained clean.
-- 2026-07-21: Runtime-quality accounting now recognizes `manifest_state=valid` on the paired
-  terminate/validate event. The exact valid/invalid event regressions passed 20 repetitions, and
-  the full deterministic DoD passed with Go 1.25.10, Node 22.21.1, npm 10.9.4, 261 Python tests and
-  142 UI tests. No provider, live harness or network dependency is used by this regression.
+- 2026-07-21: Stopped the failed matrix immediately after step2. Product and pinned Bank trees
+  remained clean; the failed matrix is not reusable release evidence.
+- 2026-07-21: Added exact current-run evidence-reference guidance and provider-free prompt tests;
+  strict artifact validation remains unchanged and authoritative.
+- 2026-07-21: New step-policy/prompt regressions passed 20 repetitions; the complete required DoD
+  passed with Go 1.25.10, Node 22.21.1, npm 10.9.4, 261 Python tests and 142 UI tests. A deliberately
+  over-broad 20x run of the entire long providercommon package reached its aggregate 10-minute
+  test timeout; the package passed normally in both full DoD runs, so no unrelated runtime/test
+  budget was changed.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

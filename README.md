@@ -32,7 +32,9 @@ architecture workspace. LLM/runtime drafts remain staged, orchestrator validates
 human review принимает решения, а Git хранит accepted architecture knowledge.
 
 `reports/as-is/overview.md` является каноническим Architecture Home: он ведёт к областям,
-потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Каждый
+потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Repository evidence
+сохраняет точные `<repo>:<path>` identities из валидированных current-run citations/provenance;
+неразрешимый или неподтверждённый путь остаётся gap, а не guessed navigation link. Каждый
 `init|refresh` также сохраняет `source-revisions.json`; `refresh` дополнительно пишет
 schema-validated `refresh-impact-plan.json`, `refresh-execution.json` и `refresh-materialization.json`.
 Безопасный unchanged/out-of-scope refresh завершается без provider и canonical rewrites; selective

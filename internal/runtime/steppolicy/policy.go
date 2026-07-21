@@ -701,6 +701,7 @@ func currentRunEvidenceIndexLines(task acpruntime.Task, kind currentRunEvidenceK
 			`- If typed shard completeness shows failed=0 and incomplete=0, summary.md and architect-summary.md must include an explicit no-shard-coverage-blocker statement that says current-run shard coverage is not a blocker and must not include generic failed/incomplete caveats.`,
 			`- overview.md and architect-summary.md must cite concrete repo/path or staged citation/index references from the current run, not generic scaffold language.`,
 		)
+		lines = append(lines, ArchitectureHomeEvidenceReferenceLines(task)...)
 	} else {
 		lines = append(lines,
 			fmt.Sprintf(`- Exact current-run findings source: reports/taskruns/%s/staging/final/reports/findings/findings.md. Read that file when present and copy at least one exact finding ID into proposal.md and changelog.md when findings are non-empty.`, runID),
@@ -713,6 +714,80 @@ func currentRunEvidenceIndexLines(task acpruntime.Task, kind currentRunEvidenceK
 		}
 	}
 	return lines
+}
+
+// ArchitectureHomeEvidenceReferenceLines exposes only exact repo:path identities
+// already present in valid current-run shard manifests. It is prompt guidance,
+// not an artifact rewrite or a substitute for strict draft validation.
+func ArchitectureHomeEvidenceReferenceLines(task acpruntime.Task) []string {
+	references := architectureHomeEvidenceReferences(task, 64)
+	if len(references) == 0 {
+		return []string{
+			"- No validated current-run repository evidence reference allowlist was available. Resolve every repo:path against the repository read root before publishing it; otherwise describe the evidence category as a gap without naming a guessed path.",
+		}
+	}
+	lines := []string{
+		"- Validated current-run repository evidence reference allowlist (copy repo:path values byte-for-byte when citing repository evidence in overview.md):",
+	}
+	for _, reference := range references {
+		lines = append(lines, "  - `"+reference+"`")
+	}
+	lines = append(lines,
+		"- When this allowlist is present, every repo:path reference in overview.md must be copied exactly from it. Do not shorten paths, move path components, substitute a basename, or infer a sibling/root file.",
+		"- If the needed evidence is not in the allowlist, describe the missing evidence category as a gap without publishing a guessed repo:path.",
+	)
+	return lines
+}
+
+func architectureHomeEvidenceReferences(task acpruntime.Task, limit int) []string {
+	runID := strings.TrimSpace(task.RunID)
+	seen := map[string]struct{}{}
+	references := []string{}
+	add := func(repo, path string) {
+		repo = strings.TrimSpace(repo)
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if repo == "" || path == "" {
+			return
+		}
+		reference := repo + ":" + path
+		if _, ok := seen[reference]; ok {
+			return
+		}
+		seen[reference] = struct{}{}
+		references = append(references, reference)
+	}
+	addProvenance := func(provenance contracts.Provenance) {
+		for _, evidence := range provenance.Evidence {
+			add(evidence.Repo, evidence.Path)
+		}
+	}
+	for _, manifestPath := range existingShardManifestPaths(task, 24) {
+		raw, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+		manifest, err := contracts.ParseShardPackManifest(raw)
+		if err != nil || (runID != "" && strings.TrimSpace(manifest.RunID) != runID) {
+			continue
+		}
+		for _, citation := range manifest.Citations {
+			add(citation.Repo, citation.Path)
+		}
+		for _, entity := range manifest.Semantic.Entities {
+			addProvenance(entity.Provenance)
+		}
+		for _, edge := range manifest.Semantic.Edges {
+			addProvenance(edge.Provenance)
+		}
+		for _, finding := range manifest.Semantic.Findings {
+			addProvenance(finding.Provenance)
+		}
+	}
+	sort.Strings(references)
+	if limit > 0 && len(references) > limit {
+		return references[:limit]
+	}
+	return references
 }
 
 type currentRunEvidenceItem struct {
@@ -1816,6 +1891,7 @@ func DraftArtifactRepairHints(task acpruntime.Task, validationErr error) []strin
 			`- asis-draft-manifest.json is the only publish-surface manifest for reports/as-is/*, reports/coverage/*, and reports/agent-outputs/* drafts.`,
 			`- After draft artifact repair, stop after artifacts validate; do not emit any legacy metadata registration surface.`,
 		)
+		lines = append(lines, ArchitectureHomeEvidenceReferenceLines(task)...)
 	case "init.step4.proposals", "refresh.step4.proposals":
 		lines = append(lines,
 			`- proposals-draft-manifest.json is the only publish-surface manifest for proposals/* and reports/changelog/* drafts.`,
