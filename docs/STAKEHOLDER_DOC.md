@@ -34,14 +34,15 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence. PR #170 fixed valid-artifact
-  stall accounting and clean smoke `smoke-tiny-bank-20260721T004350Z` confirmed only actual invalid/
-  repair events remain stalls. That qualification stopped at init step2 after collect `10/10`:
-  provider-authored Architecture Home shortened nested evidence to unavailable root
-  `bank-of-anthos:cloudbuild.yaml`, then focused repair emitted invalid inline Python. The active
-  provider-free remediation exposes exact current-run repo/path identities and requires literal
-  missing-reference repair without changing strict validation or live/product boundaries. The full
-  R3 sequence restarts after merge; stopped matrices are not reusable evidence.
+- release blocker: Epic 18 R3 trusted-machine composite evidence. Clean Codex smoke
+  `smoke-tiny-bank-20260721T072646Z` passed. Standalone
+  `release-fast-20260721T094341Z` then completed Qwen init/refresh and Claude collect `10/10`, but
+  stopped at Claude init step2: a mixed Architecture Home process-narration plus stale
+  downstream-index validation result was routed to the downstream-only retry, which produced no
+  fresh write before canonical exhaustion. The active provider-free remediation makes specialized
+  retry selection class-exclusive and routes that mixed result to existing provider-authored
+  Architecture Home cleanup without weakening validation or crossing the live/product boundary.
+  The full R3 sequence restarts after merge; stopped matrices are not reusable evidence.
 - out of MVP: 12, 13
 
 ---

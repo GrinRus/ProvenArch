@@ -60,6 +60,50 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260721-epic18-step2-mixed-recovery-routing
+
+### Context
+Clean standalone release-fast `release-fast-20260721T094341Z` completed Qwen init/refresh and
+Claude collect `10/10`, then failed closed at Claude `init.step2.asis_docs`. Provider-authored
+markdown simultaneously retained Architecture Home process narration and a stale downstream-index
+availability claim. The shared retry selector incorrectly treated the mixed validation result as a
+downstream-index-only failure; that focused retry made no fresh writes and exhausted after the
+canonical pre-artifact window. This is provider-independent recovery routing, not live-harness
+behavior.
+
+### Goals (must have)
+- [x] Require the specialized downstream-index retry to receive only downstream-index validation
+      problems.
+- [x] Route a mixed Architecture Home + downstream-index result to the existing Architecture Home
+      cleanup path, which still performs a provider-authored rewrite and full strict validation.
+- [x] Preserve the live-observed mixed failure as a provider-free fixture and regression.
+- [x] Pass focused stress and the full deterministic DoD.
+- [ ] Merge the remediation and restart R3 from the new clean merge commit.
+
+### Non-goals
+- [x] Do not sanitize or synthesize provider markdown in ACP.
+- [x] Do not weaken draft validation or accept stale downstream/runtime narration.
+- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry budgets or matrices.
+- [x] Do not add matrix identity, release verdicts or live environment behavior to product code.
+
+### Acceptance criteria
+- [x] Homogeneous downstream-index errors still select `draft_artifact_enrichment_downstream_index_retry`.
+- [x] Mixed Architecture Home/downstream errors do not select the downstream-only retry and recover
+      through `draft_artifact_enrichment_architecture_home_cleanup` in a provider-free test.
+- [x] Focused routing tests pass 20 consecutive runs.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-21: Stopped the failed release-fast immediately after Claude terminal failure; a Codex
+  slot started by the batch harness was interrupted and is not evidence. Product and all pinned
+  canonical source checkouts remained clean.
+- 2026-07-21: Added homogeneous-error selection and a mixed step2 fixture; no live identifiers or
+  provider-specific conditions are present in the implementation.
+- 2026-07-21: Focused mixed/pure routing regression passed 20 consecutive runs in 91.3 seconds.
+- 2026-07-21: Full deterministic DoD passed: contracts, Go/Python/UI tests, lint/typecheck and
+  production build all completed successfully with the pinned toolchains.
+
+### Plan ID
 EP-20260721-epic18-step2-exact-evidence-references
 
 ### Context
