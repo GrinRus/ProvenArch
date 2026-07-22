@@ -1230,3 +1230,98 @@ write-first and compact retries were reachable only for bootstrap/no-op errors.
 - Epic 20 is complete. Epic 18 R3 remains the independent trusted-machine release-readiness gate.
 
 ---
+
+### Plan ID
+EP-20260721-epic18-step2-mixed-recovery-routing
+
+### Context
+Clean standalone release-fast `release-fast-20260721T094341Z` completed Qwen init/refresh and
+Claude collect `10/10`, then failed closed at Claude `init.step2.asis_docs`. Provider-authored
+markdown simultaneously retained Architecture Home process narration and a stale downstream-index
+availability claim. The shared retry selector incorrectly treated the mixed validation result as a
+downstream-index-only failure; that focused retry made no fresh writes and exhausted after the
+canonical pre-artifact window. This is provider-independent recovery routing, not live-harness
+behavior.
+
+### Goals (must have)
+- [x] Require the specialized downstream-index retry to receive only downstream-index validation
+      problems.
+- [x] Route a mixed Architecture Home + downstream-index result to the existing Architecture Home
+      cleanup path, which still performs a provider-authored rewrite and full strict validation.
+- [x] Preserve the live-observed mixed failure as a provider-free fixture and regression.
+- [x] Pass focused stress and the full deterministic DoD.
+- [x] Merge the remediation in PR #172 (`a633e3ce`); R3 restart is now gated by Epic 22.
+
+### Non-goals
+- [x] Do not sanitize or synthesize provider markdown in ACP.
+- [x] Do not weaken draft validation or accept stale downstream/runtime narration.
+- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry budgets or matrices.
+- [x] Do not add matrix identity, release verdicts or live environment behavior to product code.
+
+### Acceptance criteria
+- [x] Homogeneous downstream-index errors still select `draft_artifact_enrichment_downstream_index_retry`.
+- [x] Mixed Architecture Home/downstream errors do not select the downstream-only retry and recover
+      through `draft_artifact_enrichment_architecture_home_cleanup` in a provider-free test.
+- [x] Focused routing tests pass 20 consecutive runs.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-21: Stopped the failed release-fast immediately after Claude terminal failure; a Codex
+  slot started by the batch harness was interrupted and is not evidence. Product and all pinned
+  canonical source checkouts remained clean.
+- 2026-07-21: Added homogeneous-error selection and a mixed step2 fixture; no live identifiers or
+  provider-specific conditions are present in the implementation.
+- 2026-07-21: Focused mixed/pure routing regression passed 20 consecutive runs in 91.3 seconds.
+- 2026-07-21: Full deterministic DoD passed: contracts, Go/Python/UI tests, lint/typecheck and
+  production build all completed successfully with the pinned toolchains.
+- 2026-07-21: PR #172 merged as `a633e3ce`; no stopped matrix was promoted to release evidence.
+
+### Plan ID
+EP-20260721-epic18-step2-exact-evidence-references
+
+### Context
+After PR #170 fixed valid-artifact stall accounting, clean qualification
+`smoke-tiny-bank-20260721T004350Z` reached init collect `10/10` and reported only actual invalid/
+repair stalls. `init.step2.asis_docs` then failed closed because the provider shortened the observed
+nested evidence path `src/ledger/cloudbuild.yaml` to unavailable root `cloudbuild.yaml`; focused
+repair subsequently emitted an unterminated inline Python string. This is a general evidence-
+identity and command-construction defect, not live-harness behavior.
+
+### Goals (must have)
+- [x] Build a deterministic bounded allowlist from exact repo/path identities in valid current-run
+      shard-manifest citations and semantic provenance.
+- [x] Put the same allowlist and no-shortening rule in normal, repair, enrichment, compact and
+      command-text step2 prompt paths.
+- [x] Require repository-reference repair to use direct literal heredocs rather than inline
+      generated programs.
+- [x] Preserve the Bank-shaped nested-path failure in provider-free regressions.
+- [x] Pass focused stress and the full deterministic DoD.
+- [x] Merge the remediation in PR #171 (`ca8c3f67`); R3 restart is now gated by Epic 22.
+
+### Non-goals
+- [x] Do not synthesize or rewrite Architecture Home prose in ACP.
+- [x] Do not weaken strict repository-reference validation or accept guessed paths.
+- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry policy or matrices.
+- [x] Do not add live matrix identity or environment behavior to product code/tests.
+
+### Acceptance criteria
+- [x] Exact nested citation `bank-of-anthos:src/ledger/cloudbuild.yaml` appears in guidance while
+      inferred `bank-of-anthos:cloudbuild.yaml` does not.
+- [x] Allowlist output is deterministic and ignores invalid/foreign-run manifests.
+- [x] Missing-reference focused repair forbids Python/Node/template assembly and requires literal
+      writes plus full strict revalidation.
+- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-21: Stopped the failed matrix immediately after step2. Product and pinned Bank trees
+  remained clean; the failed matrix is not reusable release evidence.
+- 2026-07-21: Added exact current-run evidence-reference guidance and provider-free prompt tests;
+  strict artifact validation remains unchanged and authoritative.
+- 2026-07-21: New step-policy/prompt regressions passed 20 repetitions; the complete required DoD
+  passed with Go 1.25.10, Node 22.21.1, npm 10.9.4, 261 Python tests and 142 UI tests. A deliberately
+  over-broad 20x run of the entire long providercommon package reached its aggregate 10-minute
+  test timeout; the package passed normally in both full DoD runs, so no unrelated runtime/test
+  budget was changed.
+
+
+---

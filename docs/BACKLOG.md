@@ -144,7 +144,10 @@ Suggested PR slices:
 - `9A workspace-backed QA service`
 - `9B public read-only Q&A API`
 - `9C async runtime-backed QA runs`
-- `9D legacy /api/qa/ask deprecation plan`
+- `9D compatibility policy through v1`
+  - keep `POST /api/qa/ask` and `acp qa` response/behavior compatible through v1;
+  - document migration to async `POST /api/qa/runs` + polling without runtime deprecation headers;
+  - permit removal only through a separately approved v1 breaking-change plan.
 
 ## Epic 10 — Iteration Changelog (MVP)
 Acceptance:
@@ -358,15 +361,13 @@ Suggested PR slices:
 
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
-Status (2026-07-21): trusted-machine R3 release evidence remains open and is the only
-release-readiness blocker after Epic 21. PR #170 fixed valid-artifact stall accounting. Clean
-qualification `smoke-tiny-bank-20260721T004350Z` confirmed the fix and reached init collect `10/10`,
-but stopped at step2 because Architecture Home shortened observed nested evidence
-`src/ledger/cloudbuild.yaml` to unavailable root `cloudbuild.yaml`; focused repair then emitted an
-unterminated inline Python string. The active provider-free remediation gives every step2 prompt
-path a deterministic allowlist of exact current-run repo/path identities and requires direct
-literal missing-reference repair. Strict validation remains unchanged. After merge the complete R3
-sequence restarts from the new clean commit; no evidence from stopped matrices is accepted.
+Status (2026-07-22): trusted-machine R3 release evidence remains open. The two provider-free
+remediations that were still pending in the previous status are merged: exact step2 evidence
+references landed in PR #171 (`ca8c3f67`) and mixed recovery routing landed in PR #172
+(`a633e3ce`). A subsequent static, deterministic and historical-artifact audit identified
+additional correctness and live/product trust-boundary blockers recorded in Epic 22. R3 is paused
+until Epic 22 passes its offline closure gate. Stopped or earlier live matrices remain diagnostic
+only and cannot be reused as release evidence.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape
@@ -1396,21 +1397,417 @@ Suggested PR slices:
   - update README/ARCHITECTURE/STAKEHOLDER docs and run deterministic UI plus optional trusted-machine
     live artifact-quality validation
 
-## Cleanup follow-up (post-beta, owner confirmation required)
+## Epic 22 — Post-implementation correctness and trust-boundary audit remediation
 
-Открытые пункты после cleanup slice:
+Status (2026-07-22): **open, release-blocking before Epic 18 R3**. Baseline for the audit is clean
+`main` at `a633e3ce`. Epic 20 and Epic 21 remain implementation-complete; this epic records newly
+demonstrated regressions and insufficient invariants found by static review, provider-free
+reproduction and preserved historical incident artifacts. It does not reinterpret a stopped live
+matrix as release evidence.
 
-1) Пересмотр необходимости persisted слоя `fixtures/scenarios/*/golden/readable`
-- Owner: ACP maintainers + QA/testing owner
-- Risk: medium (влияние на review diffability и developer UX)
-- Next step: собрать usage evidence, затем принять решение retain/remove отдельным PR
+### Goal
 
-2) Owner confirmation для cleanup-кандидатов с неявным usage risk
-- Scope:
-  - duplicated readable scenario fixtures (possible dedupe, policy-sensitive)
-- Owner: ACP maintainers + docs owner + tooling owner
-- Risk: medium/high (риск удалить скрыто используемые файлы или ухудшить regression/review UX)
-- Next step: подтвердить explicit ownership и usage contracts, затем принять retain/remove/dedupe решение отдельным PR.
+Make ordinary product execution, evidence selection, refresh preservation and ProductShell state
+fail closed under races, filesystem aliases, stale requests and malformed artifacts. Prove that the
+trusted-machine harness and product remain independent in both directions before restarting R3.
+
+### Delivery order
+
+`22A -> 22B -> 22C -> 22D -> 22E -> 22F -> 22G -> 22H -> 22I -> 22J -> 22K -> 22L -> 22M -> 22N -> 22O -> Epic 18 R3`
+
+Each slice is a separate small PR and receives its own ExecPlan when selected. Product PRs after
+R3 remain ordered `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`. Epics 12/13 and K5–K7 remain deferred.
+
+### Boundaries
+
+- Required CI and all Epic 22 acceptance are provider-free and have no live network dependency.
+- No Epic 22 test or product branch may run or adapt the canonical live matrices.
+- Source repositories remain read-only; all writes stay inside the selected workspace.
+- Product runtime/API/UI must not know matrix IDs, release verdicts, assessment filenames,
+  profile/sweep/batch labels or live-only environment variables.
+- Live E2E may use only the canonical harness and public CLI/API/UI/artifact surfaces. It must not
+  import production internals, author product state or repair provider/workspace artifacts.
+- Public schema/API changes are allowed only when a slice proves they are necessary and performs
+  the full schema/spec/appendix/examples/fixtures/validator/ADR synchronization.
+
+### Entry prerequisite
+
+Before `22A`, use a host/worktree with the required pinned Go/Node/npm toolchains and enough free
+space for caches plus parallel test/build output (minimum 5 GiB on the relevant workspace/temp
+volume). Run the deterministic preflight and leave the tree clean. Low disk or a missing pinned
+toolchain is an operational blocker; it is not permission to skip a slice DoD or change product
+behavior.
+
+### 22A — Immutable run registry and transactional history
+
+What:
+- return deep immutable copies of run records, nested slices, coordination and refresh summaries;
+- serialize run-registry transitions and make queued/running/terminal history updates transactional;
+- stop ignoring terminal persistence failures and preserve a visible diagnostic without publishing
+  an in-memory state that cannot be recovered after restart;
+- represent cancellation consistently as a terminal canceled outcome instead of an incidental
+  generic failure; synchronize the public contract first if a status-shape change is required.
+
+Why: concurrent polling and completion currently have a reproducible shared-memory race, while a
+failed history write can leave API state and restart state disagreeing.
+
+Acceptance:
+- race detector coverage for polling, refresh-summary mutation, cancel, pending replacement and
+  completion is clean;
+- injected write/rename/fsync failures never leave malformed current or `.last-good` history;
+- restart reconstructs exactly one active/pending/terminal truth and never resurrects a canceled run.
+
+### 22B — Symlink-safe workspace containment and atomic manifest writes
+
+What:
+- enforce containment against resolved filesystem identity, including existing symlink parents,
+  final symlinks and creation through a symlinked ancestor;
+- centralize the safe read/write/open primitive used by workspace-owned paths;
+- write `workspace.yaml` with the same same-directory temp, sync, rename and directory-sync contract
+  as other critical workspace files.
+
+Why: lexical path checks alone allow a path inside the workspace spelling to resolve outside it;
+direct manifest truncation can leave the workspace unreadable after an interrupted write.
+
+Acceptance:
+- symlink escape, traversal, dangling-link, replacement and concurrent rename fixtures fail closed;
+- valid in-root symlinks follow one documented policy consistently;
+- failed manifest writes preserve the previous bytes and source repositories remain unchanged.
+
+### 22C — Server-owned selected-run snapshot resolver
+
+What:
+- move final-index discovery, identity checks and artifact resolution behind one server-side resolver;
+- require exact selected `run_id`, normalized in-root staged paths, final-index inventory membership
+  and an unambiguous canonical-path-to-staged-path mapping;
+- return typed `available | partial | not_produced | unavailable | error` status and issues;
+- forbid snapshot fallback to current workspace, another run, a suffix-matched foreign index or an
+  unindexed file.
+
+Why: client-side composition and permissive path resolution can expose cross-run or newer workspace
+bytes while the UI claims to show the selected historical run.
+
+Acceptance:
+- missing/mismatched `run_id`, traversal, cross-run path, duplicate canonical mapping, stale index,
+  missing artifact and out-of-root target all produce deterministic typed failures;
+- A -> B -> A selection and reload always return the exact same-run bytes or an explicit issue.
+
+### 22D — One recursive glob dialect
+
+What:
+- define one documented recursive include/exclude matcher for workspace validation, shard planning,
+  source fingerprints, refresh impact mapping and QA/import collection;
+- reject unsupported or ambiguous patterns before execution;
+- normalize separators and ordering without silently changing the user's scope.
+
+Why: inconsistent `**` handling can classify an in-scope change as out of scope and incorrectly
+select no-op or preserved evidence.
+
+Acceptance:
+- a shared conformance table covers root files, nested files, `**`, exclusions, Windows separators,
+  invalid patterns and multi-repo scope;
+- every consumer produces identical matches and no false no-op is possible from matcher drift.
+
+### 22E — Immutable selective-refresh baseline and complete shard identity
+
+What:
+- preserve unaffected artifacts only from validator-promoted immutable taskrun staging bytes and
+  recorded digests, never from mutable current canonical files;
+- match baseline shards by the full identity: repo scopes, domain, shard ID, path scopes, source
+  revisions and artifact digests;
+- use canonical model paths and bounded filenames while retaining full logical IDs.
+
+Why: current-workspace bytes may have changed after the baseline run, and partial shard identity can
+replay evidence authored for a different scope.
+
+Acceptance:
+- post-baseline canonical edits, shard-ID collisions, changed path scopes, long IDs, missing packs and
+  digest mismatch all force a full fallback before provider execution;
+- genuinely preserved artifacts remain byte-identical and carry verifiable baseline provenance.
+
+### 22F — Session-generation lease and Git/run coordination
+
+What:
+- acquire one serialized start lease spanning session-generation validation, run registration and
+  active/pending publication;
+- prevent workspace/runtime replacement while a start is being admitted or work is active/pending;
+- block Git commit/proposal-branch mutations while active/pending work exists;
+- revalidate session generation, branch, HEAD, base and full inventory immediately before mutation.
+
+Why: a switch/start race can orphan a run under a previous service owner, and Git confirmation can
+become stale between UI confirmation and mutation.
+
+Acceptance:
+- deterministic barriers reproduce switch/start and Git/start races without orphan runs or mixed
+  workspace ownership;
+- close/shutdown, queued replacement and concurrent confirmations have one serializable outcome.
+
+### 22G — Typed validation issues and explicit recovery state machine
+
+What:
+- replace routing based on fragments of `error.Error()` with typed issue codes, paths and classes;
+- define recovery states, class-exclusive transitions, priority, retry/transition budget and an
+  auditable terminal reason;
+- add preserved Claude/Codex/Qwen incident fixtures plus paraphrase and metamorphic regressions.
+
+Why: historical live failures showed that two simultaneous validation errors can select the wrong
+repair even when both individual paths are tested.
+
+Acceptance:
+- equivalent issue sets route identically regardless of message wording or order;
+- mixed-class failures cannot enter a specialized single-class repair;
+- repeated/no-op recovery terminates within a deterministic budget and records the complete path.
+
+### 22H — Provider-free artifact integrity auditor
+
+What:
+- add a read-only auditor over promoted and selected-run evidence;
+- verify exact run/index identity, path containment, final/citation reciprocity, concrete evidence
+  existence, digests, inventory, Architecture Home completeness and finding/proposal actionability;
+- detect foreign-run refs, taskrun staging paths, absolute runtime paths, execution narration,
+  scaffold text and fake/live identity contamination;
+- emit a bounded redacted audit package suitable for later assessment without raw provider logs.
+
+Why: previous accepted-looking outputs contained staging paths, run narration, false shard recap and
+plausible but nonexistent repository references; the most recent raw workspaces are no longer
+available for independent reinspection.
+
+Acceptance:
+- every preserved historical incident fixture fails with a stable issue code;
+- a clean deterministic fixture passes, repeated scans are byte-identical and scanning never writes
+  the workspace or source repositories.
+
+### 22I — Bidirectional live E2E/product isolation
+
+What:
+- scrub live-only environment and present stable canonical repo/evidence identities to providers;
+- remove matrix/profile/batch vocabulary and temporary checkout paths from production prompts and
+  fake product artifacts;
+- stop frontend live preparation from synthesizing or rewriting product run history/state;
+- move any live assessment oracle/helper out of production `ui/src` ownership;
+- expand Go/Python/TypeScript boundary tests in both directions.
+
+Why: historical artifacts prove that providers copy ambient runtime paths and execution vocabulary;
+the harness must also not become an author of the product state it is supposed to inspect.
+
+Acceptance:
+- product code does not read `ACP_RELEASE_*`, `BATCH_*`, matrix/profile/sweep identity or assessment
+  files, and promoted documents cannot receive those values through provider context;
+- the harness imports no production-internal selector/validator and modifies no canonical workspace
+  artifact or run history;
+- live fixtures interact only through public CLI/API/UI/artifact contracts.
+
+### 22J — Changes views and workflow truth
+
+What:
+- make `Overview | Evidence | Findings | Proposals | Diff | Publish` materially distinct views whose
+  URL route/view is the sole selection source;
+- derive topology only from validated entity/edge fields, never filenames;
+- make the shared workflow selector consume server coordination, the latest authoritative accepted
+  evidence and explicit Git `clean | dirty | stale | blocked | unknown` state.
+
+Why: current composition can show duplicate content under different Changes tabs, infer topology
+from filenames and choose a next action from stale or incomplete state.
+
+Acceptance:
+- route/view table tests prove distinct content and Back/Forward restoration;
+- active/pending, no evidence, partial evidence, unknown publication and stale Git confirmation each
+  produce one deterministic next action.
+
+### 22K — URL/request identity and stale-response suppression
+
+What:
+- treat `(run_id, source_mode, artifact/entity, viewer_mode)` as one request identity;
+- cancel or ignore older requests with generation tokens/abort signals;
+- canonicalize defaults and invalid params with `replaceState`, while user navigation uses
+  `pushState`; make `popstate` restoration idempotent.
+
+Why: slow responses can overwrite the context chosen later and make the header, bytes and URL refer
+to different runs or sources.
+
+Acceptance:
+- delayed A -> B -> A fetches, reload, direct URLs and Back/Forward never display stale bytes;
+- invalid explicit IDs are sanitized with a notice and never silently fall back to current workspace.
+
+### 22L — Knowledge and QA evidence authorities
+
+What:
+- keep current promoted Knowledge free of `reports/taskruns/**` and run-scoped diagnostics;
+- define explicit evidence authorities `promoted_current | run_snapshot | qa_snapshot | qa_audit`;
+- build QA context from the exact authority, include configured imports, retain selected QA run/return
+  context and surface `qa_answer_unavailable` instead of substituting another answer/workspace state.
+
+Why: current-workspace Knowledge, historical Changes and QA audit evidence have different trust and
+lifecycle semantics and must not be merged implicitly.
+
+Acceptance:
+- authority matrix tests cover current, historical, partial, missing, canceled and legacy runs;
+- citations resolve only inside the selected pack and taskrun files never appear as promoted
+  Knowledge entities/artifacts.
+
+### 22M — Evidence Viewer correctness
+
+What:
+- resolve local links through the selected evidence authority and preserve the source run;
+- make Raw/Rendered/Diff use an explicit and truthful comparison source;
+- show `Demo | Live | Unknown`, typed issues and unavailable/partial states consistently;
+- impose a tested file-size/render budget with readable fallback for large or broken artifacts.
+
+Why: a polished renderer is still misleading if links, diff baseline or identity header refer to a
+different evidence source.
+
+Acceptance:
+- link traversal, broken links, cross-run links, XSS, Mermaid failure, long lines and oversized files
+  are isolated without replacing the selected document or crashing the page.
+
+### 22N — Responsive and accessibility completion
+
+What:
+- remove focusable hidden controls and remaining legacy shell CSS;
+- implement safe-area aware mobile navigation/sheets, 44px touch targets and keyed card fallbacks for
+  non-comparison tables;
+- verify focus trap, Escape, outside click, return focus, long paths and orientation changes.
+
+Why: static review found reachable hidden focus targets and responsive assumptions that are not
+fully protected by the current component tests.
+
+Acceptance:
+- rendered ProductShell scenarios pass at `1440`, `1280`, `1024` and `390x844` with no global
+  horizontal overflow, console errors or critical axe violations;
+- keyboard-only flows reach Home, Runs, Knowledge, Changes, Setup and global Ask with logical focus.
+
+### 22O — Deterministic offline closure gate
+
+What:
+- run the combined race, fault-injection, path-attack, incident-fixture and artifact-auditor suites;
+- run route/view-model/UI mock/rendered/keyboard/axe and live/product boundary suites;
+- run `make contracts`, `make test`, `make lint`, `make build` with enough local disk for reliable
+  output and verify tracked embedded UI bundle plus clean source repositories;
+- reconcile active plans and trackers only after every preceding slice is merged.
+
+Why: Epic 18 must restart from one reviewed clean commit with no unresolved provider-free blocker.
+
+Acceptance:
+- all offline gates pass repeatedly without provider binaries or network access;
+- no race/path/fault fixture is quarantined, and no live-specific condition exists in product code;
+- the exact clean merge commit is recorded as the new R3 qualification SHA.
+
+### Epic acceptance
+
+- Run/session/history and Git coordination are race-clean and restart-safe.
+- Workspace and snapshot paths fail closed across symlinks, traversal and cross-run identities.
+- Refresh cannot produce a false no-op or preserve mutable/foreign baseline bytes.
+- Validation/recovery is typed, bounded and independent of human error text.
+- Product and live harness share only public contracts; neither authors or imports the other's logic.
+- ProductShell evidence, routing, responsive layout, keyboard and accessibility gates pass offline.
+- Provider-free artifact audit rejects every preserved contamination incident and accepts the clean
+  reference corpus.
+- Full deterministic DoD passes on an adequately provisioned host before Epic 18 R3 restarts.
+
+## Post-R3 K-roadmap product queue
+
+Status (2026-07-22): **planned, blocked by Epic 22 and Epic 18 composite PASS**. Delivery order is
+`K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`. Each item is a separate PR/ExecPlan. K5 claim ledger,
+K6 contradictions and K7 search projection remain outside this cycle.
+
+### K2b — Advisory Workspace Health completion
+
+What:
+- retain the computed read-only `GET /api/workspace/health`; do not persist `reports/health/*` and
+  do not change the response shape/version;
+- add deterministic checks for broken local Markdown artifact links, missing entity endpoints,
+  duplicate aliases, unlinked findings, proposal evidence that does not exist, malformed canonical
+  model/proposal/report files and orphan domain/team outputs;
+- show current-workspace summary in Knowledge and existing readiness/inspector surfaces only;
+  historical Changes must not display current workspace health as historical evidence.
+
+Acceptance:
+- clean/warn/fail, path containment and every new issue class have provider-free fixtures with stable
+  IDs and deterministic ordering;
+- scanning is byte-identical/read-only and remains advisory: it never blocks run, Review or Publish.
+
+### K4 — Citation and claim identity hardening
+
+What:
+- prove global citation/claim ID uniqueness, document/citation reciprocity, run isolation, concrete
+  in-root evidence paths and deterministic claim IDs for identical input;
+- reject key Architecture Home/findings/proposals documents that claim citation completeness with
+  empty coverage;
+- prevent selective-refresh preserved artifacts from referencing a removed citation/document;
+- expose low coverage through advisory Workspace Health rather than a new publication blocker.
+
+Acceptance:
+- duplicate IDs, unresolved/foreign-run references, broken reciprocity and out-of-root paths remain
+  hard failures under the existing public schema shapes;
+- if implementation proves a shape change is necessary, stop and create a separate schema-first PR
+  with full contract synchronization instead of hiding it in K4.
+
+### K3A — Explicit Ask to Proposal backend mutation
+
+What:
+- add additive `POST /api/qa/runs/<run_id>/proposal-draft` with required title and
+  `expected_answer_digest`, optional slug/operator note, and optional `answer_digest` on succeeded
+  QA run reads;
+- allow creation only from a succeeded immutable QA run with a valid `qa-answer.json`, matching
+  digest and resolvable citations;
+- atomically create `proposals/qa-synthesis-<run-id>-<slug>/` containing `proposal.md`, `evidence.md`
+  and schema-validated `source-qa-answer.json`; never overwrite an existing package;
+- return typed not-found/not-succeeded/unavailable/stale/unresolved/invalid-slug/already-exists
+  errors without mutating the QA taskrun or source repositories.
+
+Acceptance:
+- success, stale digest, duplicate, path traversal, broken citation, write/rename failure and restart
+  fixtures prove atomic rollback and source/canonical QA non-mutation;
+- API/spec/appendix/examples/fixtures/validators/ADR rationale are synchronized in the same PR.
+
+### K3B — Ask to Proposal ProductShell flow
+
+What:
+- show `Create proposal draft` only for a succeeded answer with `answer_digest`;
+- use a focus-managed confirmation showing title/path, citations, unresolved assumptions and the
+  explicit fact that Ask remains read-only;
+- after `201`, navigate through the existing URL codec to current-workspace Changes -> Proposals and
+  preserve Return to Ask context;
+- keep Ask open on stale/duplicate/citation error and offer reload of the selected answer.
+
+Acceptance:
+- focus trap, Escape, return focus, routing/reload and stale-answer tests pass with no critical axe
+  violations;
+- the new proposal immediately appears in full Git inventory and makes an already-open Git
+  confirmation stale; no commit or branch is created implicitly.
+
+### 9D — Q&A compatibility policy through v1
+
+What:
+- keep `POST /api/qa/ask` and `acp qa` deterministic and response-compatible through v1;
+- document async start/poll migration examples without adding runtime deprecation headers;
+- require a separate approved v1 breaking-change plan before removal.
+
+Acceptance:
+- API spec, README, architecture/changelog policy and contract tests all describe the same boundary;
+- UI remains on async `/api/qa/runs`, while existing CLI/API consumers are not broken.
+
+## Cleanup follow-up (post-R3, retain decision accepted)
+
+Owner decision (2026-07-22): retain the 90 tracked files under
+`fixtures/scenarios/*/golden/readable` as a versioned human-review deterministic export. Machine
+fixtures remain the execution source; readable exports remain review/release evidence. Do not
+delete, deduplicate or switch them to generate-on-demand in this cycle.
+
+Remaining cleanup tasks:
+
+1) Readable fixture drift protection
+- keep a deterministic drift check between scenario generation/machine fixtures and readable export;
+- document ownership consistently in `fixtures/README.md`, `docs/BASELINE_POLICY.md` and
+  `docs/TESTING_STRATEGY.md`;
+- preserve current files and review-friendly Git diffs.
+
+2) Tracker and ExecPlan archive
+- archive implementation-complete ExecPlans using the monthly archive convention;
+- reconcile stale K-roadmap checkboxes and merged PR/commit references;
+- record `docs/BACKLOG.md` as acceptance/reference backlog, with active execution state remaining in
+  the stakeholder matrix and `docs/PLANS.md`;
+- do not mix archive cleanup with product behavior changes.
 
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.
