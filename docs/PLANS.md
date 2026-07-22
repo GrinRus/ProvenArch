@@ -60,95 +60,74 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260721-epic18-step2-mixed-recovery-routing
+EP-20260722-post-implementation-trust-audit
 
 ### Context
-Clean standalone release-fast `release-fast-20260721T094341Z` completed Qwen init/refresh and
-Claude collect `10/10`, then failed closed at Claude `init.step2.asis_docs`. Provider-authored
-markdown simultaneously retained Architecture Home process narration and a stale downstream-index
-availability claim. The shared retry selector incorrectly treated the mixed validation result as a
-downstream-index-only failure; that focused retry made no fresh writes and exhausted after the
-canonical pre-artifact window. This is provider-independent recovery routing, not live-harness
-behavior.
+Epic 20 and Epic 21 are implementation-complete, and the two latest provider-free Epic 18
+remediations are merged in PR #171 (`ca8c3f67`) and PR #172 (`a633e3ce`). Before restarting the
+trusted-machine R3 sequence, a static/provider-free code audit and preserved historical artifact
+review found additional correctness, snapshot, refresh, UI-state and bidirectional live/product
+isolation gaps. They are tracked as release-blocking Epic 22 rather than reopening or duplicating
+the original Epic 19–21 delivery scopes.
 
 ### Goals (must have)
-- [x] Require the specialized downstream-index retry to receive only downstream-index validation
-      problems.
-- [x] Route a mixed Architecture Home + downstream-index result to the existing Architecture Home
-      cleanup path, which still performs a provider-authored rewrite and full strict validation.
-- [x] Preserve the live-observed mixed failure as a provider-free fixture and regression.
-- [x] Pass focused stress and the full deterministic DoD.
-- [ ] Merge the remediation and restart R3 from the new clean merge commit.
+- [ ] Deliver Epic 22 slices `22A..22O` in order as small reviewable PRs, each with its own ExecPlan.
+- [ ] Close run/history/session/Git races and filesystem/snapshot trust-boundary defects.
+- [ ] Make refresh scope and preserved baseline evidence deterministic and immutable.
+- [ ] Replace stringly recovery routing with typed, bounded validation/recovery state.
+- [ ] Add a provider-free artifact integrity auditor and historical incident regression corpus.
+- [ ] Prove the live harness and product exchange only public contracts and do not author/import one
+      another's state or implementation logic.
+- [ ] Complete Changes/Knowledge/QA/EvidenceViewer request identity, responsive and accessibility
+      acceptance offline.
+- [ ] Pass the combined deterministic closure gate and record one clean R3 qualification SHA.
+- [ ] Restart Epic 18 R3 only after the Epic 22 closure gate; do not reuse stopped matrix evidence.
 
 ### Non-goals
-- [x] Do not sanitize or synthesize provider markdown in ACP.
-- [x] Do not weaken draft validation or accept stale downstream/runtime narration.
-- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry budgets or matrices.
-- [x] Do not add matrix identity, release verdicts or live environment behavior to product code.
+- [x] Do not run live E2E while implementing or accepting Epic 22.
+- [x] Do not add hosted mode, security/compliance enforcement or new runtime providers.
+- [x] Do not start Epics 12/13 or K5–K7.
+- [x] Do not make live matrix identity, verdicts, assessments or environment part of product behavior.
+- [x] Do not write to analyzed source repositories or weaken artifact validation to obtain PASS.
+
+### Approach
+1. Land core integrity slices `22A..22F`: registry/history, filesystem containment, snapshot resolver,
+   glob semantics, immutable selective baseline and serialized session/Git coordination.
+2. Land artifact/recovery isolation slices `22G..22I`: typed recovery, provider-free auditor and
+   bidirectional live/product separation.
+3. Land ProductShell correctness slices `22J..22N`: route/view truth, stale-response suppression,
+   Knowledge/QA evidence authorities, EvidenceViewer correctness and responsive/a11y completion.
+4. Run `22O` as one provider-free offline closure gate with race/fault/path/incident/UI/boundary
+   suites plus the full deterministic DoD on a host with adequate disk.
+5. From the recorded clean merge commit, execute Epic 18 R3 and its bounded evidence PR. Only after
+   composite PASS continue `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`.
+
+### Files expected to change
+- `docs/BACKLOG.md`, `docs/PLANS.md`, `docs/STAKEHOLDER_DOC.md` for initial program tracking.
+- Slice-specific Go/TypeScript/contracts/tests/docs are declared in each child ExecPlan, not
+  pre-authorized by this program plan.
 
 ### Acceptance criteria
-- [x] Homogeneous downstream-index errors still select `draft_artifact_enrichment_downstream_index_retry`.
-- [x] Mixed Architecture Home/downstream errors do not select the downstream-only retry and recover
-      through `draft_artifact_enrichment_architecture_home_cleanup` in a provider-free test.
-- [x] Focused routing tests pass 20 consecutive runs.
-- [x] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+- [x] Epic 22 scope, sequencing, boundaries and per-slice acceptance are recorded in the backlog.
+- [x] Stakeholder and engineering status identify Epic 22 as the current release blocker before R3.
+- [x] PR #171/#172 statuses are reconciled as merged without claiming that R3 restarted.
+- [ ] Every `22A..22N` slice is merged with focused tests and full deterministic DoD.
+- [ ] `22O` passes all provider-free closure gates from one clean commit.
+- [ ] Epic 18 R3 obtains fresh individual and composite PASS evidence from that unchanged commit.
+
+### Risks
+- The audit spans independent correctness domains; combining slices would hide causal regressions,
+  so ordering and small PR boundaries are mandatory.
+- Historical raw workspaces were cleaned up; preserved minimized incidents are authoritative for
+  regressions, while new acceptance evidence must be generated deterministically.
+- The current workstation has insufficient free disk for a reliable full local build; this
+  documentation slice uses focused checks and required remote CI, and `22O` explicitly requires an
+  adequately provisioned host.
 
 ### Progress log
-- 2026-07-21: Stopped the failed release-fast immediately after Claude terminal failure; a Codex
-  slot started by the batch harness was interrupted and is not evidence. Product and all pinned
-  canonical source checkouts remained clean.
-- 2026-07-21: Added homogeneous-error selection and a mixed step2 fixture; no live identifiers or
-  provider-specific conditions are present in the implementation.
-- 2026-07-21: Focused mixed/pure routing regression passed 20 consecutive runs in 91.3 seconds.
-- 2026-07-21: Full deterministic DoD passed: contracts, Go/Python/UI tests, lint/typecheck and
-  production build all completed successfully with the pinned toolchains.
-
-### Plan ID
-EP-20260721-epic18-step2-exact-evidence-references
-
-### Context
-After PR #170 fixed valid-artifact stall accounting, clean qualification
-`smoke-tiny-bank-20260721T004350Z` reached init collect `10/10` and reported only actual invalid/
-repair stalls. `init.step2.asis_docs` then failed closed because the provider shortened the observed
-nested evidence path `src/ledger/cloudbuild.yaml` to unavailable root `cloudbuild.yaml`; focused
-repair subsequently emitted an unterminated inline Python string. This is a general evidence-
-identity and command-construction defect, not live-harness behavior.
-
-### Goals (must have)
-- [x] Build a deterministic bounded allowlist from exact repo/path identities in valid current-run
-      shard-manifest citations and semantic provenance.
-- [x] Put the same allowlist and no-shortening rule in normal, repair, enrichment, compact and
-      command-text step2 prompt paths.
-- [x] Require repository-reference repair to use direct literal heredocs rather than inline
-      generated programs.
-- [x] Preserve the Bank-shaped nested-path failure in provider-free regressions.
-- [x] Pass focused stress and the full deterministic DoD.
-- [ ] Merge the remediation and restart R3 from the new clean merge commit.
-
-### Non-goals
-- [x] Do not synthesize or rewrite Architecture Home prose in ACP.
-- [x] Do not weaken strict repository-reference validation or accept guessed paths.
-- [x] Do not change schemas, HTTP API, provider contracts, timeout/retry policy or matrices.
-- [x] Do not add live matrix identity or environment behavior to product code/tests.
-
-### Acceptance criteria
-- [x] Exact nested citation `bank-of-anthos:src/ledger/cloudbuild.yaml` appears in guidance while
-      inferred `bank-of-anthos:cloudbuild.yaml` does not.
-- [x] Allowlist output is deterministic and ignores invalid/foreign-run manifests.
-- [x] Missing-reference focused repair forbids Python/Node/template assembly and requires literal
-      writes plus full strict revalidation.
-- [ ] `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
-
-### Progress log
-- 2026-07-21: Stopped the failed matrix immediately after step2. Product and pinned Bank trees
-  remained clean; the failed matrix is not reusable release evidence.
-- 2026-07-21: Added exact current-run evidence-reference guidance and provider-free prompt tests;
-  strict artifact validation remains unchanged and authoritative.
-- 2026-07-21: New step-policy/prompt regressions passed 20 repetitions; the complete required DoD
-  passed with Go 1.25.10, Node 22.21.1, npm 10.9.4, 261 Python tests and 142 UI tests. A deliberately
-  over-broad 20x run of the entire long providercommon package reached its aggregate 10-minute
-  test timeout; the package passed normally in both full DoD runs, so no unrelated runtime/test
-  budget was changed.
+- 2026-07-22: Reconciled PR #171/#172 as merged and recorded the audit findings as Epic 22.
+- 2026-07-22: Confirmed that Epic 22 required CI is provider-free and that R3/live evidence cannot
+  restart until the offline closure gate records a new clean qualification SHA.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair
@@ -619,21 +598,24 @@ Live E2E/release runs should compare stable provider surfaces. The user asked to
 
 ### Continuous Backlog Queue Policy
 
-Epics 19, 20 and 21 are complete in `main`. `docs/BACKLOG.md` remains the reference/acceptance
-backlog; this file selects focused active slices. The current release blocker is Epic 18 R3:
-trusted-machine composite evidence over fresh canonical release matrices. New Wave 1 product work
-requires a separate owner-selected ExecPlan after R3.
+Epics 19, 20 and 21 are implementation-complete in `main`. `docs/BACKLOG.md` remains the
+reference/acceptance backlog; this file selects focused active slices. The current release blocker
+is provider-free Epic 22. Epic 18 R3 restarts only after the `22O` closure gate records one clean
+qualification SHA. The post-R3 product queue is fixed as `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`.
 
 Allowed next workstreams:
-- Epic 19/20/21 archive or reconciliation bookkeeping only; no additional engineering slice remains.
-- Epic 18 R3 release validation, only when trusted-machine/provider/path prerequisites are satisfied.
+- The next ordered Epic 22 slice, with a decision-complete child ExecPlan and provider-free DoD.
+- Epic 19/20/21 archive or reconciliation bookkeeping only; no original-scope engineering slice remains.
+- Epic 18 R3 release validation only after `22O`, with trusted-machine/provider/path prerequisites.
 - `EP-20260508-oss-readiness-hardening`: owner/admin verification for residual GitHub repository settings only.
-- `EP-20260507-cleanup-owner-decisions`: owner-gated retain/remove/dedupe decisions only; retain by default until decisions exist.
-- New Wave 1 or product work: create a fresh decision-complete ExecPlan before implementation.
+- Post-R3 K-roadmap work only in the recorded order, with a fresh decision-complete ExecPlan.
+- Cleanup applies the accepted readable-fixture retain decision and archives stale trackers; it does
+  not remove or deduplicate `golden/readable`.
 
 Task selection rules:
 - Completed plans whose only remaining item is owner review, merge/archive bookkeeping, or historical evidence retention are not next engineering work.
-- Owner-decision and trusted-host/live-release items remain explicit blockers; do not run or edit them as normal backlog tasks without the required owner/trusted-machine prerequisites.
+- Trusted-host/live-release items remain explicit blockers; do not run them as normal backlog tasks
+  or before the provider-free closure prerequisite.
 - Each selected slice gets a decision-complete ExecPlan/update before implementation, one focused implementation pass, self-review/fix loops, Full DoD (`make contracts`, `make test`, `make lint`, `make build`), then one commit.
 
 ### Plan ID
@@ -5298,9 +5280,11 @@ tests; the clean-tree trusted rerun remains open and is intentionally separate f
 | 15 Domain/baseline pack hardening | done (beta baseline) | Baseline skills/prompts wired и versioned в workspace |
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
+| 18 Live E2E black-box boundary | open (paused behind Epic 22) | PR #171/#172 are merged; fresh R3 qualification and composite evidence restart only after the provider-free Epic 22 closure gate |
 | 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
 | 20 Console UX trust and IA reset | done | 20A–20N deliver trustworthy contracts, four-destination shell, feature seams, semantic primitives and responsive task gates; Epic 18 trusted-machine release evidence remains separate |
 | 21 Evidence-backed Architecture Home + impact-aware refresh | done (Wave 1) | Architecture Home, source revision/impact evidence, provider-free no-op, affected-only collect, surgical materialization and operator explanation are implemented |
+| 22 Post-implementation correctness/trust audit | open (release blocker) | Ordered provider-free remediation `22A..22O`: runtime/path/snapshot/refresh correctness, typed recovery, live/product isolation and ProductShell offline closure before R3 |
 
 ---
 

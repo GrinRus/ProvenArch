@@ -2,7 +2,7 @@
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
 > **Версия:** v1.2 (implementation-aligned)
-> **Дата:** 15 July 2026
+> **Дата:** 22 July 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
@@ -30,19 +30,23 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20) | The native History shell provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, semantic primitives, responsive navigation/context drawer, current-workspace Knowledge and global read-only Ask. |
 | Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Runs and Changes. |
+| Post-implementation correctness and trust-boundary audit remediation | open (Epic 22, release blocker) | Provider-free slices `22A..22O` close demonstrated run/history races, symlink and cross-run path escapes, false no-op/preservation risks, stringly recovery, bidirectional live/product leakage and ProductShell request/responsive/a11y gaps before trusted-machine R3 restarts. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 18 R3 trusted-machine composite evidence. Clean Codex smoke
-  `smoke-tiny-bank-20260721T072646Z` passed. Standalone
-  `release-fast-20260721T094341Z` then completed Qwen init/refresh and Claude collect `10/10`, but
-  stopped at Claude init step2: a mixed Architecture Home process-narration plus stale
-  downstream-index validation result was routed to the downstream-only retry, which produced no
-  fresh write before canonical exhaustion. The active provider-free remediation makes specialized
-  retry selection class-exclusive and routes that mixed result to existing provider-authored
-  Architecture Home cleanup without weakening validation or crossing the live/product boundary.
-  The full R3 sequence restarts after merge; stopped matrices are not reusable evidence.
+- release blocker: Epic 22 provider-free correctness and trust-boundary remediation. The prior
+  step2 fixes are merged in PR #171 (`ca8c3f67`) and PR #172 (`a633e3ce`), but a subsequent static
+  and historical-artifact audit demonstrated additional blockers in run/history concurrency,
+  filesystem and selected-run containment, refresh preservation, recovery routing, live/product
+  isolation and ProductShell state correctness. Epic 22 must pass its complete offline closure gate
+  before any new trusted-machine qualification.
+- open after Epic 22: Epic 18 R3 trusted-machine composite evidence. The full smoke -> standalone
+  fast/long -> fresh three-constituent release-full sequence starts from the exact clean Epic 22
+  closure commit; previous stopped matrices are diagnostic only and are not reusable evidence.
+- planned after composite PASS: `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`; 9D preserves
+  deterministic `acp qa` and `POST /api/qa/ask` compatibility through v1, and cleanup retains the
+  tracked `golden/readable` human-review baseline.
 - out of MVP: 12, 13
 
 ---
