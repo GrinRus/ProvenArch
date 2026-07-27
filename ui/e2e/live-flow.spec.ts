@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { evaluateDiagramArtifactReadability } from "../src/liveArtifactQuality";
+import { evaluateDiagramArtifactReadability } from "./liveArtifactQuality";
 import { expectNoCriticalAxeViolations } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();

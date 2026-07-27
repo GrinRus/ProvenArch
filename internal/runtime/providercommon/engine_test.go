@@ -551,7 +551,10 @@ func TestRedactedEnvValueOmitsSecretLikeCommandValues(t *testing.T) {
 func TestMergedCommandEnvAppliesOverrides(t *testing.T) {
 	t.Parallel()
 
-	env := mergedCommandEnv([]string{"A=old", "B=keep"}, map[string]string{"A": "new", "CODEX_HOME": "/tmp/codex-home"})
+	env := mergedCommandEnv(
+		[]string{"A=old", "B=keep", "ACP_MATRIX_ID=secret-run", "BATCH_PROVIDER_FILTER=claude-code", "UI_E2E_SCENARIO=live"},
+		map[string]string{"A": "new", "CODEX_HOME": "/tmp/codex-home", "RELEASE_VERDICT_PATH": "/tmp/verdict"},
+	)
 	got := map[string]string{}
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
@@ -567,6 +570,11 @@ func TestMergedCommandEnvAppliesOverrides(t *testing.T) {
 	}
 	if got["CODEX_HOME"] != "/tmp/codex-home" {
 		t.Fatalf("expected CODEX_HOME override, got %q from %v", got["CODEX_HOME"], env)
+	}
+	for _, forbidden := range []string{"ACP_MATRIX_ID", "BATCH_PROVIDER_FILTER", "UI_E2E_SCENARIO", "RELEASE_VERDICT_PATH"} {
+		if _, ok := got[forbidden]; ok {
+			t.Fatalf("orchestration-only environment %q leaked to provider: %v", forbidden, env)
+		}
 	}
 }
 

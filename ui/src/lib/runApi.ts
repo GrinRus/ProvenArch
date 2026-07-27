@@ -1,5 +1,5 @@
 import { fetchJSON, getErrorMessage } from "./api";
-import type { RunListResponse, RunReviewSummaryResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
+import type { RunListResponse, RunReviewSummaryResponse, RunSnapshotResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
 
 export async function listPipelineRuns(limit = 100, init?: RequestInit): Promise<RunListResponse> {
   return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`, init);
@@ -39,6 +39,10 @@ export async function getPipelineRunReviewSummary(
     throw new Error(getErrorMessage(payload, `request failed: /api/pipeline/runs/${id}/review-summary`));
   }
   return payload as RunReviewSummaryResponse;
+}
+
+export async function getPipelineRunSnapshot(id: string, init?: RequestInit): Promise<RunSnapshotResponse> {
+  return fetchJSON<RunSnapshotResponse>(`/api/pipeline/runs/${id}/snapshot`, init);
 }
 
 export type CancelRunResponse =

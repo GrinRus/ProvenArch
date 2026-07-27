@@ -15,7 +15,7 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["src/**/*.test.{ts,tsx}"],
+    include: ["src/**/*.test.{ts,tsx}", "e2e/liveArtifactQuality.test.ts"],
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",

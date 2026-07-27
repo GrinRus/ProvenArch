@@ -893,6 +893,125 @@ func TestValidateStagedArtifactsDetectsCitationIndexDocumentIssues(t *testing.T)
 	}
 }
 
+func TestValidateStagedArtifactsRejectsForeignRunAndUnavailableEvidence(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoRoot := filepath.Join(workspaceRoot, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stagedPath := "reports/taskruns/run-foreign/staging/final/reports/as-is/overview.md"
+	absStagedPath := filepath.Join(workspaceRoot, filepath.FromSlash(stagedPath))
+	if err := os.MkdirAll(filepath.Dir(absStagedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(absStagedPath, []byte("# Architecture\n\nCitation coverage is complete.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	execution := &pipelineExecution{
+		runID:     "run-current",
+		workspace: workspace.Root{Path: workspaceRoot},
+		pipelineRuntimeState: pipelineRuntimeState{
+			resolvedRepoPaths: map[string]string{"payments": repoRoot},
+		},
+		pipelineSemanticDocflowState: pipelineSemanticDocflowState{
+			finalRunIndex: &contracts.FinalRunIndex{
+				RunID:             "run-foreign",
+				CitationIndexPath: runtimeCitationIndexPath("run-foreign"),
+				CanonicalDocuments: []contracts.FinalRunDocument{{
+					ID:            "doc.home",
+					Kind:          "report",
+					CanonicalPath: "reports/as-is/overview.md",
+					StagedPath:    stagedPath,
+				}},
+			},
+			citationIndex: &contracts.CitationIndex{
+				RunID: "run-foreign",
+				Citations: []contracts.DocumentCitation{{
+					ID:          "cite.missing",
+					Repo:        "payments",
+					Path:        "../outside.md",
+					ClaimIDs:    []string{"claim.missing"},
+					DocumentIDs: []string{"doc.home"},
+				}},
+			},
+			shardPacks: []contracts.ShardPackManifest{{ShardID: "payments"}},
+		},
+	}
+
+	issues := execution.validateStagedArtifacts()
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		seen[issue.Code] = true
+	}
+	for _, code := range []string{
+		"foreign_run_index",
+		"foreign_run_citation_index",
+		"foreign_run_staged_document",
+		"citation_evidence_unavailable",
+		"empty_claimed_citation_coverage",
+	} {
+		if !seen[code] {
+			t.Fatalf("expected %s, got %#v", code, issues)
+		}
+	}
+}
+
+func TestValidateCitationEvidenceFileRequiresConcreteContainedFile(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCitationEvidenceFile(repoRoot, "README.md"); err != nil {
+		t.Fatalf("expected concrete file to pass: %v", err)
+	}
+	for _, candidate := range []string{"../outside.md", ".", "missing.md"} {
+		if err := validateCitationEvidenceFile(repoRoot, candidate); err == nil {
+			t.Fatalf("expected %q to fail", candidate)
+		}
+	}
+
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(repoRoot, "escape.md")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := validateCitationEvidenceFile(repoRoot, "escape.md"); err == nil {
+		t.Fatal("expected symlink escape to fail")
+	}
+}
+
+func TestValidatePreservedDocumentReferencesRejectsRemovedCitationAndDocument(t *testing.T) {
+	t.Parallel()
+
+	document := contracts.FinalRunDocument{
+		ID:            "doc.home",
+		CanonicalPath: "reports/as-is/overview.md",
+		CitationIDs:   []string{"cite.home"},
+	}
+	if err := validatePreservedDocumentReferences(document, []contracts.FinalRunDocument{document}, &contracts.CitationIndex{}); err == nil {
+		t.Fatal("expected removed citation to fail")
+	}
+	index := &contracts.CitationIndex{Citations: []contracts.DocumentCitation{{
+		ID:          "cite.home",
+		DocumentIDs: []string{"doc.home", "doc.removed"},
+	}}}
+	if err := validatePreservedDocumentReferences(document, []contracts.FinalRunDocument{document}, index); err == nil {
+		t.Fatal("expected removed document reference to fail")
+	}
+	index.Citations[0].DocumentIDs = []string{"doc.home"}
+	if err := validatePreservedDocumentReferences(document, []contracts.FinalRunDocument{document}, index); err != nil {
+		t.Fatalf("expected reciprocal current references to pass: %v", err)
+	}
+}
+
 func TestDocflowIndexesUseConsistentManifestDocumentIDs(t *testing.T) {
 	t.Parallel()
 

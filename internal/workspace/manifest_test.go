@@ -117,6 +117,29 @@ repos:
 	}
 }
 
+func TestOpenRejectsInvalidRecursiveAnalysisGlob(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManifestFile(t, root, `
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+    analysis:
+      include:
+        - src/**.go
+`)
+
+	_, err := Open(root)
+	if err == nil {
+		t.Fatal("expected invalid glob error")
+	}
+	if !strings.Contains(err.Error(), "may use ** only as a complete segment") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestOpenRejectsManifestWithLegacyRepoSelectionField(t *testing.T) {
 	t.Parallel()
 

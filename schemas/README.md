@@ -9,6 +9,7 @@
 - `citation-index.schema.json` — citation graph for promoted reports.
 - `validator-verdict.schema.json` — validator/findings primary verdict surface.
 - `qa-answer.schema.json` — async Ask runtime answer artifact.
+- `source-qa-answer.schema.json` — immutable provenance record for an explicit Ask-to-Proposal draft.
 
 ## Правила
 Меняя schema, обновляйте также:

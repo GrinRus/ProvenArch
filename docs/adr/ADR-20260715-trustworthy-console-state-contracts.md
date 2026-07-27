@@ -16,6 +16,11 @@ evidence only from the selected run staging index; make Git reads return one ful
 require its SHA-256 fingerprint plus repository identity for every Publish mutation. Runtime
 switching is immediate only before the launcher enters Console; afterward it requires restart.
 
+Pipeline/QA admission, session generation replacement and Git commit/proposal-branch mutations use
+one server lease. Admission holds ownership through workspace validation, generation revalidation
+and service registration. Git revalidates branch/HEAD/base/full inventory under that lease and is
+rejected while any active or queued work exists.
+
 The UI consumes these public contracts through a five-path shell and one pure workflow selector.
 Fake runtime and its artifacts are always identified as deterministic demo evidence.
 
@@ -23,6 +28,8 @@ Fake runtime and its artifacts are always identified as deterministic demo evide
 - Keep UI-only guards: rejected because another client or workspace change can invalidate them.
 - Commit only the selected preview: rejected because it changes the existing `git add -A` contract.
 - Fall back from a missing snapshot to current files: rejected because it silently crosses run boundaries.
+- Keep separate session/Git/start mutexes: rejected because snapshot validation and run publication
+  would still have an ownership race.
 
 ## Consequences
 Clients must provide Git confirmation identity and handle typed `409` conflicts. Legacy runs

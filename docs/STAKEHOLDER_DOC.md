@@ -2,7 +2,7 @@
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
 > **Версия:** v1.2 (implementation-aligned)
-> **Дата:** 22 July 2026
+> **Дата:** 26 July 2026
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
@@ -30,23 +30,33 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20) | The native History shell provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, semantic primitives, responsive navigation/context drawer, current-workspace Knowledge and global read-only Ask. |
 | Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Runs and Changes. |
-| Post-implementation correctness and trust-boundary audit remediation | open (Epic 22, release blocker) | Provider-free slices `22A..22O` close demonstrated run/history races, symlink and cross-run path escapes, false no-op/preservation risks, stringly recovery, bidirectional live/product leakage and ProductShell request/responsive/a11y gaps before trusted-machine R3 restarts. |
+| Post-implementation correctness and trust-boundary audit remediation | implementation complete; release qualification pending | Epic 22 slices `22A`–`22O` and the provider-free offline closure pass in the current working tree. A clean reviewed qualification commit has not been recorded, so trusted-machine R3 remains open and no live evidence is claimed. |
+| Advisory Workspace Health completion | done (K2b implementation) | Read-only v1 now reports broken/escaping links, model endpoint/alias/owner defects, orphan domain/team outputs, malformed canonical text, unlinked findings and missing proposal evidence; current Knowledge shows the summary without turning health into historical Changes evidence or a publication gate. |
+| Explicit Ask-to-Proposal handoff | done (K3A/K3B implementation) | A succeeded immutable Ask answer exposes a digest; operator confirmation atomically creates a traceable proposal/evidence/source package, refreshes Git truth and opens current Changes→Proposals with Return to Ask. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 22 provider-free correctness and trust-boundary remediation. The prior
+- release blocker: Epic 22 qualification handoff. The prior
   step2 fixes are merged in PR #171 (`ca8c3f67`) and PR #172 (`a633e3ce`), but a subsequent static
   and historical-artifact audit demonstrated additional blockers in run/history concurrency,
   filesystem and selected-run containment, refresh preservation, recovery routing, live/product
-  isolation and ProductShell state correctness. Epic 22 must pass its complete offline closure gate
-  before any new trusted-machine qualification.
+  isolation and ProductShell state correctness. Slices `22A`–`22O` completed on 2026-07-26 with
+  focused race/fault/restart/symlink/snapshot/glob/baseline-integrity/admission-lease and typed
+  recovery coverage, deterministic artifact auditing, bidirectional live/product isolation and
+  Changes route/Git truth, stale-response suppression, explicit Knowledge/QA evidence authorities
+  bounded authority-safe Evidence Viewer behavior, responsive/a11y completion and one deterministic
+  provider-free closure command. `make offline-closure` passed from the current working tree,
+  including race/fault/path/boundary suites, 263 Python tests, 158 UI tests, 7 rendered mock
+  scenarios, contracts, lint, build and embedded-UI/source-repository drift checks. The remaining
+  handoff is a clean reviewed qualification commit; no SHA is invented from the uncommitted tree.
 - open after Epic 22: Epic 18 R3 trusted-machine composite evidence. The full smoke -> standalone
   fast/long -> fresh three-constituent release-full sequence starts from the exact clean Epic 22
   closure commit; previous stopped matrices are diagnostic only and are not reusable evidence.
-- planned after composite PASS: `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`; 9D preserves
-  deterministic `acp qa` and `POST /api/qa/ask` compatibility through v1, and cleanup retains the
-  tracked `golden/readable` human-review baseline.
+- implemented locally by explicit owner request while composite R3 remains pending:
+  `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`. The implementation preserves deterministic
+  `acp qa` and `POST /api/qa/ask` compatibility through v1 and retains the tracked
+  `golden/readable` human-review baseline. This ordering exception does not satisfy or replace R3.
 - out of MVP: 12, 13
 
 ---
@@ -79,7 +89,7 @@ Epic matrix:
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
 - ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
 - в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
-- пока есть active или queued run, смена workspace/runner и runtime profile mutations возвращают явный conflict; UI/API должны продолжать показывать effective runtime текущей service generation до terminal state.
+- pipeline/QA start, смена workspace/runner и Git publication сериализованы одной admission lease; пока есть active или queued run, session/runtime/profile/Git mutations возвращают явный conflict, а UI/API продолжают показывать effective runtime текущей service generation до terminal state.
 
 2) **Шаг 0: Конституция проекта**
 - открывает UI → мастер (wizard) по “Конституции”:

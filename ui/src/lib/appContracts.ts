@@ -128,7 +128,7 @@ export type KnowledgeIssue = {
 export type KnowledgeResponse = {
   version: number;
   generated_at: string;
-  source_mode: "current_workspace";
+  source_mode: "promoted_current";
   status: "available" | "partial" | "unavailable";
   entities: KnowledgeEntity[];
   edges: KnowledgeEdge[];
@@ -209,6 +209,7 @@ export type RuntimePermissionDecision = {
 export type RunListResponse = {
   items: RunListItem[];
   coordination?: RunCoordination;
+  history_diagnostics?: string[];
 };
 
 export type RunCoordination = {
@@ -224,7 +225,7 @@ export type Artifact = {
   read_path?: string;
   canonical_path?: string;
   source_run_id?: string;
-  source_mode?: "run_snapshot" | "current_workspace";
+  source_mode?: "run_snapshot" | "promoted_current";
 };
 
 export type ArtifactsResponse = {
@@ -232,23 +233,17 @@ export type ArtifactsResponse = {
   artifacts: Artifact[];
 };
 
-export type FinalRunIndexDocument = {
-  id?: string;
-  canonical_path: string;
-  staged_path: string;
-  kind?: string;
-  title?: string;
-  topics?: string[];
-  citation_ids?: string[];
-  source_shards?: string[];
-  status?: string;
+export type RunSnapshotIssue = {
+  code: string;
+  message: string;
+  path?: string;
 };
 
-export type FinalRunIndex = {
-  run_id?: string;
-  generated_at?: string;
-  citation_index_path?: string;
-  canonical_documents?: FinalRunIndexDocument[];
+export type RunSnapshotResponse = {
+  run_id: string;
+  status: "available" | "partial" | "not_produced" | "unavailable" | "error";
+  artifacts: Artifact[];
+  issues: RunSnapshotIssue[];
 };
 
 export type RunLogEntry = {
@@ -337,6 +332,7 @@ export type GitDiffHunk = {
 
 export type GitDiffResponse = {
   ok: boolean;
+  state: "clean" | "dirty" | "stale" | "blocked" | "unknown";
   workspace: string;
   scope: "full_workspace";
   branch: string;

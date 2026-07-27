@@ -361,13 +361,14 @@ Suggested PR slices:
 
 ## Epic 18 — Live E2E Black-box Artifact Boundary
 
-Status (2026-07-22): trusted-machine R3 release evidence remains open. The two provider-free
+Status (2026-07-26): trusted-machine R3 release evidence remains open. The two provider-free
 remediations that were still pending in the previous status are merged: exact step2 evidence
 references landed in PR #171 (`ca8c3f67`) and mixed recovery routing landed in PR #172
 (`a633e3ce`). A subsequent static, deterministic and historical-artifact audit identified
-additional correctness and live/product trust-boundary blockers recorded in Epic 22. R3 is paused
-until Epic 22 passes its offline closure gate. Stopped or earlier live matrices remain diagnostic
-only and cannot be reused as release evidence.
+additional correctness and live/product trust-boundary blockers recorded in Epic 22. Their
+provider-free implementation and working-tree closure gate now pass; R3 remains paused until the
+same gate is tied to one clean reviewed qualification commit. Stopped or earlier live matrices
+remain diagnostic only and cannot be reused as release evidence.
 
 Context:
 - latest strict medium diagnostics validated the execution/artifact-quality split shape
@@ -1399,11 +1400,10 @@ Suggested PR slices:
 
 ## Epic 22 — Post-implementation correctness and trust-boundary audit remediation
 
-Status (2026-07-22): **open, release-blocking before Epic 18 R3**. Baseline for the audit is clean
-`main` at `a633e3ce`. Epic 20 and Epic 21 remain implementation-complete; this epic records newly
-demonstrated regressions and insufficient invariants found by static review, provider-free
-reproduction and preserved historical incident artifacts. It does not reinterpret a stopped live
-matrix as release evidence.
+Status (2026-07-26): **implementation complete; clean qualification handoff remains release-blocking
+before Epic 18 R3**. Slices `22A`–`22O` and the combined provider-free closure pass in the current
+working tree. The exact reviewed commit is not yet recorded, and no stopped live matrix is
+reinterpreted as release evidence.
 
 ### Goal
 
@@ -1415,8 +1415,9 @@ trusted-machine harness and product remain independent in both directions before
 
 `22A -> 22B -> 22C -> 22D -> 22E -> 22F -> 22G -> 22H -> 22I -> 22J -> 22K -> 22L -> 22M -> 22N -> 22O -> Epic 18 R3`
 
-Each slice is a separate small PR and receives its own ExecPlan when selected. Product PRs after
-R3 remain ordered `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`. Epics 12/13 and K5–K7 remain deferred.
+Each slice is a separate reviewable implementation unit with its own ExecPlan. By explicit owner
+request, the product queue `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup` was also completed locally
+before R3 without treating that work as live qualification. Epics 12/13 and K5–K7 remain deferred.
 
 ### Boundaries
 
@@ -1440,6 +1441,12 @@ behavior.
 
 ### 22A — Immutable run registry and transactional history
 
+Status (2026-07-26): **complete**. Run snapshots are deep-cloned at storage/read/history boundaries;
+registry candidates persist primary current history before in-memory publication; pending
+replacement is one transaction; persistence/recovery diagnostics are bounded and exposed through
+the runs list; cancellation uses the existing terminal `canceled` status. Focused race/fault/restart
+coverage and full deterministic DoD pass without live E2E. `22B` is next.
+
 What:
 - return deep immutable copies of run records, nested slices, coordination and refresh summaries;
 - serialize run-registry transitions and make queued/running/terminal history updates transactional;
@@ -1459,6 +1466,12 @@ Acceptance:
 
 ### 22B — Symlink-safe workspace containment and atomic manifest writes
 
+Status (2026-07-26): **complete**. Workspace-owned reads, layout creation and atomic writes use
+Go's descriptor-backed `os.Root`: relative symlinks are accepted only when they remain inside the
+workspace, while absolute, dangling and escaping links fail closed. Workspace creation now writes
+`workspace.yaml` through the same temp/fsync/rename/dir-sync primitive. Focused symlink and race
+tests pass; `22C` is next.
+
 What:
 - enforce containment against resolved filesystem identity, including existing symlink parents,
   final symlinks and creation through a symlinked ancestor;
@@ -1475,6 +1488,11 @@ Acceptance:
 - failed manifest writes preserve the previous bytes and source repositories remain unchanged.
 
 ### 22C — Server-owned selected-run snapshot resolver
+
+Status (2026-07-26): **complete**. `GET /api/pipeline/runs/<run_id>/snapshot` owns exact
+final-index selection, run identity, staged containment, inventory membership and canonical
+mapping checks. It returns typed states/issues; the browser no longer parses final indexes or
+constructs staged paths. Late proposal documents are persisted in run inventory. `22D` is next.
 
 What:
 - move final-index discovery, identity checks and artifact resolution behind one server-side resolver;
@@ -1494,6 +1512,12 @@ Acceptance:
 
 ### 22D — One recursive glob dialect
 
+Status (2026-07-26): **complete**. `internal/pathscope` is the only compiler/matcher for repository
+analysis scopes. Refresh impact mapping and shard planning share the same slash-normalized
+segment dialect (`*` one segment, standalone `**` recursive, literal directory includes its
+subtree); invalid/absolute/traversal patterns fail manifest validation before run admission.
+`22E` is next.
+
 What:
 - define one documented recursive include/exclude matcher for workspace validation, shard planning,
   source fingerprints, refresh impact mapping and QA/import collection;
@@ -1509,6 +1533,13 @@ Acceptance:
 - every consumer produces identical matches and no false no-op is possible from matcher drift.
 
 ### 22E — Immutable selective-refresh baseline and complete shard identity
+
+Status (2026-07-26): **complete**. Successful collect shards now receive an orchestrator-owned
+`baseline-integrity.json` sidecar with full logical identity, source revision ranges and a
+deterministic SHA-256 inventory. Selective reuse validates that sidecar plus manifest/runtime
+identity, rejects symlinks/special files, rewrites only the new run identity and falls back to full
+before provider execution on any mismatch. Preserved canonical documents are copied from the
+baseline run's staged final snapshot, never from mutable current canonical paths. `22F` is next.
 
 What:
 - preserve unaffected artifacts only from validator-promoted immutable taskrun staging bytes and
@@ -1527,6 +1558,13 @@ Acceptance:
 
 ### 22F — Session-generation lease and Git/run coordination
 
+Status (2026-07-26): **complete**. One server admission lease now serializes pipeline/QA start
+commit, workspace/runtime/session replacement and Git commit/proposal-branch mutations. Starts
+hold the lease through workspace validation, generation revalidation and service registration;
+Git mutations reject active/queued work and revalidate full confirmation state under the same
+lease immediately before mutation. Deterministic barrier and unchanged-HEAD tests cover both race
+directions. `22G` is next.
+
 What:
 - acquire one serialized start lease spanning session-generation validation, run registration and
   active/pending publication;
@@ -1544,6 +1582,13 @@ Acceptance:
 
 ### 22G — Typed validation issues and explicit recovery state machine
 
+Status (2026-07-26): **complete**. Provider artifact validation is normalized once into an internal
+ordered `validationIssueSet` with stable code/class/path fields. Collect/draft repair routing and
+provider-unavailable classification consume issue codes rather than `error.Error()` fragments;
+recovery transitions name their target stage and one-attempt budget. Claude/Qwen/Codex
+order-shuffled fixtures prove equivalent issue sets select the same path, mixed-class draft errors
+cannot enter downstream-only cleanup and repeated transitions terminate. `22H` is next.
+
 What:
 - replace routing based on fragments of `error.Error()` with typed issue codes, paths and classes;
 - define recovery states, class-exclusive transitions, priority, retry/transition budget and an
@@ -1559,6 +1604,15 @@ Acceptance:
 - repeated/no-op recovery terminates within a deterministic budget and records the complete path.
 
 ### 22H — Provider-free artifact integrity auditor
+
+Status (2026-07-26): **complete**. A read-only `internal/artifactaudit` scanner now audits an exact
+selected-run staging graph or compares that graph with promoted-current canonical bytes. It
+requires matching final/citation/validator identities, a `PASS` validator verdict, contained staged
+paths, reciprocal document/citation references, real contained repository evidence, complete
+Architecture Home sections and bounded actionable content. Reports are deterministic, redacted and
+bounded by issue, inventory, message and per-file read budgets; the HTTP surface is
+`GET /api/pipeline/runs/<run_id>/audit`. Clean, incident, foreign-run, oversized and promoted-digest
+fixtures prove read-only behavior. `22I` is next.
 
 What:
 - add a read-only auditor over promoted and selected-run evidence;
@@ -1578,6 +1632,14 @@ Acceptance:
   the workspace or source repositories.
 
 ### 22I — Bidirectional live E2E/product isolation
+
+Status (2026-07-26): **complete**. Provider subprocesses now receive a filtered ambient environment
+that excludes orchestration/release identity segments while preserving normal tool, credential,
+locale and proxy variables. Production prompts describe only canonical repo/domain/staged evidence
+and generic ambient labels. Live frontend preparation preserves the backend product-authored
+`run-history.json` in its read-only snapshot copy instead of synthesizing state, and its diagram
+assessment helper lives under `ui/e2e`, outside production ownership. Bidirectional Python source
+scans plus Go env and TypeScript helper tests enforce both boundaries. `22J` is next.
 
 What:
 - scrub live-only environment and present stable canonical repo/evidence identities to providers;
@@ -1599,6 +1661,13 @@ Acceptance:
 
 ### 22J — Changes views and workflow truth
 
+Status (2026-07-26): **complete**. Changes uses a discriminated route model for
+Overview/Evidence/Findings/Diff/Proposals/Publish and renders named route containers with
+route-specific review semantics. `GET /api/git/diff` returns server-authored
+`clean|dirty|stale|blocked|unknown`; optional confirmation fingerprint detects stale inventory and
+active/pending analysis produces `blocked`. Git actions refuse confirmation for non-actionable
+states. Route/state/popstate and backend inventory tests pass. `22K` is next.
+
 What:
 - make `Overview | Evidence | Findings | Proposals | Diff | Publish` materially distinct views whose
   URL route/view is the sole selection source;
@@ -1616,6 +1685,12 @@ Acceptance:
 
 ### 22K — URL/request identity and stale-response suppression
 
+Status (2026-07-26): **complete**. Artifact snapshot and preview requests use abortable generation
+gates; preview identity now includes exact run, source authority, canonical/read paths and viewer
+mode. Invalid explicit Changes `view/source/mode` values are removed with a visible notice and
+`replaceState` on bootstrap and PopState, while user navigation continues through `pushState`.
+Delayed selection, route-table and invalid identity regressions pass. `22L` is next.
+
 What:
 - treat `(run_id, source_mode, artifact/entity, viewer_mode)` as one request identity;
 - cancel or ignore older requests with generation tokens/abort signals;
@@ -1630,6 +1705,12 @@ Acceptance:
 - invalid explicit IDs are sanitized with a notice and never silently fall back to current workspace.
 
 ### 22L — Knowledge and QA evidence authorities
+
+Status (2026-07-26): **complete**. Knowledge is explicitly `promoted_current` and excludes every
+`reports/taskruns/**` artifact. QA responses name exact `qa_snapshot` and `qa_audit` roots, expose
+`answer_status`, validate citations against the selected context pack and return
+`qa_answer_unavailable` for a succeeded run whose own snapshot is missing or invalid. Existing
+configured-import, historical-selection and canceled/failed regressions remain green. `22M` is next.
 
 What:
 - keep current promoted Knowledge free of `reports/taskruns/**` and run-scoped diagnostics;
@@ -1647,6 +1728,12 @@ Acceptance:
 
 ### 22M — Evidence Viewer correctness
 
+Status (2026-07-26): **complete**. Relative links retain the selected canonical directory, traversal
+and taskrun/cross-run escape are blocked, and run navigation refuses paths absent from the selected
+snapshot inventory. The viewer exposes `Demo | Live | Unknown`, typed evidence states/issues and
+explicit two-sided diff identity. API reads are bounded at 2 MiB and rendered Markdown/Mermaid at
+512 KiB with Raw/unavailable fallback. XSS/Mermaid isolation remains strict. `22N` is next.
+
 What:
 - resolve local links through the selected evidence authority and preserve the source run;
 - make Raw/Rendered/Diff use an explicit and truthful comparison source;
@@ -1661,6 +1748,13 @@ Acceptance:
   are isolated without replacing the selected document or crashing the page.
 
 ### 22N — Responsive and accessibility completion
+
+Status (2026-07-26): **complete**. Tablet collapse controls are removed from focus order, mobile
+header/navigation/content/fullscreen sheets honor device safe areas, utility and primary controls
+meet the 44 px target, and Run/Knowledge read-only tables become keyed labeled cards on phones.
+Modal/drawer tests cover focus trap, Escape, outside click, return focus and live breakpoint
+transitions. Offline rendered scenarios exercise the required viewports, overflow and axe. The
+combined `22O` working-tree gate also passes.
 
 What:
 - remove focusable hidden controls and remaining legacy shell CSS;
@@ -1677,6 +1771,13 @@ Acceptance:
 - keyboard-only flows reach Home, Runs, Knowledge, Changes, Setup and global Ask with logical focus.
 
 ### 22O — Deterministic offline closure gate
+
+Status (2026-07-26): **implementation and working-tree qualification complete.**
+`make offline-closure` passed without provider binaries or live/network execution: race/fault/path
+and boundary suites, readable-fixture drift, 263 Python tests, 158 UI tests, 7 rendered mock
+scenarios, contracts, lint, build, embedded UI comparison and source-repository cleanliness all
+passed. The exact R3 qualification SHA remains intentionally unset until these changes are reviewed
+and committed from a clean tree.
 
 What:
 - run the combined race, fault-injection, path-attack, incident-fixture and artifact-auditor suites;
@@ -1706,11 +1807,16 @@ Acceptance:
 
 ## Post-R3 K-roadmap product queue
 
-Status (2026-07-22): **planned, blocked by Epic 22 and Epic 18 composite PASS**. Delivery order is
-`K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`. Each item is a separate PR/ExecPlan. K5 claim ledger,
-K6 contradictions and K7 search projection remain outside this cycle.
+Status (2026-07-26): **implementation complete in the requested order; R3 evidence remains
+pending.** The owner explicitly requested local implementation of
+`K2b -> K4 -> K3A -> K3B -> 9D -> cleanup` without waiting for live E2E. This does not waive or
+replace the trusted-machine R3 release gate. K5 claim ledger, K6 contradictions and K7 search
+projection remain outside this cycle.
 
 ### K2b — Advisory Workspace Health completion
+
+Status (2026-07-26): **implementation complete; provider-free DoD evidence recorded in the active
+ExecPlan.** Delivery was performed locally without claiming the still-blocked Epic 18 R3 live gate.
 
 What:
 - retain the computed read-only `GET /api/workspace/health`; do not persist `reports/health/*` and
@@ -1728,6 +1834,9 @@ Acceptance:
 
 ### K4 — Citation and claim identity hardening
 
+Status (2026-07-26): **implementation complete; provider-free DoD tracked in the active ExecPlan.**
+The existing public schema shapes remain unchanged.
+
 What:
 - prove global citation/claim ID uniqueness, document/citation reciprocity, run isolation, concrete
   in-root evidence paths and deterministic claim IDs for identical input;
@@ -1743,6 +1852,9 @@ Acceptance:
   with full contract synchronization instead of hiding it in K4.
 
 ### K3A — Explicit Ask to Proposal backend mutation
+
+Status (2026-07-26): **implementation complete** with atomic rollback and synchronized additive
+schema/API contracts.
 
 What:
 - add additive `POST /api/qa/runs/<run_id>/proposal-draft` with required title and
@@ -1762,6 +1874,9 @@ Acceptance:
 
 ### K3B — Ask to Proposal ProductShell flow
 
+Status (2026-07-26): **implementation complete** with focus-managed confirmation, current
+Changes→Proposals routing, Git refresh and Return to Ask context.
+
 What:
 - show `Create proposal draft` only for a succeeded answer with `answer_digest`;
 - use a focus-managed confirmation showing title/path, citations, unresolved assumptions and the
@@ -1777,6 +1892,10 @@ Acceptance:
   confirmation stale; no commit or branch is created implicitly.
 
 ### 9D — Q&A compatibility policy through v1
+
+Status (2026-07-26): **implementation/documentation lock complete.** Deterministic response-shape
+and repeatability tests protect the compatibility endpoint; removal still requires a separate
+approved v1 breaking-change plan.
 
 What:
 - keep `POST /api/qa/ask` and `acp qa` deterministic and response-compatible through v1;
@@ -1802,12 +1921,19 @@ Remaining cleanup tasks:
   `docs/TESTING_STRATEGY.md`;
 - preserve current files and review-friendly Git diffs.
 
+Status (2026-07-26): **complete** via `make verify-readable-fixtures`; all retained readable files
+must be a digest-matching subset of the adjacent machine snapshot.
+
 2) Tracker and ExecPlan archive
 - archive implementation-complete ExecPlans using the monthly archive convention;
 - reconcile stale K-roadmap checkboxes and merged PR/commit references;
 - record `docs/BACKLOG.md` as acceptance/reference backlog, with active execution state remaining in
   the stakeholder matrix and `docs/PLANS.md`;
 - do not mix archive cleanup with product behavior changes.
+
+Status (2026-07-26): **complete**. Implementation-complete child plans were moved to the July
+archive; the program-level Epic 22/R3 plan and `22O` qualification handoff remain active until a
+clean reviewed SHA and trusted-machine evidence exist.
 
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.

@@ -143,6 +143,10 @@ Managed policy первого slice:
 - auto-approve `read|list|glob|grep` только внутри `read_context_roots`;
 - auto-approve `create|write|overwrite|mkdir` только внутри `write_root` и `draft_final_root`;
 - deny writes в analyzed repos, `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*`, path traversal, absolute/symlink escape outside allowed roots;
+- workspace-owned filesystem operations resolve from an opened root handle: relative symlinks may
+  target only another location inside the same workspace; absolute, dangling and escaping symlinks
+  fail closed. Critical writes, including initial `workspace.yaml`, use a same-directory temporary
+  file, file sync, atomic rename and parent-directory sync;
 - `network|package_install|shell|unknown` требуют пользователя; в non-interactive `fail_fast` это terminal `runtime_permission_required`;
 - live provider approve-loop включается только provider-by-provider при наличии structured permission events. Если structured protocol недоступен, `managed` fail-fast без PTY text parsing.
 
@@ -237,7 +241,10 @@ Manifest считается невалидным, если:
 - запись repo не содержит `name`
 - запись repo содержит одновременно `path` и `git_url`
 - запись repo не содержит ни `path`, ни `git_url`
-- `analysis.include[]`/`analysis.exclude[]` содержит пустые элементы
+- `analysis.include[]`/`analysis.exclude[]` содержит пустой, absolute, traversal, non-normalized
+  или syntactically invalid pattern. Диалект slash-normalized: `*`/`?` не пересекают `/`,
+  standalone segment `**` рекурсивен и может сопоставить zero segments, literal directory
+  включает своё subtree; `**` внутри другого segment запрещён
 - manifest содержит удалённое legacy поле `analysis.role`
 - любое значение `runtime.profile.timeouts.* <= 0`
 - `runtime.profile.execution.max_parallel_tasks <= 0`

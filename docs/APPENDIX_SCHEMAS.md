@@ -23,7 +23,9 @@
   - required `name`
   - ровно одно из `path | git_url`
   - optional `ref`
-  - optional `analysis.include[] | analysis.exclude[]` (glob overrides для shard planner)
+  - optional `analysis.include[] | analysis.exclude[]`; shape остаётся string arrays, semantic
+    validator компилирует единый slash-normalized dialect (`*` one segment, standalone `**`
+    recursive, literal directory includes subtree) и fail-fast отклоняет ambiguous/invalid paths
 - `repo.name` значения должны быть уникальными; это semantic validation rule workspace validator-а поверх JSON Schema
 - `docs.imports_path` optional, default `./docs/imports`
 - `<docs.imports_path>/index.yaml` не входит в `workspace.yaml` schema; validator проверяет его warning-only как imports metadata artifact (`id`/`path` required)
@@ -155,6 +157,9 @@ Required fields:
 
 Semantic role:
 - нормализует citation ids / claim ids / document ids
+- semantic pair validation (without changing either JSON shape) requires global citation/claim
+  uniqueness, reciprocal document bindings, matching run identity and concrete in-root repository
+  evidence files; foreign-run or unresolved references are invalid
 - даёт deterministic bridge между authored docs и evidence-backed claims
 
 ## 6) Validator Verdict Schema
@@ -299,6 +304,13 @@ Output mapping rules:
 - Фиксирует решения `updated`, `preserved`, `removed`, `uncertain`, baseline provenance и SHA-256 доступного содержимого.
 - `uncertain` не разрешает selective promotion; полный объединённый staged set обязан пройти validator до атомарной promotion.
 
+Selective shard reuse additionally requires orchestrator-owned
+`reports/taskruns/<run_id>/staging/shards/<bounded-shard>/baseline-integrity.json`. This is an
+internal persistence sidecar, not a provider/public schema: it records the full logical shard
+identity, source ranges and sorted SHA-256/size inventory. Missing/legacy/invalid sidecars force
+full refresh; they are never inferred from mutable canonical files. Its parser and fixtures live
+with orchestrator tests so no public example or schema is added.
+
 ## 12) QA Answer Schema
 
 - **Source of truth:** `schemas/qa-answer.schema.json`
@@ -321,7 +333,21 @@ Semantic role:
 - file is written only under `reports/taskruns/<run_id>/qa/qa-answer.json`;
 - it is run/audit output, not a promoted canonical architecture artifact.
 
-## 13) Model conventions
+## 13) Source QA Answer Schema
+
+- **Source of truth:** `schemas/source-qa-answer.schema.json`
+- Immutable provenance record inside an explicitly created Ask-to-Proposal package.
+
+Required fields:
+- `version` — integer `1`
+- `source_run_id`, `answer_digest`, `proposal_title`, `question`
+- `answer_generated_at`, `citations[]`, `unresolved[]`, `created_at`
+
+Optional `operator_note` records the confirming operator context. The closed schema is validated
+before atomic directory publication. It is a provenance record, not a replacement for the
+immutable taskrun answer.
+
+## 14) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -344,18 +370,39 @@ Public HTTP contracts, не представленные JSON Schema, фикси
 canonical fixture полного Git confirmation/read contract находится в
 `fixtures/api/git-state-confirmation.json`, а user-facing example — в
 `examples/git-state-confirmation.example.json`. Run coordination и persisted runtime identity
-остаются additive API fields и не изменяют workspace artifact schemas.
+остаются additive API fields и не изменяют workspace artifact schemas. Epic 22F не меняет payload:
+existing pipeline/QA and Git handlers now share a server admission lease; deterministic handler
+tests prove `session_generation_changed`/`run_active` conflict behavior and unchanged Git HEAD.
 
 Любые изменения в `schemas/` и контрактах сопровождаются:
 - обновлением `docs/spec/*` и `docs/APPENDIX_SCHEMAS.md`
 - обновлением примеров/фикстур
 - кратким rationale в PR
 
+Epic 22G changes no public schema. Provider validation diagnostics are normalized into an internal
+typed issue set before recovery selection; Go incident fixtures are the compatibility surface.
+Public terminal runner error codes remain unchanged.
+
+Epic 22H likewise adds no persisted schema. `GET /api/pipeline/runs/<run_id>/audit` is a transient
+read model specified in `docs/spec/API_SPEC.md` and checked by Go handler/package fixtures. Its
+versioned, bounded JSON report is computed from existing final-index, citation-index and validator
+contracts; it is never promoted or written into the workspace.
+
+Epic 22I changes no product schema/API. It narrows provider process environment and live-harness
+ownership: captured product history is copied byte-for-byte for inspection and never synthesized.
+
+Epic 22J adds transient `state` to the existing Git diff HTTP read model; it is specified in
+`docs/spec/API_SPEC.md` and does not alter a persisted workspace schema.
+
+Epic 22K changes no API or persisted schema; immutable request keys and URL canonicalization are
+client execution invariants covered by deterministic UI tests.
+
 ## 14) Current knowledge API read model
 
 - **Source of truth:** `docs/spec/API_SPEC.md` (`GET /api/knowledge`) и Go response types в `internal/api/knowledge.go`.
 - Это transient read model, а не новая persisted schema: `schemas/*` не меняются.
-- `source_mode` всегда `current_workspace`; historical run snapshot остаётся отдельным Changes/evidence contract.
+- `source_mode` всегда `promoted_current`; historical run snapshot, immutable QA answer/context
+  (`qa_snapshot`) и QA diagnostics (`qa_audit`) являются отдельными authorities без fallback.
 - `entities[]`/`edges[]` сохраняют canonical model fields и добавляют workspace-relative `path`.
 - Только parsed fields задают topology; filename-derived IDs/edges запрещены.
 - Malformed/unreadable/broken-reference файл фиксируется в typed `issues[]` и переводит общий `status` в `partial`, не скрывая валидные записи.

@@ -22,6 +22,9 @@
 Следующие generated артефакты намеренно tracked в git и считаются частью baseline/release surface:
 - `internal/api/ui_dist/*` (embed UI assets, используемые `acp serve`)
 - `fixtures/scenarios/*/golden/readable/*` (human-readable deterministic export для review-диффов)
+  - owner: deterministic scenario baseline maintainers;
+  - `make verify-readable-fixtures` requires every tracked readable file to exist in the adjacent
+    machine `snapshot.sha256` with the same SHA-256; machine-only entries are allowed.
 
 Rationale:
 - фиксированная локальная воспроизводимость UI/fixtures без дополнительных шагов в ревью;

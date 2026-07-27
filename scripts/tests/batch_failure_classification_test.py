@@ -1150,55 +1150,18 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertIn('cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/', script)
         self.assertNotIn('rm -rf "$frontend_workspace/reports"', script)
 
-    def test_shell_prepares_frontend_snapshot_run_history(self) -> None:
-        workspace = self.root / "frontend-snapshot-workspace"
-        write_text(workspace / "reports/as-is/overview.md", "# Overview\nEvidence-backed content.\n")
-        write_text(workspace / "reports/coverage/summary.md", "# Coverage\n")
-        write_text(workspace / "reports/diagrams/c4-context.mmd", "graph TD\nA-->B\n")
-        write_text(workspace / "reports/taskruns/refresh-run/staging/final/final-run-index.json", '{"canonical_documents": []}\n')
-        write_text(workspace / "reports/taskruns/refresh-run/staging/final/citation-index.json", '{"citations": []}\n')
-        write_json(
-            workspace / "reports/taskruns/refresh-run-quality.json",
-            {
-                "version": 1,
-                "run_id": "refresh-run",
-                "pipeline": "refresh",
-                "status": "succeeded",
-                "generated_at": "2026-06-25T12:00:00Z",
-                "run_warnings": ["artifact_quality: telemetry only"],
-            },
-        )
-        write_text(workspace / "proposals/proposal.md", "# Proposal\n")
+    def test_frontend_snapshot_preserves_product_authored_run_history(self) -> None:
+        batch_script = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        backend_script = BACKEND_CYCLE_SCRIPT.read_text(encoding="utf-8")
 
-        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
-        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
-        command = (
-            prelude
-            + "\n"
-            + f'prepare_frontend_snapshot_run_history {shlex.quote(str(workspace))} "refresh-run" "codex-code" "refresh"\n'
-            + "python3 - <<'PY'\n"
-            + "import json\n"
-            + f"from pathlib import Path\np = Path({str(workspace / 'reports/taskruns/run-history.json')!r})\n"
-            + "payload = json.loads(p.read_text(encoding='utf-8'))\n"
-            + "item = payload['items'][0]\n"
-            + "print(item['run_id'] + ':' + item['status'] + ':' + item['pipeline'])\n"
-            + "print(item['step_providers']['*'])\n"
-            + "print('\\n'.join(sorted(a['path'] for a in item['artifacts'])))\n"
-            + "PY\n"
+        self.assertNotIn("prepare_frontend_snapshot_run_history", batch_script)
+        self.assertNotIn("snapshot-history.log", batch_script)
+        self.assertIn(
+            'copy_if_exists "$workspace_path/reports/taskruns/run-history.json" '
+            '"$dst/reports/taskruns/run-history.json"',
+            backend_script,
         )
-        completed = subprocess.run(
-            ["bash", "-lc", command],
-            check=True,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
-        )
-
-        self.assertIn("refresh-run:succeeded:refresh", completed.stdout)
-        self.assertIn("codex-code", completed.stdout)
-        self.assertIn("reports/as-is/overview.md", completed.stdout)
-        self.assertIn("reports/taskruns/refresh-run/staging/final/final-run-index.json", completed.stdout)
-        self.assertIn("proposals/proposal.md", completed.stdout)
+        self.assertIn('cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/', batch_script)
 
     def test_python_report_aggregates_runtime_repair_stall_counters(self) -> None:
         quality_path = self.run_dir / "snapshots" / "refresh-run" / "reports" / "taskruns" / "refresh-run-quality.json"

@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactaudit"
 	"github.com/GrinRus/ProvenArch/internal/doctor"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
+	"github.com/GrinRus/ProvenArch/internal/proposaldraft"
 	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimeprofile"
@@ -28,7 +30,7 @@ import (
 
 type Server struct {
 	mu                sync.RWMutex
-	gitMutationMu     sync.Mutex
+	admissionMu       sync.Mutex
 	workspace         workspace.Root
 	workspacePath     string
 	workspaceSelected bool
@@ -39,6 +41,7 @@ type Server struct {
 	runtimeConfig     ServerRuntimeConfig
 	serviceFactory    ServiceFactory
 	generation        uint64
+	admissionHook     func(string)
 }
 
 type ServerRuntimeConfig struct {
@@ -284,6 +287,8 @@ func (s *Server) serviceHasInFlightWorkLocked() bool {
 }
 
 func (s *Server) mutateWorkspaceRoot(mutate func(workspace.Root) (workspace.Root, error)) (workspace.Root, error) {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.serviceHasInFlightWorkLocked() {
@@ -301,6 +306,8 @@ func (s *Server) mutateWorkspaceRoot(mutate func(workspace.Root) (workspace.Root
 }
 
 func (s *Server) saveWorkspaceManifest(content string) (*orchestrator.Service, error) {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.serviceHasInFlightWorkLocked() {
@@ -310,7 +317,8 @@ func (s *Server) saveWorkspaceManifest(content string) (*orchestrator.Service, e
 	if workspacePath == "" {
 		return nil, errors.New("workspace is not selected")
 	}
-	if err := os.WriteFile(filepath.Join(workspacePath, workspace.ManifestFileName), []byte(content), 0o644); err != nil {
+	current := workspace.Root{Path: workspacePath}
+	if err := current.WriteFileAtomic(workspace.ManifestFileName, []byte(content)); err != nil {
 		return nil, fmt.Errorf("manifest_write_failed: %w", err)
 	}
 	reopened, err := workspace.Open(workspacePath)
@@ -336,6 +344,8 @@ func (s *Server) saveWorkspaceManifest(content string) (*orchestrator.Service, e
 }
 
 func (s *Server) setWorkspace(ws workspace.Root) error {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.serviceHasInFlightWorkLocked() {
@@ -349,6 +359,8 @@ func (s *Server) setWorkspace(ws workspace.Root) error {
 }
 
 func (s *Server) setDraftWorkspace(path string) error {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.serviceHasInFlightWorkLocked() {
@@ -363,6 +375,8 @@ func (s *Server) setDraftWorkspace(path string) error {
 }
 
 func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, error) {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.serviceHasInFlightWorkLocked() {
@@ -379,6 +393,8 @@ func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, erro
 }
 
 func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) (*orchestrator.Service, error) {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.consoleEntered {
@@ -398,6 +414,8 @@ func (s *Server) setRuntimeConfig(config ServerRuntimeConfig) (*orchestrator.Ser
 }
 
 func (s *Server) enterConsole() error {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.workspaceSelected || s.workspace.Path == "" || s.service == nil || !s.runtimeSelected {
@@ -1009,13 +1027,21 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 	if message == "" {
 		message = "chore: update ACP workspace artifacts"
 	}
-	ws := s.getWorkspace()
 	if strings.TrimSpace(payload.ExpectedFingerprint) == "" {
 		writeError(writer, http.StatusBadRequest, "git_confirmation_required", "expected_fingerprint is required")
 		return
 	}
-	s.gitMutationMu.Lock()
-	defer s.gitMutationMu.Unlock()
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	snapshot := s.sessionSnapshot()
+	if snapshot.Service != nil && snapshot.Service.HasInFlightRun() {
+		writeError(writer, http.StatusConflict, "run_active", "Git mutation is blocked while a run is active or queued")
+		return
+	}
+	if s.admissionHook != nil {
+		s.admissionHook("git_commit_commit")
+	}
+	ws := snapshot.Workspace
 	state, err := collectWorkspaceGitState(request.Context(), ws)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
@@ -1072,13 +1098,21 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 		branch = "proposal/" + time.Now().UTC().Format("20060102-150405")
 	}
 
-	ws := s.getWorkspace()
 	if strings.TrimSpace(payload.ExpectedFingerprint) == "" || strings.TrimSpace(payload.ExpectedSourceBranch) == "" || strings.TrimSpace(payload.ExpectedBaseRef) == "" {
 		writeError(writer, http.StatusBadRequest, "git_confirmation_required", "expected_fingerprint, expected_source_branch and expected_base_ref are required")
 		return
 	}
-	s.gitMutationMu.Lock()
-	defer s.gitMutationMu.Unlock()
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	snapshot := s.sessionSnapshot()
+	if snapshot.Service != nil && snapshot.Service.HasInFlightRun() {
+		writeError(writer, http.StatusConflict, "run_active", "Git mutation is blocked while a run is active or queued")
+		return
+	}
+	if s.admissionHook != nil {
+		s.admissionHook("git_branch_commit")
+	}
+	ws := snapshot.Workspace
 	state, err := collectWorkspaceGitState(request.Context(), ws)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
@@ -1117,10 +1151,15 @@ func (s *Server) handleArtifacts(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	ws := s.getWorkspace()
-	content, err := ws.ReadFile(relPath)
+	const maxArtifactReadBytes = 2 * 1024 * 1024
+	content, err := ws.ReadFileLimit(relPath, maxArtifactReadBytes)
 	if err != nil {
 		if errors.Is(err, workspace.ErrPathTraversal) || errors.Is(err, workspace.ErrPathAbsolute) {
 			writeError(writer, http.StatusBadRequest, "path_invalid", err.Error())
+			return
+		}
+		if errors.Is(err, workspace.ErrFileTooLarge) {
+			writeError(writer, http.StatusRequestEntityTooLarge, "artifact_too_large", "artifact exceeds the 2 MiB viewer read budget")
 			return
 		}
 		writeError(writer, http.StatusNotFound, "artifact_not_found", err.Error())
@@ -1167,10 +1206,108 @@ func (s *Server) handleQARuns(writer http.ResponseWriter, request *http.Request)
 	case http.MethodGet:
 		s.handleQARunsGet(writer, request)
 	case http.MethodPost:
-		s.handleQARunsPost(writer, request)
+		if strings.HasSuffix(strings.TrimRight(request.URL.Path, "/"), "/proposal-draft") {
+			s.handleQAProposalDraft(writer, request)
+		} else {
+			s.handleQARunsPost(writer, request)
+		}
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPost)
 	}
+}
+
+func (s *Server) handleQAProposalDraft(writer http.ResponseWriter, request *http.Request) {
+	rest := strings.Trim(strings.TrimPrefix(request.URL.Path, "/api/qa/runs/"), "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] != "proposal-draft" {
+		writeError(writer, http.StatusNotFound, "qa_run_not_found", "qa run not found")
+		return
+	}
+	var payload struct {
+		Title                string `json:"title"`
+		ExpectedAnswerDigest string `json:"expected_answer_digest"`
+		Slug                 string `json:"slug"`
+		OperatorNote         string `json:"operator_note"`
+	}
+	if err := decodeStrictJSON(request, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+		return
+	}
+	if strings.TrimSpace(payload.Title) == "" {
+		writeError(writer, http.StatusBadRequest, "proposal_title_required", "title is required")
+		return
+	}
+	if strings.TrimSpace(payload.ExpectedAnswerDigest) == "" {
+		writeError(writer, http.StatusBadRequest, "answer_digest_required", "expected_answer_digest is required")
+		return
+	}
+
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	snapshot := s.sessionSnapshot()
+	if snapshot.Service == nil {
+		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select a workspace before creating a proposal draft")
+		return
+	}
+	if snapshot.Service.HasInFlightRun() {
+		writeError(writer, http.StatusConflict, "run_active", "proposal mutation is blocked while a run is active or queued")
+		return
+	}
+	runID := strings.TrimSpace(parts[0])
+	runInfo, ok := snapshot.Service.GetRun(runID)
+	if !ok || runInfo.Pipeline != string(orchestrator.PipelineQA) {
+		writeError(writer, http.StatusNotFound, "qa_run_not_found", "qa run not found")
+		return
+	}
+	if runInfo.Status != orchestrator.RunStatusSucceeded {
+		writeError(writer, http.StatusConflict, "qa_run_not_succeeded", "proposal draft requires a succeeded QA run")
+		return
+	}
+	qaRoot := path.Join("reports", "taskruns", runID, "qa")
+	answerRaw, err := snapshot.Workspace.ReadFile(path.Join(qaRoot, "qa-answer.json"))
+	if err != nil {
+		writeError(writer, http.StatusConflict, "qa_answer_unavailable", "the immutable QA answer is unavailable")
+		return
+	}
+	contextRaw, err := snapshot.Workspace.ReadFile(path.Join(qaRoot, "context-pack.json"))
+	if err != nil {
+		writeError(writer, http.StatusConflict, "qa_answer_unavailable", "the immutable QA context is unavailable")
+		return
+	}
+	if s.admissionHook != nil {
+		s.admissionHook("qa_proposal_draft_commit")
+	}
+	current := s.sessionSnapshot()
+	if current.Generation != snapshot.Generation || current.Service != snapshot.Service || current.Workspace.Path != snapshot.Workspace.Path {
+		writeError(writer, http.StatusConflict, "session_generation_changed", "workspace session changed before proposal creation")
+		return
+	}
+	result, err := proposaldraft.Create(snapshot.Workspace, proposaldraft.Input{
+		RunID:                runID,
+		Title:                payload.Title,
+		Slug:                 payload.Slug,
+		OperatorNote:         payload.OperatorNote,
+		ExpectedAnswerDigest: payload.ExpectedAnswerDigest,
+		AnswerRaw:            answerRaw,
+		ContextRaw:           contextRaw,
+		CreatedAt:            time.Now().UTC(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, proposaldraft.ErrStaleDigest):
+			writeError(writer, http.StatusConflict, "qa_answer_stale", err.Error())
+		case errors.Is(err, proposaldraft.ErrAlreadyExists):
+			writeError(writer, http.StatusConflict, "proposal_already_exists", err.Error())
+		case errors.Is(err, proposaldraft.ErrInvalidSlug):
+			writeError(writer, http.StatusBadRequest, "proposal_slug_invalid", err.Error())
+		case errors.Is(err, proposaldraft.ErrUnresolvedCitation):
+			writeError(writer, http.StatusUnprocessableEntity, "qa_citation_unresolved", err.Error())
+		default:
+			writeError(writer, http.StatusInternalServerError, "proposal_draft_create_failed", err.Error())
+		}
+		return
+	}
+	writeJSON(writer, http.StatusCreated, result)
 }
 
 func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Request) {
@@ -1190,6 +1327,8 @@ func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusBadRequest, "question_required", "question is required")
 		return
 	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	snapshot := s.sessionSnapshot()
 	if !snapshot.RuntimeSelected {
 		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting Q&A")
@@ -1197,6 +1336,13 @@ func (s *Server) handleQARunsPost(writer http.ResponseWriter, request *http.Requ
 	}
 	if snapshot.Service == nil {
 		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before starting Q&A")
+		return
+	}
+	if s.admissionHook != nil {
+		s.admissionHook("qa_start_commit")
+	}
+	if current := s.sessionSnapshot(); current.Generation != snapshot.Generation || current.Service != snapshot.Service {
+		writeError(writer, http.StatusConflict, "session_generation_changed", "workspace session changed before Q&A admission")
 		return
 	}
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
@@ -1355,6 +1501,8 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	snapshot := s.sessionSnapshot()
 	if !snapshot.RuntimeSelected {
 		writeError(writer, http.StatusBadRequest, "runtime_not_selected", "select a runner before starting analysis")
@@ -1381,6 +1529,15 @@ func (s *Server) handlePipelineStart(writer http.ResponseWriter, request *http.R
 			"warnings":       report.Warnings,
 			"resolved_repos": report.ResolvedRepos,
 		})
+		return
+	}
+	if s.admissionHook != nil {
+		s.admissionHook("pipeline_start_commit")
+	}
+	if current := s.sessionSnapshot(); current.Generation != snapshot.Generation ||
+		current.Service != snapshot.Service ||
+		current.Workspace.Path != snapshot.Workspace.Path {
+		writeError(writer, http.StatusConflict, "session_generation_changed", "workspace session changed before run admission")
 		return
 	}
 
@@ -1448,6 +1605,16 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "snapshot" {
+		s.handlePipelineRunSnapshot(writer, runID)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "audit" {
+		s.handlePipelineRunAudit(writer, runID)
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "review-summary" {
 		s.handlePipelineRunReviewSummary(writer, runID)
 		return
@@ -1464,6 +1631,16 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 	}
 
 	writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
+}
+
+func (s *Server) handlePipelineRunAudit(writer http.ResponseWriter, runID string) {
+	snapshot := s.sessionSnapshot()
+	runInfo, ok := snapshot.Service.GetRun(runID)
+	if !ok || runInfo.Pipeline == string(orchestrator.PipelineQA) {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	writeJSON(writer, http.StatusOK, artifactaudit.ScanSelectedRun(snapshot.Workspace, runID))
 }
 
 func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *http.Request) {
@@ -1501,8 +1678,9 @@ func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *htt
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"items":        items,
-		"coordination": snapshot.Service.Coordination(),
+		"items":               items,
+		"coordination":        snapshot.Service.Coordination(),
+		"history_diagnostics": snapshot.Service.HistoryDiagnostics(),
 	})
 }
 
@@ -1537,6 +1715,16 @@ func (s *Server) handlePipelineRunArtifacts(writer http.ResponseWriter, runID st
 		"run_id":    runID,
 		"artifacts": artifacts,
 	})
+}
+
+func (s *Server) handlePipelineRunSnapshot(writer http.ResponseWriter, runID string) {
+	snapshot := s.sessionSnapshot()
+	artifacts, ok := snapshot.Service.GetRunArtifacts(runID)
+	if !ok {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	writeJSON(writer, http.StatusOK, resolveRunSnapshot(snapshot.Workspace, runID, artifacts))
 }
 
 func (s *Server) handlePipelineRunPermissions(writer http.ResponseWriter, runID string) {
@@ -1753,6 +1941,19 @@ func formatQARunSummaryPayload(runInfo orchestrator.RunInfo) map[string]any {
 
 func (s *Server) formatQARunPayload(ws workspace.Root, runInfo orchestrator.RunInfo) (map[string]any, error) {
 	payload := formatQARunSummaryPayload(runInfo)
+	qaRoot := path.Join("reports", "taskruns", runInfo.RunID, "qa")
+	payload["answer_authority"] = evidenceAuthority{
+		Mode:  evidenceAuthorityQASnapshot,
+		RunID: runInfo.RunID,
+		Root:  qaRoot,
+	}
+	payload["audit_authority"] = evidenceAuthority{
+		Mode:  evidenceAuthorityQAAudit,
+		RunID: runInfo.RunID,
+		Root:  qaRoot,
+	}
+	payload["answer_status"] = "not_produced"
+	payload["answer_digest"] = nil
 	payload["answer"] = nil
 	payload["citations"] = []qa.Citation{}
 	payload["unresolved"] = []string{}
@@ -1762,11 +1963,11 @@ func (s *Server) formatQARunPayload(ws workspace.Root, runInfo orchestrator.RunI
 		return payload, nil
 	}
 
-	answerRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "qa-answer.json")
+	answerRel := path.Join(qaRoot, "qa-answer.json")
 	answerRaw, err := ws.ReadFile(answerRel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return payload, nil
+			return nil, fmt.Errorf("read %s: %w", answerRel, err)
 		}
 		return nil, fmt.Errorf("read %s: %w", answerRel, err)
 	}
@@ -1774,7 +1975,7 @@ func (s *Server) formatQARunPayload(ws workspace.Root, runInfo orchestrator.RunI
 	if err != nil {
 		return nil, err
 	}
-	contextRel := path.Join("reports", "taskruns", runInfo.RunID, "qa", "context-pack.json")
+	contextRel := path.Join(qaRoot, "context-pack.json")
 	contextRaw, err := ws.ReadFile(contextRel)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", contextRel, err)
@@ -1792,6 +1993,8 @@ func (s *Server) formatQARunPayload(ws workspace.Root, runInfo orchestrator.RunI
 	payload["confidence"] = answer.Confidence
 	payload["provider"] = answer.Provider
 	payload["generated_at"] = answer.GeneratedAt
+	payload["answer_status"] = "available"
+	payload["answer_digest"] = proposaldraft.AnswerDigest(answerRaw)
 	return payload, nil
 }
 

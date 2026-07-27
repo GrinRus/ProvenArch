@@ -613,13 +613,13 @@ func markCollectManifestMissingFindingsRecovered(result acpruntime.Result, repor
 		result.Diagnostics = map[string]any{}
 	}
 	result.Diagnostics[collectManifestMissingFindingsRecoveryMode] = map[string]any{
-		"recovery_mode":       collectManifestMissingFindingsRecoveryMode,
-		"source":              "runtime_shape_recovery",
-		"provider_authored":   false,
-		"inserted_field":      "semantic.findings",
-		"before_digest":       report.BeforeDigest,
-		"after_digest":        report.AfterDigest,
-		"manual_quality_gate": "artifact_quality_assessment",
+		"recovery_mode":            collectManifestMissingFindingsRecoveryMode,
+		"source":                   "runtime_shape_recovery",
+		"provider_authored":        false,
+		"inserted_field":           "semantic.findings",
+		"before_digest":            report.BeforeDigest,
+		"after_digest":             report.AfterDigest,
+		"operator_review_required": true,
 	}
 	warning := "runtime_recovery: collect_manifest_missing_findings_recovery inserted an empty semantic.findings collection; treat as shape recovery evidence, not artifact-quality acceptance"
 	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
@@ -664,37 +664,23 @@ func runCollectManifestShapeCleanup(ctx context.Context, task acpruntime.Task, a
 }
 
 func shouldRetryCollectManifestShapeCleanup(err error) bool {
-	if err == nil {
+	issues := classifyValidationIssues(err)
+	if issues.HasAny(
+		issueCollectRepoEvidence,
+		issueCollectProcessContent,
+		issueCollectWriteSet,
+		issueCollectAuthoredMarkdown,
+		issueCollectBootstrap,
+	) {
 		return false
 	}
-	detail := strings.ToLower(strings.TrimSpace(err.Error()))
-	if detail == "" {
-		return false
-	}
-	if strings.Contains(detail, "repo evidence path") ||
-		strings.Contains(detail, "process-contaminated") ||
-		strings.Contains(detail, "process contaminated") ||
-		strings.Contains(detail, "outside shard-pack-manifest.json") ||
-		strings.Contains(detail, "wrote forbidden files") ||
-		strings.Contains(detail, "authored markdown") ||
-		strings.Contains(detail, "empty authored markdown") ||
-		strings.Contains(detail, "bootstrap-only") {
-		return false
-	}
-	if strings.Contains(detail, "citations") && strings.Contains(detail, ".id must be unique") {
-		return true
-	}
-	if strings.Contains(detail, "semantic/questions") && strings.Contains(detail, "text") {
-		return true
-	}
-	if strings.Contains(detail, ".claim_ids is required") || strings.Contains(detail, ".document_ids is required") ||
-		isSchemaMinItemsFieldFailure(detail, "claim_ids") || isSchemaMinItemsFieldFailure(detail, "document_ids") {
-		return true
-	}
-	if strings.Contains(detail, "documents") && strings.Contains(detail, "citation_ids") && strings.Contains(detail, "references") {
-		return true
-	}
-	return false
+	return issues.HasAny(
+		issueCollectDuplicateCitation,
+		issueCollectQuestionText,
+		issueCollectClaimBinding,
+		issueCollectDocumentBinding,
+		issueCollectCitationReference,
+	)
 }
 
 func recoverCollectManifestDeterministically(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, beforeRepairFiles writeRootFileSnapshot, cause error) (bool, acpruntime.Result, error) {
@@ -720,14 +706,14 @@ func markCollectManifestRuntimeRecovered(result acpruntime.Result, report collec
 		result.Diagnostics = map[string]any{}
 	}
 	result.Diagnostics["collect_manifest_runtime_recovery"] = map[string]any{
-		"recovery_mode":       "collect_manifest_runtime_recovery",
-		"source":              "runtime_recovery",
-		"provider_authored":   false,
-		"document_count":      report.DocumentCount,
-		"entity_count":        report.EntityCount,
-		"edge_count":          report.EdgeCount,
-		"evidence_path":       strings.TrimSpace(report.EvidencePath),
-		"manual_quality_gate": "artifact_quality_assessment",
+		"recovery_mode":            "collect_manifest_runtime_recovery",
+		"source":                   "runtime_recovery",
+		"provider_authored":        false,
+		"document_count":           report.DocumentCount,
+		"entity_count":             report.EntityCount,
+		"edge_count":               report.EdgeCount,
+		"evidence_path":            strings.TrimSpace(report.EvidencePath),
+		"operator_review_required": true,
 	}
 	warning := "runtime_recovery: collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json from provider-authored markdown; treat as recovery evidence, not normal provider-authored manifest success"
 	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
@@ -756,40 +742,19 @@ func collectManifestFileMissing(task acpruntime.Task) bool {
 }
 
 func isCollectManifestSemanticScaffoldFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "semantic snapshot is bootstrap-only collect scaffold")
+	return classifyValidationIssues(err).Has(issueCollectSemanticScaffold)
 }
 
 func isCollectManifestEmptyPayloadFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "shard-pack-manifest.schema.json validation failed: empty payload")
+	return classifyValidationIssues(err).Has(issueCollectEmptyPayload)
 }
 
 func isCollectManifestCitationClaimBindingFailure(err error) bool {
-	if err == nil {
+	issues := classifyValidationIssues(err)
+	if issues.HasAny(issueCollectRepoEvidence, issueCollectProcessContent) {
 		return false
 	}
-	detail := strings.ToLower(err.Error())
-	if strings.Contains(detail, "repo evidence path") ||
-		strings.Contains(detail, "process-contaminated") ||
-		strings.Contains(detail, "process contaminated") {
-		return false
-	}
-	return strings.Contains(detail, ".claim_ids is required") || isSchemaMinItemsFieldFailure(detail, "claim_ids")
-}
-
-func isSchemaMinItemsFieldFailure(detail string, field string) bool {
-	detail = strings.ToLower(strings.TrimSpace(detail))
-	field = strings.ToLower(strings.TrimSpace(field))
-	if detail == "" || field == "" {
-		return false
-	}
-	return strings.Contains(detail, "/"+field) &&
-		(strings.Contains(detail, "minitems") || strings.Contains(detail, "minimum 1 items required"))
+	return issues.Has(issueCollectClaimBinding)
 }
 
 func collectWriteRootHasBootstrapOnlyAuthoredDoc(task acpruntime.Task) bool {
@@ -980,32 +945,18 @@ func stringSliceSet(values []string) map[string]struct{} {
 }
 
 func missingRepoEvidencePathsFromError(err error) []string {
-	if err == nil {
-		return nil
-	}
-	const marker = `repo evidence path "`
-	text := err.Error()
 	paths := []string{}
 	seen := map[string]struct{}{}
-	for {
-		idx := strings.Index(text, marker)
-		if idx < 0 {
-			break
+	for _, issue := range classifyValidationIssues(err).Items {
+		if issue.Code != issueCollectRepoEvidence || strings.TrimSpace(issue.Path) == "" {
+			continue
 		}
-		text = text[idx+len(marker):]
-		end := strings.Index(text, `"`)
-		if end < 0 {
-			break
+		if _, ok := seen[issue.Path]; !ok {
+			seen[issue.Path] = struct{}{}
+			paths = append(paths, issue.Path)
 		}
-		path := strings.TrimSpace(text[:end])
-		if path != "" {
-			if _, ok := seen[path]; !ok {
-				seen[path] = struct{}{}
-				paths = append(paths, path)
-			}
-		}
-		text = text[end+1:]
 	}
+	sort.Strings(paths)
 	return paths
 }
 
@@ -1364,7 +1315,7 @@ func targetedArchitectureHomeRewriteIsValid(task acpruntime.Task, beforeDraftRoo
 	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
 		return false
 	}
-	if recoveryCause == nil || !strings.Contains(recoveryCause.Error(), `outputs[0].path "overview.md" Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language`) {
+	if !classifyValidationIssues(recoveryCause).Has(issueDraftArchitectureHome) {
 		return false
 	}
 	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
@@ -1383,7 +1334,7 @@ func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Tas
 	if shouldRetryDraftStep0CanonicalDuplicateCleanup(task, beforeWriteRoot, beforeDraftRoot, err) {
 		return true
 	}
-	if !strings.Contains(err.Error(), "draft repair wrote forbidden write_root files") {
+	if !classifyValidationIssues(err).Has(issueDraftWriteRootForbidden) {
 		return false
 	}
 	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
@@ -1472,7 +1423,7 @@ func rollbackCreatedEmptyDraftSidecars(task acpruntime.Task, beforeWriteRoot wri
 }
 
 func shouldRetryDraftStep0CanonicalDuplicateCleanup(task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
-	if err == nil || !strings.Contains(err.Error(), "draft repair wrote forbidden draft_final_root files") {
+	if !classifyValidationIssues(err).Has(issueDraftFinalRootForbidden) {
 		return false
 	}
 	afterWriteRoot, writeErr := snapshotWriteRootFiles(task.WriteRoot)
@@ -1620,106 +1571,76 @@ func allDraftMarkdownOutputsChanged(task acpruntime.Task, beforeDraftRoot writeR
 }
 
 func isDraftEnrichmentNoopOrScaffoldFailure(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "draft_artifact_enrichment_noop_or_scaffold")
+	return classifyValidationIssues(err).Has(issueDraftNoopScaffold)
 }
 
 func shouldRetryDraftMalformedMarkdownEnrichment(stage string, err error) bool {
-	return strings.TrimSpace(stage) != "draft_artifact_enrichment_markdown_syntax" &&
-		err != nil &&
-		strings.Contains(err.Error(), "malformed markdown inline-code")
+	return classifyValidationIssues(err).Allows(stage, recoveryTransition{
+		IssueCode: issueDraftMalformedMarkdown, TargetStage: "draft_artifact_enrichment_markdown_syntax", MaxAttempts: 1,
+	})
 }
 
 func shouldRetryDraftManifestShapeEnrichment(stage string, err error) bool {
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_manifest_shape" || err == nil {
-		return false
-	}
-	text := err.Error()
-	return strings.Contains(text, "parse runtime draft manifest: json: unknown field") ||
-		(strings.Contains(text, "runtime draft manifest outputs are invalid:") && strings.Contains(text, "unknown field"))
+	issues := classifyValidationIssues(err)
+	return issues.Allows(stage, recoveryTransition{
+		IssueCode: issueDraftUnknownField, TargetStage: "draft_artifact_enrichment_manifest_shape", MaxAttempts: 1,
+	}) &&
+		issues.HasAny(issueDraftManifestParse, issueDraftManifestOutputs)
 }
 
 func shouldRetryDraftDownstreamIndexClaimEnrichment(stage string, err error) bool {
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_downstream_index_retry" || err == nil {
-		return false
-	}
-	problems := runtimeDraftValidationProblems(err)
-	if len(problems) == 0 {
-		return false
-	}
-	for _, problem := range problems {
-		if !isDraftDownstreamIndexClaimProblem(problem) {
-			return false
-		}
-	}
-	return true
-}
-
-func runtimeDraftValidationProblems(err error) []string {
-	if err == nil {
-		return nil
-	}
-	text := err.Error()
-	const marker = "runtime draft manifest outputs are invalid:"
-	idx := strings.Index(text, marker)
-	if idx < 0 {
-		return nil
-	}
-	text = strings.TrimSpace(text[idx+len(marker):])
-	if text == "" {
-		return nil
-	}
-	parts := strings.Split(text, "; ")
-	problems := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if problem := strings.TrimSpace(part); problem != "" {
-			problems = append(problems, problem)
-		}
-	}
-	return problems
-}
-
-func isDraftDownstreamIndexClaimProblem(problem string) bool {
-	return strings.Contains(problem, "claims current-run final/citation indexes are unavailable") ||
-		strings.Contains(problem, "claims current-run final-run-index has zero observed documents")
+	issues := classifyValidationIssues(err)
+	return issues.Has(issueDraftManifestOutputs) && issues.Allows(stage, recoveryTransition{
+		IssueCode: issueDraftDownstreamIndex, TargetStage: "draft_artifact_enrichment_downstream_index_retry", MaxAttempts: 1,
+	}) &&
+		!issues.HasAny(
+			issueDraftMalformedMarkdown,
+			issueDraftShardStatus,
+			issueDraftArchitectureHome,
+			issueDraftMarkerCleanup,
+			issueDraftFindingLinkage,
+			issueDraftProposalSection,
+			issueDraftEvidence,
+			issueDraftOperatorSummary,
+			issueDraftEmptyShardEvidence,
+		)
 }
 
 func shouldRetryDraftShardStatusCleanupEnrichment(stage string, err error) bool {
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_shard_status_cleanup" || err == nil {
-		return false
-	}
 	if isDraftEnrichmentNoopOrScaffoldFailure(err) {
 		return false
 	}
-	text := err.Error()
-	return strings.Contains(text, "uses generic conditional shard-gap wording") ||
-		strings.Contains(text, "generic conditional shard-gap wording") ||
-		strings.Contains(text, "does not report exact current-run shard status") ||
-		strings.Contains(text, "does not report exact current-run proposal shard completeness") ||
-		strings.Contains(text, "does not report exact current-run shard completeness")
+	return classifyValidationIssues(err).Allows(stage, recoveryTransition{
+		IssueCode: issueDraftShardStatus, TargetStage: "draft_artifact_enrichment_shard_status_cleanup", MaxAttempts: 1,
+	})
 }
 
 func shouldRetryDraftArchitectureHomeCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_architecture_home_cleanup" || err == nil {
+	if err == nil {
 		return false
 	}
 	stepID := strings.TrimSpace(task.StepID)
 	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
 		return false
 	}
-	if !strings.Contains(err.Error(), "Architecture Home contains runtime/process narration, manifest recap, or unsupported confidence language") {
+	if !classifyValidationIssues(err).Allows(stage, recoveryTransition{
+		IssueCode: issueDraftArchitectureHome, TargetStage: "draft_artifact_enrichment_architecture_home_cleanup", MaxAttempts: 1,
+	}) {
 		return false
 	}
 	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot)
 }
 
 func shouldRetryDraftMarkerCleanupEnrichment(stage string, task acpruntime.Task, beforeDraftRoot writeRootFileSnapshot, err error) bool {
-	if strings.TrimSpace(stage) == "draft_artifact_enrichment_marker_cleanup" || err == nil {
+	if err == nil {
 		return false
 	}
-	text := err.Error()
-	if !strings.Contains(text, "bootstrap-only placeholder draft content") &&
-		!strings.Contains(text, "mentions downstream or runtime-only evidence in step0 constitution content") &&
-		!strings.Contains(text, "proposal content references taskrun staging paths") {
+	issues := classifyValidationIssues(err)
+	if !issues.Allows(stage, recoveryTransition{
+		IssueCode: issueDraftBootstrap, TargetStage: "draft_artifact_enrichment_marker_cleanup", MaxAttempts: 1,
+	}) && !issues.Allows(stage, recoveryTransition{
+		IssueCode: issueDraftMarkerCleanup, TargetStage: "draft_artifact_enrichment_marker_cleanup", MaxAttempts: 1,
+	}) {
 		return false
 	}
 	return allDraftMarkdownOutputsChanged(task, beforeDraftRoot) && draftMarkdownContainsMarkerCleanupCandidate(task)
@@ -1926,46 +1847,27 @@ func shouldRetryDraftMissingPythonEnrichment(stage string, result acpruntime.Res
 }
 
 func isDraftBootstrapOnlyValidationFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "bootstrap-only placeholder draft content")
+	return classifyValidationIssues(err).Has(issueDraftBootstrap)
 }
 
 func shouldRecoverDraftRepairValidationWithEnrichment(task acpruntime.Task, err error) bool {
 	if err == nil || !runtimedrafts.IsDraftStep(task.StepID) {
 		return false
 	}
-	if isDraftBootstrapOnlyValidationFailure(err) {
-		return true
-	}
-	text := err.Error()
-	recoverable := []string{
-		"runtime draft manifest outputs are invalid:",
-		"parse runtime draft manifest:",
-		"malformed markdown inline-code",
-		"does not report exact current-run shard status",
-		"does not report exact current-run shard completeness",
-		"does not report exact current-run proposal shard completeness",
-		"uses generic conditional shard-gap wording",
-		"does not reference any current-run finding ID",
-		"uses synthetic current-run finding placeholder",
-		"claims no structured finding summary",
-		"does not link medium/high current-run findings",
-		"uses markdown table for medium/high actionable findings",
-		"is missing substantive proposal section",
-		"is missing substantive proposal changelog section",
-		"does not include concrete repo/path, citation, or staged artifact evidence references",
-		"does not include a decision-ready operator summary",
-		"claims staging shard evidence is empty",
-		"mentions downstream or runtime-only evidence in step0 constitution content",
-	}
-	for _, marker := range recoverable {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	issues := classifyValidationIssues(err)
+	return issues.HasAny(
+		issueDraftBootstrap,
+		issueDraftManifestOutputs,
+		issueDraftManifestParse,
+		issueDraftMalformedMarkdown,
+		issueDraftShardStatus,
+		issueDraftFindingLinkage,
+		issueDraftProposalSection,
+		issueDraftEvidence,
+		issueDraftOperatorSummary,
+		issueDraftEmptyShardEvidence,
+		issueDraftMarkerCleanup,
+	)
 }
 
 func draftRepairEnrichmentStage(stage string, err error) string {

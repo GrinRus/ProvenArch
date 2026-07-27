@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { KnowledgeResponse } from "../lib/appContracts";
+import type { KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
 import { buildKnowledgeViewModel } from "../features/workbench/viewModels";
 
@@ -10,6 +10,7 @@ export function KnowledgePage({
   error,
   view,
   selectedEntityID,
+  workspaceHealth,
   onViewChange,
   onEntityChange,
   onOpenArtifact,
@@ -19,6 +20,7 @@ export function KnowledgePage({
   error: string;
   view: KnowledgeView;
   selectedEntityID?: string;
+  workspaceHealth?: WorkspaceHealthResponse | null;
   onViewChange: (view: KnowledgeView) => void;
   onEntityChange: (id?: string) => void;
   onOpenArtifact: (path: string) => void;
@@ -34,6 +36,11 @@ export function KnowledgePage({
         <span className={`status ${knowledge?.status === "available" ? "ok" : knowledge?.status === "partial" ? "warn" : "err"}`}>{loading ? "loading" : error ? "unavailable" : knowledge?.status ?? "unavailable"}</span>
       </div>
       <p className="source-identity"><strong>Current workspace</strong> · promoted, read-only knowledge</p>
+      {workspaceHealth ? (
+        <aside className={`status ${workspaceHealth.status === "pass" ? "ok" : workspaceHealth.status === "warn" ? "warn" : "err"}`} data-testid="knowledge-workspace-health">
+          Workspace Health: <strong>{workspaceHealth.status}</strong> · {workspaceHealth.summary.error} errors, {workspaceHealth.summary.warning} warnings, {workspaceHealth.summary.info} info. Advisory only.
+        </aside>
+      ) : null}
       <nav className="destination-tabs" aria-label="Knowledge views">
         {(["overview", "atlas", "entities", "artifacts"] as KnowledgeView[]).map((item) => (
           <button key={item} type="button" aria-current={view === item ? "page" : undefined} onClick={() => onViewChange(item)}>{label(item)}</button>
@@ -62,8 +69,8 @@ export function KnowledgePage({
           <h2>Validated relationship atlas</h2>
           <p className="hint">Topology is derived only from parsed entity and edge contents. File names are never interpreted as relationships.</p>
           {edges.length === 0 ? <p className="empty-state">No validated relationships are available.</p> : (
-            <table><caption className="sr-only">Validated architecture relationships</caption><thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Source</th></tr></thead><tbody>
-              {edges.map((edge) => <tr key={edge.id}><td>{entityName(entities, edge.from)}</td><td>{edge.type}</td><td>{entityName(entities, edge.to)}</td><td><button type="button" onClick={() => onOpenArtifact(edge.path)}>{edge.path}</button></td></tr>)}
+            <table className="responsive-card-table"><caption className="sr-only">Validated architecture relationships</caption><thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Source</th></tr></thead><tbody>
+              {edges.map((edge) => <tr key={edge.id}><td data-label="From">{entityName(entities, edge.from)}</td><td data-label="Relationship">{edge.type}</td><td data-label="To">{entityName(entities, edge.to)}</td><td data-label="Source"><button type="button" onClick={() => onOpenArtifact(edge.path)}>{edge.path}</button></td></tr>)}
             </tbody></table>
           )}
           {knowledge.status === "partial" ? <p className="status warn">Atlas is incomplete because malformed or missing-reference files were excluded.</p> : null}
@@ -73,8 +80,8 @@ export function KnowledgePage({
       {knowledge && view === "entities" ? (
         <div data-testid="knowledge-entities">
           <label>Search entities<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <table><caption className="sr-only">Searchable validated entities</caption><thead><tr><th>Name</th><th>Type</th><th>ID</th><th>Source</th></tr></thead><tbody>
-            {filteredEntities.map((entity) => <tr key={entity.id} aria-selected={selectedEntityID === entity.id}><td><button type="button" onClick={() => onEntityChange(entity.id)}>{entity.name}</button></td><td>{entity.type}</td><td><code>{entity.id}</code></td><td><button type="button" onClick={() => onOpenArtifact(entity.path)}>{entity.path}</button></td></tr>)}
+          <table className="responsive-card-table"><caption className="sr-only">Searchable validated entities</caption><thead><tr><th>Name</th><th>Type</th><th>ID</th><th>Source</th></tr></thead><tbody>
+            {filteredEntities.map((entity) => <tr key={entity.id} aria-selected={selectedEntityID === entity.id}><td data-label="Name"><button type="button" onClick={() => onEntityChange(entity.id)}>{entity.name}</button></td><td data-label="Type">{entity.type}</td><td data-label="ID"><code>{entity.id}</code></td><td data-label="Source"><button type="button" onClick={() => onOpenArtifact(entity.path)}>{entity.path}</button></td></tr>)}
           </tbody></table>
           {filteredEntities.length === 0 ? <p className="empty-state">No validated entities match this search.</p> : null}
           {selectedEntity ? <aside className="inspector-card" data-testid="knowledge-entity-detail"><h2>{selectedEntity.name}</h2><p>{selectedEntity.type} · <code>{selectedEntity.id}</code></p><button type="button" onClick={() => onOpenArtifact(selectedEntity.path)}>Open source artifact</button></aside> : null}

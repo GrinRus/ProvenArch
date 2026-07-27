@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,7 @@ func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Status != "unavailable" || response.SourceMode != "current_workspace" {
+	if response.Status != "unavailable" || response.SourceMode != evidenceAuthorityPromotedCurrent {
 		t.Fatalf("unexpected source/status: %#v", response)
 	}
 	if len(response.Entities)+len(response.Edges)+len(response.Artifacts)+len(response.Issues) != 0 {
@@ -36,6 +37,7 @@ func TestKnowledgeReturnsValidatedEntitiesEdgesAndArtifacts(t *testing.T) {
 	writeKnowledgeTestFile(t, root, "model/entities/svc.users.yaml", "id: svc.users\ntype: service\nname: Users\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
 	writeKnowledgeTestFile(t, root, "model/edges/edge.payments.calls.users.yaml", "id: edge.payments.calls.users\ntype: calls\nfrom: svc.payments\nto: svc.users\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
 	writeKnowledgeTestFile(t, root, "reports/as-is/overview.md", "# Overview\n")
+	writeKnowledgeTestFile(t, root, "reports/taskruns/qa-old/qa/qa-answer.json", `{"answer":"must stay out of promoted Knowledge"}`)
 
 	recorder := httptest.NewRecorder()
 	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodGet, "/api/knowledge", nil))
@@ -51,6 +53,11 @@ func TestKnowledgeReturnsValidatedEntitiesEdgesAndArtifacts(t *testing.T) {
 	}
 	if len(response.Artifacts) != 4 {
 		t.Fatalf("artifact inventory length = %d, want 4", len(response.Artifacts))
+	}
+	for _, artifact := range response.Artifacts {
+		if strings.HasPrefix(artifact.Path, "reports/taskruns/") {
+			t.Fatalf("taskrun artifact leaked into promoted Knowledge: %#v", artifact)
+		}
 	}
 }
 
@@ -97,7 +104,7 @@ func TestKnowledgeFixtureMatchesWireContract(t *testing.T) {
 	if err := json.Unmarshal(content, &response); err != nil {
 		t.Fatalf("decode fixture: %v", err)
 	}
-	if response.Version != 1 || response.SourceMode != "current_workspace" || response.Status != "partial" {
+	if response.Version != 1 || response.SourceMode != evidenceAuthorityPromotedCurrent || response.Status != "partial" {
 		t.Fatalf("fixture identity is invalid: %#v", response)
 	}
 	if len(response.Entities) != 1 || len(response.Artifacts) != 2 || len(response.Issues) != 1 {

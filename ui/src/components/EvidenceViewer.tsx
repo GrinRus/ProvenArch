@@ -9,15 +9,19 @@ type EvidenceViewerProps = {
   path: string;
   content: string;
   runId?: string | null;
-  sourceMode: "run_snapshot" | "current_workspace";
+  sourceMode: "run_snapshot" | "promoted_current";
   demo?: boolean;
+  provenance?: "demo" | "live" | "unknown";
+  status?: "available" | "partial" | "unavailable" | "error";
+  issues?: Array<{ code: string; message: string; path?: string }>;
   diff?: ReactNode;
+  diffIdentity?: { left: string; right: string };
   onOpenArtifact?: (path: string) => void;
   mode?: "rendered" | "raw" | "diff";
   onModeChange?: (mode: "rendered" | "raw" | "diff") => void;
 };
 
-export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, onOpenArtifact, mode, onModeChange }: EvidenceViewerProps) {
+export function EvidenceViewer({ path, content, runId, sourceMode, demo, provenance, status = "available", issues = [], diff, diffIdentity, onOpenArtifact, mode, onModeChange }: EvidenceViewerProps) {
   const [localView, setLocalView] = useState<"rendered" | "raw" | "diff">(() => modeFromLocation(diff));
   const view = mode ?? localView;
   const setView = (next: "rendered" | "raw" | "diff") => {
@@ -40,17 +44,35 @@ export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, o
     { id: "raw" as const, label: "Raw" },
     ...(diff ? [{ id: "diff" as const, label: "Diff" }] : []),
   ];
+  const evidenceProvenance = provenance ?? (demo === true ? "demo" : demo === false ? "live" : "unknown");
+  const provenanceLabel = evidenceProvenance === "demo" ? "Demo" : evidenceProvenance === "live" ? "Live" : "Unknown";
+  const localLinkIssue = (target: string) => {
+    const resolved = resolveLocalEvidenceLink(path, target);
+    if (!resolved) return null;
+    if ((sourceMode === "promoted_current" || sourceMode === "run_snapshot") &&
+        (resolved === "reports/taskruns" || resolved.startsWith("reports/taskruns/"))) return null;
+    return resolved;
+  };
+  const exceedsRenderBudget = content.length > 512 * 1024;
 
   return (
     <section className="evidence-viewer" data-testid="evidence-viewer">
       <header className="evidence-source-header">
         <div><strong>{path || "Evidence"}</strong><span>{sourceMode === "run_snapshot" ? `Run snapshot · ${runId ?? "unknown run"}` : "Current workspace"}</span></div>
-        <span className={demo ? "status warn" : "status ok"}>{demo ? "Demo evidence" : "Live evidence"}</span>
+        <span className={evidenceProvenance === "demo" ? "status warn" : evidenceProvenance === "live" ? "status ok" : "status"}>{provenanceLabel} evidence</span>
       </header>
+      {status !== "available" ? <p className={status === "partial" ? "status warn" : "status err"} role="status">Evidence state: {status}.</p> : null}
+      {issues.length > 0 ? (
+        <ul className="evidence-issues" aria-label="Evidence issues">
+          {issues.map((issue) => <li key={`${issue.code}:${issue.path ?? ""}:${issue.message}`}><code>{issue.code}</code>: {issue.message}</li>)}
+        </ul>
+      ) : null}
+      {diff && diffIdentity ? <p className="hint" data-testid="evidence-diff-identity">Diff: {diffIdentity.left} → {diffIdentity.right}</p> : null}
       <TabNav ariaLabel="Evidence views" idBase="evidence-viewer" value={view} onChange={setView} options={options} />
       <div {...tabPanelProps("evidence-viewer", view)}>
-        {view === "rendered" && path.endsWith(".mmd") ? <MermaidPreview source={content} title={path || "Mermaid diagram"} /> : null}
-        {view === "rendered" && !path.endsWith(".mmd") ? (
+        {view === "rendered" && exceedsRenderBudget ? <p className="status warn">Rendered preview is disabled above 512 KiB. Use Raw for the bounded text response.</p> : null}
+        {view === "rendered" && !exceedsRenderBudget && path.endsWith(".mmd") ? <MermaidPreview source={content} title={path || "Mermaid diagram"} /> : null}
+        {view === "rendered" && !exceedsRenderBudget && !path.endsWith(".mmd") ? (
           <div className="markdown-evidence">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -58,7 +80,11 @@ export function EvidenceViewer({ path, content, runId, sourceMode, demo, diff, o
                 a: ({ href, children }) => {
                   const target = href ?? "";
                   if (isLocalEvidenceLink(target)) {
-                    return <button type="button" className="evidence-link" onClick={() => onOpenArtifact?.(normalizeLocalEvidenceLink(target))}>{children}</button>;
+                    const resolved = localLinkIssue(target);
+                    if (!resolved) {
+                      return <span className="status err" title="Link escapes or is invalid for the selected evidence authority">{children}</span>;
+                    }
+                    return <button type="button" className="evidence-link" onClick={() => onOpenArtifact?.(resolved)}>{children}</button>;
                   }
                   return <a href={target} target="_blank" rel="noreferrer">{children}<span className="sr-only"> (external link)</span></a>;
                 },
@@ -92,6 +118,19 @@ function isLocalEvidenceLink(href: string): boolean {
   return normalized !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(normalized) && !normalized.startsWith("#") && !normalized.startsWith("//");
 }
 
-function normalizeLocalEvidenceLink(href: string): string {
-  return href.split("#", 1)[0].replace(/^\.\//, "");
+export function resolveLocalEvidenceLink(basePath: string, href: string): string | null {
+  const raw = href.split(/[?#]/, 1)[0].trim().replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || raw.includes("\0")) return null;
+  const baseParts = basePath.replace(/\\/g, "/").split("/").slice(0, -1);
+  const stack = raw.startsWith("./") || !raw.includes(":") ? baseParts : [];
+  for (const part of raw.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (stack.length === 0) return null;
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack.length > 0 ? stack.join("/") : null;
 }

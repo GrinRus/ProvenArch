@@ -31,6 +31,9 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
     setGitError("");
     try {
       const diff = await loadWorkspaceGitDiff();
+      if (diff.state === "blocked" || diff.state === "unknown" || diff.state === "stale") {
+        throw new Error(diff.message || `Git state is ${diff.state}; refresh and resolve it before publication.`);
+      }
       setGitConfirmation({ action, diff });
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : "Git confirmation failed to load";

@@ -60,7 +60,7 @@ func collectKnowledge(root string) knowledgeResponse {
 	response := knowledgeResponse{
 		Version:     1,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-		SourceMode:  "current_workspace",
+		SourceMode:  evidenceAuthorityPromotedCurrent,
 		Entities:    []knowledgeEntity{},
 		Edges:       []knowledgeEdge{},
 		Artifacts:   []knowledgeArtifact{},
@@ -218,18 +218,20 @@ func inventoryKnowledgeArtifacts(root string, issues *[]knowledgeIssue) []knowle
 			if !entry.Type().IsRegular() {
 				return nil
 			}
-			if file, err := os.Open(current); err != nil {
-				rel, _ := filepath.Rel(root, current)
-				*issues = append(*issues, knowledgeIssue{Code: "knowledge.file_unreadable", Path: filepath.ToSlash(rel), Message: err.Error()})
-				return nil
-			} else {
-				_ = file.Close()
-			}
 			rel, err := filepath.Rel(root, current)
 			if err != nil {
 				return nil
 			}
 			canonical := filepath.ToSlash(rel)
+			if canonical == "reports/taskruns" || strings.HasPrefix(canonical, "reports/taskruns/") {
+				return nil
+			}
+			if file, err := os.Open(current); err != nil {
+				*issues = append(*issues, knowledgeIssue{Code: "knowledge.file_unreadable", Path: filepath.ToSlash(rel), Message: err.Error()})
+				return nil
+			} else {
+				_ = file.Close()
+			}
 			items = append(items, knowledgeArtifact{Path: canonical, Kind: knowledgeArtifactKind(canonical), Name: entry.Name()})
 			return nil
 		})

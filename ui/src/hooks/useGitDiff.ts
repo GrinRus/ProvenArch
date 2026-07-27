@@ -19,7 +19,7 @@ export function useGitDiff() {
         return null;
       }
       setGitDiff(payload);
-      setGitDiffStatus(payload.empty ? "No workspace Git changes." : "");
+      setGitDiffStatus(gitTruthStatus(payload));
       return payload;
     } catch (error) {
       if (isAbortError(error) || !diffRequest.isCurrent(token)) {
@@ -45,5 +45,16 @@ function gitDiffRequestKey(options: LoadGitDiffOptions): string {
     options.path ?? "",
     options.folder ?? "",
     options.stepId ?? "",
+    options.fingerprint ?? "",
   ].join("|");
+}
+
+function gitTruthStatus(payload: GitDiffResponse): string {
+  switch (payload.state) {
+    case "clean": return "No workspace Git changes.";
+    case "stale": return "Workspace Git state changed after the supplied confirmation.";
+    case "blocked": return "Git publication is blocked while analysis is active or queued.";
+    case "unknown": return payload.message || "Workspace Git state is unavailable.";
+    case "dirty": return "";
+  }
 }

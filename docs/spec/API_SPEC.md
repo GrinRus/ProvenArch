@@ -226,11 +226,20 @@ Body: отсутствует.
 Endpoint вычисляет отчет на запрос, не пишет `reports/health/*`, не запускает runtime
 provider и не блокирует run/review/publish/Q&A flows.
 
-Initial K2a checks:
+Workspace Health v1 checks:
 - observation provenance в `model/entities/*.yaml` и `model/edges/*.yaml` без evidence;
-- `reports/agent-outputs/domains/*.md` без matching `charter/cards/domains/<domain-id>.md`;
+- model edges с отсутствующим canonical endpoint, duplicate entity aliases и отсутствующие
+  owner-team cards;
+- `reports/agent-outputs/{domains,teams}/*.md` без matching canonical cards;
 - `proposals/*/proposal.md` без review sections `Evidence`, `Citations`, `Unresolved`/`Open questions`;
+- broken/escaping local Markdown links, malformed canonical Markdown, unlinked finding IDs и
+  отсутствующие proposal evidence paths;
+- low explicit citation coverage in key current-workspace architecture/findings/proposal documents;
 - количество unresolved questions в `reports/coverage/open-questions.md` как info item.
+
+Порядок `items[]` детерминирован. Scanner следует workspace containment, исключает
+`reports/taskruns/**`, не изменяет bytes workspace и относится только к текущему promoted
+workspace. Historical Changes не должны представлять этот snapshot как run evidence.
 
 **200**
 ```json
@@ -284,7 +293,7 @@ edge включается только когда обе ссылки разре
 {
   "version": 1,
   "generated_at": "2026-07-15T00:00:00Z",
-  "source_mode": "current_workspace",
+  "source_mode": "promoted_current",
   "status": "partial",
   "entities": [
     {
@@ -688,6 +697,10 @@ Partial update persisted permission-полей в `workspace.yaml`.
 ## 3) Artifacts endpoints
 
 ### GET `/api/artifacts?path=<relative>`
+
+Reads are bounded to 2 MiB for interactive viewer safety. Larger files return HTTP `413` with
+`artifact_too_large`; clients keep the selected identity and offer a readable unavailable/raw
+fallback rather than retrying an unbounded read.
 Безопасное чтение файла из bound workspace (safe-join, без выхода за root).
 
 **200**
@@ -748,6 +761,11 @@ Partial update persisted permission-полей в `workspace.yaml`.
 pending refresh. Заменённый pending run получает terminal `status=canceled`,
 `error_code=run_superseded` и `superseded_by_run_id`.
 
+Pipeline и async Q&A admission используют одну server lease со сменой workspace/runtime/session и
+Git mutations. Lease удерживается через workspace validation, повторную проверку immutable session
+generation и durable service registration, поэтому switch не может вклиниться между snapshot и
+публикацией active/pending run.
+
 `trigger` поддерживает только enum:
 - `ui`
 - `manual`
@@ -775,6 +793,7 @@ pending refresh. Заменённый pending run получает terminal `sta
 
 **409**
 - `run_active`
+- `session_generation_changed`
 
 `runner_unavailable` и `runtime_contract_failed` не возвращаются start-endpoint'ом; эти коды появляются только в run status (`GET /api/pipeline/runs/<run_id>`) после `202 Accepted`, когда конкретный step-scoped provider проходит lazy preflight или runtime execution.
 
@@ -806,7 +825,7 @@ pending refresh. Заменённый pending run получает terminal `sta
 - `run_not_found`
 
 **409**
-- `run_not_cancelable` (run уже terminal: `succeeded|failed`)
+- `run_not_cancelable` (run уже terminal: `succeeded|failed|canceled`)
 
 **400**
 - `invalid_request_body`
@@ -858,7 +877,7 @@ pending refresh. Заменённый pending run получает terminal `sta
 - `run_partial_failed` — run завершён после `best_effort` shard execution, но один или более shard-ов завершились ошибкой.
 
 ### GET `/api/pipeline/runs?limit=<n>`
-Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed/canceled), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются. Ответ также содержит authoritative `coordination`: active run и единственный pending refresh, если они есть. Additive boolean `authoritative_index` сообщает, зарегистрирован ли у run его собственный staged `final-run-index.json`; только `succeeded init|refresh` с этим флагом являются Change Review packages. Финальная content/readability validation всё равно выполняется snapshot loader-ом при выборе run.
+Возвращает список запусков analysis pipeline (`init|refresh`, queued/running/succeeded/failed/canceled), отсортированный по `started_at desc`. Q&A runs (`pipeline="qa"`) имеют отдельный endpoint `/api/qa/runs` и в этот список не включаются. Ответ также содержит authoritative `coordination`: active run и единственный pending refresh, если они есть. `history_diagnostics[]` содержит bounded service-level recovery/persistence diagnostics, которые нельзя безопасно приписать недолговечному run candidate. Additive boolean `authoritative_index` сообщает, зарегистрирован ли у run его собственный staged `final-run-index.json`; только `succeeded init|refresh` с этим флагом являются Change Review packages. Финальная content/readability validation всё равно выполняется snapshot loader-ом при выборе run.
 
 Параметры:
 - `limit` optional, default `50`, max `500`
@@ -866,6 +885,7 @@ pending refresh. Заменённый pending run получает terminal `sta
 **200**
 ```json
 {
+  "history_diagnostics": [],
   "coordination": {
     "active_run_id": null,
     "pending": null
@@ -1033,6 +1053,82 @@ Impact plan остаётся advisory; фактический пропуск/в�
 **404**
 - `run_not_found`
 
+### GET `/api/pipeline/runs/<run_id>/snapshot`
+Возвращает server-resolved immutable Change Review snapshot. Сервер принимает только exact
+`reports/taskruns/<run_id>/staging/final/final-run-index.json`, проверяет совпадение `run_id`,
+normalized staged containment, persisted inventory membership и однозначное
+`canonical_path -> staged_path` отображение. Fallback в current workspace или другой run запрещён.
+
+**200**
+```json
+{
+  "run_id": "run_20260403_001",
+  "status": "available",
+  "artifacts": [
+    {
+      "id": "doc.reports-as-is-overview-md",
+      "path": "reports/as-is/overview.md",
+      "read_path": "reports/taskruns/run_20260403_001/staging/final/reports/as-is/overview.md",
+      "canonical_path": "reports/as-is/overview.md",
+      "kind": "report",
+      "label": "System Overview",
+      "source_run_id": "run_20260403_001",
+      "source_mode": "run_snapshot"
+    }
+  ],
+  "issues": []
+}
+```
+
+`status`: `available | partial | not_produced | unavailable | error`. Missing indexed bytes дают
+`partial`, отсутствие authoritative index — `not_produced`, unreadable listed index —
+`unavailable`, invalid/foreign/ambiguous index — `error`.
+
+**404**
+- `run_not_found`
+
+### GET `/api/pipeline/runs/<run_id>/audit`
+
+Выполняет provider-free read-only аудит exact selected-run snapshot. Endpoint не изменяет
+workspace и source repositories, не читает raw provider logs и не использует current workspace как
+fallback. Для run обязательны matching `final-run-index.json`, `citation-index.json` и
+`validator-verdict.json` с `verdict=PASS`.
+
+Ответ детерминирован и bounded: не более 200 issues, 2000 artifact digest entries, 1 MiB на один
+прочитанный artifact и 320 bytes на message. `truncated=true` означает, что один из budget исчерпан.
+`scope` для HTTP endpoint всегда `selected_run`; внутренний promoted-current scanner дополнительно
+сравнивает canonical bytes с exact staging snapshot.
+
+**200**
+```json
+{
+  "version": 1,
+  "run_id": "run_20260403_001",
+  "scope": "selected_run",
+  "status": "pass",
+  "summary": {
+    "error": 0,
+    "warning": 0,
+    "artifact": 4
+  },
+  "issues": [],
+  "artifacts": [
+    {
+      "path": "reports/taskruns/run_20260403_001/staging/final/final-run-index.json",
+      "size": 1024,
+      "sha256": "<sha256>"
+    }
+  ],
+  "truncated": false
+}
+```
+
+`status`: `pass | warn | fail`. Каждый issue имеет stable `code`, `severity`, optional
+workspace/repository-relative `path`, sorted `related_paths` и bounded redacted `message`.
+
+**404**
+- `run_not_found`
+
 ## 5) Git helper endpoints
 
 ### GET `/api/git/diff`
@@ -1047,11 +1143,16 @@ old/new mode, HEAD/index object identity, worktree SHA-256, additions/deletions 
 
 `fingerprint` — SHA-256 канонического отсортированного manifest identity + полного inventory;
 он меняется при смене branch/HEAD/base, status/path/mode/index blob или рабочего содержимого.
+`state` — server-authored `clean | dirty | stale | blocked | unknown`. Optional query
+`fingerprint=<previous>` возвращает `stale`, если confirmation identity изменилась;
+active/pending analysis возвращает `blocked`. При недоступном Git inventory endpoint сохраняет
+HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагностическим `message`.
 
 **200**
 ```json
 {
   "scope": "full_workspace",
+  "state": "dirty",
   "branch": "main",
   "head_oid": "abc123",
   "base_ref": "HEAD",
@@ -1131,7 +1232,8 @@ old/new mode, HEAD/index object identity, worktree SHA-256, additions/deletions 
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
 
-Обе mutation операции сериализованы. Несовпадение подтверждённых branch/HEAD/base/inventory
+Обе mutation операции сериализованы общей admission lease с run/session mutations и запрещены,
+пока service имеет active или queued work (`409 run_active`). Несовпадение подтверждённых branch/HEAD/base/inventory
 возвращает `409 stale_git_confirmation` до любой Git mutation. Пустой fingerprint возвращает
 `400 git_confirmation_required`.
 
@@ -1184,6 +1286,18 @@ Returns Q&A run status and answer fields when ready.
   },
   "runtime_provider": "codex-code",
   "provider": "codex-code",
+  "answer_status": "available",
+  "answer_digest": "7f83b1657ff1fc53b92dc18148a1d65dfa13514c06f4f92d3f4f62f7f3f4d5a7",
+  "answer_authority": {
+    "mode": "qa_snapshot",
+    "run_id": "run_20260403_001",
+    "root": "reports/taskruns/run_20260403_001/qa"
+  },
+  "audit_authority": {
+    "mode": "qa_audit",
+    "run_id": "run_20260403_001",
+    "root": "reports/taskruns/run_20260403_001/qa"
+  },
   "answer": "The available workspace evidence identifies Platform Architecture as owner.",
   "citations": [
     {
@@ -1201,13 +1315,65 @@ Returns Q&A run status and answer fields when ready.
 }
 ```
 
-While queued/running, answer fields are `null`/empty and provider identity comes from resolved `runtime.profile.steps.qa.provider`. Failed runs return the failed run envelope without parsing partial `qa-answer.json` content. Succeeded runs expose citations only after the runtime answer has passed schema validation and citation paths have been cross-checked against `context-pack.json` `documents[].path`.
+`answer_authority` always identifies the selected run's immutable `qa_snapshot`; `audit_authority`
+identifies diagnostics in the same run's `qa_audit` root. While queued/running/canceled,
+`answer_status="not_produced"` and answer fields are `null`/empty; provider identity comes from
+resolved `runtime.profile.steps.qa.provider`. Failed runs return the failed run envelope without
+parsing partial `qa-answer.json` content. A succeeded run whose own answer or context pack is missing
+returns `qa_answer_unavailable` and never falls back to another run or promoted workspace state.
+Succeeded runs expose citations only after the runtime answer has passed schema validation and
+citation paths have been cross-checked against that exact run's `context-pack.json`
+`documents[].path`.
+
+`answer_digest` is the lowercase SHA-256 digest of the immutable `qa-answer.json` bytes. It is
+present only for a succeeded, validated answer and is the optimistic-concurrency token for the
+explicit proposal mutation below.
 
 **404**
 - `qa_run_not_found`
 
 **500**
 - `qa_answer_unavailable`
+
+### POST `/api/qa/runs/<run_id>/proposal-draft`
+
+Creates one current-workspace proposal package from an immutable succeeded Ask answer. This is the
+only Ask mutation; it does not alter the selected taskrun or any source repository. The mutation is
+serialized by the shared admission lease and returns `run_active` while work is active/queued.
+
+Request:
+```json
+{
+  "title": "Clarify payments ownership",
+  "expected_answer_digest": "7f83b1657ff1fc53b92dc18148a1d65dfa13514c06f4f92d3f4f62f7f3f4d5a7",
+  "slug": "clarify-payments-ownership",
+  "operator_note": "Confirm with the platform team."
+}
+```
+
+`title` and `expected_answer_digest` are required. `slug` and `operator_note` are optional.
+The server re-reads and validates that run's `qa-answer.json` and `context-pack.json`, compares the
+digest and atomically publishes an exclusive
+`proposals/qa-synthesis-<run-id>-<slug>/` containing `proposal.md`, `evidence.md` and a
+schema-validated `source-qa-answer.json`. Existing packages are never overwritten.
+
+**201**
+```json
+{
+  "path": "proposals/qa-synthesis-run-20260403-001-clarify-payments-ownership",
+  "proposal_path": "proposals/qa-synthesis-run-20260403-001-clarify-payments-ownership/proposal.md",
+  "evidence_path": "proposals/qa-synthesis-run-20260403-001-clarify-payments-ownership/evidence.md",
+  "source_path": "proposals/qa-synthesis-run-20260403-001-clarify-payments-ownership/source-qa-answer.json",
+  "answer_digest": "7f83b1657ff1fc53b92dc18148a1d65dfa13514c06f4f92d3f4f62f7f3f4d5a7"
+}
+```
+
+Typed errors:
+- `400 proposal_title_required|answer_digest_required|proposal_slug_invalid|invalid_request_body`
+- `404 qa_run_not_found`
+- `409 qa_run_not_succeeded|qa_answer_unavailable|qa_answer_stale|proposal_already_exists|run_active|session_generation_changed`
+- `422 qa_citation_unresolved`
+- `500 proposal_draft_create_failed`
 
 ### GET `/api/qa/runs?limit=<n>`
 Lists Q&A runs only, sorted by `started_at desc`.
@@ -1236,6 +1402,9 @@ Parameters:
 
 ### POST `/api/qa/ask`
 Legacy compatibility endpoint for deterministic read-only Q&A over workspace artifacts. Endpoint uses deterministic `internal/qa` service and does not call headless runtime providers, git helpers or pipeline runs. New UI Ask uses `/api/qa/runs`.
+The four response fields and read-only deterministic behavior are supported through v1. ACP does
+not emit runtime deprecation headers; removal requires a separately approved v1 breaking-change
+plan.
 
 **Request**
 ```json
@@ -1243,6 +1412,12 @@ Legacy compatibility endpoint for deterministic read-only Q&A over workspace art
 ```
 
 Unknown fields and malformed JSON are rejected.
+
+Migration for interactive/agent-backed consumers:
+```text
+POST /api/qa/runs {"question":"..."} -> 202 run_id
+GET  /api/qa/runs/<run_id>           -> poll until succeeded|failed|canceled
+```
 
 **200**
 ```json

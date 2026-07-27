@@ -12,7 +12,14 @@ import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
 import { isAbortError, useRequestGate } from "../hooks/useRequestGate";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
-import { getQARun, listQARuns, startQAQuestion, type QARunResponse } from "../lib/qaApi";
+import {
+  createQAProposalDraft,
+  getQARun,
+  listQARuns,
+  startQAQuestion,
+  type QAProposalDraftResponse,
+  type QARunResponse,
+} from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
 import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
@@ -3169,7 +3176,7 @@ function RunHistoryTable({
         <p>No runs yet.</p>
       ) : (
         <div className="run-table-wrap">
-          <table className="run-table" data-testid="runs-history-table">
+          <table className="run-table responsive-card-table" data-testid="runs-history-table">
             <thead>
               <tr>
                 <th>Run ID</th>
@@ -3184,7 +3191,7 @@ function RunHistoryTable({
             <tbody>
               {runList.map((run) => (
                 <tr key={run.run_id} className={runId === run.run_id ? "selected" : ""} onClick={() => onSelectRun(run.run_id)}>
-                  <td>
+                  <td data-label="Run ID">
                     <button
                       type="button"
                       className="link-button"
@@ -3196,14 +3203,14 @@ function RunHistoryTable({
                       {run.run_id}
                     </button>
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <StatusBadge tone={runOutcomeTone(run)}>{runOutcomeLabel(run)}</StatusBadge>
                   </td>
-                  <td>{run.pipeline}</td>
-                  <td>{formatTimestamp(run.started_at)}</td>
-                  <td>{formatTimestamp(run.finished_at)}</td>
-                  <td>{run.error_code || "-"}</td>
-                  <td>{run.warnings?.length ?? 0}</td>
+                  <td data-label="Pipeline">{run.pipeline}</td>
+                  <td data-label="Started">{formatTimestamp(run.started_at)}</td>
+                  <td data-label="Finished">{formatTimestamp(run.finished_at)}</td>
+                  <td data-label="Error code">{run.error_code || "-"}</td>
+                  <td data-label="Warnings">{run.warnings?.length ?? 0}</td>
                 </tr>
               ))}
             </tbody>
@@ -3215,6 +3222,7 @@ function RunHistoryTable({
 }
 
 export type ReviewStageProps = {
+  routeView?: "overview" | "evidence" | "findings" | "diff";
   runId: string | null;
   runStatus: RunStatusResponse | null;
   runList: RunListItem[];
@@ -3224,6 +3232,8 @@ export type ReviewStageProps = {
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
+  evidenceStatus?: "idle" | "loading" | "available" | "partial" | "not_produced" | "unavailable" | "error";
+  evidenceIssues?: Array<{ code: string; message: string; path?: string }>;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
   demo: boolean;
@@ -3235,6 +3245,7 @@ export type ReviewStageProps = {
 };
 
 export function ReviewStagePanel({
+  routeView = "overview",
   runId,
   runStatus,
   runList,
@@ -3244,6 +3255,8 @@ export function ReviewStagePanel({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
+  evidenceStatus = "available",
+  evidenceIssues = [],
   runLogs,
   reviewSummary,
   demo,
@@ -3300,8 +3313,8 @@ export function ReviewStagePanel({
       <section className="panel stage-panel" data-testid="results-coverage-panel">
         <div className="stage-header">
           <div>
-            <h1>Review</h1>
-            <p className="hint">Validate as-is evidence, coverage gaps, findings and diagrams before publishing workspace changes.</p>
+            <h1>{routeView === "overview" ? "Review" : capitalize(routeView)}</h1>
+            <p className="hint">{reviewRouteDescription(routeView)}</p>
           </div>
           <StatusBadge tone={nonDiagramArtifacts.length + diagramArtifacts.length > 0 ? "ok" : "info"}>
             {nonDiagramArtifacts.length + diagramArtifacts.length} artifacts
@@ -3338,6 +3351,7 @@ export function ReviewStagePanel({
             <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
           ) : (
             <ReviewEvidenceWorkbench
+              routeView={routeView}
               coverageSummary={coverageSummary}
               openQuestions={openQuestions}
               openQuestionCount={openQuestionCount}
@@ -3348,6 +3362,8 @@ export function ReviewStagePanel({
               diagramArtifacts={diagramArtifacts}
               selectedArtifact={selectedArtifact}
               selectedArtifactContent={selectedArtifactContent}
+              evidenceStatus={evidenceStatus}
+              evidenceIssues={evidenceIssues}
               selectedArtifactIsLoading={selectedArtifactIsLoading}
               runLogs={runLogs}
               reviewSummary={reviewSummary}
@@ -3363,6 +3379,15 @@ export function ReviewStagePanel({
       </section>
     </div>
   );
+}
+
+function reviewRouteDescription(view: "overview" | "evidence" | "findings" | "diff"): string {
+  switch (view) {
+    case "overview": return "Validate run identity, coverage and review readiness before publication.";
+    case "evidence": return "Inspect immutable selected-run evidence and its exact artifact identity.";
+    case "findings": return "Resolve findings, coverage questions and decision blockers.";
+    case "diff": return "Inspect the server-authoritative current workspace Git diff.";
+  }
 }
 
 function findLastSuccessfulRun(runList: RunListItem[], currentRunID: string | null): RunListItem | null {
@@ -3529,6 +3554,7 @@ function ReviewDomainMap({
 }
 
 function ReviewEvidenceWorkbench({
+  routeView,
   coverageSummary,
   openQuestions,
   openQuestionCount,
@@ -3539,6 +3565,8 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts,
   selectedArtifact,
   selectedArtifactContent,
+  evidenceStatus,
+  evidenceIssues,
   selectedArtifactIsLoading,
   runLogs,
   reviewSummary,
@@ -3549,6 +3577,7 @@ function ReviewEvidenceWorkbench({
   onLoadGitDiff,
   onOpenArtifact,
 }: {
+  routeView: "overview" | "evidence" | "findings" | "diff";
   coverageSummary: string;
   openQuestions: string;
   openQuestionCount: number;
@@ -3559,6 +3588,8 @@ function ReviewEvidenceWorkbench({
   diagramArtifacts: Artifact[];
   selectedArtifact: string;
   selectedArtifactContent: string;
+  evidenceStatus: "idle" | "loading" | "available" | "partial" | "not_produced" | "unavailable" | "error";
+  evidenceIssues: Array<{ code: string; message: string; path?: string }>;
   selectedArtifactIsLoading: boolean;
   runLogs: RunLogEntry[];
   reviewSummary: RunReviewSummaryResponse | null;
@@ -3569,7 +3600,9 @@ function ReviewEvidenceWorkbench({
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onOpenArtifact: (path: string) => void;
 }) {
-  const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">("preview");
+  const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">(
+    routeView === "diff" ? "diff" : routeView === "findings" ? "evidence" : "preview",
+  );
   const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
   const [artifactExplorerOpen, setArtifactExplorerOpen] = useState(reviewQueue.length === 0);
   const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
@@ -3580,6 +3613,10 @@ function ReviewEvidenceWorkbench({
       onLoadGitDiff({ path: selectedArtifact });
     }
   }, [evidenceView, onLoadGitDiff, selectedArtifact]);
+
+  useEffect(() => {
+    setEvidenceView(routeView === "diff" ? "diff" : routeView === "findings" ? "evidence" : "preview");
+  }, [routeView]);
 
   useEffect(() => {
     if (reviewQueue.length === 0) {
@@ -3691,7 +3728,9 @@ function ReviewEvidenceWorkbench({
                 content={selectedArtifactContent}
                 runId={reviewSummary?.run_id}
                 sourceMode="run_snapshot"
-                demo={demo}
+                provenance={demo ? "demo" : reviewSummary ? "live" : "unknown"}
+                status={evidenceStatus === "partial" ? "partial" : evidenceStatus === "error" ? "error" : evidenceStatus === "unavailable" || evidenceStatus === "not_produced" ? "unavailable" : "available"}
+                issues={evidenceIssues}
                 onOpenArtifact={onOpenArtifact}
               />
             )
@@ -4748,9 +4787,11 @@ function proposalTabLabel(view: "preview" | "evidence" | "changelog" | "diff" | 
 export function AskStagePanel({
   primaryActionSignal = 0,
   onOpenArtifact,
+  onProposalCreated,
 }: {
   primaryActionSignal?: number;
   onOpenArtifact: (path: string) => void;
+  onProposalCreated?: (proposal: QAProposalDraftResponse) => void;
 }) {
   const [question, setQuestion] = useState("");
   const [qaRun, setQARun] = useState<QARunResponse | null>(null);
@@ -4760,6 +4801,10 @@ export function AskStagePanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
+  const [proposalConfirmationOpen, setProposalConfirmationOpen] = useState(false);
+  const [proposalTitle, setProposalTitle] = useState("");
+  const [proposalOperatorNote, setProposalOperatorNote] = useState("");
+  const [proposalBusy, setProposalBusy] = useState(false);
   const historyRequest = useRequestGate("qa-history");
   const detailRequest = useRequestGate("qa-detail");
   const pollRequest = useRequestGate("qa-poll");
@@ -4916,6 +4961,44 @@ export function AskStagePanel({
         setSelectedLoading(false);
       }
       detailRequest.finish(token);
+    }
+  }
+
+  async function reloadSelectedAnswer() {
+    if (!qaRun?.run_id) return;
+    await handleSelectRun(qaRun);
+  }
+
+  function openProposalConfirmation() {
+    if (!qaRun?.answer_digest || qaRun.status !== "succeeded") return;
+    setProposalTitle((qaRun.question || "Ask synthesis").trim());
+    setProposalOperatorNote("");
+    setStatus("");
+    setProposalConfirmationOpen(true);
+  }
+
+  async function handleCreateProposalDraft() {
+    if (!qaRun?.run_id || !qaRun.answer_digest) return;
+    const title = proposalTitle.trim();
+    if (!title) {
+      setStatus("Proposal title is required.");
+      return;
+    }
+    setProposalBusy(true);
+    setStatus("Creating proposal draft from the immutable Ask answer.");
+    try {
+      const proposal = await createQAProposalDraft(qaRun.run_id, {
+        title,
+        expected_answer_digest: qaRun.answer_digest,
+        operator_note: proposalOperatorNote.trim() || undefined,
+      });
+      setProposalConfirmationOpen(false);
+      setStatus(`Proposal draft created at ${proposal.path}.`);
+      onProposalCreated?.(proposal);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Proposal draft creation failed");
+    } finally {
+      setProposalBusy(false);
     }
   }
 
@@ -5080,6 +5163,11 @@ export function AskStagePanel({
               </div>
               {qaRun.answer ? <p>{qaRun.answer}</p> : <p className="empty-state">No answer returned yet. Check run status and logs for details.</p>}
               {unresolved.length > 0 ? <p className="status warn">Unresolved: {unresolved.join(", ")}</p> : <p className="hint">No unresolved assumptions returned.</p>}
+              {qaRun.status === "succeeded" && qaRun.answer_digest ? (
+                <button type="button" onClick={openProposalConfirmation} data-testid="qa-create-proposal-btn">
+                  Create proposal draft
+                </button>
+              ) : null}
               <div className="qa-related-partial">
                 <h3>Related entities and edges</h3>
                 <p className="hint">Partial state: the current QA API returns citations, not a structured related-entity graph. Use the citation trail for drilldown.</p>
@@ -5152,6 +5240,27 @@ export function AskStagePanel({
           </section>
         </aside>
       </div>
+      <ModalDialog
+        open={proposalConfirmationOpen}
+        title="Create proposal draft"
+        description="This explicit mutation creates a new current-workspace proposal package. The selected Ask taskrun and source repositories remain read-only."
+        confirmLabel="Create proposal draft"
+        busy={proposalBusy}
+        onCancel={() => setProposalConfirmationOpen(false)}
+        onConfirm={() => void handleCreateProposalDraft()}
+      >
+        <label htmlFor="qaProposalTitle">Proposal title</label>
+        <input id="qaProposalTitle" value={proposalTitle} onChange={(event) => setProposalTitle(event.target.value)} autoFocus />
+        <label htmlFor="qaProposalNote">Operator note (optional)</label>
+        <textarea id="qaProposalNote" value={proposalOperatorNote} onChange={(event) => setProposalOperatorNote(event.target.value)} rows={3} />
+        <p><strong>Target:</strong> `proposals/qa-synthesis-{qaRun?.run_id ?? "run"}-&lt;slug&gt;/`</p>
+        <p><strong>Citations:</strong> {citations.length}</p>
+        <p><strong>Unresolved assumptions:</strong> {unresolved.length > 0 ? unresolved.join(", ") : "none"}</p>
+        <p className="hint">Ask remains read-only; only the new proposal package is written.</p>
+        <button type="button" className="secondary" onClick={() => void reloadSelectedAnswer()} disabled={proposalBusy}>
+          Reload selected answer
+        </button>
+      </ModalDialog>
     </section>
   );
 }

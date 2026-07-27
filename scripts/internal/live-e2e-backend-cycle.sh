@@ -766,6 +766,8 @@ snapshot_run_artifacts() {
   copy_if_exists "$workspace_path/reports/coverage/summary.md" "$dst/reports/coverage/summary.md"
   copy_if_exists "$workspace_path/reports/coverage/open-questions.md" "$dst/reports/coverage/open-questions.md"
   copy_if_exists "$workspace_path/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
+  copy_if_exists "$workspace_path/reports/taskruns/run-history.json" "$dst/reports/taskruns/run-history.json"
+  copy_if_exists "$workspace_path/reports/taskruns/run-history.json.last-good" "$dst/reports/taskruns/run-history.json.last-good"
   copy_tree_if_exists "$workspace_path/reports/taskruns/${run_id}" "$dst/reports/taskruns/${run_id}"
   for taskrun_json in "$workspace_path/reports/taskruns/${run_id}-"*.json; do
     if [[ -f "$taskrun_json" ]]; then

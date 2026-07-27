@@ -30,10 +30,11 @@ const (
 )
 
 const (
-	runHistoryPath      = "reports/taskruns/run-history.json"
-	runHistoryVersion   = 1
-	runHistoryRetention = 500
-	runLogsPath         = "reports/taskruns/logs"
+	runHistoryPath          = "reports/taskruns/run-history.json"
+	runHistoryVersion       = 1
+	runHistoryRetention     = 500
+	historyDiagnosticsLimit = 20
+	runLogsPath             = "reports/taskruns/logs"
 )
 
 const (
@@ -94,6 +95,7 @@ type Service struct {
 	historyRetention           int
 	historyRecoveryDiagnostics []string
 	lastHistoryPersistenceErr  error
+	historyWriteFile           func(workspace.Root, string, []byte) error
 
 	runLogsWorkspace workspace.Root
 	runLogsEnabled   bool
@@ -298,6 +300,9 @@ func NewService(options ...Option) *Service {
 		providerFallback: acpruntime.ProviderClaudeCode,
 		providerSource:   acpruntime.ProviderSourceDefault,
 		runtimeMode:      acpruntime.RuntimeModeFake,
+		historyWriteFile: func(root workspace.Root, relPath string, content []byte) error {
+			return root.WriteFileAtomic(relPath, content)
+		},
 	}
 	for _, option := range options {
 		option(service)
@@ -393,18 +398,22 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	if resolvedStepProvidersErr == nil {
 		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
 	}
-	s.storeRun(runRecord{
+	if err := s.storeRun(runRecord{
 		info:      initialInfo,
 		artifacts: append([]Artifact(nil), initialArtifacts...),
-	})
+	}); err != nil {
+		return initialInfo, initialArtifacts, fmt.Errorf("persist initial run state: %w", err)
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panicErr := fmt.Errorf("run panic: %v", recovered)
-			s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
+			_ = s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
 			panic(recovered)
 		}
 		if finalErr != nil {
-			s.terminalizeActiveRunAfterUnexpectedExit(runID, finalErr, "run failed: unexpected exit")
+			if terminalErr := s.terminalizeActiveRunAfterUnexpectedExit(runID, finalErr, "run failed: unexpected exit"); terminalErr != nil {
+				finalErr = errors.Join(finalErr, fmt.Errorf("persist terminal guard state: %w", terminalErr))
+			}
 		}
 	}()
 	s.appendRunLog(runID, RunLogEntry{
@@ -661,10 +670,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
-		s.storeRun(runRecord{
+		if err := s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
-		})
+		}); err != nil {
+			execution.recordProgressPersistenceError(err)
+		}
 		execution.logInfo(stepID, "", "step started", nil)
 	}
 	execution.onPermissions = func(pending []acpruntime.PermissionRequest) {
@@ -674,10 +685,12 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), pending...)
-		s.storeRun(runRecord{
+		if err := s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
-		})
+		}); err != nil {
+			execution.recordProgressPersistenceError(err)
+		}
 	}
 
 	if err := execution.run(ctx); err != nil {
@@ -769,15 +782,17 @@ type pipelineExecution struct {
 }
 
 type pipelineRunProgressState struct {
-	startedAt          time.Time
-	stepStatus         RunInfo
-	onStep             func(stepID string)
-	onLog              func(entry RunLogEntry)
-	onPermissions      func([]acpruntime.PermissionRequest)
-	warnings           []string
-	pendingPermissions []acpruntime.PermissionRequest
-	resumeFromStep     string
-	resumeSourceStep   string
+	startedAt              time.Time
+	stepStatus             RunInfo
+	onStep                 func(stepID string)
+	onLog                  func(entry RunLogEntry)
+	onPermissions          func([]acpruntime.PermissionRequest)
+	warnings               []string
+	pendingPermissions     []acpruntime.PermissionRequest
+	resumeFromStep         string
+	resumeSourceStep       string
+	progressPersistenceMu  sync.Mutex
+	progressPersistenceErr error
 }
 
 type pipelineArtifactRegistry struct {

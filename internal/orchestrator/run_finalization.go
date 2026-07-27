@@ -19,16 +19,18 @@ func (s *Service) failRunBeforeExecution(
 ) (RunInfo, []Artifact, error) {
 	finishedAt := s.clock().UTC()
 	failedInfo := initialInfo
-	failedInfo.Status = RunStatusFailed
 	failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, classifyErr)
+	failedInfo.Status = terminalStatusForErrorCode(failedInfo.ErrorCode)
 	if warnings != nil {
 		failedInfo.Warnings = append([]string(nil), warnings...)
 	}
 	failedInfo.FinishedAt = &finishedAt
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      failedInfo,
 		artifacts: append([]Artifact(nil), artifacts...),
-	})
+	}); persistErr != nil {
+		return failedInfo, nil, errors.Join(returnErr, fmt.Errorf("persist failed run state: %w", persistErr))
+	}
 	fields := map[string]any{
 		"error_code": failedInfo.ErrorCode,
 		"error":      failedInfo.Error,
@@ -49,8 +51,8 @@ func (s *Service) failRunBeforeExecution(
 func (s *Service) finishExecutionFailure(runID string, initialInfo RunInfo, execution *pipelineExecution, err error) (RunInfo, []Artifact, error) {
 	finishedAt := s.clock().UTC()
 	failedInfo := initialInfo
-	failedInfo.Status = RunStatusFailed
 	failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
+	failedInfo.Status = terminalStatusForErrorCode(failedInfo.ErrorCode)
 	failedInfo.CurrentStep = execution.stepStatus.CurrentStep
 	execution.rewriteTerminalReports(RunStatusFailed)
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
@@ -69,10 +71,12 @@ func (s *Service) finishExecutionFailure(runID string, initialInfo RunInfo, exec
 			"error": qualityErr.Error(),
 		})
 	}
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      failedInfo,
 		artifacts: execution.artifacts,
-	})
+	}); persistErr != nil {
+		return failedInfo, execution.artifacts, errors.Join(err, fmt.Errorf("persist failed run state: %w", persistErr))
+	}
 	execution.logError(execution.stepStatus.CurrentStep, "", "run failed", map[string]any{
 		"error_code": failedInfo.ErrorCode,
 		"error":      failedInfo.Error,
@@ -107,10 +111,12 @@ func (s *Service) finishPartialExecutionFailure(runID string, initialInfo RunInf
 	} else {
 		failedInfo.Warnings = append(failedInfo.Warnings, fmt.Sprintf("run quality summary write failed: %v", qualityErr))
 	}
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      failedInfo,
 		artifacts: execution.artifacts,
-	})
+	}); persistErr != nil {
+		return failedInfo, execution.artifacts, fmt.Errorf("persist partial-failure run state: %w", persistErr)
+	}
 	execution.logError(execution.stepStatus.CurrentStep, "", "run failed: partial shard failures detected", map[string]any{
 		"error_code":            failedInfo.ErrorCode,
 		"partial_failure_count": len(execution.partialFailures),
@@ -135,10 +141,12 @@ func (s *Service) finishExecutionSuccess(runID string, initialInfo RunInfo, exec
 			"error": qualityErr.Error(),
 		})
 	}
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      succeeded,
 		artifacts: execution.artifacts,
-	})
+	}); persistErr != nil {
+		return succeeded, execution.artifacts, fmt.Errorf("persist succeeded run state: %w", persistErr)
+	}
 	execution.logInfo(execution.stepStatus.CurrentStep, "", "run succeeded", map[string]any{
 		"artifacts": len(execution.artifacts),
 	})

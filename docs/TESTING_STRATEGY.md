@@ -26,8 +26,11 @@
   - `schemas/source-revisions.schema.json`
   - `schemas/refresh-impact-plan.schema.json`
   - `schemas/qa-answer.schema.json`
+  - `schemas/source-qa-answer.schema.json`
 - persisted `runtime-execution.json` metadata и artifact-only step contracts проходят parse/semantic validation
 - examples и fixture cases должны парситься и проходить contract validation, где это ожидается
+- Ask-to-Proposal tests cover digest staleness, citation authority, exclusive atomic directory
+  publication, injected write/rename rollback and ProductShell focus/routing/Git refresh
 
 ### Semantic validator tests
 - правила, которые не выражаются чистой JSON Schema
@@ -46,6 +49,8 @@
 ### Scenario integration tests
 - pipeline runs на synthetic repos и fixture workspaces
 - artifact fixtures without live providers в required tests
+- Workspace Health fixtures cover every advisory v1 issue class, deterministic ordering,
+  workspace containment and byte-identical read-only scans; response version remains `1`
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 - `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
 - collect contract fixtures must include at least one authored document and one repo-backed
@@ -147,7 +152,16 @@ Baseline scenario set:
   - promotion builds a complete run-scoped generation, validates indexed files, activates managed canonical roots with journaled rollback, and regression tests inject failures across copy/model/diagram/activation operations to prove canonical state is either the previous complete generation or the new complete generation
   - `reports/changelog/*` draft files are activated through the journaled file path while preserving existing changelog history; stale managed artifact registry entries are removed only after successful activation
 - UI route-shell seams:
-  - feature-owned Changes/Knowledge/Publish view models receive authoritative route/data inputs; ProductShell, semantic primitives and ContextDrawer have focused component coverage
+  - feature-owned Changes/Knowledge/Publish view models receive authoritative route/data inputs;
+    authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
+    `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
+    Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
+  - Evidence Viewer regressions cover relative links, traversal/cross-run rejection, safe raw HTML,
+    explicit diff identity, unknown provenance, typed partial state, long lines and oversized
+    read/render fallback
+  - responsive/a11y coverage includes 1440, 1280, 1024 and 390×844 rendered scenarios, global
+    overflow/console checks, critical axe, safe-area CSS, 44 px controls, keyed card tables and
+    focus trap/Escape/outside-click/return-focus/orientation transitions
   - historical snapshot tests inject a foreign-run final index before the selected-run index and
     require the UI to open only the exact selected-run staged paths; the live ProductShell flow
     accepts an empty optional Diagrams group but must still open and inspect substantive indexed
@@ -281,7 +295,10 @@ Release workflow hardening:
   - collect pair and manifest repair prompt tests require exact stable `documents[].path -> documents[].canonical_path` mapping for provider-authored markdown. Compact no-artifact repair must name the exact `documents[0].canonical_path` and reject `reports/taskruns/**`, `/staging/`, absolute `write_root`, duplicated `artifact_root`, raw runtime metadata/logs and provider side-effect paths as canonical publish surfaces.
   - manifest-only runtime repair запускается один раз только при authored docs + structural-invalid `shard-pack-manifest.json`; if structural-invalid cause is missing repo evidence and authored markdown still names the missing path, or if authored markdown is empty/whitespace-only, runtime uses collect pair repair targeting that existing markdown and requiring a fresh rewrite before manifest-only repair can run; missing/empty manifests, scaffold-only manifests, and clean manifests whose only binding error is empty/missing `citations[].claim_ids` can use deterministic `collect_manifest_runtime_recovery` from temp authored-doc trees. Provider repair prompt still requires `FIRST COLLECT MANIFEST REPAIR COMMAND` as next filesystem action, and that first provider-authored command must read bounded authored docs/evidence and write `shard-pack-manifest.json` before returning; evidence-packet-only output or status prose without a manifest write is a no-op repair failure. Exhausted/no-op structural manifest repair remains terminal `runtime_contract_failed` and must not fall back to deterministic runtime recovery. Recovered runtime manifests carry explicit warning/diagnostic markers and evidence-rich docs must produce concrete semantic entities/edges/findings beyond repo/shard wrappers and owner mapping; prompt contract tests require manifest-only repair to carry the same canonical semantic-shape block and to forbid top-level `claims`/`claim_map`/metadata wrappers, legacy semantic aliases and placeholder or empty claim-id tokens.
 - draft enrichment include-scope tests require current-run shard status JSON visibility for `step2/step4` while keeping whole workspace/source repo and old sibling taskrun histories out of the focused read surface. Prompt contract tests require target identity from `repo_scope`/`repo_scopes`/`domain_id`, typed shard-summary `items[].status` counting, current-run final-index counts from `canonical_documents[]`, citation counts from `citations[]`, exact final/citation index count consistency when index files are present, no matrix-folder target contamination, no placeholder/recovery wording in proposals, runtime draft validation rejection for generic placeholder-replacement narration such as `replaced placeholder proposal content`, rejection of step0 downstream/runtime-only constitution leaks, rejection of foreign live `run_*` taskrun IDs in current-run markdown, rejection of generic conditional shard-gap wording such as `failed shards require rerun`, acceptance of exact current-run no-shard-coverage-blocker statements when tied to the typed summary/status, rejection of step2 `summary.md` that omits exact typed shard-summary completeness, rejection of step2 `overview.md` without concrete repo/path, citation, or staged artifact evidence refs when typed shard status is visible, rejection of step2 `architect-summary.md` without decision-ready operator next-action/inspection cues when typed shard status is visible, rejection of stale current-run final/citation-index unavailable or not-yet-present claims in `step2` markdown, rejection of false empty-shard evidence claims such as `Shard pack manifests: none observed`, rejection of stale `No current-run final-run-index document list was available`, `final-run-index.json contains 0 observed document entries` and `final-run-index.json (0 observed document entries)` claims in `step4` proposal/changelog markdown, rejection of empty proposal/changelog sections, dangling `findings above` references and generic follow-up plans without a proposed-plan no-actionable-proposal gap, rejection of metadata-only evidence bullets such as `"version": 1` and unquoted shard-summary key dumps, rejection of raw structured evidence dumps (`{'id': ...}`, `documents=[{...}]`, `citations=[{...}]`) and malformed markdown backtick/fence syntax in operator-facing markdown, provider-authored markdown syntax retry prompt without scaffold heredoc after a malformed enrichment attempt, command-text retry prompt/engine behavior, terminal noop/scaffold enrichment exhaustion, and no false `0 authored markdown shard docs` / `0 staging shard files` claim.
-  - boundary tests assert that live/manual release evidence names (`release_verdict`, `execution_report`, `swe_ux_assessment`, `swe_artifact_quality_assessment`) do not enter core AOR runtime/orchestrator packages
+  - bidirectional boundary tests scan Go/Python/TypeScript ownership: live/manual release identity and
+    assessment names cannot enter product runtime/orchestrator/UI sources; the live flow cannot
+    import production-internal selectors/validators or synthesize `run-history.json`; provider env
+    fixtures prove ambient orchestration identity is removed before child process start
   - backend-cycle script tests assert that failed `/api/pipeline/init` baseline simulation writes a 17-field fake init row into `run-results.tsv` before stopping, preserving failed run telemetry for `execution_report_*`
   - successful Epic 21 no-op refresh is counted as a completed run without legacy `<run_id>-quality.json` only when its matching run-scoped `refresh-execution.json` validates `unchanged_candidate`, `no_op` and skipped providers; malformed, mismatched or absent audit evidence remains a gate failure
   - manifest-only runtime repair fail-ится, если provider пишет что-либо кроме `shard-pack-manifest.json`
@@ -366,6 +383,11 @@ Release workflow hardening:
   - release UX readiness still requires Ask-flow evidence in `swe_ux_assessment_<matrix-id>.md`
 - UI Publish gate coverage:
   - deterministic UI tests check folder summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan and existing Git actions
+  - Changes route table covers distinct overview/evidence/findings/diff/proposals/publish models,
+    popstate restoration and server-authored Git `clean|dirty|stale|blocked|unknown`; mutation
+    confirmation is unavailable for non-actionable Git truth
+  - URL/request identity tests cover delayed artifact selection, run/source/path/viewer generations,
+    invalid explicit enum cleanup through notice + `replaceState`, and user `pushState` navigation
 - UI run lifecycle operability:
   - bootstrap auto-select newest active run
   - если выбранный run исчезает из list endpoint и replacement доступен, UI переключается на следующий run; если list endpoint временно пуст, но status endpoint ещё жив, selection сохраняется
@@ -400,7 +422,7 @@ Release workflow hardening:
   - `artifact_quality.*` signals emitted by product quality summaries block strict live E2E artifact-quality status; reports must show split cases as `runtime passed, artifact quality failed` instead of collapsing them into runtime/provider failures
   - placeholder promoted-artifact checks distinguish bootstrap/generic proposal text from evidence-backed proposal/changelog artifacts: boilerplate validation notes alone are not blockers when the artifact carries concrete finding/question ids and findings/coverage traceability
   - artifact-quality report tests cover misleading/off-topic interpretation, weak evidence density, useless C4/Mermaid and missing cross-repo truthfulness; machine hard-fails are limited to public product signals and documented analysis blockers, while broader SWE review remains a companion assessment
-  - frontend smoke работает на отдельной `frontend-workspace` копии backend workspace, merge-ит выбранный run snapshot reports поверх copied reports tree и не мутирует backend baseline; batch harness создает frontend-only `reports/taskruns/run-history.json` для выбранного succeeded backend `refresh_run_id`, чтобы Playwright выбирал completed snapshot run instead of starting a second provider-backed init; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression; shell tests закрепляют, что failed headless refresh row remains ineligible for frontend smoke even if a triage snapshot directory exists
+  - frontend smoke работает на отдельной `frontend-workspace` копии backend workspace, merge-ит выбранный run snapshot reports и captured product-authored history поверх copied reports tree и не мутирует backend baseline; harness не создает и не переписывает product run history, а Playwright выбирает completed snapshot run instead of starting a second provider-backed init; `snapshot_reports_missing` после terminal backend failure записывается как dependent skipped frontend status, а не independent frontend regression; shell tests закрепляют, что failed headless refresh row remains ineligible for frontend smoke even if a triage snapshot directory exists
   - terminal-success backend runs (`result=passed`, `run-status.env state=completed process_exit=0`) остаются `failure_class=none`, даже если raw provider logs содержат recovered `runner_unavailable`/429 diagnostics
   - batch/report tests cover `runtime_contract_status`, `artifact_quality_status`, `quality_gates_failed_failures` and `artifact_quality_failed_failures`; `runtime_quality.stall_pressure` stays non-blocking but caps the display label below `Excellent`; step-level blocker fixtures preserve both `first_validation_error_excerpt` and additive `terminal_validation_error_excerpt` so final repair exhaustion causes are visible without raw-log drilldown
   - execution report/matrix telemetry counters агрегируют `repair_attempts`, `repair_exhausted`, `fresh_retries`, `focused_repairs`, `stall_count`, `pre_artifact_stalls`, `post_artifact_stalls`, `zero_output_pre_artifact_stalls`, `partial_failure_count` и `quality_alerts`; counters читаются из snapshot quality JSON, а для failed/non-snapshot runs — из actual workspace `reports/taskruns/<run_id>-quality.json` без превращения такого run в snapshot hard-pass; non-exhausted repair/stall pressure visible but non-blocking, partial failures remain blockers; provider-free event-sequence tests prove that a valid provider-command controlled stop and its paired `retry scheduled / terminate_and_validate` diagnostic count once as `valid_artifact_controlled_stops` and never emit `stall_pressure`, while invalid/missing artifact state remains an actual post-artifact stall; malformed provider-authored semantic artifacts such as markdown written to `shard-pack-manifest.json` are surfaced as `analysis:malformed-semantic-json` issue details instead of crashing report generation; runtime Go tests cover the single provider-authored `collect_manifest_shape_cleanup` retry for missing question text / duplicate citation IDs and prove repeated invalid cleanup remains `runtime_contract_failed`
@@ -451,6 +473,8 @@ Release workflow hardening:
   - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
 - tracked generated artifacts policy:
   - `internal/api/ui_dist/*` и `fixtures/scenarios/*/golden/readable/*` остаются versioned в git как часть baseline/release surface
+  - `make verify-readable-fixtures` checks every readable export path/digest against its adjacent
+    machine `snapshot.sha256`; machine-only snapshot entries remain valid
   - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
     the embedded bundle and `make verify-ui-dist` to prove the committed bundle matches the
     current Vite output.
@@ -492,6 +516,9 @@ Release workflow hardening:
 - `make test`
 - `make lint` (gofmt + ShellCheck + UI typecheck)
 - `make build`
+- `make offline-closure` (complete provider-free Epic 22 closure: race/fault/path/boundary,
+  readable-fixture drift, UI unit/rendered mock suites, deterministic DoD, embedded UI and
+  source-repository cleanliness; never runs live providers or canonical matrices)
 - `make verify-ui-determinism`
 - `make verify-ui-dist`
 - `make run-backend WORKSPACE=/abs/path/to/arch-workspace`

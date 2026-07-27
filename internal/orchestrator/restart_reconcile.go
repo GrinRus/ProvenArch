@@ -83,11 +83,9 @@ func parseRunHistorySnapshot(content []byte) (runHistorySnapshot, error) {
 }
 
 func (s *Service) addHistoryRecoveryDiagnostic(message string) {
-	message = strings.TrimSpace(message)
-	if message == "" {
-		return
-	}
-	s.historyRecoveryDiagnostics = append(s.historyRecoveryDiagnostics, message)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addHistoryDiagnosticLocked(message)
 }
 
 func (s *Service) recoverStaleRunsAfterRestart() {
@@ -96,11 +94,12 @@ func (s *Service) recoverStaleRunsAfterRestart() {
 	var resumeTarget *staleRunResumeTarget
 
 	s.mu.Lock()
+	candidateRuns := cloneRunRegistry(s.runs)
 	candidateRunID := ""
 	if s.resumeStaleAsync {
 		candidateRunID = s.findResumableRunningRunLocked()
 	}
-	for runID, record := range s.runs {
+	for runID, record := range candidateRuns {
 		if record == nil {
 			continue
 		}
@@ -125,20 +124,25 @@ func (s *Service) recoverStaleRunsAfterRestart() {
 		}
 		previousStatus := record.info.Status
 		finishedAt := now
-		reconciledInfo := record.info
+		reconciledInfo := cloneRunInfo(record.info)
 		reconciledInfo.Status = RunStatusFailed
 		reconciledInfo.ErrorCode = runErrorCodeReconciledAfterRestart
 		reconciledInfo.Error = fmt.Sprintf("run reconciled after service restart (stale status=%s)", previousStatus)
-		reconciledInfo.FinishedAt = &finishedAt
+		reconciledInfo.FinishedAt = cloneTimePointer(&finishedAt)
 		record.info = reconciledInfo
-		s.runs[runID] = record
+		candidateRuns[runID] = record
 		reconciledRuns = append(reconciledRuns, staleRunReconciliation{
 			runID:         runID,
 			previousState: previousStatus,
 		})
 	}
 	if len(reconciledRuns) > 0 {
-		_ = s.persistHistoryLocked()
+		if err := s.persistHistorySnapshotLocked(candidateRuns); err != nil {
+			s.recordHistoryPersistenceFailureLocked(fmt.Errorf("reconcile stale run history: %w", err))
+			reconciledRuns = nil
+		} else {
+			s.runs = candidateRuns
+		}
 	}
 	if resumeTarget != nil {
 		s.activeRunID = resumeTarget.runID

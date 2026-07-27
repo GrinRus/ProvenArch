@@ -352,7 +352,8 @@ func createWorkspaceFromConfig(config workspaceInitConfig) (workspace.Root, erro
 	if err != nil {
 		return workspace.Root{}, fmt.Errorf("encode workspace manifest: %w", err)
 	}
-	if err := os.WriteFile(manifestPath, manifestContent, 0o644); err != nil {
+	workspaceRoot := workspace.Root{Path: normalized.WorkspacePath}
+	if err := workspaceRoot.WriteFileAtomic(workspace.ManifestFileName, manifestContent); err != nil {
 		return workspace.Root{}, fmt.Errorf("write workspace manifest: %w", err)
 	}
 

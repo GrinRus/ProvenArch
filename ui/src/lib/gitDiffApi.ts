@@ -6,6 +6,7 @@ export type LoadGitDiffOptions = {
   folder?: string;
   runId?: string | null;
   stepId?: string | null;
+  fingerprint?: string;
   signal?: AbortSignal;
 };
 
@@ -22,6 +23,9 @@ export async function loadWorkspaceGitDiff(options: LoadGitDiffOptions = {}): Pr
   }
   if (options.stepId) {
     query.set("step_id", options.stepId);
+  }
+  if (options.fingerprint) {
+    query.set("fingerprint", options.fingerprint);
   }
   const suffix = query.toString() ? `?${query.toString()}` : "";
   return fetchJSON<GitDiffResponse>(`/api/git/diff${suffix}`, { signal: options.signal });
