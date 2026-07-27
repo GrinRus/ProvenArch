@@ -60,26 +60,6 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260726-epic22o-offline-closure
-
-### Context
-The constituent race, fault, path, incident, boundary and rendered UI suites existed but were not
-assembled into one provider-free closure command.
-
-### Goals (must have)
-- [x] Add one deterministic `make offline-closure` gate without live/provider dependencies.
-- [x] Include race/path/fault/auditor, live-product boundary and all unit suites.
-- [x] Include all offline rendered mock/keyboard/axe scenarios.
-- [x] Run contracts, test, lint and build and compare source UI with embedded `ui_dist`.
-- [x] Record the passing working-tree evidence; reserve qualification SHA for a clean reviewed commit.
-- [x] Synchronize docs and tracker state; no live E2E.
-- [ ] Record the clean reviewed qualification SHA, then archive this handoff plan.
-
-### Non-goals
-- [x] No wrapper or invocation of the live matrix harness.
-- [x] No R3 qualification claim from an uncommitted tree.
-
-### Plan ID
 EP-20260722-post-implementation-trust-audit
 
 ### Context
@@ -101,7 +81,7 @@ the original Epic 19–21 delivery scopes.
 - [x] Complete Changes/Knowledge/QA/EvidenceViewer request identity, responsive and accessibility
       acceptance offline.
 - [x] Pass the combined deterministic closure gate in the current working tree.
-- [ ] Record one clean reviewed R3 qualification SHA.
+- [x] Record clean reviewed R3 qualification SHA `e8055d65699ed63623f62ad99c3b8406f79c030d`.
 - [ ] Restart Epic 18 R3 only after the Epic 22 closure gate; do not reuse stopped matrix evidence.
 
 ### Non-goals
@@ -430,7 +410,8 @@ discovery plan.
 - [x] PR #171/#172 statuses are reconciled as merged without claiming that R3 restarted.
 - [x] Every `22A..22N` slice is implemented with focused tests and full deterministic DoD.
 - [x] `22O` passes all provider-free closure gates in the current working tree.
-- [ ] The same gate passes from one clean reviewed qualification commit.
+- [x] The same gate passes from clean reviewed qualification commit
+      `e8055d65699ed63623f62ad99c3b8406f79c030d`.
 - [ ] Epic 18 R3 obtains fresh individual and composite PASS evidence from that unchanged commit.
 
 ### Risks
@@ -460,6 +441,10 @@ discovery plan.
 - 2026-07-26: Completed `22E`–`22O` and the requested post-R3 product/cleanup queue in the working
   tree. `make offline-closure` passed with 263 Python tests, 158 UI tests and 7 rendered mock
   scenarios. Live E2E was not run; a clean reviewed qualification SHA and Epic 18 R3 remain open.
+- 2026-07-27: Committed the complete provider-free implementation as
+  `e8055d65699ed63623f62ad99c3b8406f79c030d` and reran `make offline-closure` from an isolated
+  clean detached worktree. All gates passed with no tracked drift. This SHA is the only authorized
+  code input for the still-open Epic 18 R3; no live E2E was run.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

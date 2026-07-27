@@ -30,14 +30,14 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20) | The native History shell provides `Home / Runs / Knowledge / Changes`, deep URL context, run-pinned evidence, server-authored coordination/runtime identity, safe Git publication, semantic primitives, responsive navigation/context drawer, current-workspace Knowledge and global read-only Ask. |
 | Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Runs and Changes. |
-| Post-implementation correctness and trust-boundary audit remediation | implementation complete; release qualification pending | Epic 22 slices `22A`–`22O` and the provider-free offline closure pass in the current working tree. A clean reviewed qualification commit has not been recorded, so trusted-machine R3 remains open and no live evidence is claimed. |
+| Post-implementation correctness and trust-boundary audit remediation | done; R3 pending | Epic 22 slices `22A`–`22O` and the complete provider-free closure pass at clean qualification commit `e8055d65699ed63623f62ad99c3b8406f79c030d`. Trusted-machine R3 remains open and no live evidence is claimed. |
 | Advisory Workspace Health completion | done (K2b implementation) | Read-only v1 now reports broken/escaping links, model endpoint/alias/owner defects, orphan domain/team outputs, malformed canonical text, unlinked findings and missing proposal evidence; current Knowledge shows the summary without turning health into historical Changes evidence or a publication gate. |
 | Explicit Ask-to-Proposal handoff | done (K3A/K3B implementation) | A succeeded immutable Ask answer exposes a digest; operator confirmation atomically creates a traceable proposal/evidence/source package, refreshes Git truth and opens current Changes→Proposals with Return to Ask. |
 
 Epic matrix:
 - done: 1, 2, 3, 4, 5, 6, 7, 8, 9 (within boundary), 10, 11, 14, 15, 16, 17, 19
 - done: Epic 20 and Epic 21 implementation complete
-- release blocker: Epic 22 qualification handoff. The prior
+- completed release prerequisite: Epic 22 qualification handoff. The prior
   step2 fixes are merged in PR #171 (`ca8c3f67`) and PR #172 (`a633e3ce`), but a subsequent static
   and historical-artifact audit demonstrated additional blockers in run/history concurrency,
   filesystem and selected-run containment, refresh preservation, recovery routing, live/product
@@ -46,10 +46,11 @@ Epic matrix:
   recovery coverage, deterministic artifact auditing, bidirectional live/product isolation and
   Changes route/Git truth, stale-response suppression, explicit Knowledge/QA evidence authorities
   bounded authority-safe Evidence Viewer behavior, responsive/a11y completion and one deterministic
-  provider-free closure command. `make offline-closure` passed from the current working tree,
+  provider-free closure command. `make offline-closure` passed from isolated clean commit
+  `e8055d65699ed63623f62ad99c3b8406f79c030d`,
   including race/fault/path/boundary suites, 263 Python tests, 158 UI tests, 7 rendered mock
-  scenarios, contracts, lint, build and embedded-UI/source-repository drift checks. The remaining
-  handoff is a clean reviewed qualification commit; no SHA is invented from the uncommitted tree.
+  scenarios, contracts, lint, build and embedded-UI/source-repository drift checks, leaving no
+  tracked drift.
 - open after Epic 22: Epic 18 R3 trusted-machine composite evidence. The full smoke -> standalone
   fast/long -> fresh three-constituent release-full sequence starts from the exact clean Epic 22
   closure commit; previous stopped matrices are diagnostic only and are not reusable evidence.

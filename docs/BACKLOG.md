@@ -1400,10 +1400,10 @@ Suggested PR slices:
 
 ## Epic 22 — Post-implementation correctness and trust-boundary audit remediation
 
-Status (2026-07-26): **implementation complete; clean qualification handoff remains release-blocking
-before Epic 18 R3**. Slices `22A`–`22O` and the combined provider-free closure pass in the current
-working tree. The exact reviewed commit is not yet recorded, and no stopped live matrix is
-reinterpreted as release evidence.
+Status (2026-07-27): **complete; Epic 18 R3 remains the release blocker.** Slices `22A`–`22O` and
+the combined provider-free closure pass at clean qualification commit
+`e8055d65699ed63623f62ad99c3b8406f79c030d`. No stopped live matrix is reinterpreted as release
+evidence.
 
 ### Goal
 
@@ -1772,12 +1772,12 @@ Acceptance:
 
 ### 22O — Deterministic offline closure gate
 
-Status (2026-07-26): **implementation and working-tree qualification complete.**
-`make offline-closure` passed without provider binaries or live/network execution: race/fault/path
-and boundary suites, readable-fixture drift, 263 Python tests, 158 UI tests, 7 rendered mock
-scenarios, contracts, lint, build, embedded UI comparison and source-repository cleanliness all
-passed. The exact R3 qualification SHA remains intentionally unset until these changes are reviewed
-and committed from a clean tree.
+Status (2026-07-27): **complete at qualification SHA
+`e8055d65699ed63623f62ad99c3b8406f79c030d`.** `make offline-closure` passed from an isolated clean
+detached worktree without provider binaries or live/network execution: race/fault/path and boundary
+suites, readable-fixture drift, 263 Python tests, 158 UI tests, 7 rendered mock scenarios,
+contracts, lint, build, embedded UI comparison and source-repository cleanliness all passed. The
+worktree remained free of tracked drift.
 
 What:
 - run the combined race, fault-injection, path-attack, incident-fixture and artifact-auditor suites;
@@ -1931,9 +1931,8 @@ must be a digest-matching subset of the adjacent machine snapshot.
   the stakeholder matrix and `docs/PLANS.md`;
 - do not mix archive cleanup with product behavior changes.
 
-Status (2026-07-26): **complete**. Implementation-complete child plans were moved to the July
-archive; the program-level Epic 22/R3 plan and `22O` qualification handoff remain active until a
-clean reviewed SHA and trusted-machine evidence exist.
+Status (2026-07-27): **complete**. Implementation-complete child plans, including `22O`, were moved
+to the July archive. Only the program-level Epic 18 R3 evidence work remains active.
 
 Resolved (2026-04-05):
 - `slugify` дедупликация между подсистемами выполнена через `internal/slugutil` + regression tests.
