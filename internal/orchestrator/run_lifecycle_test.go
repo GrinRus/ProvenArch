@@ -515,6 +515,7 @@ func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
 	if calls := runner.callCount(); calls < 2 {
 		t.Fatalf("expected pending run to start after panic; runner calls=%d", calls)
 	}
+	waitForServiceQuiescent(t, service, 2*time.Second)
 }
 
 func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
@@ -1101,6 +1102,24 @@ func waitForRunTerminalInfo(t *testing.T, service *Service, runID string, timeou
 	}
 	t.Fatalf("run %q did not reach terminal status before timeout; last status=%s", runID, info.Status)
 	return RunInfo{}
+}
+
+func waitForServiceQuiescent(t *testing.T, service *Service, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !service.HasInFlightRun() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	coordination := service.Coordination()
+	t.Fatalf(
+		"service did not become quiescent before timeout; active_run_id=%q pending=%+v",
+		coordination.ActiveRunID,
+		coordination.Pending,
+	)
 }
 
 func readRunHistorySnapshot(t *testing.T, root string) runHistorySnapshot {
