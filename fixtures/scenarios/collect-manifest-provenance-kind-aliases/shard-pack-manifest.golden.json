@@ -1,0 +1,117 @@
+{
+  "agent_role": "shard-analyst",
+  "artifact_root": "__ARTIFACT_ROOT__",
+  "citations": [
+    {
+      "claim_ids": [
+        "claim.bank.readme"
+      ],
+      "document_ids": [
+        "doc.bank.overview"
+      ],
+      "id": "cite.bank.readme",
+      "path": "README.md",
+      "repo": "bank-of-anthos"
+    }
+  ],
+  "documents": [
+    {
+      "canonical_path": "reports/as-is/bank/overview.md",
+      "citation_ids": [
+        "cite.bank.readme"
+      ],
+      "id": "doc.bank.overview",
+      "kind": "report",
+      "path": "overview.md",
+      "title": "Bank Overview",
+      "topics": [
+        "bank"
+      ]
+    }
+  ],
+  "domain_id": "bank",
+  "path_scopes": [
+    "README.md"
+  ],
+  "repo_scopes": [
+    "bank-of-anthos"
+  ],
+  "run_id": "__RUN_ID__",
+  "semantic": {
+    "coverage": {
+      "missing": [
+        "owner mapping"
+      ],
+      "notes": [
+        "README.md identifies the service entrypoint"
+      ],
+      "observed": [
+        "repository entrypoint"
+      ]
+    },
+    "edges": [
+      {
+        "from": "svc.bank",
+        "id": "edge.bank.exposes",
+        "name": "documents entrypoint",
+        "provenance": {
+          "confidence": 0.7,
+          "evidence": [
+            {
+              "path": "README.md",
+              "repo": "bank-of-anthos"
+            }
+          ],
+          "kind": "assertion"
+        },
+        "to": "svc.bank",
+        "type": "exposes"
+      }
+    ],
+    "entities": [
+      {
+        "id": "svc.bank",
+        "name": "Bank of Anthos",
+        "provenance": {
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "path": "README.md",
+              "repo": "bank-of-anthos"
+            }
+          ],
+          "kind": "observation"
+        },
+        "type": "service"
+      }
+    ],
+    "findings": [
+      {
+        "description": "README.md does not identify an owning team.",
+        "id": "finding.bank.owner",
+        "provenance": {
+          "confidence": 0.6,
+          "evidence": [
+            {
+              "path": "README.md",
+              "repo": "bank-of-anthos"
+            }
+          ],
+          "kind": "inference"
+        },
+        "severity": "medium",
+        "title": "Owner mapping is absent"
+      }
+    ],
+    "questions": [
+      {
+        "id": "q.bank.owner",
+        "text": "Who owns bank-of-anthos?"
+      }
+    ]
+  },
+  "shard_id": "bank",
+  "step_id": "init.step1.collect",
+  "summary": "Bank architecture evidence",
+  "version": 1
+}
