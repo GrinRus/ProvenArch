@@ -1674,13 +1674,6 @@ repos:
     path: ` + filepath.Join(root, "repos", "missing-repo") + `
 `
 	server := newTestServerFromManifest(t, manifest)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			t.Errorf("shutdown test server: %v", err)
-		}
-	})
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
@@ -3836,6 +3829,13 @@ runtime:
         provider: codex-code
 `
 	server := newTestServerFromManifest(t, manifest)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown test server: %v", err)
+		}
+	})
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
