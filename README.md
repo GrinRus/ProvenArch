@@ -8,7 +8,9 @@
 ACP строит Git-версионируемую compiled architecture knowledge base для одного или
 нескольких локальных репозиториев. Результат - не картинка и не чат-лог, а набор
 файлов с evidence, отчетами, диаграммами, findings, proposals, derived model и
-read-only health snapshot по опубликованным workspace artifacts.
+детерминированный advisory health snapshot по опубликованным workspace artifacts. Health
+проверяет ссылки, model identities/endpoints, canonical text и orphan outputs, оставаясь
+read-only и не блокируя Review/Publish.
 
 В одну строку:
 
@@ -30,6 +32,8 @@ Architecture Control Plane (ACP) - **local-first инструмент анали
 evidence, валидирует созданные артефакты и записывает принятый результат в отдельный
 architecture workspace. LLM/runtime drafts remain staged, orchestrator validates/promotes,
 human review принимает решения, а Git хранит accepted architecture knowledge.
+Succeeded Ask answers remain immutable; an explicit digest-confirmed action can create a new
+traceable proposal package without changing the source taskrun or committing it automatically.
 
 `reports/as-is/overview.md` является каноническим Architecture Home: он ведёт к областям,
 потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Repository evidence
@@ -38,7 +42,26 @@ human review принимает решения, а Git хранит accepted arc
 `init|refresh` также сохраняет `source-revisions.json`; `refresh` дополнительно пишет
 schema-validated `refresh-impact-plan.json`, `refresh-execution.json` и `refresh-materialization.json`.
 Безопасный unchanged/out-of-scope refresh завершается без provider и canonical rewrites; selective
-refresh переиспользует только валидные baseline shard packs, иначе fail-closed выполняет полный pipeline.
+refresh переиспользует только baseline shard packs с полной identity и проверенным SHA-256
+inventory, а документы берёт из immutable staged snapshot baseline run; иначе fail-closed выполняет
+полный pipeline до первого provider call.
+Pipeline/QA start, смена workspace/runtime и Git publication используют одну admission lease:
+active/queued work нельзя перепривязать к другой session generation или пересечь с commit/branch
+mutation.
+Provider artifact recovery выбирается по typed issue codes/classes/paths и bounded transitions,
+поэтому перестановка диагностических сообщений не меняет repair path и не создаёт retry loop.
+Exact selected-run evidence можно перепроверить без provider execution через
+`GET /api/pipeline/runs/<run_id>/audit`: read-only auditor требует matching final/citation indexes
+и validator `PASS`, проверяет containment, reciprocity, реальные repository evidence paths,
+Architecture Home/content invariants и возвращает детерминированный bounded report.
+Live harness отделён от product state: provider children не получают ambient orchestration/release
+identity, frontend snapshot inspection использует реальную сохранённую run history, а live-only
+assessment helpers не входят в production UI bundle.
+Changes routes имеют отдельные Overview/Evidence/Findings/Diff/Proposals/Publish semantics, а Git
+readiness приходит с сервера как `clean|dirty|stale|blocked|unknown`; unknown/stale/blocked не
+открывают publication confirmation.
+Artifact reads bound к полной route identity и abort previous generations; invalid explicit URL
+context очищается через notice + `replaceState`, не создавая лишнюю history entry.
 
 ACP нужен, когда вы хотите получить:
 
@@ -123,13 +146,24 @@ acp serve
 `acp serve` обрабатывает SIGINT/SIGTERM/SIGHUP через bounded shutdown: HTTP listener
 останавливается gracefully, active runtime run получает context cancellation, queued pending
 runs завершаются как canceled, а новые async starts после shutdown отклоняются.
+Run registry публикует queued/running/terminal snapshot только после успешной atomic записи
+`reports/taskruns/run-history.json`; вложенные maps/slices не разделяются с API caller-ами, а
+ошибки current/`.last-good` persistence видны в поле `history_diagnostics` ответа
+`GET /api/pipeline/runs`.
+Workspace-owned reads и writes привязаны к открытому filesystem root: symlink может вести только
+внутрь того же workspace, а absolute/dangling/escaping links блокируются. Первичный
+`workspace.yaml` записывается тем же atomic temp/fsync/rename способом, что и остальные critical
+workspace artifacts.
 
 В onboarding UI:
 
 Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает. Для headless runner onboarding дополнительно показывает expected command, env override и provider readiness guidance до первого live analysis.
 
 1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
-2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`.
+2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout
+   path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`. В scope
+   dialect `*` совпадает внутри одного path segment, standalone `**` рекурсивен, а invalid или
+   escaping pattern отклоняется до запуска.
 3. `Analysis brief`: сохраните project name и scope либо подтвердите запуск без brief с явным quality warning.
 4. `Runner & readiness`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
 5. `Review & start`: проверьте summary и запустите первый `init` после successful local readiness check.
@@ -140,10 +174,19 @@ runs завершаются как canceled, а новые async starts посл
 
 После setup основной shell использует четыре destination: `Home / Runs / Knowledge / Changes`.
 Home показывает четыре authoritative оси и одну next action; Runs объединяет history, Run Studio и
-явную refresh queue; Knowledge читает только current promoted workspace; Changes открывает immutable
+явную refresh queue; Knowledge читает только authority `promoted_current` без
+`reports/taskruns/**`; Changes открывает immutable
 run snapshot через Evidence/Findings/Proposals/Diff/Publish. Setup остаётся contextual utility, Ask —
 global `Current workspace · read-only` dialog, а diagnostics не влияют на workflow acceptance.
 Back/Forward и reload восстанавливают run, source, view и artifact/entity context.
+Historical Change Review загружает server-resolved snapshot через
+`GET /api/pipeline/runs/<run_id>/snapshot`; UI не угадывает final-index или staged artifact paths и
+не fallback-ится в current workspace при partial/missing run evidence. QA отдельно маркирует
+`qa_snapshot` и `qa_audit`; missing selected answer возвращает `qa_answer_unavailable`.
+Evidence Viewer сохраняет canonical link/run authority, показывает `Demo | Live | Unknown` и
+ограничивает artifact read 2 MiB, а rendered Markdown/Mermaid — 512 KiB с Raw fallback.
+Mobile ProductShell учитывает device safe areas, держит 44 px touch targets и переводит
+некомпаративные Run/Knowledge таблицы в labeled cards.
 
 Опытные пользователи, scripts, CI и live E2E могут по-прежнему открыть direct-mode console сразу на известном workspace. Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
 
@@ -301,6 +344,8 @@ Current/compatibility split:
 
 - UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` history, with explicit failed-run recovery and same-question retry.
 - `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed compatibility surfaces.
+- Эти compatibility surfaces сохраняют response/behavior through v1 без runtime deprecation
+  headers; agent-backed consumers migrate via `POST /api/qa/runs` + polling.
 - QA runs do not mutate source repos or canonical `charter/`, `model/`, `reports/*`, or `proposals/*`; they write only taskrun/audit artifacts under `reports/taskruns/<run_id>/qa/`.
 
 Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).

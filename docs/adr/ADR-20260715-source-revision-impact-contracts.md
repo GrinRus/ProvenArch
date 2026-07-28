@@ -13,16 +13,24 @@ Every `init|refresh` persists a schema-validated `source-revisions.json` before 
 
 Every refresh also persists a schema-validated `refresh-impact-plan.json` before collect. It uses a complete rename/copy-aware Git delta, a hard 10,000-path mapping limit, prior shard/domain/citation/final-index dependencies and conservative typed fallback reasons. Dirty worktrees, missing/unavailable revisions, rewritten history, changed/unreadable analysis inputs, unreadable prior evidence and unmapped in-scope paths require `full_refresh_required`.
 
-The impact contract is explicitly `advisory`. The current orchestrator continues to run the full refresh regardless of `unchanged_candidate` or `selective_candidate`. Applying those decisions requires separate 21D–21F changes with their own validation and promotion guarantees.
+The impact contract is explicitly `advisory`. No-op and selective decisions are applied only by
+the factual execution layer. Every successful collect shard receives an orchestrator-owned
+internal integrity sidecar with full repo/domain/shard/path/source identity and a deterministic
+SHA-256 inventory. Selective replay requires the sidecar, manifest and successful runtime metadata
+to agree with the current plan and source range. Preserved final documents are copied from the
+baseline taskrun staging snapshot, never from mutable canonical workspace paths.
 
 ## Consequences
 
 - Advisory planning and factual execution are separate persisted contracts: `refresh-impact-plan.json` is immutable, while `refresh-execution.json` records no-op/selective/full behavior and conservative fallback.
-- Selective collect reuses prior shard packs only through the existing validated checkpoint replay path; unavailable or mismatched baseline evidence forces full execution before providers start.
+- Selective collect reuses prior shard packs only after full identity and digest verification;
+  unavailable, legacy, symlinked or mismatched baseline evidence forces full execution before
+  providers start.
 - Publication decisions are independently auditable through `refresh-materialization.json`; preserved content carries baseline provenance and digest.
 
 - Each run has reviewable baseline evidence and deterministic planning output.
 - Initial and legacy workspaces safely fall back without blocking the existing full pipeline.
 - Required CI remains provider-independent and can exercise all decisions with synthetic Git output and fixtures.
-- Taskrun storage grows by two small JSON artifacts per refresh.
+- Taskrun storage grows by the public planning/execution artifacts plus one small internal integrity
+  sidecar per successful collect shard.
 - Current stale/preserved lists are candidates, not proof that an artifact was actually retained or republished.

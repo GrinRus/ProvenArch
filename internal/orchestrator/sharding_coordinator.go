@@ -120,6 +120,18 @@ func (e *pipelineExecution) executeRuntimeTasksSharded(
 		}
 
 		taskrunPath := shardTaskrunPath(e.runID, stepID, domainID, result.Plan.ShardID, summaryState.singleShard)
+		if runtimeStepContract(stepID) == "collect" {
+			if err := e.writeShardBaselineIntegrity(stepID, domainID, result.Plan, nil); err != nil {
+				outcome.FailedShards++
+				if markErr := summaryState.markFailedError(result.Plan, result.Prepared.Task.TaskID, err); markErr != nil {
+					return nil, runtimeShardOutcome{}, markErr
+				}
+				if terminalErr == nil {
+					terminalErr = fmt.Errorf("persist shard baseline integrity: %w", err)
+				}
+				continue
+			}
+		}
 		if err := summaryState.markSucceeded(result.Plan, result.Prepared.Task.TaskID, taskrunPath); err != nil {
 			return nil, runtimeShardOutcome{}, err
 		}

@@ -1323,5 +1323,102 @@ identity and command-construction defect, not live-harness behavior.
   test timeout; the package passed normally in both full DoD runs, so no unrelated runtime/test
   budget was changed.
 
+---
+
+### Plan IDs
+- `EP-20260726-epic22a-transactional-run-history`
+- `EP-20260726-epic22b-symlink-safe-workspace`
+- `EP-20260726-epic22c-server-snapshot-resolver`
+- `EP-20260726-epic22d-one-pathscope-dialect`
+- `EP-20260726-epic22e-immutable-refresh-baseline`
+- `EP-20260726-epic22f-session-git-admission-lease`
+- `EP-20260726-epic22g-typed-recovery-routing`
+- `EP-20260726-epic22h-provider-free-artifact-auditor`
+- `EP-20260726-epic22i-live-product-boundary`
+- `EP-20260726-epic22j-changes-workflow-truth`
+- `EP-20260726-epic22k-url-request-identity`
+- `EP-20260726-epic22l-evidence-authorities`
+- `EP-20260726-epic22m-evidence-viewer-correctness`
+- `EP-20260726-epic22n-responsive-accessibility`
+
+### Result
+- Epic 22 implementation slices `22A`–`22N` closed the run-history, filesystem, snapshot,
+  path-scope, refresh-baseline, admission, recovery, artifact-audit, live/product isolation,
+  Changes, request-identity, evidence-authority, Evidence Viewer and responsive/accessibility
+  findings.
+- Every slice received focused provider-free regression coverage and documentation synchronization.
+  The combined `make offline-closure` subsequently passed; live E2E was intentionally not run.
+- `EP-20260726-epic22o-offline-closure` remains active only to record a clean reviewed qualification
+  SHA before Epic 18 R3.
+
+---
+
+### Plan ID
+EP-20260726-k2b-advisory-workspace-health
+
+### Result
+- Workspace Health v1 remains read-only/advisory and now reports deterministic link, model,
+  ownership, orphan, malformed-document, finding, proposal-evidence and low-citation-coverage issues.
+- Current Knowledge exposes the summary; historical Changes does not import current health.
+
+---
+
+### Plan ID
+EP-20260726-k4-citation-claim-hardening
+
+### Result
+- Existing public shapes now enforce run isolation, global citation/claim identity and reciprocity,
+  concrete contained repository evidence, key-document completeness and safe selective preservation.
+- Focused fault/path fixtures and the complete provider-free DoD passed without adding a claim ledger
+  or publication policy.
+
+---
+
+### Plan ID
+EP-20260726-k3a-qa-proposal-draft
+
+### Result
+- Succeeded immutable QA answers expose a digest and can create one exclusive atomic
+  proposal/evidence/source package through the typed proposal-draft endpoint.
+- The additive `source-qa-answer` schema, parser, examples, fixtures, API/spec/appendix and ADR are
+  synchronized; stale, duplicate, traversal, citation and rollback cases are covered.
+- K3B completed the focus-managed confirmation, stale-answer recovery, Git refresh,
+  Changes→Proposals navigation and Return to Ask flow on top of that mutation.
+
+---
+
+### Plan ID
+EP-20260726-9d-qa-v1-compatibility
+
+### Result
+- Deterministic `acp qa` and `POST /api/qa/ask` retain their exact compatibility contract through
+  v1, with async start/poll migration documented and no removal or deprecation headers scheduled.
+
+---
+
+### Plan ID
+EP-20260726-cleanup-readable-trackers
+
+### Result
+- `make verify-readable-fixtures` protects all 90 retained human-readable fixture exports by path
+  and digest while machine snapshots remain authoritative.
+- Implementation-complete child plans were archived and backlog/stakeholder/program state was
+  reconciled. The clean qualification SHA was subsequently recorded by the archived `22O` handoff;
+  live R3 remains explicitly open.
+
+---
+
+### Plan ID
+EP-20260726-epic22o-offline-closure
+
+### Result
+- Added one provider-free `make offline-closure` command covering race/fault/path/auditor,
+  live-product boundary, readable-fixture drift, UI unit/rendered mock, contracts, full tests, lint,
+  build, embedded UI and source-repository cleanliness.
+- The gate passed from isolated clean commit
+  `e8055d65699ed63623f62ad99c3b8406f79c030d` with 263 Python tests, 158 UI tests and 7 Playwright
+  scenarios and left no tracked drift.
+- Live E2E was intentionally not run. Epic 18 R3 remains active and must use this exact code input.
+
 
 ---

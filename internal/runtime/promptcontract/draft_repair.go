@@ -265,7 +265,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	}
 	if isStep0DraftEnrichmentStep(task.StepID) {
 		lines = append(lines,
-			"- Current target identity comes from repo_scope/repo_scopes/domain_id and repository entrypoint evidence, not from matrix id, batch id, profile id, workspace path, run-folder names, staged artifacts, or later pipeline evidence.",
+			"- Current target identity comes only from repo_scope/repo_scopes/domain_id and repository entrypoint evidence, never from ambient orchestration labels, workspace paths, run-folder names, staged artifacts, or later pipeline evidence.",
 			"- Step0 runs before later pipeline evidence exists. Do not read, mention, count, or summarize downstream evidence surfaces in constitution markdown.",
 			"- Final markdown must not cite taskrun identifiers, runtime provider names, generated timestamps, draft manifests, draft roots, recovery mechanics, or future pipeline outputs.",
 			"DRAFT ENRICHMENT STEP0 REPOSITORY EVIDENCE:",
@@ -273,9 +273,9 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		)
 	} else {
 		lines = append(lines,
-			"- Current target identity comes from repo_scope/repo_scopes/domain_id and the current staged artifacts, not from matrix id, batch id, profile id, workspace path, or run-folder names.",
-			"- If current_repo_scopes contains exactly one repo, final markdown must not name sibling matrix targets or other repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
-			"- Matrix/profile/batch names such as combined multi-target folder names are harness labels, not architecture evidence.",
+			"- Current target identity comes only from repo_scope/repo_scopes/domain_id and current staged evidence, never from ambient orchestration labels, workspace paths, or run-folder names.",
+			"- If current_repo_scopes contains exactly one repo, final markdown must not name unrelated targets or repositories unless an allowed staged artifact, final index, citation index, or shard status file explicitly names that repo as evidence.",
+			"- Ambient orchestration labels and combined temporary-folder names are not architecture evidence.",
 			"- Final markdown must not cite taskrun identifiers other than current_run_id. If older workspace artifacts are visible, do not use them as current-run evidence and do not list their run_* paths as reviewed indexes.",
 			"DRAFT ENRICHMENT CURRENT-RUN SHARD STATUS EVIDENCE:",
 		)

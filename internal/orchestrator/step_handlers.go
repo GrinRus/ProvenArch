@@ -45,11 +45,34 @@ func (e *pipelineExecution) run(ctx context.Context) error {
 		if e.onStep != nil {
 			e.onStep(stepID)
 		}
+		if err := e.progressPersistenceError(); err != nil {
+			return fmt.Errorf("persist run progress for %s: %w", stepID, err)
+		}
 		if err := e.runStep(ctx, stepID); err != nil {
 			return fmt.Errorf("%s: %w", stepID, err)
 		}
+		if err := e.progressPersistenceError(); err != nil {
+			return fmt.Errorf("persist run progress for %s: %w", stepID, err)
+		}
 	}
 	return nil
+}
+
+func (e *pipelineExecution) recordProgressPersistenceError(err error) {
+	if err == nil {
+		return
+	}
+	e.progressPersistenceMu.Lock()
+	defer e.progressPersistenceMu.Unlock()
+	if e.progressPersistenceErr == nil {
+		e.progressPersistenceErr = err
+	}
+}
+
+func (e *pipelineExecution) progressPersistenceError() error {
+	e.progressPersistenceMu.Lock()
+	defer e.progressPersistenceMu.Unlock()
+	return e.progressPersistenceErr
 }
 
 func (e *pipelineExecution) runStep(ctx context.Context, stepID string) error {
@@ -707,6 +730,13 @@ func (e *pipelineExecution) stageProposalDraftOutputsForFinalIndex() error {
 		return err
 	}
 	e.finalRunIndex = &parsedFinalRunIndex
+	for _, document := range parsedFinalRunIndex.CanonicalDocuments {
+		e.addArtifacts(Artifact{
+			Path:  document.StagedPath,
+			Kind:  document.Kind,
+			Label: document.Title,
+		})
+	}
 	e.logInfo(e.stepStatus.CurrentStep, "", "proposal drafts staged into final run index", map[string]any{
 		"draft_artifacts":     len(draftArtifacts),
 		"canonical_documents": len(e.finalRunIndex.CanonicalDocuments),

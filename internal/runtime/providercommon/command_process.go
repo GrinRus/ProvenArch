@@ -39,9 +39,7 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
 		cmd.Dir = dir
 	}
-	if len(spec.Env) > 0 {
-		cmd.Env = mergedCommandEnv(os.Environ(), spec.Env)
-	}
+	cmd.Env = mergedCommandEnv(os.Environ(), spec.Env)
 	if spec.Stdin != nil {
 		cmd.Stdin = spec.Stdin
 	}
@@ -519,14 +517,11 @@ func isRawDiagnosticEnv(key string) bool {
 }
 
 func mergedCommandEnv(base []string, overrides map[string]string) []string {
-	if len(overrides) == 0 {
-		return append([]string(nil), base...)
-	}
 	values := make(map[string]string, len(base)+len(overrides))
 	order := make([]string, 0, len(base)+len(overrides))
 	for _, entry := range base {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(key) == "" {
+		if !ok || !providerAmbientEnvAllowed(key) {
 			continue
 		}
 		if _, exists := values[key]; !exists {
@@ -536,7 +531,7 @@ func mergedCommandEnv(base []string, overrides map[string]string) []string {
 	}
 	for key, value := range overrides {
 		key = strings.TrimSpace(key)
-		if key == "" {
+		if !providerAmbientEnvAllowed(key) {
 			continue
 		}
 		if _, exists := values[key]; !exists {
@@ -549,6 +544,37 @@ func mergedCommandEnv(base []string, overrides map[string]string) []string {
 		out = append(out, key+"="+values[key])
 	}
 	return out
+}
+
+func providerAmbientEnvAllowed(key string) bool {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if key == "" {
+		return false
+	}
+	// Runtime providers need credentials, locale, proxy and toolchain environment, but must not
+	// receive orchestration identities. Matching semantic identity segments keeps the product
+	// independent from any particular external harness variable name.
+	segments := strings.FieldsFunc(key, func(r rune) bool { return r == '_' || r == '-' })
+	for _, segment := range []string{"E2E", "RELEASE", "MATRIX", "BATCH", "SWEEP", "VERDICT", "ASSESSMENT"} {
+		if envKeyHasSegment(key, segment) {
+			return false
+		}
+	}
+	for index := 0; index+1 < len(segments); index++ {
+		if segments[index] == "PROFILE" && segments[index+1] == "ID" {
+			return false
+		}
+	}
+	return true
+}
+
+func envKeyHasSegment(key string, expected string) bool {
+	for _, segment := range strings.FieldsFunc(key, func(r rune) bool { return r == '_' || r == '-' }) {
+		if segment == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func isSecretFlag(arg string) bool {

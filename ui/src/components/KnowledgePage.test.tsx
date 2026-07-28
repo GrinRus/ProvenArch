@@ -7,7 +7,7 @@ import { KnowledgePage } from "./KnowledgePage";
 const partialKnowledge: KnowledgeResponse = {
   version: 1,
   generated_at: "2026-07-15T00:00:00Z",
-  source_mode: "current_workspace",
+  source_mode: "promoted_current",
   status: "partial",
   entities: [
     { id: "svc.payments", type: "service", name: "Payments", path: "model/entities/svc.payments.yaml", provenance: { kind: "inference", confidence: 0.9 } },
@@ -46,5 +46,22 @@ describe("KnowledgePage", () => {
     render(<KnowledgePage knowledge={{ ...partialKnowledge, status: "unavailable", entities: [], edges: [], artifacts: [], issues: [] }} loading={false} error="" view="overview" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
     expect(screen.getByText(/No promoted knowledge is available/)).toBeInTheDocument();
     expect(screen.getAllByText("0", { selector: "strong" })).toHaveLength(4);
+  });
+
+  it("shows advisory current-workspace health without presenting it as historical evidence", () => {
+    render(
+      <KnowledgePage
+        knowledge={partialKnowledge}
+        workspaceHealth={{ version: 1, generated_at: "2026-07-26T00:00:00Z", status: "warn", summary: { info: 1, warning: 2, error: 0 }, items: [] }}
+        loading={false}
+        error=""
+        view="overview"
+        onViewChange={vi.fn()}
+        onEntityChange={vi.fn()}
+        onOpenArtifact={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("knowledge-workspace-health")).toHaveTextContent("Workspace Health: warn");
+    expect(screen.getByTestId("knowledge-workspace-health")).toHaveTextContent("Advisory only");
   });
 });

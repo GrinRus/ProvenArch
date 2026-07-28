@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -132,10 +133,12 @@ func (s *Service) runQAWithID(
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), pending...)
-		s.storeRun(runRecord{
+		if err := s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
-		})
+		}); err != nil {
+			execution.recordProgressPersistenceError(err)
+		}
 	}
 
 	progress := initialInfo
@@ -143,10 +146,12 @@ func (s *Service) runQAWithID(
 	progress.Question = question
 	progress.CurrentStep = stepID
 	progress.StepProviders = execution.stepProviders.StringMap()
-	s.storeRun(runRecord{
+	if err := s.storeRun(runRecord{
 		info:      progress,
 		artifacts: append([]Artifact(nil), execution.artifacts...),
-	})
+	}); err != nil {
+		return initialInfo, initialArtifacts, fmt.Errorf("persist qa progress: %w", err)
+	}
 	execution.logInfo(stepID, "", "qa context pack prepared", map[string]any{
 		"context_pack_path": contextPackRel,
 		"context_pack_abs":  contextPackAbs,
@@ -163,6 +168,9 @@ func (s *Service) runQAWithID(
 	})
 	if err != nil {
 		return s.finishQAFailure(runID, initialInfo, &execution, err)
+	}
+	if err := execution.progressPersistenceError(); err != nil {
+		return s.finishQAFailure(runID, initialInfo, &execution, fmt.Errorf("persist qa permission state: %w", err))
 	}
 	executionPath := runtimeExecutionMetadataPathForTask(prepared.Task)
 	if err := execution.persistRuntimeExecutionArtifact(executionPath, stepID+".runtime-execution", prepared.ExecutionRaw); err != nil {
@@ -210,18 +218,20 @@ func qaRuntimeContractError(runtimeName string, err error) error {
 func (s *Service) finishQAFailure(runID string, initialInfo RunInfo, execution *pipelineExecution, err error) (RunInfo, []Artifact, error) {
 	finishedAt := s.clock().UTC()
 	failedInfo := initialInfo
-	failedInfo.Status = RunStatusFailed
 	failedInfo.CurrentStep = acpruntime.StepIDQAAsk
 	failedInfo.Question = strings.TrimSpace(initialInfo.Question)
 	failedInfo.StepProviders = execution.stepProviders.StringMap()
 	failedInfo.ErrorCode, failedInfo.Error = s.classifyRunFailure(runID, err)
+	failedInfo.Status = terminalStatusForErrorCode(failedInfo.ErrorCode)
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
 	failedInfo.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	failedInfo.FinishedAt = &finishedAt
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      failedInfo,
 		artifacts: append([]Artifact(nil), execution.artifacts...),
-	})
+	}); persistErr != nil {
+		return failedInfo, execution.artifacts, errors.Join(err, fmt.Errorf("persist failed qa run state: %w", persistErr))
+	}
 	execution.logError(acpruntime.StepIDQAAsk, "", "qa run failed", map[string]any{
 		"error_code": failedInfo.ErrorCode,
 		"error":      failedInfo.Error,
@@ -240,10 +250,12 @@ func (s *Service) finishQASuccess(runID string, initialInfo RunInfo, execution *
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	succeeded.FinishedAt = &finishedAt
-	s.storeRun(runRecord{
+	if persistErr := s.storeRun(runRecord{
 		info:      succeeded,
 		artifacts: append([]Artifact(nil), execution.artifacts...),
-	})
+	}); persistErr != nil {
+		return succeeded, execution.artifacts, fmt.Errorf("persist succeeded qa run state: %w", persistErr)
+	}
 	execution.logInfo(acpruntime.StepIDQAAsk, "", "qa run succeeded", map[string]any{
 		"artifacts": len(execution.artifacts),
 	})

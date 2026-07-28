@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -533,26 +534,7 @@ func matchesAnyShardPattern(candidate string, patterns []string) bool {
 }
 
 func matchShardPattern(candidate string, pattern string) bool {
-	candidate = normalizeShardPath(candidate)
-	pattern = normalizeShardPath(pattern)
-	if pattern == "." {
-		return candidate == "."
-	}
-	if strings.HasSuffix(pattern, "/**") {
-		prefix := strings.TrimSuffix(pattern, "/**")
-		return candidate == prefix || strings.HasPrefix(candidate, prefix+"/")
-	}
-	if candidate == pattern {
-		return true
-	}
-	matched, err := path.Match(pattern, candidate)
-	if err == nil && matched {
-		return true
-	}
-	if strings.Contains(pattern, "*") {
-		return false
-	}
-	return strings.HasPrefix(candidate, pattern+"/")
+	return pathscope.Match(pattern, candidate)
 }
 
 func buildStructuralShardGroups(repoPath string, coverageRoots []string) ([][]string, []string) {

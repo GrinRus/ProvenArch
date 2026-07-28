@@ -785,111 +785,6 @@ runtime_cmd_for_provider() {
   esac
 }
 
-prepare_frontend_snapshot_run_history() {
-  local workspace="$1"
-  local run_id="$2"
-  local provider="$3"
-  local pipeline="${4:-refresh}"
-  python3 - "$workspace" "$run_id" "$provider" "$pipeline" <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-workspace = Path(sys.argv[1])
-run_id = sys.argv[2].strip()
-provider = sys.argv[3].strip()
-pipeline = (sys.argv[4].strip() or "refresh")
-reports = workspace / "reports"
-taskruns = reports / "taskruns"
-history_path = taskruns / "run-history.json"
-quality_path = taskruns / f"{run_id}-quality.json"
-
-def read_json(path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-def iso_from_mtime(path):
-    try:
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    except Exception:
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-def artifact_kind(rel):
-    if rel.endswith(".mmd") or rel.startswith("reports/diagrams/"):
-        return "diagram"
-    if rel.startswith("reports/as-is/"):
-        return "as-is"
-    if rel.startswith("reports/coverage/"):
-        return "coverage"
-    if rel.startswith("reports/findings/"):
-        return "findings"
-    if rel.startswith("reports/changelog/"):
-        return "changelog"
-    if rel.startswith("proposals/"):
-        return "proposal"
-    if rel.endswith("final-run-index.json"):
-        return "final-index"
-    if rel.endswith("citation-index.json"):
-        return "citation-index"
-    if rel.endswith("validator-verdict.json"):
-        return "validator"
-    if rel.endswith("runtime-execution.json"):
-        return "runtime-execution"
-    if rel.startswith("reports/taskruns/"):
-        return "taskrun"
-    return "artifact"
-
-def artifact_label(rel):
-    name = Path(rel).name
-    stem = name.rsplit(".", 1)[0].replace("-", " ").replace("_", " ").strip()
-    return stem.title() if stem else rel
-
-def iter_workspace_artifacts():
-    roots = [reports, workspace / "proposals"]
-    seen = set()
-    for root in roots:
-        if not root.exists():
-            continue
-        for path in sorted(root.rglob("*")):
-            if not path.is_file():
-                continue
-            rel = path.relative_to(workspace).as_posix()
-            if "/raw/" in rel or "/logs/" in rel or rel.endswith("/run-history.json"):
-                continue
-            if rel in seen:
-                continue
-            seen.add(rel)
-            yield {
-                "path": rel,
-                "kind": artifact_kind(rel),
-                "label": artifact_label(rel),
-            }
-
-quality = read_json(quality_path)
-generated_at = str(quality.get("generated_at") or "").strip()
-timestamp = generated_at or iso_from_mtime(quality_path if quality_path.exists() else reports)
-artifacts = list(iter_workspace_artifacts())
-item = {
-    "run_id": run_id,
-    "pipeline": str(quality.get("pipeline") or pipeline),
-    "status": "succeeded",
-    "started_at": timestamp,
-    "finished_at": timestamp,
-    "current_step": f"{pipeline}.complete",
-    "step_providers": {"*": provider},
-    "warnings": quality.get("run_warnings") if isinstance(quality.get("run_warnings"), list) else [],
-    "artifacts": artifacts,
-}
-history_path.parent.mkdir(parents=True, exist_ok=True)
-history_path.write_text(json.dumps({"version": 1, "items": [item]}, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-print(f"snapshot_run_history={history_path} artifacts={len(artifacts)} run_id={run_id}")
-PY
-}
-
 run_frontend_live_e2e() {
   local provider="$1"
   local backend_run_dir="$2"
@@ -981,7 +876,6 @@ run_frontend_live_e2e() {
   cp -a "$workspace" "$frontend_workspace"
   mkdir -p "$frontend_workspace/reports"
   cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/
-  prepare_frontend_snapshot_run_history "$frontend_workspace" "$refresh_run_id" "$provider" "refresh" >>"$output_dir/snapshot-history.log" 2>&1
 
   log "frontend live e2e provider=$provider run=${run_index:-summary} workspace=$frontend_workspace artifact_source=snapshot refresh_run_id=${refresh_run_id:-unknown}"
   if ! (

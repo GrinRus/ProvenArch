@@ -15,6 +15,20 @@ func TestOpenRejectsRelativePath(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsManifestSymlinkOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "workspace.yaml")
+	if err := os.WriteFile(outside, []byte("version: 1\nrepos:\n  - name: sample\n    path: /tmp/sample\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ManifestFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(root); err == nil {
+		t.Fatal("expected manifest symlink escape to fail")
+	}
+}
+
 func TestOpenRejectsMissingManifest(t *testing.T) {
 	t.Parallel()
 

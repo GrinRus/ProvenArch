@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -59,39 +58,15 @@ func shouldClassifyZeroOutputPreArtifactStallUnavailable(policy RecoveryPolicy, 
 }
 
 func isMissingArtifactFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(text, "no such file or directory") ||
-		strings.Contains(text, "is unavailable") ||
-		strings.Contains(text, "required") && strings.Contains(text, "missing")
+	return classifyValidationIssues(err).Has(issueMissingArtifact)
 }
 
 func isStructuralArtifactContractFailure(err error) bool {
-	if err == nil || isMissingArtifactFailure(err) {
+	issues := classifyValidationIssues(err)
+	if issues.Has(issueMissingArtifact) {
 		return false
 	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	switch {
-	case text == "":
-		return false
-	case strings.Contains(text, "parse runtime draft manifest"):
-		return true
-	case strings.Contains(text, "runtime draft manifest"):
-		return true
-	case strings.Contains(text, "shard pack manifest"):
-		return true
-	case strings.Contains(text, "validator verdict"):
-		return true
-	case strings.Contains(text, "must point to a file"):
-		return true
-	default:
-		return false
-	}
+	return issues.HasAny(issueRuntimeDraftManifest, issueShardPackManifest, issueValidatorVerdict, issueExpectedFile)
 }
 
 func wrapArtifactContractFailure(adapter ProviderAdapter, task acpruntime.Task, stage string, result acpruntime.Result, message string, cause error) error {
@@ -164,45 +139,16 @@ func shouldTreatArtifactFailureAsProviderUnavailable(result acpruntime.Result, e
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, os.ErrNotExist) {
+	issues := classifyValidationIssues(err)
+	if issues.Has(issueMissingArtifact) {
 		return true
 	}
 
 	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	switch {
-	case text == "":
+	if text == "" {
 		return true
-	case strings.Contains(text, "runtime draft manifest") && strings.Contains(text, "is unavailable"):
-		return true
-	case strings.Contains(text, "parse runtime draft manifest"):
-		return false
-	case strings.Contains(text, "runtime draft manifest step_id must equal"):
-		return false
-	case strings.Contains(text, "runtime draft manifest step_contract must equal"):
-		return false
-	case strings.Contains(text, "runtime draft manifest run_id must equal"):
-		return false
-	case strings.Contains(text, "runtime draft manifest agent_role must not be empty"):
-		return false
-	case strings.Contains(text, "runtime draft manifest outputs are invalid"):
-		return false
-	case strings.Contains(text, "shard pack manifest") && strings.Contains(text, "is unavailable"):
-		return true
-	case strings.Contains(text, "validator verdict") && strings.Contains(text, "is unavailable"):
-		return true
-	case strings.Contains(text, "shard pack manifest"):
-		return false
-	case strings.Contains(text, "validator verdict"):
-		return false
-	case strings.Contains(text, "is unavailable"):
-		return true
-	case strings.Contains(text, "no such file or directory"):
-		return true
-	case strings.Contains(text, "must point to a file"):
-		return false
-	default:
-		return false
 	}
+	return false
 }
 
 func shouldRetryTransientProviderUnavailableArtifactRepair(policy RecoveryPolicy, result acpruntime.Result, err error, markers []string) bool {

@@ -219,6 +219,13 @@ func (e *pipelineExecution) assembleStagedDocFlow() error {
 	for _, artifact := range result.StageArtifacts {
 		e.addArtifacts(artifact)
 	}
+	for _, document := range result.FinalRunIndex.CanonicalDocuments {
+		e.addArtifacts(Artifact{
+			Path:  document.StagedPath,
+			Kind:  document.Kind,
+			Label: document.Title,
+		})
+	}
 	e.addArtifacts(Artifact{
 		Path:  runtimeCitationIndexPath(e.runID),
 		Kind:  "taskrun",
@@ -1763,6 +1770,27 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 			Message:  "citation index was not assembled",
 		}}
 	}
+	expectedRunID := strings.TrimSpace(e.runID)
+	if expectedRunID == "" {
+		expectedRunID = strings.TrimSpace(e.finalRunIndex.RunID)
+	}
+	if strings.TrimSpace(e.finalRunIndex.RunID) != expectedRunID ||
+		strings.TrimSpace(e.citationIndex.RunID) != expectedRunID {
+		issues = append(issues, contracts.ValidatorIssue{
+			Code:     "foreign_run_index",
+			Severity: "error",
+			Message:  fmt.Sprintf("final/citation index run ids must both equal %q", expectedRunID),
+		})
+	}
+	expectedCitationPath := runtimeCitationIndexPath(expectedRunID)
+	if strings.TrimSpace(e.finalRunIndex.CitationIndexPath) != expectedCitationPath {
+		issues = append(issues, contracts.ValidatorIssue{
+			Code:     "foreign_run_citation_index",
+			Severity: "error",
+			Message:  fmt.Sprintf("citation index path must be %q", expectedCitationPath),
+			Path:     e.finalRunIndex.CitationIndexPath,
+		})
+	}
 
 	citationIDs := map[string]struct{}{}
 	citationsByID := map[string]contracts.DocumentCitation{}
@@ -1793,12 +1821,43 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 			}
 			claimIDs[claimID] = struct{}{}
 		}
+		if len(e.resolvedRepoPaths) > 0 {
+			repoRoot := resolvedCitationRepoRoot(e.resolvedRepoPaths, citation.Repo)
+			switch {
+			case repoRoot == "":
+				issues = append(issues, contracts.ValidatorIssue{
+					Code:       "citation_repo_unknown",
+					Severity:   "error",
+					Message:    fmt.Sprintf("citation %q references unknown repository %q", citation.ID, citation.Repo),
+					CitationID: citation.ID,
+				})
+			case validateCitationEvidenceFile(repoRoot, citation.Path) != nil:
+				issues = append(issues, contracts.ValidatorIssue{
+					Code:       "citation_evidence_unavailable",
+					Severity:   "error",
+					Message:    fmt.Sprintf("citation %q evidence path %q is not a concrete in-root file", citation.ID, citation.Path),
+					Path:       citation.Path,
+					CitationID: citation.ID,
+				})
+			}
+		}
 	}
 
 	seenTopics := map[string]struct{}{}
 	documentsByID := map[string]contracts.FinalRunDocument{}
 	for _, document := range e.finalRunIndex.CanonicalDocuments {
 		documentsByID[document.ID] = document
+		expectedStageRoot := runtimeFinalArtifactRoot(expectedRunID)
+		stagedPath := path.Clean(filepath.ToSlash(strings.TrimSpace(document.StagedPath)))
+		if stagedPath == "." || (stagedPath != expectedStageRoot && !strings.HasPrefix(stagedPath, expectedStageRoot+"/")) {
+			issues = append(issues, contracts.ValidatorIssue{
+				Code:       "foreign_run_staged_document",
+				Severity:   "error",
+				Message:    fmt.Sprintf("document %q staged path is outside run %q", document.ID, expectedRunID),
+				Path:       document.StagedPath,
+				DocumentID: document.ID,
+			})
+		}
 		if strictCitationChecks && requiresDocumentCitations(document) && len(document.CitationIDs) == 0 {
 			issues = append(issues, contracts.ValidatorIssue{
 				Code:       "missing_document_citations",
@@ -1838,6 +1897,15 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 				Severity:   "error",
 				Message:    fmt.Sprintf("staged document %q is missing", document.StagedPath),
 				Path:       document.StagedPath,
+				DocumentID: document.ID,
+			})
+		}
+		if len(document.CitationIDs) == 0 && keyDocumentClaimsCitationCompleteness(document, e.workspace) {
+			issues = append(issues, contracts.ValidatorIssue{
+				Code:       "empty_claimed_citation_coverage",
+				Severity:   "error",
+				Message:    fmt.Sprintf("key document %q claims citation completeness but has no citation coverage", document.CanonicalPath),
+				Path:       document.CanonicalPath,
 				DocumentID: document.ID,
 			})
 		}
@@ -1903,6 +1971,71 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 		return issues[i].Code < issues[j].Code
 	})
 	return issues
+}
+
+func resolvedCitationRepoRoot(repoPaths map[string]string, repo string) string {
+	target := strings.ToLower(strings.TrimSpace(repo))
+	for name, root := range repoPaths {
+		if strings.ToLower(strings.TrimSpace(name)) == target {
+			return strings.TrimSpace(root)
+		}
+	}
+	return ""
+}
+
+func validateCitationEvidenceFile(repoRoot string, rawPath string) error {
+	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
+	relative := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath)))
+	if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("invalid relative evidence path")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		return err
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(filepath.Join(repoRoot, relative))
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedTarget)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("evidence path escapes repository")
+	}
+	info, err := os.Stat(resolvedTarget)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("evidence path is not a regular file")
+	}
+	return nil
+}
+
+func keyDocumentClaimsCitationCompleteness(document contracts.FinalRunDocument, ws workspace.Root) bool {
+	canonical := filepath.ToSlash(strings.TrimSpace(document.CanonicalPath))
+	isKey := canonical == "reports/as-is/overview.md" ||
+		strings.HasPrefix(canonical, "reports/findings/") ||
+		strings.HasPrefix(canonical, "proposals/")
+	if !isKey {
+		return false
+	}
+	raw, err := ws.ReadFile(document.StagedPath)
+	if err != nil {
+		return false
+	}
+	normalized := strings.ToLower(string(raw))
+	for _, phrase := range []string{
+		"citation coverage is complete",
+		"citations are complete",
+		"fully cited",
+		"all claims are cited",
+		"complete evidence coverage",
+	} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsTrimmedString(values []string, target string) bool {

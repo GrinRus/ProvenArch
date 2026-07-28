@@ -7,6 +7,10 @@ repos:
   # configured through `workspace.yaml`.
   - name: payments-service
     path: /absolute/path/to/payments-service
+    analysis:
+      # One shared slash-normalized dialect: * stays in one segment; ** is recursive.
+      include: ["src/**", "README.md"]
+      exclude: ["src/generated/**"]
   - name: users-service
     git_url: https://gitlab.example.com/platform/users-service.git
     ref: main

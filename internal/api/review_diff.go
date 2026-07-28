@@ -404,9 +404,14 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 	ws := snapshot.Workspace
 	state, err := collectWorkspaceGitState(request.Context(), ws)
 	if err != nil {
-		writeError(writer, http.StatusBadRequest, "git_diff_failed", err.Error())
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok": false, "workspace": ws.Path, "scope": "full_workspace",
+			"state": "unknown", "files": []gitDiffFile{}, "folders": []gitDiffFolderSummary{},
+			"hunks": []gitDiffHunk{}, "empty": true, "message": err.Error(),
+		})
 		return
 	}
+	gitState := deriveGitWorkspaceState(state.Files, snapshot.Service.Coordination(), query.Get("fingerprint"), state.Fingerprint)
 	files := state.Files
 	folders := summarizeGitDiffFolders(files)
 	selectedPath := pathFilter
@@ -437,6 +442,7 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"ok":            true,
+		"state":         gitState,
 		"workspace":     ws.Path,
 		"scope":         "full_workspace",
 		"branch":        state.Identity.Branch,
@@ -454,6 +460,20 @@ func (s *Server) handleGitDiff(writer http.ResponseWriter, request *http.Request
 		"message":       selectedMessage,
 		"empty":         len(files) == 0,
 	})
+}
+
+func deriveGitWorkspaceState(files []gitDiffFile, coordination orchestrator.RunCoordination, expectedFingerprint string, actualFingerprint string) string {
+	if coordination.ActiveRunID != "" || coordination.Pending != nil {
+		return "blocked"
+	}
+	expectedFingerprint = strings.TrimSpace(expectedFingerprint)
+	if expectedFingerprint != "" && expectedFingerprint != actualFingerprint {
+		return "stale"
+	}
+	if len(files) > 0 {
+		return "dirty"
+	}
+	return "clean"
 }
 
 func normalizeOptionalWorkspacePath(rawPath string) (string, error) {

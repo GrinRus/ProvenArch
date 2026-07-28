@@ -32,7 +32,7 @@ func TestRunHeadlessProviderRecoversInlineArchitectureHomeWithoutProviderRepair(
 		t.Fatalf("missing deterministic recovery diagnostic: %#v", diagnostics)
 	}
 	recovery, ok := result.Diagnostics[architectureHomeInlineHeadingRecoveryMode].(map[string]any)
-	if !ok || recovery["before_digest"] == "" || recovery["after_digest"] == "" || recovery["before_digest"] == recovery["after_digest"] || recovery["manual_quality_gate"] != "artifact_quality_assessment" {
+	if !ok || recovery["before_digest"] == "" || recovery["after_digest"] == "" || recovery["before_digest"] == recovery["after_digest"] || recovery["operator_review_required"] != true {
 		t.Fatalf("invalid recovery audit: %#v", result.Diagnostics)
 	}
 	if err := ValidateDraftArtifacts(task); err != nil {

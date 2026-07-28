@@ -10,7 +10,7 @@ REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
 STRESS_TEST ?= TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh
 
-.PHONY: bootstrap contracts test test-stress lint build verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
+.PHONY: bootstrap contracts test test-stress lint build offline-closure verify-readable-fixtures verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 
 bootstrap:
 	$(GO) mod tidy
@@ -54,6 +54,22 @@ build:
 	cp ui/dist/index.html internal/api/ui_dist/index.html
 	mkdir -p ./bin
 	$(GO) build -o ./bin/acp ./cmd/acp
+
+offline-closure:
+	$(GO) test -race ./internal/api ./internal/orchestrator ./internal/workspace ./internal/workspacehealth ./internal/proposaldraft ./internal/contracts ./internal/refreshplan ./internal/pathscope ./internal/artifactaudit ./internal/runtime/providercommon
+	$(PYTHON) -m unittest scripts.tests.aor_live_boundary_test
+	$(MAKE) verify-readable-fixtures
+	$(NPM) run test --prefix $(UI_DIR) -- --run
+	bash ./scripts/ui-mock-e2e.sh
+	$(MAKE) contracts
+	$(MAKE) test
+	$(MAKE) lint
+	$(MAKE) build
+	diff -qr --exclude=README.md $(UI_DIR)/dist internal/api/ui_dist
+	@test -z "$$(git status --porcelain -- fixtures/scenarios/*/repos)" || (echo "Scenario source repo fixtures changed"; git status --short -- fixtures/scenarios/*/repos; exit 1)
+
+verify-readable-fixtures:
+	$(PYTHON) ./scripts/verify-readable-fixture-drift.py
 
 verify-ui-determinism:
 	bash ./scripts/verify-ui-deterministic-build.sh HEAD

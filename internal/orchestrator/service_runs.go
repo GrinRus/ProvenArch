@@ -10,6 +10,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 func (s *Service) ReconcileStaleRunsAfterRestart() {
@@ -44,8 +45,8 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		s.mu.Unlock()
 		return "", ErrServiceClosed
 	}
-	storeQueuedRun := func() error {
-		return s.upsertRunLocked(runRecord{
+	queuedRecord := func() runRecord {
+		return runRecord{
 			info: RunInfo{
 				RunID:         runID,
 				Pipeline:      string(request.Pipeline),
@@ -55,7 +56,7 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 				RuntimeMode:   s.runtimeMode,
 				StepProviders: resolvedStepProviders.Effective.StringMap(),
 			},
-		})
+		}
 	}
 	if s.isActiveRunLocked() {
 		if intent != RunIntentQueue {
@@ -63,11 +64,12 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 			return "", ErrRunActive
 		}
 		if s.pendingRun != nil {
-			if err := storeQueuedRun(); err != nil {
+			superseded, ok := s.supersededRunRecordLocked(s.pendingRun.runID, runID)
+			if !ok {
 				s.mu.Unlock()
-				return "", err
+				return "", fmt.Errorf("pending run %q is missing from registry", s.pendingRun.runID)
 			}
-			if err := s.markRunSupersededLocked(s.pendingRun.runID, runID); err != nil {
+			if err := s.upsertRunsLocked(queuedRecord(), superseded); err != nil {
 				s.mu.Unlock()
 				return "", err
 			}
@@ -75,7 +77,7 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 			s.mu.Unlock()
 			return runID, nil
 		}
-		if err := storeQueuedRun(); err != nil {
+		if err := s.upsertRunLocked(queuedRecord()); err != nil {
 			s.mu.Unlock()
 			return "", err
 		}
@@ -87,7 +89,7 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		s.mu.Unlock()
 		return runID, nil
 	}
-	if err := storeQueuedRun(); err != nil {
+	if err := s.upsertRunLocked(queuedRecord()); err != nil {
 		s.mu.Unlock()
 		return "", err
 	}
@@ -129,22 +131,22 @@ func (s *Service) CancelRun(runID string) error {
 		return ErrRunNotCancelable
 	case RunStatusQueued:
 		if s.pendingRun != nil && s.pendingRun.runID == runID {
-			s.pendingRun = nil
-			if s.cancelRequests != nil {
-				delete(s.cancelRequests, runID)
-			}
-			failedInfo := record.info
-			failedInfo.Status = RunStatusFailed
-			failedInfo.ErrorCode = runErrorCodeCanceled
-			failedInfo.Error = fmt.Sprintf("run canceled while queued (previous_status=%s)", RunStatusQueued)
-			failedInfo.FinishedAt = &now
+			canceledInfo := cloneRunInfo(record.info)
+			canceledInfo.Status = RunStatusCanceled
+			canceledInfo.ErrorCode = runErrorCodeCanceled
+			canceledInfo.Error = fmt.Sprintf("run canceled while queued (previous_status=%s)", RunStatusQueued)
+			canceledInfo.FinishedAt = cloneTimePointer(&now)
 			copiedArtifacts := append([]Artifact(nil), record.artifacts...)
 			if err := s.upsertRunLocked(runRecord{
-				info:      failedInfo,
+				info:      canceledInfo,
 				artifacts: copiedArtifacts,
 			}); err != nil {
 				s.mu.Unlock()
 				return err
+			}
+			s.pendingRun = nil
+			if s.cancelRequests != nil {
+				delete(s.cancelRequests, runID)
 			}
 			s.mu.Unlock()
 			s.appendRunLog(runID, RunLogEntry{
@@ -197,7 +199,7 @@ func (s *Service) GetRun(runID string) (RunInfo, bool) {
 	if !ok {
 		return RunInfo{}, false
 	}
-	return record.info, true
+	return cloneRunInfo(record.info), true
 }
 
 func (s *Service) GetRunArtifacts(runID string) ([]Artifact, bool) {
@@ -227,7 +229,7 @@ func (s *Service) GetRunPermissions(runID string) ([]acpruntime.PermissionReques
 	if !ok {
 		return nil, false
 	}
-	return append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...), true
+	return clonePermissionRequests(record.info.PendingPermissions), true
 }
 
 func (s *Service) GetRunLogs(runID string, cursor int, limit int) (RunLogPage, bool, error) {
@@ -251,10 +253,7 @@ func (s *Service) ListRuns(limit int) []RunInfo {
 
 	infos := make([]RunInfo, 0, len(s.runs))
 	for _, record := range s.runs {
-		info := record.info
-		info.Warnings = append([]string(nil), record.info.Warnings...)
-		info.PendingPermissions = append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...)
-		infos = append(infos, info)
+		infos = append(infos, cloneRunInfo(record.info))
 	}
 	sort.Slice(infos, func(i, j int) bool {
 		if infos[i].StartedAt.Equal(infos[j].StartedAt) {
@@ -272,11 +271,20 @@ func (s *Service) ListRuns(limit int) []RunInfo {
 func (s *Service) Coordination() RunCoordination {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	coordination := RunCoordination{ActiveRunID: s.activeRunID}
+	coordination := RunCoordination{}
+	if s.isActiveRunLocked() {
+		coordination.ActiveRunID = s.activeRunID
+	}
 	if s.pendingRun != nil {
 		coordination.Pending = &PendingRunInfo{RunID: s.pendingRun.runID, Pipeline: string(s.pendingRun.request.Pipeline)}
 	}
 	return coordination
+}
+
+func (s *Service) HistoryDiagnostics() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string{}, s.historyRecoveryDiagnostics...)
 }
 
 func (s *Service) HasInFlightRun() bool {
@@ -306,10 +314,10 @@ func (s *Service) storeRun(record runRecord) error {
 	return s.upsertRunLocked(record)
 }
 
-func (s *Service) terminalizeActiveRunAfterUnexpectedExit(runID string, err error, logMessage string) {
+func (s *Service) terminalizeActiveRunAfterUnexpectedExit(runID string, err error, logMessage string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" || err == nil {
-		return
+		return nil
 	}
 	errorCode, errorMessage := s.classifyRunFailure(runID, err)
 	if strings.TrimSpace(errorCode) == "" {
@@ -331,20 +339,23 @@ func (s *Service) terminalizeActiveRunAfterUnexpectedExit(runID string, err erro
 	s.mu.Lock()
 	record, ok := s.runs[runID]
 	if ok && record != nil && (record.info.Status == RunStatusQueued || record.info.Status == RunStatusRunning) {
-		failedInfo := record.info
-		failedInfo.Status = RunStatusFailed
+		failedInfo := cloneRunInfo(record.info)
+		failedInfo.Status = terminalStatusForErrorCode(errorCode)
 		failedInfo.ErrorCode = errorCode
 		failedInfo.Error = errorMessage
-		failedInfo.FinishedAt = &now
-		s.upsertRunLocked(runRecord{
+		failedInfo.FinishedAt = cloneTimePointer(&now)
+		if persistErr := s.upsertRunLocked(runRecord{
 			info:      failedInfo,
 			artifacts: append([]Artifact(nil), record.artifacts...),
-		})
+		}); persistErr != nil {
+			s.mu.Unlock()
+			return persistErr
+		}
 		updated = true
 	}
 	s.mu.Unlock()
 	if !updated {
-		return
+		return nil
 	}
 
 	message := strings.TrimSpace(logMessage)
@@ -360,6 +371,7 @@ func (s *Service) terminalizeActiveRunAfterUnexpectedExit(runID string, err erro
 			"error":      errorMessage,
 		},
 	})
+	return nil
 }
 
 func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
@@ -370,25 +382,7 @@ func (s *Service) loadExistingRunRecord(runID string) (runRecord, bool) {
 	if !ok || record == nil {
 		return runRecord{}, false
 	}
-	return runRecord{
-		info: RunInfo{
-			RunID:              record.info.RunID,
-			Pipeline:           record.info.Pipeline,
-			Status:             record.info.Status,
-			StartedAt:          record.info.StartedAt,
-			FinishedAt:         record.info.FinishedAt,
-			Question:           record.info.Question,
-			CurrentStep:        record.info.CurrentStep,
-			RuntimeMode:        record.info.RuntimeMode,
-			StepProviders:      cloneStringMap(record.info.StepProviders),
-			Warnings:           append([]string(nil), record.info.Warnings...),
-			PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
-			ErrorCode:          record.info.ErrorCode,
-			Error:              record.info.Error,
-			SupersededByRunID:  record.info.SupersededByRunID,
-		},
-		artifacts: append([]Artifact(nil), record.artifacts...),
-	}, true
+	return cloneRunRecord(*record), true
 }
 
 func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunRequest) {
@@ -402,7 +396,7 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 	if s.closed {
 		s.mu.Unlock()
 		cancel()
-		s.terminalizeActiveRunAfterUnexpectedExit(runID, context.Canceled, "run failed: service shutdown")
+		_ = s.terminalizeActiveRunAfterUnexpectedExit(runID, context.Canceled, "run failed: service shutdown")
 		s.finishAsyncRun(ctx, runID)
 		return
 	}
@@ -420,11 +414,14 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				panicErr := fmt.Errorf("run panic: %v", recovered)
-				s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
+				_ = s.terminalizeActiveRunAfterUnexpectedExit(runID, panicErr, "run failed: panic")
 			}
 			s.finishAsyncRun(ctx, runID)
 		}()
-		_, _, _ = s.runWithID(runCtx, request, runID)
+		_, _, runErr := s.runWithID(runCtx, request, runID)
+		if runErr != nil {
+			_ = s.terminalizeActiveRunAfterUnexpectedExit(runID, runErr, "run failed: async execution")
+		}
 	}()
 }
 
@@ -441,9 +438,12 @@ func (s *Service) finishAsyncRun(ctx context.Context, runID string) {
 		delete(s.cancelRequests, runID)
 	}
 	if s.activeRunID == runID {
-		s.activeRunID = ""
+		record := s.runs[runID]
+		if record != nil && isTerminalRunStatus(record.info.Status) {
+			s.activeRunID = ""
+		}
 	}
-	if !s.closed && s.pendingRun != nil {
+	if !s.closed && strings.TrimSpace(s.activeRunID) == "" && s.pendingRun != nil {
 		next = s.pendingRun
 		s.pendingRun = nil
 		s.activeRunID = next.runID
@@ -471,13 +471,16 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	now := s.clock().UTC()
 	var activeRunID string
 	var cancelFns []context.CancelFunc
+	var pendingPersistenceErr error
 
 	s.mu.Lock()
 	s.closed = true
 	activeRunID = s.activeRunID
 	if s.pendingRun != nil {
-		s.failQueuedRunLocked(s.pendingRun.runID, now, runErrorCodeCanceled, "service shutdown canceled queued run")
-		s.pendingRun = nil
+		pendingPersistenceErr = s.failQueuedRunLocked(s.pendingRun.runID, now, runErrorCodeCanceled, "service shutdown canceled queued run")
+		if pendingPersistenceErr == nil {
+			s.pendingRun = nil
+		}
 	}
 	for _, cancel := range s.runCancels {
 		if cancel != nil {
@@ -490,29 +493,29 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		cancel()
 	}
 	if strings.TrimSpace(activeRunID) == "" {
-		return nil
+		return pendingPersistenceErr
 	}
 	if err := s.waitForRunTerminal(ctx, activeRunID); err != nil {
-		s.terminalizeActiveRunAfterUnexpectedExit(activeRunID, context.Canceled, "run failed: service shutdown")
-		return err
+		terminalErr := s.terminalizeActiveRunAfterUnexpectedExit(activeRunID, context.Canceled, "run failed: service shutdown")
+		return errors.Join(pendingPersistenceErr, err, terminalErr)
 	}
-	return nil
+	return pendingPersistenceErr
 }
 
-func (s *Service) failQueuedRunLocked(runID string, finishedAt time.Time, errorCode string, errorMessage string) {
+func (s *Service) failQueuedRunLocked(runID string, finishedAt time.Time, errorCode string, errorMessage string) error {
 	record, ok := s.runs[runID]
 	if !ok || record == nil || record.info.Status != RunStatusQueued {
-		return
+		return nil
 	}
-	info := record.info
-	info.Status = RunStatusFailed
+	info := cloneRunInfo(record.info)
+	info.Status = terminalStatusForErrorCode(errorCode)
 	info.ErrorCode = errorCode
 	info.Error = strings.TrimSpace(errorMessage)
 	if info.Error == "" {
 		info.Error = "run canceled"
 	}
-	info.FinishedAt = &finishedAt
-	_ = s.upsertRunLocked(runRecord{
+	info.FinishedAt = cloneTimePointer(&finishedAt)
+	return s.upsertRunLocked(runRecord{
 		info:      info,
 		artifacts: append([]Artifact(nil), record.artifacts...),
 	})
@@ -545,75 +548,80 @@ func (s *Service) isActiveRunLocked() bool {
 	return record.info.Status == RunStatusQueued || record.info.Status == RunStatusRunning
 }
 
-func (s *Service) markRunSupersededLocked(oldRunID string, newRunID string) error {
+func (s *Service) supersededRunRecordLocked(oldRunID string, newRunID string) (runRecord, bool) {
 	record, ok := s.runs[oldRunID]
-	if !ok {
-		return nil
+	if !ok || record == nil {
+		return runRecord{}, false
 	}
 	finishedAt := s.clock().UTC()
-	superseded := record.info
+	superseded := cloneRunInfo(record.info)
 	superseded.Status = RunStatusCanceled
 	superseded.ErrorCode = runErrorCodeSuperseded
 	superseded.Error = fmt.Sprintf("run superseded by newer event %q (last-event-wins)", newRunID)
 	superseded.SupersededByRunID = newRunID
-	superseded.FinishedAt = &finishedAt
-	return s.upsertRunLocked(runRecord{
+	superseded.FinishedAt = cloneTimePointer(&finishedAt)
+	return runRecord{
 		info:      superseded,
-		artifacts: record.artifacts,
-	})
+		artifacts: append([]Artifact(nil), record.artifacts...),
+	}, true
 }
 
 func (s *Service) upsertRunLocked(record runRecord) error {
-	s.runs[record.info.RunID] = &record
-	s.trimRunRegistryLocked()
-	if err := s.persistHistoryLocked(); err != nil {
-		s.lastHistoryPersistenceErr = err
-		s.addHistoryPersistenceWarningLocked(record.info.RunID, err)
+	return s.upsertRunsLocked(record)
+}
+
+func (s *Service) upsertRunsLocked(records ...runRecord) error {
+	candidate := cloneRunRegistry(s.runs)
+	for _, record := range records {
+		cloned := cloneRunRecord(record)
+		candidate[cloned.info.RunID] = &cloned
+	}
+	trimRunRegistry(candidate, s.historyRetention)
+	if err := s.persistHistorySnapshotLocked(candidate); err != nil {
+		s.recordHistoryPersistenceFailureLocked(err)
 		return err
 	}
-	s.lastHistoryPersistenceErr = nil
+	s.runs = candidate
 	return nil
 }
 
-func (s *Service) trimRunRegistryLocked() {
-	retention := s.historyRetention
+func trimRunRegistry(runs map[string]*runRecord, configuredRetention int) {
+	retention := configuredRetention
 	if retention <= 0 {
 		retention = runHistoryRetention
 	}
-	if len(s.runs) <= retention {
+	if len(runs) <= retention {
 		return
 	}
 
-	runIDs := make([]string, 0, len(s.runs))
-	for runID := range s.runs {
+	runIDs := make([]string, 0, len(runs))
+	for runID := range runs {
 		runIDs = append(runIDs, runID)
 	}
 	sort.Slice(runIDs, func(i, j int) bool {
-		left := s.runs[runIDs[i]].info
-		right := s.runs[runIDs[j]].info
+		left := runs[runIDs[i]].info
+		right := runs[runIDs[j]].info
 		if left.StartedAt.Equal(right.StartedAt) {
 			return left.RunID < right.RunID
 		}
 		return left.StartedAt.Before(right.StartedAt)
 	})
-	removeCount := len(s.runs) - retention
+	removeCount := len(runs) - retention
 	for idx := 0; idx < removeCount; idx++ {
-		delete(s.runs, runIDs[idx])
+		delete(runs, runIDs[idx])
 	}
 }
 
-func (s *Service) persistHistoryLocked() error {
+func (s *Service) persistHistorySnapshotLocked(runs map[string]*runRecord) error {
 	if !s.historyEnabled {
+		s.lastHistoryPersistenceErr = nil
 		return nil
 	}
 
-	items := make([]runHistoryItem, 0, len(s.runs))
-	records := make([]runRecord, 0, len(s.runs))
-	for _, record := range s.runs {
-		records = append(records, runRecord{
-			info:      record.info,
-			artifacts: append([]Artifact(nil), record.artifacts...),
-		})
+	items := make([]runHistoryItem, 0, len(runs))
+	records := make([]runRecord, 0, len(runs))
+	for _, record := range runs {
+		records = append(records, cloneRunRecord(*record))
 	}
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].info.StartedAt.Equal(records[j].info.StartedAt) {
@@ -643,27 +651,47 @@ func (s *Service) persistHistoryLocked() error {
 		return fmt.Errorf("marshal run history: %w", err)
 	}
 	encoded = append(encoded, '\n')
-	if err := s.historyWorkspace.WriteFileAtomicWithLastGood(runHistoryPath, encoded); err != nil {
+	writeFile := s.historyWriteFile
+	if writeFile == nil {
+		writeFile = func(root workspace.Root, relPath string, content []byte) error {
+			return root.WriteFileAtomic(relPath, content)
+		}
+	}
+	if err := writeFile(s.historyWorkspace, runHistoryPath, encoded); err != nil {
 		return fmt.Errorf("persist run history: %w", err)
 	}
+	if err := writeFile(s.historyWorkspace, runHistoryPath+".last-good", encoded); err != nil {
+		diagnostic := fmt.Errorf("persist run history last-good: %w", err)
+		s.lastHistoryPersistenceErr = diagnostic
+		s.addHistoryDiagnosticLocked(diagnostic.Error())
+		return nil
+	}
+	s.lastHistoryPersistenceErr = nil
 	return nil
 }
 
-func (s *Service) addHistoryPersistenceWarningLocked(runID string, err error) {
+func (s *Service) recordHistoryPersistenceFailureLocked(err error) {
 	if err == nil {
 		return
 	}
-	record, ok := s.runs[runID]
-	if !ok || record == nil {
+	s.lastHistoryPersistenceErr = err
+	s.addHistoryDiagnosticLocked(err.Error())
+}
+
+func (s *Service) addHistoryDiagnosticLocked(message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
 		return
 	}
-	warning := fmt.Sprintf("run history persistence failed: %v", err)
-	for _, existing := range record.info.Warnings {
-		if existing == warning {
+	for _, existing := range s.historyRecoveryDiagnostics {
+		if existing == message {
 			return
 		}
 	}
-	record.info.Warnings = append(record.info.Warnings, warning)
+	s.historyRecoveryDiagnostics = append(s.historyRecoveryDiagnostics, message)
+	if len(s.historyRecoveryDiagnostics) > historyDiagnosticsLimit {
+		s.historyRecoveryDiagnostics = append([]string(nil), s.historyRecoveryDiagnostics[len(s.historyRecoveryDiagnostics)-historyDiagnosticsLimit:]...)
+	}
 }
 
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
@@ -677,7 +705,7 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		Question:           record.info.Question,
 		StepProviders:      cloneStringMap(record.info.StepProviders),
 		Warnings:           append([]string(nil), record.info.Warnings...),
-		PendingPermissions: append([]acpruntime.PermissionRequest(nil), record.info.PendingPermissions...),
+		PendingPermissions: clonePermissionRequests(record.info.PendingPermissions),
 		ErrorCode:          record.info.ErrorCode,
 		Error:              record.info.Error,
 		SupersededByRunID:  record.info.SupersededByRunID,
@@ -716,7 +744,7 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			RuntimeMode:        item.RuntimeMode,
 			StepProviders:      cloneStringMap(item.StepProviders),
 			Warnings:           append([]string(nil), item.Warnings...),
-			PendingPermissions: append([]acpruntime.PermissionRequest(nil), item.PendingPermissions...),
+			PendingPermissions: clonePermissionRequests(item.PendingPermissions),
 			ErrorCode:          item.ErrorCode,
 			Error:              item.Error,
 			SupersededByRunID:  item.SupersededByRunID,
@@ -733,6 +761,69 @@ func cloneRefreshSummary(value *RefreshSummary) *RefreshSummary {
 	clone := *value
 	clone.ReasonCodes = append([]string(nil), value.ReasonCodes...)
 	return &clone
+}
+
+func cloneRunInfo(value RunInfo) RunInfo {
+	clone := value
+	clone.FinishedAt = cloneTimePointer(value.FinishedAt)
+	clone.StepProviders = cloneStringMap(value.StepProviders)
+	clone.Warnings = append([]string(nil), value.Warnings...)
+	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
+	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)
+	return clone
+}
+
+func cloneRunRecord(value runRecord) runRecord {
+	return runRecord{
+		info:      cloneRunInfo(value.info),
+		artifacts: append([]Artifact(nil), value.artifacts...),
+	}
+}
+
+func cloneRunRegistry(values map[string]*runRecord) map[string]*runRecord {
+	clone := make(map[string]*runRecord, len(values))
+	for runID, record := range values {
+		if record == nil {
+			continue
+		}
+		copied := cloneRunRecord(*record)
+		clone[runID] = &copied
+	}
+	return clone
+}
+
+func clonePermissionRequests(values []acpruntime.PermissionRequest) []acpruntime.PermissionRequest {
+	if values == nil {
+		return nil
+	}
+	clone := make([]acpruntime.PermissionRequest, len(values))
+	for idx, value := range values {
+		clone[idx] = value
+		if value.Decision != nil {
+			decision := *value.Decision
+			clone[idx].Decision = &decision
+		}
+	}
+	return clone
+}
+
+func cloneTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func terminalStatusForErrorCode(errorCode string) RunStatus {
+	if strings.TrimSpace(errorCode) == runErrorCodeCanceled {
+		return RunStatusCanceled
+	}
+	return RunStatusFailed
+}
+
+func isTerminalRunStatus(status RunStatus) bool {
+	return status == RunStatusSucceeded || status == RunStatusFailed || status == RunStatusCanceled
 }
 
 func classifyExecutionError(err error) (code string, message string) {

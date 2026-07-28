@@ -37,7 +37,7 @@ type CommandSpec struct {
 	Command  string
 	Args     []string
 	// Env contains provider-specific environment overrides. Values are merged
-	// over os.Environ() immediately before process start.
+	// over the provider-safe ambient environment immediately before process start.
 	Env   map[string]string
 	Stdin io.Reader
 	Dir   string

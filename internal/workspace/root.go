@@ -38,8 +38,14 @@ func Open(root string) (Root, error) {
 		return Root{}, ErrWorkspaceNotDir
 	}
 
+	filesystemRoot := Root{Path: root}
 	manifestPath := filepath.Join(root, ManifestFileName)
-	manifestInfo, err := os.Stat(manifestPath)
+	osRoot, err := filesystemRoot.openFilesystemRoot()
+	if err != nil {
+		return Root{}, err
+	}
+	defer osRoot.Close()
+	manifestInfo, err := osRoot.Stat(ManifestFileName)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Root{}, ErrManifestMissing
@@ -50,7 +56,11 @@ func Open(root string) (Root, error) {
 		return Root{}, ErrManifestMissing
 	}
 
-	manifest, err := LoadManifest(manifestPath)
+	rawManifest, err := osRoot.ReadFile(ManifestFileName)
+	if err != nil {
+		return Root{}, fmt.Errorf("read manifest: %w", err)
+	}
+	manifest, err := ParseManifest(rawManifest)
 	if err != nil {
 		return Root{}, err
 	}

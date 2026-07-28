@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -224,17 +225,7 @@ func inAnalysisScope(candidate string, includes, excludes []string) bool {
 }
 
 func matchPathPattern(pattern, candidate string) bool {
-	pattern = strings.TrimPrefix(path.Clean(pattern), "./")
-	if pattern == "." || pattern == "**" || pattern == "**/*" {
-		return true
-	}
-	if ok, _ := path.Match(pattern, candidate); ok {
-		return true
-	}
-	if strings.HasSuffix(pattern, "/**") {
-		return candidate == strings.TrimSuffix(pattern, "/**") || strings.HasPrefix(candidate, strings.TrimSuffix(pattern, "**"))
-	}
-	return candidate == pattern || strings.HasPrefix(candidate, strings.TrimSuffix(pattern, "/")+"/")
+	return pathscope.Match(pattern, candidate)
 }
 
 func matchEvidence(repo string, change PathChange, evidence PriorEvidence) ([]string, []string, bool) {

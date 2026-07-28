@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	"github.com/GrinRus/ProvenArch/internal/validation"
 	"gopkg.in/yaml.v3"
 )
@@ -294,11 +295,15 @@ func validateManifest(manifest Manifest) error {
 			for idx, include := range repo.Analysis.Include {
 				if strings.TrimSpace(include) == "" {
 					problems = append(problems, fmt.Sprintf("%s.analysis.include[%d] must not be empty", indexLabel, idx))
+				} else if _, err := pathscope.Compile(include); err != nil {
+					problems = append(problems, fmt.Sprintf("%s.analysis.include[%d] is invalid: %v", indexLabel, idx, err))
 				}
 			}
 			for idx, exclude := range repo.Analysis.Exclude {
 				if strings.TrimSpace(exclude) == "" {
 					problems = append(problems, fmt.Sprintf("%s.analysis.exclude[%d] must not be empty", indexLabel, idx))
+				} else if _, err := pathscope.Compile(exclude); err != nil {
+					problems = append(problems, fmt.Sprintf("%s.analysis.exclude[%d] is invalid: %v", indexLabel, idx, err))
 				}
 			}
 		}

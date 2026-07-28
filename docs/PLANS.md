@@ -71,16 +71,17 @@ isolation gaps. They are tracked as release-blocking Epic 22 rather than reopeni
 the original Epic 19–21 delivery scopes.
 
 ### Goals (must have)
-- [ ] Deliver Epic 22 slices `22A..22O` in order as small reviewable PRs, each with its own ExecPlan.
-- [ ] Close run/history/session/Git races and filesystem/snapshot trust-boundary defects.
-- [ ] Make refresh scope and preserved baseline evidence deterministic and immutable.
-- [ ] Replace stringly recovery routing with typed, bounded validation/recovery state.
-- [ ] Add a provider-free artifact integrity auditor and historical incident regression corpus.
-- [ ] Prove the live harness and product exchange only public contracts and do not author/import one
+- [x] Deliver Epic 22 slices `22A..22O` in order as reviewable implementation units with child ExecPlans.
+- [x] Close run/history/session/Git races and filesystem/snapshot trust-boundary defects.
+- [x] Make refresh scope and preserved baseline evidence deterministic and immutable.
+- [x] Replace stringly recovery routing with typed, bounded validation/recovery state.
+- [x] Add a provider-free artifact integrity auditor and historical incident regression corpus.
+- [x] Prove the live harness and product exchange only public contracts and do not author/import one
       another's state or implementation logic.
-- [ ] Complete Changes/Knowledge/QA/EvidenceViewer request identity, responsive and accessibility
+- [x] Complete Changes/Knowledge/QA/EvidenceViewer request identity, responsive and accessibility
       acceptance offline.
-- [ ] Pass the combined deterministic closure gate and record one clean R3 qualification SHA.
+- [x] Pass the combined deterministic closure gate in the current working tree.
+- [x] Record clean reviewed R3 qualification SHA `e8055d65699ed63623f62ad99c3b8406f79c030d`.
 - [ ] Restart Epic 18 R3 only after the Epic 22 closure gate; do not reuse stopped matrix evidence.
 
 ### Non-goals
@@ -99,20 +100,318 @@ the original Epic 19–21 delivery scopes.
    Knowledge/QA evidence authorities, EvidenceViewer correctness and responsive/a11y completion.
 4. Run `22O` as one provider-free offline closure gate with race/fault/path/incident/UI/boundary
    suites plus the full deterministic DoD on a host with adequate disk.
-5. From the recorded clean merge commit, execute Epic 18 R3 and its bounded evidence PR. Only after
-   composite PASS continue `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup`.
+5. From the recorded clean merge commit, execute Epic 18 R3 and its bounded evidence PR. The owner
+   explicitly requested that `K2b -> K4 -> K3A -> K3B -> 9D -> cleanup` be implemented locally
+   before that live gate; this does not replace composite PASS.
+
+### Delivery work breakdown
+
+This section is the program-level implementation map. Before changing code for a selected slice,
+create a focused child ExecPlan with exact goals/non-goals, the final file list and fixtures for
+that PR. Do not combine adjacent slices merely because they touch the same module.
+
+#### Phase 0 — Qualification-ready development host
+
+Deliverable:
+- use exact Go/Node/npm versions from `.go-version` and `.node-version`;
+- keep at least 5 GiB free on every workspace/temp volume used by tests, with additional headroom
+  before `22O`;
+- preserve a clean starting tree and do not touch unrelated user-owned files;
+- record baseline `make contracts`, `make test`, `make lint`, and `make build` results before `22A`.
+
+Exit gate:
+- all four deterministic commands pass through the repository tool resolvers;
+- failures are classified as product, fixture, toolchain or host-capacity failures rather than
+  bypassed with version/precheck overrides.
+
+#### Phase 1 — Core integrity (`22A..22F`)
+
+`22A — Immutable run registry and transactional history`
+
+- Deliverable: one deep-copy boundary for every `RunInfo` read/write path and one serialized
+  transition primitive that persists the candidate history before publishing it in memory.
+- Primary files: `internal/orchestrator/orchestrator.go`,
+  `internal/orchestrator/service_runs.go`, `internal/orchestrator/run_finalization.go`,
+  run-history persistence helpers and `internal/api/server.go` only if the public canceled shape
+  must change.
+- Focused tests: `internal/orchestrator/run_lifecycle_test.go`, restart reconciliation tests,
+  concurrent `GetRun`/`ListRuns` polling, refresh-summary mutation, queued replacement, cancel and
+  injected write/rename/fsync failures under `go test -race`.
+- Exit gate: failed persistence never leaks a newer in-memory state; restart reconstructs one
+  active/pending/terminal truth; cancellation is stable across API, history and restart.
+
+`22B — Symlink-safe workspace containment and atomic manifest writes`
+
+- Deliverable: a centralized workspace-owned read/open/write primitive that resolves symlink
+  identity fail-closed and an atomic `workspace.yaml` write path using same-directory temp,
+  file-sync, rename and directory-sync.
+- Primary files: `internal/workspace/fs.go`, `internal/workspace/root.go`,
+  `internal/workspace/manifest.go`, `cmd/acp/main.go` and any direct workspace file writer found by
+  the slice audit.
+- Focused tests: `internal/workspace/fs_test.go`, root/manifest tests with final and ancestor
+  symlinks, dangling links, replacement races, traversal, valid in-root policy and injected atomic
+  write failures.
+- Exit gate: no workspace spelling can read or write outside the resolved root; source repositories
+  remain byte-identical; interrupted manifest replacement preserves previous valid bytes.
+
+`22C — Server-owned selected-run snapshot resolver`
+
+- Deliverable: one backend resolver and additive read endpoint that selects an exact run-owned final
+  index, validates inventory membership and returns typed
+  `available|partial|not_produced|unavailable|error` state without workspace fallback.
+- Primary files: `internal/api/server.go`, a focused `internal/api` snapshot resolver module,
+  `internal/contracts` only if a shared response contract is necessary,
+  `ui/src/hooks/useRunArtifacts.ts` and `ui/src/lib/runApi.ts`.
+- Focused tests: API tests for wrong/foreign run ID, traversal, duplicate canonical mapping, missing
+  or stale index, missing artifact and out-of-root target; UI A-B-A, reload and partial-run tests.
+- Exit gate: the browser no longer discovers final indexes or composes staged paths; selected-run
+  bytes are either exact and indexed or represented by an explicit typed issue.
+
+`22D — One recursive glob dialect`
+
+- Deliverable: one package that compiles, validates and matches recursive include/exclude patterns
+  for every source-scope consumer.
+- Primary files: new `internal/pathscope` package, `internal/workspace/manifest.go`,
+  `internal/refreshplan/plan.go`, `internal/orchestrator/sharding_planner.go`, source fingerprint,
+  imports and QA collection consumers discovered by AST/usage search.
+- Focused tests: a shared conformance table for root/nested files, `*`, `**`, excludes, separators,
+  invalid syntax, multi-repo paths and deterministic ordering; adapter tests prove all consumers
+  return the same match set.
+- Exit gate: invalid scope is rejected before run admission and no consumer retains an independent
+  glob implementation.
+
+`22E — Immutable selective-refresh baseline and complete shard identity`
+
+- Deliverable: preserve unaffected documents only from validator-promoted baseline staging bytes;
+  validate full shard identity and artifact digests before deciding selective reuse.
+- Primary files: `internal/refreshplan/baseline.go`, `internal/refreshplan/plan.go`,
+  `internal/orchestrator/refresh_selective.go`,
+  `internal/orchestrator/refresh_preservation.go`,
+  `internal/orchestrator/refresh_materialization.go` and refresh audit contracts if additive
+  provenance is required.
+- Focused tests: canonical workspace edited after baseline, repeated shard ID under another scope,
+  changed repo/path scope or revision, missing pack, digest mismatch, long logical ID/model path,
+  and a positive byte-identical preservation case.
+- Exit gate: every identity/digest ambiguity falls back to full refresh before provider execution;
+  a valid reuse records immutable provenance and reproduces the exact baseline bytes.
+
+`22F — Session-generation lease and Git/run coordination`
+
+- Deliverable: one admission coordinator spanning session generation validation, run registration,
+  active/pending publication and Git mutation preconditions.
+- Primary files: `internal/api/server.go`, session/runtime profile handlers,
+  `internal/orchestrator/service_runs.go` and existing Git confirmation/fingerprint helpers.
+- Focused tests: deterministic channel/barrier tests for switch-vs-start, commit-vs-start,
+  proposal-branch-vs-start, concurrent confirmations, shutdown and queued replacement.
+- Exit gate: no admitted run is owned by an obsolete service generation; Git mutation cannot cross
+  an active/pending boundary or use stale branch/HEAD/base/inventory evidence.
+
+Phase 1 dependency rule:
+- `22B` safe primitives must be reused by later snapshot, baseline and auditor work;
+- `22C` becomes the selected-run authority consumed by `22H`, `22L` and `22M`;
+- `22D` is the only scope matcher accepted by `22E`;
+- do not start `22G` until the registry, filesystem, snapshot, scope and admission foundations are
+  merged and their deterministic DoD is green.
+
+#### Phase 2 — Validation, auditing and boundary isolation (`22G..22I`)
+
+`22G — Typed validation issues and explicit recovery state machine`
+
+- Deliverable: internal typed issue codes/classes/paths plus an explicit, bounded recovery state
+  machine; public validator shapes remain unchanged unless a separate schema-first decision proves
+  otherwise.
+- Primary files: `internal/runtime/steppolicy/policy.go`,
+  `internal/runtime/providercommon/artifact_recovery.go`,
+  provider-common validation/diagnostic helpers and focused prompt-contract adapters.
+- Focused tests: preserved Claude/Qwen/Codex incidents under `internal/runtime/testdata`, equivalent
+  paraphrased messages, shuffled issue ordering, mixed classes, no-op repair and budget exhaustion.
+- Exit gate: routing does not inspect `error.Error()` fragments; the same issue set always follows
+  the same auditable transition path and terminates within a deterministic budget.
+
+`22H — Provider-free artifact integrity auditor`
+
+- Deliverable: new read-only `internal/artifactaudit` package with a bounded redacted JSON result
+  for promoted-current and exact selected-run evidence.
+- Primary files: new auditor package/fixtures, reuse-only boundaries in `internal/contracts`,
+  `internal/artifactquality` and the `22C` resolver; expose only the minimal CLI/API surface required
+  by backlog acceptance.
+- Focused tests: one fixture per preserved historical incident plus a clean fixture; foreign run,
+  broken reciprocity, missing evidence/digest, absolute/staging path, execution narration,
+  Architecture Home gaps, scaffold and proposal/finding disconnect.
+- Exit gate: repeated scans are byte-identical; all incident fixtures have stable issue codes; scan
+  leaves workspace and source repository snapshots unchanged.
+
+`22I — Bidirectional live E2E/product isolation`
+
+- Deliverable: production runtime receives only canonical repository/evidence identities; live
+  preparation observes public product state without synthesizing run history or importing product
+  implementation helpers.
+- Primary files: runtime prompt/include-dir/environment construction, `scripts/full-run-batch.sh`,
+  `scripts/frontend-live-e2e.sh`, `ui/e2e/live-flow.spec.ts`,
+  `scripts/tests/aor_live_boundary_test.py`, plus relocation of any live-only helper from `ui/src`.
+- Focused tests: bidirectional Go/Python/TypeScript forbidden-dependency scans; provider prompt/env
+  snapshots without matrix/batch/temp identities; frontend preparation test proving no product
+  history/state rewrite.
+- Exit gate: product has no matrix/profile/sweep/verdict/assessment vocabulary; harness uses only
+  CLI/API/UI/artifact contracts and cannot author or repair product state.
+
+#### Phase 3 — ProductShell correctness (`22J..22N`)
+
+`22J — Changes views and workflow truth`
+
+- Deliverable: separate typed Overview/Evidence/Findings/Diff/Proposals/Publish view models and
+  server-backed Git state `clean|dirty|stale|blocked|unknown`.
+- Primary files: `ui/src/features/changes/ChangesWorkspace.tsx`, stage/view components,
+  `ui/src/lib/workflowState.ts`, Git API contracts/handlers and route integration in `ui/src/App.tsx`.
+- Focused tests: table-driven route/view/source/Git-state rendering, action availability, refresh,
+  deep reload and Back/Forward.
+- Exit gate: changing a Changes route changes data and action semantics, not merely a tab label;
+  client state cannot claim publication readiness without authoritative Git evidence.
+
+`22K — URL/request identity and stale-response suppression`
+
+- Deliverable: one immutable request identity
+  `(run, source, artifact-or-entity, viewer-mode)` with generation/abort handling and explicit invalid
+  URL sanitization.
+- Primary files: `ui/src/lib/appRoutes.ts`, `ui/src/hooks/useRequestGate.ts`,
+  `ui/src/hooks/useRunArtifacts.ts`, `ui/src/App.tsx` and affected viewer hooks.
+- Focused tests: delayed A-B-A responses, source/viewer changes with the same artifact path, invalid
+  explicit IDs/enums, `replaceState` canonicalization, user `pushState`, reload and popstate.
+- Exit gate: a stale response cannot update another route identity and invalid explicit state is
+  visible to the user rather than silently reinterpreted.
+
+`22L — Knowledge and QA evidence authorities`
+
+- Deliverable: shared authority resolver for
+  `promoted_current|run_snapshot|qa_snapshot|qa_audit`; Knowledge excludes
+  `reports/taskruns/**` and QA never falls back to another authority.
+- Primary files: `internal/api/knowledge.go`, `internal/qa/service.go`,
+  `internal/orchestrator/qa_runs.go`, selected-run resolver integration and Knowledge/Ask UI clients.
+- Focused tests: current, historical, partial, canceled, missing, foreign and legacy snapshots;
+  explicit taskrun exclusion and immutable QA context-pack/answer linkage.
+- Exit gate: every response names one authority and exact evidence inventory; unavailable selected
+  evidence returns a typed unavailable state rather than current-workspace content.
+
+`22M — Evidence Viewer correctness`
+
+- Deliverable: authority-aware link resolution, typed `Demo|Live|Unknown` provenance, explicit left
+  and right diff identities and bounded read/render behavior.
+- Primary files: `ui/src/components/EvidenceViewer.tsx`,
+  `ui/src/components/MermaidPreview.tsx`, API artifact-link resolution from `22C/22L` and viewer
+  tests.
+- Focused tests: traversal, cross-run link, missing/unknown source, XSS, Mermaid failure, long line,
+  oversized artifact, explicit diff sides and keyboard navigation.
+- Exit gate: local links cannot escape their authority, unknown evidence is never labeled Live and
+  oversized/unsafe content degrades to a usable bounded fallback.
+
+`22N — Responsive and accessibility completion`
+
+- Deliverable: safe-area-aware responsive shell/navigation, no hidden focus targets, accessible
+  modal/tab/combobox interactions and deterministic mobile card layouts.
+- Primary files: `ui/src/components/ProductShell.tsx`, `ModalDialog.tsx`, `TabNav.tsx`,
+  `LocalPathCombobox.tsx`, `ui/src/styles.css`, Vitest tests and mock Playwright scenarios.
+- Focused tests: rendered `1440`, `1280`, `1024`, `390x844`; keyboard-only flows, focus return/trap,
+  touch targets, orientation, overflow, first-viewport action and critical axe violations.
+- Exit gate: no global horizontal overflow or unreachable focused element; all required product
+  destinations and primary actions remain visible and operable across the acceptance viewports.
+
+#### Phase 4 — Offline closure (`22O`)
+
+Deliverable:
+- assemble the race/fault/symlink/glob/refresh/incident/auditor/boundary/request/UI/a11y suites into
+  one deterministic provider-free closure gate;
+- run `make contracts`, `make test`, `make lint`, and `make build` using pinned toolchains;
+- verify generated `internal/api/ui_dist`, fixture exports and source-repository snapshots have only
+  expected changes;
+- merge from a clean tree and record the exact qualification commit in PLANS, stakeholder status
+  and the R3 operator record.
+
+Primary files:
+- `Makefile`, existing `scripts/run-go.sh`, `scripts/run-python.sh`, `scripts/run-npm.sh`,
+  test/golden ownership docs and only the smallest CI wiring needed to make the offline gate
+  required;
+- do not add a wrapper over `scripts/full-run-batch-matrix.sh`.
+
+Exit gate:
+- closure passes repeatedly from the same clean commit;
+- no live provider or network dependency is present in required CI;
+- `git status --short` after the gate contains no unexplained generated drift;
+- the recorded commit is the only code input authorized for Epic 18 R3.
+
+### Epic 18 R3 execution plan
+
+R3 is evidence generation, not a code-remediation phase. Any product or harness fix invalidates the
+qualification SHA and returns the program to the appropriate provider-free slice plus `22O`.
+
+1. On a trusted host, verify clean tree, exact pinned toolchains, adequate disk, writable canonical
+   roots, all `qwen`, `claude`, `codex` binaries, and every curated path checkout at its pinned SHA.
+2. Execute a fresh direct smoke, then standalone canonical `regres fast` and `regres long`.
+3. Execute fresh `release full` constituents with direct
+   `scripts/full-run-batch-matrix.sh` invocations: release-fast, release-long and ftgo+sentry.
+4. For every release constituent require explicit `baseline` and `parallel-default`, identical
+   shard plan for the same `profile_id`, strict zero failures and snapshot-only frontend evidence.
+5. Inspect public backend/UI/API/artifact evidence and write matching accepted
+   `swe_ux_assessment_<matrix-id>.md` and
+   `swe_artifact_quality_assessment_<matrix-id>.md`.
+6. Run `scripts/verify-release-verdict.py` over all three fresh constituent verdict JSON files.
+7. Publish the bounded evidence PR only when all machine verdicts are `PASS`, both assessments for
+   every matrix are accepted and the qualification SHA is unchanged.
+
+### Post-R3 product and cleanup plan
+
+Start this queue only after composite R3 readiness:
+
+1. `K2b`: extend provider-free Workspace Health using stable issue IDs/order without changing the
+   response version. Add broken links, missing edge endpoints, duplicate aliases, unlinked
+   findings, proposal-evidence gaps, malformed canonical files and orphan domain/team coverage.
+2. `K4`: harden global claim/citation uniqueness, reciprocity, run isolation, concrete in-root
+   evidence and deterministic IDs under existing public shapes. If a shape change is proven
+   necessary, stop and split a schema-first PR.
+3. `K3A`: add the Ask-to-Proposal backend mutation with answer digest precondition, immutable QA
+   source package, exclusive atomic creation and full schema/spec/appendix/examples/fixtures/ADR
+   synchronization.
+4. `K3B`: add the ProductShell confirmation and navigation flow, focus/a11y handling, stale-answer
+   recovery and Git-inventory invalidation.
+5. `9D`: lock deterministic `acp qa` and `POST /api/qa/ask` compatibility through v1 in docs,
+   examples and contract tests; do not add removal/deprecation behavior.
+6. Cleanup PR 1: deterministic drift protection and ownership documentation for retained readable
+   fixtures.
+7. Cleanup PR 2: archive completed ExecPlans and reconcile tracker/PR references without product
+   behavior changes.
+
+Epics 12/13 and K5-K7 remain out of this execution plan and require a separate owner-approved Wave 1
+discovery plan.
+
+### Program verification and PR rules
+
+- One slice equals one reviewable PR; `22A..22O` order is strict.
+- Each child plan starts with a failing provider-free regression or fixture when the defect is
+  reproducible, then implements the smallest code change that closes it.
+- Contract/schema changes require the schema guardian workflow and synchronized
+  `docs/spec/*`, `docs/APPENDIX_SCHEMAS.md`, examples, fixtures, validators, tests and ADR rationale.
+- Core extraction/model/recovery changes add or update incident fixtures and golden outputs.
+- Behavior changes synchronize README, architecture, pipeline/testing docs and stakeholder status
+  in the same slice.
+- Every implementation PR completes `make contracts`, `make test`, `make lint`, and `make build`;
+  focused tests are evidence during development, not a replacement for DoD.
+- Live E2E is forbidden during Epic 22 acceptance and is never made a required CI dependency.
+- A failure discovered after merge reopens the owning slice and invalidates downstream
+  qualification evidence; it is not patched opportunistically inside a later UI or cleanup PR.
 
 ### Files expected to change
 - `docs/BACKLOG.md`, `docs/PLANS.md`, `docs/STAKEHOLDER_DOC.md` for initial program tracking.
-- Slice-specific Go/TypeScript/contracts/tests/docs are declared in each child ExecPlan, not
-  pre-authorized by this program plan.
+- The program-level likely modules and tests are listed in the delivery work breakdown. The exact
+  final file list is narrowed and approved by each child ExecPlan; this plan does not pre-authorize
+  unrelated refactors.
 
 ### Acceptance criteria
 - [x] Epic 22 scope, sequencing, boundaries and per-slice acceptance are recorded in the backlog.
 - [x] Stakeholder and engineering status identify Epic 22 as the current release blocker before R3.
 - [x] PR #171/#172 statuses are reconciled as merged without claiming that R3 restarted.
-- [ ] Every `22A..22N` slice is merged with focused tests and full deterministic DoD.
-- [ ] `22O` passes all provider-free closure gates from one clean commit.
+- [x] Every `22A..22N` slice is implemented with focused tests and full deterministic DoD.
+- [x] `22O` passes all provider-free closure gates in the current working tree.
+- [x] The same gate passes from clean reviewed qualification commit
+      `e8055d65699ed63623f62ad99c3b8406f79c030d`.
 - [ ] Epic 18 R3 obtains fresh individual and composite PASS evidence from that unchanged commit.
 
 ### Risks
@@ -120,14 +419,32 @@ the original Epic 19–21 delivery scopes.
   so ordering and small PR boundaries are mandatory.
 - Historical raw workspaces were cleaned up; preserved minimized incidents are authoritative for
   regressions, while new acceptance evidence must be generated deterministically.
-- The current workstation has insufficient free disk for a reliable full local build; this
-  documentation slice uses focused checks and required remote CI, and `22O` explicitly requires an
-  adequately provisioned host.
+- A working-tree pass is not a qualification SHA. Any change made before review/commit requires
+  rerunning `make offline-closure` on the resulting clean commit before R3.
 
 ### Progress log
 - 2026-07-22: Reconciled PR #171/#172 as merged and recorded the audit findings as Epic 22.
 - 2026-07-22: Confirmed that Epic 22 required CI is provider-free and that R3/live evidence cannot
   restart until the offline closure gate records a new clean qualification SHA.
+- 2026-07-26: Re-audited the clean `f569585c` implementation against every open backlog item and
+  expanded this program plan with per-slice deliverables, primary modules, focused tests,
+  dependencies, closure gates, the exact R3 evidence sequence and the post-R3 queue.
+- 2026-07-26: Completed `22A` with deep immutable run snapshots, persist-before-publish registry
+  transactions, atomic pending replacement, bounded history diagnostics and consistent canceled
+  terminal state. Focused race/fault/restart tests and full deterministic DoD pass; `22B` is next.
+- 2026-07-26: Completed `22B` with descriptor-backed workspace containment, one atomic manifest
+  writer and adversarial symlink coverage; `22C` is next.
+- 2026-07-26: Completed `22C` with server-owned selected-run snapshot resolution, typed states and
+  persisted late-document inventory; `22D` is next.
+- 2026-07-26: Completed `22D` with one validated recursive pathscope dialect shared by refresh and
+  shard planning; `22E` is next.
+- 2026-07-26: Completed `22E`–`22O` and the requested post-R3 product/cleanup queue in the working
+  tree. `make offline-closure` passed with 263 Python tests, 158 UI tests and 7 rendered mock
+  scenarios. Live E2E was not run; a clean reviewed qualification SHA and Epic 18 R3 remain open.
+- 2026-07-27: Committed the complete provider-free implementation as
+  `e8055d65699ed63623f62ad99c3b8406f79c030d` and reran `make offline-closure` from an isolated
+  clean detached worktree. All gates passed with no tracked drift. This SHA is the only authorized
+  code input for the still-open Epic 18 R3; no live E2E was run.
 
 ### Plan ID
 EP-20260719-epic18-targeted-architecture-home-repair

@@ -44,7 +44,13 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
   ];
   const gitDiff = {
     ok: true,
+    state: "dirty",
     workspace: "/tmp/publish-git-recovery-workspace",
+    branch: "main",
+    head_oid: "abc123",
+    base_ref: "HEAD",
+    base_oid: "abc123",
+    fingerprint: "publish-git-recovery-fixture",
     run_id: runID,
     step_id: null,
     selected_path: "reports/coverage/summary.md",
@@ -171,6 +177,24 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
 
     if (method === "GET" && url.pathname === `/api/pipeline/runs/${runID}/artifacts`) {
       await route.fulfill({ ...json({ run_id: runID, artifacts }) });
+      return;
+    }
+
+    if (method === "GET" && url.pathname === `/api/pipeline/runs/${runID}/snapshot`) {
+      await route.fulfill({
+        ...json({
+          run_id: runID,
+          status: "available",
+          issues: [],
+          artifacts: artifacts.map((artifact) => ({
+            ...artifact,
+            canonical_path: artifact.path,
+            read_path: artifact.path === finalIndexPath ? finalIndexPath : `reports/taskruns/${runID}/staging/final/${artifact.path}`,
+            source_run_id: runID,
+            source_mode: "run_snapshot",
+          })),
+        }),
+      });
       return;
     }
 

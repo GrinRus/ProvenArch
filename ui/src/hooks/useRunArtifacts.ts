@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchJSON } from "../lib/api";
 import { dedupeArtifactsByPath } from "../lib/runState";
-import type { Artifact, ArtifactsResponse, FinalRunIndex } from "../lib/appContracts";
+import type { Artifact } from "../lib/appContracts";
+import { getPipelineRunSnapshot } from "../lib/runApi";
 import { isAbortError, useRequestGate } from "./useRequestGate";
 
 export function useRunArtifacts() {
@@ -14,6 +14,7 @@ export function useRunArtifacts() {
   const artifactsRef = useRef(artifacts);
   const selectedArtifactRef = useRef(selectedArtifact);
   const [evidenceSnapshot, setEvidenceSnapshot] = useState<RunEvidenceSnapshot>(emptyEvidenceSnapshot());
+  const evidenceSnapshotRef = useRef(evidenceSnapshot);
   const artifactsRequest = useRequestGate("run-evidence-snapshot");
   const previewRequest = useRequestGate("run-artifact-preview");
   const contentByReadPath = useRef(new Map<string, string>());
@@ -25,6 +26,10 @@ export function useRunArtifacts() {
   useEffect(() => {
     selectedArtifactRef.current = selectedArtifact;
   }, [selectedArtifact]);
+
+  useEffect(() => {
+    evidenceSnapshotRef.current = evidenceSnapshot;
+  }, [evidenceSnapshot]);
 
   const diagramArtifacts = useMemo(() => {
     return artifacts
@@ -74,24 +79,24 @@ export function useRunArtifacts() {
     setEvidenceSnapshot({ ...emptyEvidenceSnapshot(), runId: id, status: "loading" });
     contentByReadPath.current = new Map();
     try {
-      const snapshot = await fetchRunSnapshotIndex(id, token.signal);
+      const snapshot = await getPipelineRunSnapshot(id, { signal: token.signal });
       if (!artifactsRequest.isCurrent(token)) {
         return;
       }
-      if (!snapshot) {
+      if (snapshot.status === "not_produced" || snapshot.status === "unavailable" || snapshot.status === "error") {
         applyEvidenceSnapshot({
           runId: id,
           sourceMode: "run_snapshot",
-          status: "not_produced",
+          status: snapshot.status,
           artifacts: [],
           coverageSummary: "",
           openQuestions: "",
-          issues: [{ code: "snapshot_not_produced", message: `Run ${id} has no final snapshot index.` }],
+          issues: snapshot.issues,
         });
         return;
       }
-      const nextArtifacts = dedupeArtifactsByPath([...snapshot.canonicalArtifacts, ...snapshot.indexArtifacts]);
-      const issues: EvidenceIssue[] = [];
+      const nextArtifacts = dedupeArtifactsByPath(snapshot.artifacts);
+      const issues: EvidenceIssue[] = [...snapshot.issues];
       await Promise.all(
         nextArtifacts.map(async (artifact) => {
           const readPath = artifact.read_path ?? artifact.path;
@@ -108,8 +113,8 @@ export function useRunArtifacts() {
       if (!artifactsRequest.isCurrent(token)) {
         return;
       }
-      const coveragePath = snapshot.readPathByCanonicalPath.get("reports/coverage/summary.md");
-      const questionsPath = snapshot.readPathByCanonicalPath.get("reports/coverage/open-questions.md");
+      const coveragePath = nextArtifacts.find((artifact) => artifact.canonical_path === "reports/coverage/summary.md")?.read_path;
+      const questionsPath = nextArtifacts.find((artifact) => artifact.canonical_path === "reports/coverage/open-questions.md")?.read_path;
       applyEvidenceSnapshot({
         runId: id,
         sourceMode: "run_snapshot",
@@ -137,10 +142,23 @@ export function useRunArtifacts() {
     }
   }
 
-  const handleOpenArtifact = useCallback(async (path: string) => {
+  const handleOpenArtifact = useCallback(async (path: string, viewerMode = "rendered") => {
     const artifact = artifactsRef.current.find((item) => item.path === path);
-    const readPath = artifact?.read_path ?? path;
-    const token = previewRequest.begin(`${path}|${readPath}`);
+    if (!artifact) {
+      previewRequest.abort();
+      setSelectedArtifact(path);
+      setSelectedArtifactContent("Artifact unavailable: the link is outside the selected run snapshot inventory.");
+      return;
+    }
+    const readPath = artifact.read_path ?? artifact.path;
+    const snapshot = evidenceSnapshotRef.current;
+    const token = previewRequest.begin([
+      snapshot.runId ?? "",
+      snapshot.sourceMode,
+      path,
+      readPath,
+      viewerMode,
+    ].join("|"));
     setSelectedArtifact(path);
     setSelectedArtifactContent("Loading...");
     try {
@@ -213,7 +231,7 @@ export function useRunArtifacts() {
   };
 }
 
-export type EvidenceSourceMode = "run_snapshot" | "current_workspace";
+export type EvidenceSourceMode = "run_snapshot" | "promoted_current";
 export type EvidenceSnapshotStatus = "idle" | "loading" | "available" | "partial" | "not_produced" | "unavailable" | "error";
 export type EvidenceIssue = { code: string; message: string; path?: string };
 export type RunEvidenceSnapshot = {
@@ -229,92 +247,11 @@ export type RunEvidenceSnapshot = {
 function emptyEvidenceSnapshot(): RunEvidenceSnapshot {
   return {
     runId: null,
-    sourceMode: "current_workspace",
+    sourceMode: "promoted_current",
     status: "idle",
     artifacts: [],
     coverageSummary: "",
     openQuestions: "",
     issues: [],
   };
-}
-
-type RunSnapshotIndex = {
-  canonicalArtifacts: Artifact[];
-  indexArtifacts: Artifact[];
-  readPathByCanonicalPath: Map<string, string>;
-};
-
-async function fetchRunSnapshotIndex(id: string, signal?: AbortSignal): Promise<RunSnapshotIndex | null> {
-  const payload = await fetchJSON<ArtifactsResponse>(`/api/pipeline/runs/${id}/artifacts`, { signal });
-  const runArtifacts = payload.artifacts ?? [];
-  const finalRunIndexPath = `reports/taskruns/${id}/staging/final/final-run-index.json`;
-  const hasSelectedRunIndex = runArtifacts.some((artifact) => artifact.path.trim() === finalRunIndexPath);
-  if (!hasSelectedRunIndex) {
-    return null;
-  }
-
-  const finalRunIndex = await fetchJSON<FinalRunIndex>(`/api/artifacts?path=${encodeURIComponent(finalRunIndexPath)}`, { signal });
-  return buildRunSnapshotIndex(id, finalRunIndexPath, finalRunIndex);
-}
-
-function buildRunSnapshotIndex(id: string, finalRunIndexPath: string, finalRunIndex: FinalRunIndex): RunSnapshotIndex {
-  const indexRunID = String(finalRunIndex.run_id ?? "").trim();
-  if (indexRunID && indexRunID !== id) {
-    throw new Error(`final run index run_id ${indexRunID} does not match selected run ${id}`);
-  }
-
-  const readPathByCanonicalPath = new Map<string, string>();
-  const canonicalArtifacts: Artifact[] = (finalRunIndex.canonical_documents ?? [])
-    .map((document) => {
-      const canonicalPath = String(document.canonical_path ?? "").trim();
-      const stagedPath = String(document.staged_path ?? "").trim();
-      if (!canonicalPath || !stagedPath) {
-        throw new Error("final run index document is missing canonical_path or staged_path");
-      }
-      if (!isRunFinalStagedPath(id, stagedPath)) {
-        throw new Error(`final run index staged_path ${stagedPath} is outside selected run snapshot`);
-      }
-      readPathByCanonicalPath.set(canonicalPath, stagedPath);
-      return {
-        id: String(document.id ?? "").trim() || undefined,
-        path: canonicalPath,
-        read_path: stagedPath,
-        canonical_path: canonicalPath,
-        kind: String(document.kind ?? "report").trim() || "report",
-        label: String(document.title ?? canonicalPath).trim() || canonicalPath,
-        source_run_id: id,
-        source_mode: "run_snapshot",
-      } satisfies Artifact;
-    });
-
-  const indexArtifacts: Artifact[] = [
-    {
-      path: finalRunIndexPath,
-      read_path: finalRunIndexPath,
-      kind: "taskrun",
-      label: "Final run index",
-      source_run_id: id,
-      source_mode: "run_snapshot",
-    },
-  ];
-  const citationIndexPath = String(finalRunIndex.citation_index_path ?? "").trim();
-  if (citationIndexPath.length > 0) {
-    if (!isRunFinalStagedPath(id, citationIndexPath)) {
-      throw new Error(`citation_index_path ${citationIndexPath} is outside selected run snapshot`);
-    }
-    indexArtifacts.push({
-      path: citationIndexPath,
-      read_path: citationIndexPath,
-      kind: "taskrun",
-      label: "Citation index",
-      source_run_id: id,
-      source_mode: "run_snapshot",
-    });
-  }
-
-  return { canonicalArtifacts, indexArtifacts, readPathByCanonicalPath };
-}
-
-function isRunFinalStagedPath(runID: string, path: string): boolean {
-  return path === `reports/taskruns/${runID}/staging/final/final-run-index.json` || path.startsWith(`reports/taskruns/${runID}/staging/final/`);
 }

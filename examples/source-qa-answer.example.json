@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "source_run_id": "run-qa-20260726",
+  "answer_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "proposal_title": "Document payment retry ownership",
+  "question": "Who owns payment retry behavior?",
+  "answer_generated_at": "2026-07-26T10:00:00Z",
+  "citations": [
+    {
+      "path": "reports/as-is/overview.md",
+      "reason": "The current architecture overview identifies the payment flow."
+    }
+  ],
+  "unresolved": [
+    "The escalation owner is not recorded."
+  ],
+  "operator_note": "Validate with the payments team before acceptance.",
+  "created_at": "2026-07-26T10:05:00Z"
+}

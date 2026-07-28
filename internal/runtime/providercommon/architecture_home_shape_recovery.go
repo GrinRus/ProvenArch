@@ -142,13 +142,13 @@ func markArchitectureHomeInlineHeadingsRecovered(result acpruntime.Result, repor
 		result.Diagnostics = map[string]any{}
 	}
 	result.Diagnostics[architectureHomeInlineHeadingRecoveryMode] = map[string]any{
-		"recovery_mode":       architectureHomeInlineHeadingRecoveryMode,
-		"source":              "runtime_shape_recovery",
-		"provider_authored":   false,
-		"normalized_sections": append([]string(nil), report.NormalizedSections...),
-		"before_digest":       report.BeforeDigest,
-		"after_digest":        report.AfterDigest,
-		"manual_quality_gate": "artifact_quality_assessment",
+		"recovery_mode":            architectureHomeInlineHeadingRecoveryMode,
+		"source":                   "runtime_shape_recovery",
+		"provider_authored":        false,
+		"normalized_sections":      append([]string(nil), report.NormalizedSections...),
+		"before_digest":            report.BeforeDigest,
+		"after_digest":             report.AfterDigest,
+		"operator_review_required": true,
 	}
 	return result
 }

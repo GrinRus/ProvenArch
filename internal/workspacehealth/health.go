@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -74,9 +76,11 @@ func Scan(ctx context.Context, ws workspace.Root, options Options) (Report, erro
 	}
 
 	scanner := scanner{
-		ctx:    ctx,
-		ws:     ws,
-		report: &report,
+		ctx:       ctx,
+		ws:        ws,
+		report:    &report,
+		entityIDs: map[string]string{},
+		aliases:   map[string][]string{},
 	}
 	if err := scanner.scanModelObservations(); err != nil {
 		return Report{}, err
@@ -88,6 +92,15 @@ func Scan(ctx context.Context, ws workspace.Root, options Options) (Report, erro
 		return Report{}, err
 	}
 	if err := scanner.scanOpenQuestions(); err != nil {
+		return Report{}, err
+	}
+	if err := scanner.scanMarkdownIntegrity(); err != nil {
+		return Report{}, err
+	}
+	if err := scanner.scanFindingLinks(); err != nil {
+		return Report{}, err
+	}
+	if err := scanner.scanCitationCoverage(); err != nil {
 		return Report{}, err
 	}
 
@@ -124,9 +137,11 @@ func Scan(ctx context.Context, ws workspace.Root, options Options) (Report, erro
 }
 
 type scanner struct {
-	ctx    context.Context
-	ws     workspace.Root
-	report *Report
+	ctx       context.Context
+	ws        workspace.Root
+	report    *Report
+	entityIDs map[string]string
+	aliases   map[string][]string
 }
 
 func (s scanner) scanModelObservations() error {
@@ -143,6 +158,22 @@ func (s scanner) scanModelEntityObservations() error {
 			s.add(SeverityError, "model.entity.invalid_yaml", fmt.Sprintf("Cannot parse model entity YAML: %v", err), rel, nil)
 			return
 		}
+		entityID := strings.TrimSpace(entity.ID)
+		if entityID != "" {
+			s.entityIDs[entityID] = rel
+		}
+		for _, alias := range entity.Aliases {
+			key := strings.ToLower(strings.TrimSpace(alias))
+			if key != "" {
+				s.aliases[key] = append(s.aliases[key], rel)
+			}
+		}
+		if teamID := strings.TrimSpace(entity.OwnerTeamID); teamID != "" {
+			teamCard := filepath.ToSlash(filepath.Join("charter/cards/teams", strings.TrimPrefix(teamID, "team.")+".md"))
+			if _, err := s.ws.ReadFile(teamCard); isNotExistError(err) {
+				s.add(SeverityWarning, "model.owner_team.missing", fmt.Sprintf("Entity %q references missing owner team %q", entityID, teamID), rel, []string{teamCard})
+			}
+		}
 		if isObservationWithoutEvidence(entity.Provenance) {
 			title := "Observation entity has no evidence"
 			if strings.TrimSpace(entity.ID) != "" {
@@ -154,11 +185,19 @@ func (s scanner) scanModelEntityObservations() error {
 }
 
 func (s scanner) scanModelEdgeObservations() error {
-	return s.walkWorkspaceFiles("model/edges", ".yaml", func(rel string, raw []byte) {
+	err := s.walkWorkspaceFiles("model/edges", ".yaml", func(rel string, raw []byte) {
 		var edge contracts.Edge
 		if err := yaml.Unmarshal(raw, &edge); err != nil {
 			s.add(SeverityError, "model.edge.invalid_yaml", fmt.Sprintf("Cannot parse model edge YAML: %v", err), rel, nil)
 			return
+		}
+		for _, endpoint := range []struct {
+			label string
+			value string
+		}{{"from", edge.From}, {"to", edge.To}} {
+			if _, ok := s.entityIDs[strings.TrimSpace(endpoint.value)]; !ok {
+				s.add(SeverityError, "model.edge.endpoint_missing", fmt.Sprintf("Edge %q %s endpoint %q does not resolve to a canonical entity", edge.ID, endpoint.label, endpoint.value), rel, nil)
+			}
 		}
 		if isObservationWithoutEvidence(edge.Provenance) {
 			title := "Observation edge has no evidence"
@@ -168,24 +207,149 @@ func (s scanner) scanModelEdgeObservations() error {
 			s.add(SeverityWarning, "model.observation.missing_evidence", title, rel, nil)
 		}
 	})
+	if err != nil {
+		return err
+	}
+	for alias, paths := range s.aliases {
+		if len(paths) > 1 {
+			s.add(SeverityWarning, "model.entity.alias_duplicate", fmt.Sprintf("Entity alias %q is used by %d entities", alias, len(paths)), paths[0], paths[1:])
+		}
+	}
+	return nil
 }
 
 func (s scanner) scanDomainOutputs() error {
-	return s.walkWorkspaceFiles("reports/agent-outputs/domains", ".md", func(rel string, _ []byte) {
+	if err := s.scanOwnedOutputs("domains", "domain"); err != nil {
+		return err
+	}
+	return s.scanOwnedOutputs("teams", "team")
+}
+
+func (s scanner) scanOwnedOutputs(folder string, kind string) error {
+	return s.walkWorkspaceFiles(filepath.ToSlash(filepath.Join("reports/agent-outputs", folder)), ".md", func(rel string, _ []byte) {
 		domainID := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
-		cardRel := filepath.ToSlash(filepath.Join("charter/cards/domains", domainID+".md"))
+		cardRel := filepath.ToSlash(filepath.Join("charter/cards", folder, domainID+".md"))
 		cardAbs, err := s.ws.Resolve(cardRel)
 		if err != nil {
 			s.add(SeverityError, "workspace.path.invalid", fmt.Sprintf("Cannot resolve domain card path for %q: %v", domainID, err), rel, nil)
 			return
 		}
 		if _, statErr := os.Stat(cardAbs); errors.Is(statErr, os.ErrNotExist) {
-			s.add(SeverityWarning, "domain.output.orphan", fmt.Sprintf("Domain output %q has no matching canonical domain card", domainID), rel, []string{cardRel})
+			label := strings.ToUpper(kind[:1]) + kind[1:]
+			s.add(SeverityWarning, kind+".output.orphan", fmt.Sprintf("%s output %q has no matching canonical %s card", label, domainID, kind), rel, []string{cardRel})
 			return
 		} else if statErr != nil {
 			s.add(SeverityError, "domain.card.unreadable", fmt.Sprintf("Cannot read matching domain card %q: %v", cardRel, statErr), rel, []string{cardRel})
 		}
 	})
+}
+
+var (
+	markdownLinkPattern    = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)`)
+	findingIDPattern       = regexp.MustCompile("`(finding\\.[A-Za-z0-9._-]+)`")
+	citationIDPattern      = regexp.MustCompile(`(?i)\b(?:cite|citation)\.[A-Za-z0-9._-]+\b`)
+	workspacePathCodeRegex = regexp.MustCompile("`((?:charter|model|reports|proposals|docs)/[^`#?]+)`")
+	externalLinkPattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+)
+
+func (s scanner) scanCitationCoverage() error {
+	for _, root := range []string{"reports/as-is", "reports/findings", "proposals"} {
+		if err := s.walkWorkspaceFiles(root, ".md", func(rel string, raw []byte) {
+			if strings.HasPrefix(rel, "proposals/") && filepath.Base(rel) != "proposal.md" {
+				return
+			}
+			content := strings.TrimSpace(string(raw))
+			if content == "" || citationIDPattern.MatchString(content) {
+				return
+			}
+			s.add(
+				SeverityWarning,
+				"citation.coverage.low",
+				"Key architecture document has no explicit citation identifiers",
+				rel,
+				nil,
+			)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s scanner) scanMarkdownIntegrity() error {
+	for _, root := range []string{"charter", "reports", "proposals"} {
+		if err := s.walkWorkspaceFiles(root, ".md", func(rel string, raw []byte) {
+			if rel == "reports/taskruns" || strings.HasPrefix(rel, "reports/taskruns/") {
+				return
+			}
+			if !utf8.Valid(raw) || strings.IndexByte(string(raw), 0) >= 0 {
+				s.add(SeverityError, "workspace.canonical.invalid_text", "Canonical Markdown is not valid UTF-8 text", rel, nil)
+				return
+			}
+			for _, match := range markdownLinkPattern.FindAllStringSubmatch(string(raw), -1) {
+				target := strings.TrimSpace(match[1])
+				if target == "" || strings.HasPrefix(target, "#") || strings.HasPrefix(target, "//") || externalLinkPattern.MatchString(target) {
+					continue
+				}
+				target = strings.Split(strings.Split(target, "#")[0], "?")[0]
+				resolved, ok := resolveHealthLink(rel, target)
+				if !ok {
+					s.add(SeverityWarning, "artifact.link.invalid", "Local Markdown link escapes the workspace or is invalid", rel, []string{target})
+					continue
+				}
+				if _, err := s.ws.ReadFile(resolved); err != nil {
+					s.add(SeverityWarning, "artifact.link.broken", fmt.Sprintf("Local Markdown link target %q does not exist", resolved), rel, []string{resolved})
+				}
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s scanner) scanFindingLinks() error {
+	findings := map[string]string{}
+	if err := s.walkWorkspaceFiles("reports/findings", ".md", func(rel string, raw []byte) {
+		for _, match := range findingIDPattern.FindAllStringSubmatch(string(raw), -1) {
+			findings[match[1]] = rel
+		}
+	}); err != nil {
+		return err
+	}
+	linked := map[string]bool{}
+	if err := s.walkWorkspaceFiles("proposals", ".md", func(rel string, raw []byte) {
+		content := string(raw)
+		for _, match := range findingIDPattern.FindAllStringSubmatch(content, -1) {
+			linked[match[1]] = true
+		}
+		for _, match := range workspacePathCodeRegex.FindAllStringSubmatch(content, -1) {
+			target := strings.TrimSpace(match[1])
+			if _, err := s.ws.ReadFile(target); err != nil {
+				s.add(SeverityWarning, "proposal.evidence.missing", fmt.Sprintf("Proposal evidence path %q does not exist", target), rel, []string{target})
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	for id, rel := range findings {
+		if !linked[id] {
+			s.add(SeverityWarning, "finding.unlinked", fmt.Sprintf("Finding %q is not linked from any proposal", id), rel, nil)
+		}
+	}
+	return nil
+}
+
+func resolveHealthLink(baseRel string, target string) (string, bool) {
+	normalized := strings.ReplaceAll(strings.TrimSpace(target), "\\", "/")
+	if normalized == "" || strings.HasPrefix(normalized, "/") {
+		return "", false
+	}
+	resolved := path.Clean(path.Join(path.Dir(baseRel), normalized))
+	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
+		return "", false
+	}
+	return resolved, true
 }
 
 func (s scanner) scanProposals() error {

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -83,7 +84,7 @@ func TestServeContextCancellationShutsDownService(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected run %q", runID)
 	}
-	if info.Status != orchestrator.RunStatusFailed || info.ErrorCode != "run_canceled" {
+	if info.Status != orchestrator.RunStatusCanceled || info.ErrorCode != "run_canceled" {
 		t.Fatalf("expected service shutdown to cancel active run, got status=%s code=%q", info.Status, info.ErrorCode)
 	}
 }
@@ -432,6 +433,114 @@ func TestOnboardingRuntimeSwitchConflictsWithActiveRun(t *testing.T) {
 	}
 	if status.Runtime.Runtime != acpruntime.RuntimeModeFake || status.Runtime.RuntimeProvider != string(acpruntime.ProviderClaudeCode) {
 		t.Fatalf("expected effective runtime to remain fake/claude-code, got %+v", status.Runtime)
+	}
+}
+
+func TestPipelineAdmissionLeasePreventsWorkspaceSwitchRace(t *testing.T) {
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	server.admissionHook = func(point string) {
+		if point == "pipeline_start_commit" {
+			close(entered)
+			<-release
+		}
+	}
+	responseCh := make(chan *http.Response, 1)
+	errorCh := make(chan error, 1)
+	go func() {
+		response, err := http.Post(httpServer.URL+"/api/pipeline/init", "application/json", strings.NewReader(`{"trigger":"ui"}`))
+		if err != nil {
+			errorCh <- err
+			return
+		}
+		responseCh <- response
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run admission did not reach commit barrier")
+	}
+
+	switchResult := make(chan error, 1)
+	secondWorkspace := workspace.Root{Path: t.TempDir()}
+	go func() {
+		switchResult <- server.setWorkspace(secondWorkspace)
+	}()
+	select {
+	case err := <-switchResult:
+		t.Fatalf("workspace switch escaped admission lease: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+
+	select {
+	case err := <-errorCh:
+		t.Fatal(err)
+	case response := <-responseCh:
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusAccepted {
+			body, _ := io.ReadAll(response.Body)
+			t.Fatalf("expected admitted run 202, got %d body=%s", response.StatusCode, body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run admission did not complete")
+	}
+	select {
+	case err := <-switchResult:
+		if !errors.Is(err, errSessionMutationConflict) {
+			t.Fatalf("expected switch conflict after run publication, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("workspace switch did not resume after admission")
+	}
+}
+
+func TestGitCommitBlockedWhileRunIsActive(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary is required for git mutation API tests")
+	}
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	ws := initGitWorkspaceForDiffTest(t, server)
+	commitWorkspaceForDiffTest(t, ws, "baseline")
+	if err := ws.WriteFile("reports/as-is/overview.md", []byte("candidate\n")); err != nil {
+		t.Fatal(err)
+	}
+	state, err := collectWorkspaceGitState(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headBefore := state.Identity.HeadOID
+	if _, err := server.getService().StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace: ws, Pipeline: orchestrator.PipelineInit, NonInteractive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	body := fmt.Sprintf(`{"message":"publish","expected_fingerprint":%q,"expected_head_oid":%q}`, state.Fingerprint, state.Identity.HeadOID)
+	response := postJSON(t, httpServer.URL+"/api/git/commit", body)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict || decodeErrorCode(t, response) != "run_active" {
+		t.Fatalf("expected run_active conflict, got status %d", response.StatusCode)
+	}
+	headAfter, err := runGit(context.Background(), ws.Path, "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(headAfter) != headBefore {
+		t.Fatalf("Git mutation escaped active-run lease: before=%q after=%q err=%v", headBefore, headAfter, err)
 	}
 }
 
@@ -1078,12 +1187,13 @@ func TestWorkspaceHealthEndpointReturnsAdvisoryFindings(t *testing.T) {
 	if payload.Status != "warn" {
 		t.Fatalf("expected warn status, got %+v", payload)
 	}
-	if payload.Summary.Warning != 3 || payload.Summary.Info != 1 || payload.Summary.Error != 0 {
+	if payload.Summary.Warning != 4 || payload.Summary.Info != 1 || payload.Summary.Error != 0 {
 		t.Fatalf("unexpected summary: %+v", payload.Summary)
 	}
 	assertWorkspaceHealthPayloadItem(t, payload, "model.observation.missing_evidence", "warning", "model/entities/svc.payments.yaml")
 	assertWorkspaceHealthPayloadItem(t, payload, "domain.output.orphan", "warning", "reports/agent-outputs/domains/payments.md")
 	assertWorkspaceHealthPayloadItem(t, payload, "proposal.missing_review_sections", "warning", "proposals/proposal-payments/proposal.md")
+	assertWorkspaceHealthPayloadItem(t, payload, "citation.coverage.low", "warning", "proposals/proposal-payments/proposal.md")
 	assertWorkspaceHealthPayloadItem(t, payload, "coverage.open_questions.count", "info", "reports/coverage/open-questions.md")
 }
 
@@ -1109,14 +1219,30 @@ func TestQAAskEndpointReturnsWorkspaceBackedResponseAndDoesNotMutateWorkspace(t 
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("expected status 200, got %d body=%s", response.StatusCode, string(body))
 	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read qa response: %v", err)
+	}
 	var payload struct {
 		Answer     string          `json:"answer"`
 		Citations  []qaAPICitation `json:"citations"`
 		Unresolved []string        `json:"unresolved"`
 		Confidence float64         `json:"confidence"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode qa response: %v", err)
+	}
+	var compatibilityShape map[string]json.RawMessage
+	if err := json.Unmarshal(body, &compatibilityShape); err != nil {
+		t.Fatalf("decode compatibility shape: %v", err)
+	}
+	gotKeys := make([]string, 0, len(compatibilityShape))
+	for key := range compatibilityShape {
+		gotKeys = append(gotKeys, key)
+	}
+	sort.Strings(gotKeys)
+	if want := []string{"answer", "citations", "confidence", "unresolved"}; !reflect.DeepEqual(gotKeys, want) {
+		t.Fatalf("compatibility response keys changed: got=%v want=%v", gotKeys, want)
 	}
 	if strings.TrimSpace(payload.Answer) == "" {
 		t.Fatalf("expected answer")
@@ -1133,6 +1259,23 @@ func TestQAAskEndpointReturnsWorkspaceBackedResponseAndDoesNotMutateWorkspace(t 
 
 	after := snapshotWorkspaceFiles(t, server.getWorkspace().Path)
 	assertWorkspaceSnapshotEqual(t, before, after)
+
+	second, err := http.Post(
+		httpServer.URL+"/api/qa/ask",
+		"application/json",
+		bytes.NewBufferString(`{"question":"What does coverage say about owner mappings and architecture notes?"}`),
+	)
+	if err != nil {
+		t.Fatalf("repeat POST /api/qa/ask: %v", err)
+	}
+	defer second.Body.Close()
+	secondBody, err := io.ReadAll(second.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(body, secondBody) {
+		t.Fatalf("compatibility response is not deterministic\nfirst=%s\nsecond=%s", body, secondBody)
+	}
 }
 
 func TestQAAskEndpointRejectsInvalidRequests(t *testing.T) {
@@ -1245,6 +1388,7 @@ func TestQARunsEndpointStartsFakeRuntimeRunAndWritesAuditArtifacts(t *testing.T)
 		RuntimeProvider string          `json:"runtime_provider"`
 		Provider        string          `json:"provider"`
 		Answer          string          `json:"answer"`
+		AnswerDigest    string          `json:"answer_digest"`
 		Citations       []qaAPICitation `json:"citations"`
 		Confidence      float64         `json:"confidence"`
 	}
@@ -1287,6 +1431,49 @@ func TestQARunsEndpointStartsFakeRuntimeRunAndWritesAuditArtifacts(t *testing.T)
 	if len(detail.Citations) == 0 || detail.Confidence <= 0 {
 		t.Fatalf("expected citations/confidence, got citations=%+v confidence=%f", detail.Citations, detail.Confidence)
 	}
+	if len(detail.AnswerDigest) != 64 {
+		t.Fatalf("expected immutable answer digest, got %q", detail.AnswerDigest)
+	}
+
+	proposalBody := fmt.Sprintf(`{"title":"Clarify ownership from Ask","slug":"clarify-ownership","expected_answer_digest":%q}`, detail.AnswerDigest)
+	proposalResp, err := http.Post(
+		httpServer.URL+"/api/qa/runs/"+started.RunID+"/proposal-draft",
+		"application/json",
+		bytes.NewBufferString(proposalBody),
+	)
+	if err != nil {
+		t.Fatalf("POST proposal draft: %v", err)
+	}
+	if proposalResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(proposalResp.Body)
+		_ = proposalResp.Body.Close()
+		t.Fatalf("expected proposal status 201, got %d body=%s", proposalResp.StatusCode, body)
+	}
+	var proposal struct {
+		Path       string `json:"path"`
+		SourcePath string `json:"source_path"`
+	}
+	if err := json.NewDecoder(proposalResp.Body).Decode(&proposal); err != nil {
+		_ = proposalResp.Body.Close()
+		t.Fatalf("decode proposal response: %v", err)
+	}
+	_ = proposalResp.Body.Close()
+	if _, err := ws.ReadFile(proposal.SourcePath); err != nil {
+		t.Fatalf("proposal source provenance missing: %v", err)
+	}
+	duplicateResp, err := http.Post(
+		httpServer.URL+"/api/qa/runs/"+started.RunID+"/proposal-draft",
+		"application/json",
+		bytes.NewBufferString(proposalBody),
+	)
+	if err != nil {
+		t.Fatalf("POST duplicate proposal: %v", err)
+	}
+	if duplicateResp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(duplicateResp.Body)
+		t.Fatalf("expected duplicate status 409, got %d body=%s", duplicateResp.StatusCode, body)
+	}
+	_ = duplicateResp.Body.Close()
 
 	contextPack, err := ws.ReadFile(filepath.Join("reports", "taskruns", started.RunID, "qa", "context-pack.json"))
 	if err != nil {
@@ -1305,7 +1492,8 @@ func TestQARunsEndpointStartsFakeRuntimeRunAndWritesAuditArtifacts(t *testing.T)
 	}
 	defer listResp.Body.Close()
 	var listPayload struct {
-		Items []struct {
+		HistoryDiagnostics []string `json:"history_diagnostics"`
+		Items              []struct {
 			RunID    string `json:"run_id"`
 			Pipeline string `json:"pipeline"`
 		} `json:"items"`
@@ -2109,8 +2297,8 @@ func TestPipelineRunCancelEndpointAcceptsRunningRun(t *testing.T) {
 	}
 
 	terminal := waitForRunTerminalStatus(t, httpServer.URL, started.RunID, 8*time.Second)
-	if terminal.Status != string(orchestrator.RunStatusFailed) {
-		t.Fatalf("expected canceled run to fail, got status=%q", terminal.Status)
+	if terminal.Status != string(orchestrator.RunStatusCanceled) {
+		t.Fatalf("expected canceled run status, got status=%q", terminal.Status)
 	}
 	if terminal.ErrorCode != "run_canceled" {
 		t.Fatalf("expected error_code run_canceled, got %q", terminal.ErrorCode)
@@ -2383,7 +2571,8 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", listResp.StatusCode)
 	}
 	var listPayload struct {
-		Items []struct {
+		HistoryDiagnostics []string `json:"history_diagnostics"`
+		Items              []struct {
 			RunID              string   `json:"run_id"`
 			Pipeline           string   `json:"pipeline"`
 			Status             string   `json:"status"`
@@ -2400,6 +2589,9 @@ func TestPipelineRunsListEndpointReturnsRecentRuns(t *testing.T) {
 	}
 	if len(listPayload.Items) != 1 {
 		t.Fatalf("expected one run from limited list, got %d", len(listPayload.Items))
+	}
+	if listPayload.HistoryDiagnostics == nil {
+		t.Fatalf("expected explicit history_diagnostics array")
 	}
 	if listPayload.Items[0].RunID != secondPayload.RunID {
 		t.Fatalf("expected newest run first, got %q want %q", listPayload.Items[0].RunID, secondPayload.RunID)
@@ -2685,6 +2877,7 @@ func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
 	}
 	var payload struct {
 		Empty        bool   `json:"empty"`
+		State        string `json:"state"`
 		Scope        string `json:"scope"`
 		Branch       string `json:"branch"`
 		HeadOID      string `json:"head_oid"`
@@ -2699,6 +2892,9 @@ func TestGitDiffEndpointReturnsWorkspaceFolderAndLineHunks(t *testing.T) {
 	}
 	if payload.Empty || len(payload.Files) != 3 {
 		t.Fatalf("expected complete workspace inventory with selected preview, got %+v", payload)
+	}
+	if payload.State != "dirty" {
+		t.Fatalf("expected authoritative dirty state, got %+v", payload)
 	}
 	if payload.Scope != "full_workspace" || payload.Branch == "" || payload.HeadOID == "" || len(payload.Fingerprint) != 64 {
 		t.Fatalf("expected authoritative Git identity and fingerprint, got %+v", payload)
@@ -2777,6 +2973,7 @@ func TestGitDiffEndpointHandlesEmptyAndInvalidPath(t *testing.T) {
 	}
 	var emptyPayload struct {
 		Empty bool          `json:"empty"`
+		State string        `json:"state"`
 		Files []gitDiffFile `json:"files"`
 	}
 	if err := json.NewDecoder(emptyResp.Body).Decode(&emptyPayload); err != nil {
@@ -2784,6 +2981,24 @@ func TestGitDiffEndpointHandlesEmptyAndInvalidPath(t *testing.T) {
 	}
 	if !emptyPayload.Empty || len(emptyPayload.Files) != 0 {
 		t.Fatalf("expected valid empty diff, got %+v", emptyPayload)
+	}
+	if emptyPayload.State != "clean" {
+		t.Fatalf("expected authoritative clean state, got %+v", emptyPayload)
+	}
+
+	staleResp, err := http.Get(httpServer.URL + "/api/git/diff?fingerprint=stale-confirmation")
+	if err != nil {
+		t.Fatalf("GET stale git diff: %v", err)
+	}
+	defer staleResp.Body.Close()
+	var stalePayload struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(staleResp.Body).Decode(&stalePayload); err != nil {
+		t.Fatalf("decode stale diff: %v", err)
+	}
+	if stalePayload.State != "stale" {
+		t.Fatalf("expected stale state, got %+v", stalePayload)
 	}
 
 	invalidResp, err := http.Get(httpServer.URL + "/api/git/diff?path=..%2Fworkspace.yaml")
@@ -2958,6 +3173,41 @@ repos:
 	}
 	if len(artifactsPayload.Artifacts) == 0 {
 		t.Fatalf("expected non-empty artifacts from persisted history")
+	}
+	snapshotResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + runInfo.RunID + "/snapshot")
+	if err != nil {
+		t.Fatalf("GET persisted run snapshot: %v", err)
+	}
+	defer snapshotResp.Body.Close()
+	if snapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for persisted run snapshot, got %d", snapshotResp.StatusCode)
+	}
+	var snapshotPayload runSnapshotResponse
+	if err := json.NewDecoder(snapshotResp.Body).Decode(&snapshotPayload); err != nil {
+		t.Fatalf("decode persisted run snapshot: %v", err)
+	}
+	if snapshotPayload.Status != runSnapshotAvailable || len(snapshotPayload.Artifacts) == 0 {
+		t.Fatalf("expected available server-owned snapshot, got %+v", snapshotPayload)
+	}
+	auditResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + runInfo.RunID + "/audit")
+	if err != nil {
+		t.Fatalf("GET persisted run audit: %v", err)
+	}
+	defer auditResp.Body.Close()
+	if auditResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for persisted run audit, got %d", auditResp.StatusCode)
+	}
+	var auditPayload struct {
+		Version   int    `json:"version"`
+		RunID     string `json:"run_id"`
+		Status    string `json:"status"`
+		Artifacts []any  `json:"artifacts"`
+	}
+	if err := json.NewDecoder(auditResp.Body).Decode(&auditPayload); err != nil {
+		t.Fatalf("decode persisted run audit: %v", err)
+	}
+	if auditPayload.Version != 1 || auditPayload.RunID != runInfo.RunID || auditPayload.Status == "" || len(auditPayload.Artifacts) == 0 {
+		t.Fatalf("unexpected read-only audit payload: %+v", auditPayload)
 	}
 }
 
@@ -3706,7 +3956,7 @@ runtime:
 
 			runStatus := waitForRunTerminalStatus(t, httpServer.URL, startPayload.RunID, 8*time.Second)
 			if runStatus.Status != string(orchestrator.RunStatusSucceeded) {
-				t.Fatalf("expected succeeded status, got %q (%q)", runStatus.Status, runStatus.ErrorCode)
+				t.Fatalf("expected succeeded status, got %q (%q): %s", runStatus.Status, runStatus.ErrorCode, runStatus.Error)
 			}
 
 			logsResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + startPayload.RunID + "/logs?cursor=0&limit=500")
@@ -5109,6 +5359,7 @@ func gitDiffFolderPresent(folders []gitDiffFolderSummary, folder string) bool {
 type runStatusPayload struct {
 	Status    string `json:"status"`
 	ErrorCode string `json:"error_code"`
+	Error     string `json:"error"`
 }
 
 func waitForRunTerminalStatus(t *testing.T, serverURL string, runID string, timeout time.Duration) runStatusPayload {
@@ -5133,7 +5384,7 @@ func waitForRunTerminalStatus(t *testing.T, serverURL string, runID string, time
 		if err := json.NewDecoder(runResp.Body).Decode(&payload); err != nil {
 			return false, err
 		}
-		if payload.Status == string(orchestrator.RunStatusSucceeded) || payload.Status == string(orchestrator.RunStatusFailed) {
+		if payload.Status == string(orchestrator.RunStatusSucceeded) || payload.Status == string(orchestrator.RunStatusFailed) || payload.Status == string(orchestrator.RunStatusCanceled) {
 			terminal = payload
 			return true, nil
 		}

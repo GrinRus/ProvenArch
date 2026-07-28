@@ -26,6 +26,7 @@ type FetchMockState = {
   qaRunID?: string;
   qaRuns?: MockJSON[];
   qaRunResponses?: Record<string, MockJSON>;
+  qaProposalResponse?: { status: number; body: MockJSON };
   onboardingStatus?: MockJSON;
   onboardingWorkspaceSelectionStatus?: MockJSON;
   systemVersion?: MockJSON;
@@ -163,6 +164,7 @@ function createFetchMock(state: FetchMockState = {}) {
   };
   const defaultGitDiff = state.gitDiff ?? {
     ok: true,
+    state: "dirty",
     workspace: "/tmp/workspace",
     run_id: runID,
     step_id: null,
@@ -481,7 +483,7 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse(state.knowledgeResponse ?? {
         version: 1,
         generated_at: "2026-07-15T00:00:00Z",
-        source_mode: "current_workspace",
+        source_mode: "promoted_current",
         status: "unavailable",
         entities: [],
         edges: [],
@@ -608,6 +610,54 @@ function createFetchMock(state: FetchMockState = {}) {
       return jsonResponse((runReviewSummary[requestedRunID] ?? {}) as MockJSON);
     }
 
+    const runSnapshotMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/snapshot$/);
+    if (method === "GET" && runSnapshotMatch) {
+      const requestedRunID = decodeURIComponent(runSnapshotMatch[1]);
+      const indexPath = `reports/taskruns/${requestedRunID}/staging/final/final-run-index.json`;
+      const rawIndex = artifactText[indexPath];
+      if (rawIndex === undefined) {
+        return jsonResponse({
+          run_id: requestedRunID,
+          status: "not_produced",
+          artifacts: [],
+          issues: [{ code: "snapshot_not_produced", message: `Run ${requestedRunID} has no final snapshot index.` }],
+        });
+      }
+      const index = JSON.parse(rawIndex) as {
+        citation_index_path?: string;
+        canonical_documents?: Array<{ id?: string; canonical_path: string; staged_path: string; kind?: string; title?: string }>;
+      };
+      const snapshotArtifacts: MockJSON[] = (index.canonical_documents ?? []).map((document) => ({
+        id: document.id,
+        path: document.canonical_path,
+        read_path: document.staged_path,
+        canonical_path: document.canonical_path,
+        kind: document.kind ?? "report",
+        label: document.title ?? document.canonical_path,
+        source_run_id: requestedRunID,
+        source_mode: "run_snapshot",
+      }));
+      snapshotArtifacts.push({
+        path: indexPath,
+        read_path: indexPath,
+        kind: "taskrun",
+        label: "Final run index",
+        source_run_id: requestedRunID,
+        source_mode: "run_snapshot",
+      });
+      if (index.citation_index_path) {
+        snapshotArtifacts.push({
+          path: index.citation_index_path,
+          read_path: index.citation_index_path,
+          kind: "taskrun",
+          label: "Citation index",
+          source_run_id: requestedRunID,
+          source_mode: "run_snapshot",
+        });
+      }
+      return jsonResponse({ run_id: requestedRunID, status: "available", artifacts: snapshotArtifacts, issues: [] });
+    }
+
     const runArtifactsMatch = url.match(/^\/api\/pipeline\/runs\/([^/]+)\/artifacts$/);
     if (method === "GET" && runArtifactsMatch) {
       const requestedRunID = decodeURIComponent(runArtifactsMatch[1]);
@@ -626,6 +676,19 @@ function createFetchMock(state: FetchMockState = {}) {
 
     if (method === "POST" && url === "/api/qa/runs") {
       return jsonResponse({ run_id: qaRunID, status: "queued" }, 202);
+    }
+
+    if (method === "POST" && /^\/api\/qa\/runs\/[^/]+\/proposal-draft$/.test(url)) {
+      return jsonResponse(
+        state.qaProposalResponse?.body ?? {
+          path: "proposals/qa-synthesis-qa-run-1-who-owns-payments",
+          proposal_path: "proposals/qa-synthesis-qa-run-1-who-owns-payments/proposal.md",
+          evidence_path: "proposals/qa-synthesis-qa-run-1-who-owns-payments/evidence.md",
+          source_path: "proposals/qa-synthesis-qa-run-1-who-owns-payments/source-qa-answer.json",
+          answer_digest: "a".repeat(64),
+        },
+        state.qaProposalResponse?.status ?? 201,
+      );
     }
 
     if (method === "GET" && url.startsWith("/api/qa/runs/")) {
@@ -652,6 +715,7 @@ function createFetchMock(state: FetchMockState = {}) {
           current_step: "qa.ask",
           runtime_provider: "claude-code",
           provider: "fake",
+          answer_digest: "a".repeat(64),
           generated_at: "2026-04-03T12:00:04Z",
           ...configuredPayload,
         },
@@ -1573,6 +1637,33 @@ describe("App", () => {
     expect(screen.queryByTestId("next-action-panel")).not.toBeInTheDocument();
   });
 
+  it("renders distinct Changes route models with server-authored Git truth", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
+
+    for (const view of ["overview", "evidence", "findings", "diff", "proposals", "publish"] as const) {
+      window.history.pushState({}, "", `/changes?run=run-1&view=${view}&source=snapshot&mode=rendered`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      expect(await screen.findByTestId(`changes-route-${view}`)).toBeInTheDocument();
+      expect(screen.getByTestId("changes-git-state")).toHaveTextContent("Git: dirty");
+    }
+  });
+
+  it("canonicalizes invalid explicit Changes identity during PopState with replace semantics", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+    await renderConsoleApp("/changes?run=run-1&view=evidence&source=snapshot&mode=rendered");
+
+    window.history.pushState({}, "", "/changes?run=run-1&view=invalid&source=foreign&mode=unsafe");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(await screen.findByTestId("route-notice")).toHaveTextContent("view, source, mode");
+    await waitFor(() => {
+      expect(`${window.location.pathname}${window.location.search}`).toBe(
+        "/changes?run=run-1&view=overview&source=snapshot&mode=rendered",
+      );
+    });
+  });
+
   it("renders Readiness V2 cards and compact runtime profile summary", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
@@ -1688,7 +1779,7 @@ describe("App", () => {
   it("sanitizes a stale current-workspace entity without inventing another selection", async () => {
     vi.stubGlobal("fetch", createFetchMock({
       knowledgeResponse: {
-        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "available",
+        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "promoted_current", status: "available",
         entities: [{ id: "svc.payments", type: "service", name: "Payments", path: "model/entities/svc.payments.yaml", provenance: { kind: "inference", confidence: 0.9 } }],
         edges: [], artifacts: [{ path: "model/entities/svc.payments.yaml", kind: "entity", name: "svc.payments.yaml" }], issues: [],
       },
@@ -1703,7 +1794,7 @@ describe("App", () => {
   it("sanitizes a stale current artifact without falling back to selected-run evidence", async () => {
     vi.stubGlobal("fetch", createFetchMock({
       runStarted: true,
-      knowledgeResponse: { version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "unavailable", entities: [], edges: [], artifacts: [], issues: [] },
+      knowledgeResponse: { version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "promoted_current", status: "unavailable", entities: [], edges: [], artifacts: [], issues: [] },
     }));
     await renderConsoleApp("/changes?view=evidence&source=current&artifact=reports%2Fmissing.md&mode=raw");
     expect(await screen.findByTestId("route-notice")).toHaveTextContent("reports/missing.md is unavailable in the current workspace");
@@ -2671,6 +2762,64 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/qa/runs/qa-run-1", expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
+  it("creates an explicit Ask proposal draft and routes to current Changes proposals with return context", async () => {
+    const proposalPath = "proposals/qa-synthesis-qa-run-1-who-owns-payments/proposal.md";
+    const fetchMock = createFetchMock({
+      artifactText: {
+        [proposalPath]: "# Who owns payments?\n\n## Evidence\n",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderConsoleApp();
+    navigateToStage("ask");
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+    expect(await screen.findByTestId("qa-create-proposal-btn")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("qa-create-proposal-btn"));
+    const dialog = await screen.findByRole("dialog", { name: "Create proposal draft" });
+    expect(dialog).toHaveTextContent("Ask remains read-only");
+    expect(dialog).toHaveTextContent("Citations: 1");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create proposal draft" }));
+
+    expect(await screen.findByTestId("changes-route-proposals")).toBeInTheDocument();
+    expect(screen.getByText("Return to Ask")).toBeInTheDocument();
+    expect(window.location.search).toContain("view=proposals");
+    expect(window.location.search).toContain("source=current");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/qa/runs/qa-run-1/proposal-draft",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining(`"expected_answer_digest":"${"a".repeat(64)}"`),
+      }),
+    );
+
+    fireEvent.click(screen.getByText("Return to Ask"));
+    expect(await screen.findByTestId("qa-panel")).toBeInTheDocument();
+  });
+
+  it("keeps Ask confirmation open on a stale proposal digest and offers answer reload", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      qaProposalResponse: {
+        status: 409,
+        body: { error: { code: "qa_answer_stale", message: "qa answer digest is stale" } },
+      },
+    }));
+
+    await renderConsoleApp();
+    navigateToStage("ask");
+    fireEvent.change(await screen.findByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
+    fireEvent.click(screen.getByTestId("qa-ask-btn"));
+    fireEvent.click(await screen.findByTestId("qa-create-proposal-btn"));
+    const dialog = await screen.findByRole("dialog", { name: "Create proposal draft" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create proposal draft" }));
+
+    expect(await screen.findByText("qa answer digest is stale")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Create proposal draft" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Reload selected answer" })).toBeInTheDocument();
+  });
+
   it("keeps an accepted Q&A run selected when the first detail GET fails and later recovers", async () => {
     const runID = "qa-start-accepted";
     let startCalls = 0;
@@ -3012,7 +3161,7 @@ describe("App", () => {
       qaRuns: [historyRun],
       qaRunResponses: { "qa-citation-1": historyRun },
       knowledgeResponse: {
-        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "current_workspace", status: "available",
+        version: 1, generated_at: "2026-07-15T00:00:00Z", source_mode: "promoted_current", status: "available",
         entities: [{ id: "svc.payments", type: "service", name: "Payments", path: "model/entities/svc.payments.yaml", provenance: { kind: "inference", confidence: 0.9 } }],
         edges: [], artifacts: [{ path: "model/entities/svc.payments.yaml", kind: "entity", name: "svc.payments.yaml" }], issues: [],
       },
@@ -4259,6 +4408,34 @@ describe("App", () => {
             ],
           });
         }
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}/snapshot`) {
+          const index = finalIndex(runID);
+          return jsonResponse({
+            run_id: runID,
+            status: "available",
+            issues: [],
+            artifacts: [
+              ...index.canonical_documents.map((document) => ({
+                id: document.id,
+                path: document.canonical_path,
+                read_path: document.staged_path,
+                canonical_path: document.canonical_path,
+                kind: document.kind,
+                label: document.title,
+                source_run_id: runID,
+                source_mode: "run_snapshot",
+              })),
+              {
+                path: finalIndexPath(runID),
+                read_path: finalIndexPath(runID),
+                kind: "taskrun",
+                label: "Final run index",
+                source_run_id: runID,
+                source_mode: "run_snapshot",
+              },
+            ],
+          });
+        }
         if (method === "GET" && url.startsWith(`/api/pipeline/runs/${runID}/logs?`)) {
           return jsonResponse({ run_id: runID, items: [], next_cursor: 0, eof: true });
         }
@@ -4391,6 +4568,41 @@ describe("App", () => {
             { path: "reports/taskruns/run-new/staging/final/final-run-index.json", kind: "taskrun", label: "Final run index" },
           ],
         });
+      }
+
+      for (const [runID, canonicalPath] of [
+        ["run-old", "reports/as-is/old.md"],
+        ["run-new", "reports/as-is/new.md"],
+      ] as const) {
+        if (method === "GET" && url === `/api/pipeline/runs/${runID}/snapshot`) {
+          const indexPath = `reports/taskruns/${runID}/staging/final/final-run-index.json`;
+          const stagedPath = `reports/taskruns/${runID}/staging/final/${canonicalPath}`;
+          return jsonResponse({
+            run_id: runID,
+            status: "available",
+            issues: [],
+            artifacts: [
+              {
+                id: `doc.${runID}`,
+                path: canonicalPath,
+                read_path: stagedPath,
+                canonical_path: canonicalPath,
+                kind: "report",
+                label: canonicalPath,
+                source_run_id: runID,
+                source_mode: "run_snapshot",
+              },
+              {
+                path: indexPath,
+                read_path: indexPath,
+                kind: "taskrun",
+                label: "Final run index",
+                source_run_id: runID,
+                source_mode: "run_snapshot",
+              },
+            ],
+          });
+        }
       }
 
       const snapshotArtifact = (runID: string, canonicalPath: string, body: string) => {

@@ -20,4 +20,16 @@ describe("ModalDialog", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it("closes on outside click and returns focus to the invoking control", () => {
+    const onCancel = vi.fn();
+    const { rerender } = render(<><button>Invoker</button><ModalDialog open={false} title="Context" description="Details" onCancel={onCancel} /></>);
+    const invoker = screen.getByRole("button", { name: "Invoker" });
+    invoker.focus();
+    rerender(<><button>Invoker</button><ModalDialog open title="Context" description="Details" onCancel={onCancel} /></>);
+    fireEvent.mouseDown(screen.getByRole("presentation"));
+    expect(onCancel).toHaveBeenCalledOnce();
+    rerender(<><button>Invoker</button><ModalDialog open={false} title="Context" description="Details" onCancel={onCancel} /></>);
+    expect(screen.getByRole("button", { name: "Invoker" })).toHaveFocus();
+  });
 });

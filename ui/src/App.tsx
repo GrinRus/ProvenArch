@@ -44,6 +44,7 @@ import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 import { loadArtifactText, loadKnowledgeAPI, loadWorkspaceHealthAPI } from "./lib/workspaceApi";
+import type { QAProposalDraftResponse } from "./lib/qaApi";
 
 export default function App() {
   const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location, true));
@@ -53,6 +54,7 @@ export default function App() {
   const [routeNotice, setRouteNotice] = useState("");
   const [askOpen, setAskOpen] = useState(false);
   const [askReturnRoute, setAskReturnRoute] = useState<AppRoute | null>(null);
+  const [createdQAProposal, setCreatedQAProposal] = useState<QAProposalDraftResponse | null>(null);
   const [knowledge, setKnowledge] = useState<KnowledgeResponse | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [knowledgeError, setKnowledgeError] = useState("");
@@ -267,6 +269,10 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const nextRoute = parseAppRoute(window.location, consoleReady);
+      if (nextRoute.invalid.length > 0) {
+        const canonicalPath = formatAppRoute(nextRoute);
+        window.history.replaceState({}, "", canonicalPath);
+      }
       setRoute(nextRoute);
       setActiveStageState(stageForRoute(nextRoute));
       setRouteNotice(nextRoute.invalid.length ? `Unsupported URL context was removed: ${nextRoute.invalid.join(", ")}.` : "");
@@ -589,7 +595,7 @@ export default function App() {
   }, [navigateRoute]);
 
   const handleOpenArtifactAndReview = useCallback(async (path: string) => {
-    await handleOpenArtifact(path);
+    await handleOpenArtifact(path, route.mode ?? "rendered");
     const artifactKey = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.path === path)?.id || path;
     navigateRoute({
       destination: "changes",
@@ -620,6 +626,36 @@ export default function App() {
     setAskOpen(false);
     await handleOpenCurrentArtifact(path);
   }, [handleOpenCurrentArtifact, route]);
+
+  const handleQAProposalCreated = useCallback(async (proposal: QAProposalDraftResponse) => {
+    setCreatedQAProposal(proposal);
+    setAskReturnRoute(route);
+    setAskOpen(false);
+    await loadGitDiff();
+    const content = await loadArtifactText(proposal.proposal_path);
+    if (content !== null) {
+      setCurrentArtifactPath(proposal.proposal_path);
+      setCurrentArtifactContent(content);
+    }
+    navigateRoute({
+      destination: "changes",
+      changesView: "proposals",
+      source: "current",
+      artifact: proposal.proposal_path,
+      mode: "rendered",
+      invalid: [],
+    });
+  }, [loadGitDiff, navigateRoute, route]);
+
+  const handleOpenCreatedProposalArtifact = useCallback(async (path: string) => {
+    const content = await loadArtifactText(path);
+    if (content === null) {
+      setRouteNotice(`Proposal artifact ${path} is unavailable in the current workspace.`);
+      return;
+    }
+    setCurrentArtifactPath(path);
+    setCurrentArtifactContent(content);
+  }, []);
 
   async function handleSelectRunAndRoute(id: string) {
     if (destination === "runs") navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
@@ -669,7 +705,7 @@ export default function App() {
     }
     if (selectedArtifact !== match.path && restoredArtifactRef.current !== route.artifact) {
       restoredArtifactRef.current = route.artifact;
-      void handleOpenArtifact(match.path);
+      void handleOpenArtifact(match.path, route.mode ?? "rendered");
     }
   }, [diagramArtifacts, evidenceSnapshot.status, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route, selectedArtifact]);
 
@@ -906,9 +942,30 @@ export default function App() {
 			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
 			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
 		  }}
-		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, runLogs, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
-		  proposals={{ artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, proposalBranch, gitStatus, runLogs, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onOpenArtifact: (path) => void handleOpenArtifactAndReview(path), onGoPublish: () => navigateRoute({ ...route, destination: "changes", changesView: "publish", invalid: [] }) }}
-		  publish={{ busy, gitMessage, proposalBranch, gitStatus, gitError, artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, externalGateItems: publishExternalGateItems, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onGitMessageChange: setGitMessage, onProposalBranchChange: setProposalBranch, onCommit: () => void handleGitCommit(), onCreateProposalBranch: () => void handleCreateProposalBranch(), onPreviewArtifact: (path) => void handleOpenArtifact(path) }}
+		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, runLogs, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
+		  proposals={{
+		    artifacts: [
+		      ...nonDiagramArtifacts,
+		      ...diagramArtifacts,
+		      ...(createdQAProposal ? [
+		        { id: createdQAProposal.proposal_path, path: createdQAProposal.proposal_path, kind: "proposal", label: "Ask proposal draft" },
+		        { id: createdQAProposal.evidence_path, path: createdQAProposal.evidence_path, kind: "proposal-evidence", label: "Ask proposal evidence" },
+		        { id: createdQAProposal.source_path, path: createdQAProposal.source_path, kind: "proposal-source", label: "Ask proposal source" },
+		      ] : []),
+		    ],
+		    selectedArtifact: createdQAProposal && currentArtifactPath.startsWith(`${createdQAProposal.path}/`) ? currentArtifactPath : selectedArtifact,
+		    selectedArtifactContent: createdQAProposal && currentArtifactPath.startsWith(`${createdQAProposal.path}/`) ? currentArtifactContent : selectedArtifactContent,
+		    openQuestions,
+		    proposalBranch,
+		    gitStatus,
+		    runLogs,
+		    gitDiff,
+		    gitDiffStatus,
+		    onLoadGitDiff: handleLoadGitDiff,
+		    onOpenArtifact: (path) => void (createdQAProposal && path.startsWith(`${createdQAProposal.path}/`) ? handleOpenCreatedProposalArtifact(path) : handleOpenArtifactAndReview(path)),
+		    onGoPublish: () => navigateRoute({ ...route, destination: "changes", changesView: "publish", invalid: [] }),
+		  }}
+		  publish={{ busy, gitMessage, proposalBranch, gitStatus, gitError, artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, externalGateItems: publishExternalGateItems, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onGitMessageChange: setGitMessage, onProposalBranchChange: setProposalBranch, onCommit: () => void handleGitCommit(), onCreateProposalBranch: () => void handleCreateProposalBranch(), onPreviewArtifact: (path) => void handleOpenArtifact(path, route.mode ?? "rendered") }}
 		  currentArtifact={currentArtifactPath ? { path: currentArtifactPath, content: currentArtifactContent } : null}
 		  viewerMode={route.mode ?? "rendered"}
 		  askReturnAvailable={askReturnRoute !== null}
@@ -923,6 +980,7 @@ export default function App() {
 	  {destination === "knowledge" ? (
 		<KnowledgePage
 		  knowledge={knowledge}
+		  workspaceHealth={workspaceHealthReport}
 		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
 		  error={knowledgeError}
 		  view={route.knowledgeView ?? "overview"}
@@ -1069,7 +1127,7 @@ export default function App() {
         description="Current workspace · read-only. Q&A execution and history do not alter Change Review or Publish acceptance."
         onCancel={() => setAskOpen(false)}
       >
-        <AskStagePanel onOpenArtifact={(path) => void handleAskCitation(path)} />
+        <AskStagePanel onOpenArtifact={(path) => void handleAskCitation(path)} onProposalCreated={(proposal) => void handleQAProposalCreated(proposal)} />
       </ModalDialog>
       <ModalDialog
         open={gitConfirmation !== null}
@@ -1281,7 +1339,7 @@ export function deriveNextAction(
         if (state.releaseBlockersCount > 0) {
           return {
             label: "Verify release blockers",
-            description: "Inspect release verdict evidence before making a release decision.",
+            description: "Inspect validation evidence before making a publication decision.",
             primaryActionId: "review",
           };
         }
