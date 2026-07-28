@@ -525,8 +525,13 @@ func (s *Service) waitForRunTerminal(ctx context.Context, runID string) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		info, ok := s.GetRun(runID)
-		if !ok || info.Status == RunStatusSucceeded || info.Status == RunStatusFailed || info.Status == RunStatusCanceled {
+		s.mu.RLock()
+		record, ok := s.runs[runID]
+		terminal := !ok || (record != nil && isTerminalRunStatus(record.info.Status))
+		_, ownsCancel := s.runCancels[runID]
+		ownsActiveSlot := s.activeRunID == runID
+		s.mu.RUnlock()
+		if terminal && !ownsCancel && !ownsActiveSlot {
 			return nil
 		}
 		select {
