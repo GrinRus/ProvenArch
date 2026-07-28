@@ -126,19 +126,30 @@ func TestComposeArtifactOnlyPromptAddsCollectLegacyHygieneSection(t *testing.T) 
 	}
 }
 
-func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *testing.T) {
+func TestComposeArtifactOnlyPromptUsesBoundedQwenToolFirstCollectContract(t *testing.T) {
 	t.Parallel()
 
+	repoRoot := t.TempDir()
+	for _, name := range []string{"README.md", "pom.xml"} {
+		if err := os.WriteFile(filepath.Join(repoRoot, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatalf("write evidence file: %v", err)
+		}
+	}
 	task := acpruntime.Task{
 		RunID:        "run-1",
 		StepID:       "refresh.step1.collect",
 		ArtifactRoot: "reports/taskruns/run-1/staging/shards/root-files",
 		WriteRoot:    "/tmp/write-root",
-		RepoScopes:   []string{"bank"},
-		PathScopes:   []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
-		ShardID:      "bank-root-files",
-		DomainID:     "bank",
-		AgentRole:    "shard-analyst",
+		ReadContextRoots: []string{
+			repoRoot,
+		},
+		RepoScopes: []string{"bank"},
+		PathScopes: []string{".gitignore", "LICENSE", "Makefile", "README.md", "pom.xml"},
+		ShardID:    "bank-root-files",
+		DomainID:   "bank",
+		AgentRole:  "shard-analyst",
+		RefreshIntentContext: "REFRESH AFFECTED-SCOPE CONTEXT\n" +
+			"changed=modified:README.md\ncommit=abc123 clarify deployment",
 	}
 
 	claudePrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderClaudeCode, task)
@@ -146,64 +157,59 @@ func TestComposeArtifactOnlyPromptKeepsRefreshCollectFirstActionTaskSpecific(t *
 	codexPrompt := ComposeArtifactOnlyPrompt(acpruntime.ProviderCodexCode, task)
 
 	claudeTail := strings.TrimPrefix(claudePrompt, "You are ACP runtime provider \"claude-code\".\n\n")
-	qwenTail := strings.TrimPrefix(qwenPrompt, "You are ACP runtime provider \"qwen-code\".\n\n")
 	codexTail := strings.TrimPrefix(codexPrompt, "You are ACP runtime provider \"codex-code\".\n\n")
-	if claudeTail != qwenTail || claudeTail != codexTail {
-		t.Fatalf("expected collect providers to share identical enforced prompt body\nclaude:\n%s\n\nqwen:\n%s\n\ncodex:\n%s", claudeTail, qwenTail, codexTail)
+	if claudeTail != codexTail {
+		t.Fatalf("expected claude/codex collect providers to share identical enforced prompt body\nclaude:\n%s\n\ncodex:\n%s", claudeTail, codexTail)
+	}
+	if qwenPrompt == claudePrompt || qwenPrompt == codexPrompt {
+		t.Fatalf("expected qwen collect prompt to use its bounded tool-first contract")
 	}
 	prompt := qwenPrompt
 	for _, token := range []string{
-		"COLLECT EVIDENCE-FIRST ARTIFACT PAIR:",
-		"FIRST COLLECT BOUNDED WRITE ACTION:",
-		"COLLECT FINAL WRITE REQUIREMENT:",
-		"COLLECT MANIFEST TASK SKELETON:",
-		"SKELETON USE:",
-		"Artifact-only contract:",
-		"DOCS-FIRST FILESYSTEM CONTRACT:",
-		`"step_id": "refresh.step1.collect"`,
-		`"path": "README.md"`,
-		`"questions": [`,
-		`"missing": [`,
-		"next filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write of both exact targets",
-		"inspect at most 8 representative entrypoint/build/config/source files",
-		"Read at most the first 6000 bytes from any file.",
-		"Do not emit analysis-only prose",
-		"Before both targets exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings",
-		"direct shell heredoc/printf/tee literal content",
-		"start by writing an evidence-backed artifact pair; do not write a seed-only pair",
-		"Normal collect must not depend on collect_pair_repair as the expected path to success.",
-		"Copying this skeleton unchanged is invalid",
+		`You are ACP runtime provider "qwen-code".`,
+		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"next response block must be read_file tool calls",
+		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"Do not plan, explain, use a todo, or generate a shell/Python/template writer.",
+		`step_id="refresh.step1.collect"`,
+		`path="root-overview.md"`,
+		`canonical_path="reports/as-is/bank-root-files/root-overview.md"`,
+		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
+		"Values such as document, report, source, observed, inferred, or asserted are invalid.",
+		"Refresh collect requires at least one semantic question and at least three concrete coverage.missing items.",
+		"Current source files and observed evidence are authoritative; this bounded refresh intent is a secondary hint only:",
+		"changed=modified:README.md",
+		"commit=abc123 clarify deployment",
+		"Repository evidence candidates (choose up to 4):",
+		"- README.md",
+		"- pom.xml",
 	} {
 		if !strings.Contains(prompt, token) {
-			t.Fatalf("expected refresh collect prompt to contain %q, got:\n%s", token, prompt)
+			t.Fatalf("expected qwen collect prompt to contain %q, got:\n%s", token, prompt)
 		}
 	}
 	for _, forbidden := range []string{
-		"FIRST COLLECT ARTIFACT PAIR COMMAND:",
-		"<<'ACP_COLLECT_DOC'",
-		"<<'ACP_MANIFEST_JSON'",
-		"ACP_COLLECT_BOOTSTRAP_REPLACE_BEFORE_EXIT",
-		"bootstrap-only",
-		"unchanged bootstrap pair is an artifact_quality blocker",
+		"COLLECT MANIFEST TASK SKELETON:",
+		"DOCS-FIRST FILESYSTEM CONTRACT:",
+		"run_shell_command",
+		"python3 heredoc",
 	} {
 		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("normal collect prompt must not contain bootstrap marker/wording %q:\n%s", forbidden, prompt)
+			t.Fatalf("qwen collect prompt must omit bulky/script token %q:\n%s", forbidden, prompt)
 		}
 	}
-	if !strings.HasPrefix(prompt, "You are ACP runtime provider \"qwen-code\".\n\nCOLLECT EVIDENCE-FIRST ARTIFACT PAIR:") {
-		t.Fatalf("expected collect evidence-first section immediately after provider identity, got:\n%s", prompt)
+	if got, max := len([]byte(prompt)), 6*1024; got > max {
+		t.Fatalf("qwen normal collect prompt is %d bytes, want at most %d", got, max)
 	}
-	if got := strings.Count(prompt, "COLLECT MANIFEST TASK SKELETON:"); got != 1 {
-		t.Fatalf("expected collect task skeleton section exactly once, got %d:\n%s", got, prompt)
+}
+
+func TestBoundedQwenCollectIntentIsRuneSafe(t *testing.T) {
+	t.Parallel()
+	if got := boundedQwenCollectIntent("  абвгд  ", 3); got != "абв…" {
+		t.Fatalf("bounded intent = %q, want %q", got, "абв…")
 	}
-	firstActionIndex := strings.Index(prompt, "FIRST COLLECT BOUNDED WRITE ACTION:")
-	artifactContractIndex := strings.Index(prompt, "Artifact-only contract:")
-	docFirstIndex := strings.Index(prompt, "DOCS-FIRST FILESYSTEM CONTRACT:")
-	if firstActionIndex < 0 || artifactContractIndex < 0 || docFirstIndex < 0 {
-		t.Fatalf("expected evidence-first, artifact contract, and doc-first sections:\n%s", prompt)
-	}
-	if !(firstActionIndex < artifactContractIndex && artifactContractIndex < docFirstIndex) {
-		t.Fatalf("expected collect evidence-first section before broad artifact/doc-first contract:\n%s", prompt)
+	if got := boundedQwenCollectIntent("short", 10); got != "short" {
+		t.Fatalf("short intent = %q, want short", got)
 	}
 }
 
@@ -954,7 +960,7 @@ func TestComposeCollectArtifactPairRepairPromptUsesCompactLiveRecoveryForStalls(
 	}
 }
 
-func TestComposeCollectArtifactPairRepairPromptUsesQwenToolFirstStreamRetry(t *testing.T) {
+func TestComposeCollectArtifactPairRepairPromptUsesQwenReadThenWriteForAnyPreArtifactStall(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := t.TempDir()
@@ -975,16 +981,19 @@ func TestComposeCollectArtifactPairRepairPromptUsesQwenToolFirstStreamRetry(t *t
 		ExpectedArtifacts: []string{"shard-pack-manifest.json"},
 	}
 
-	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderQwenCode, task, fmt.Errorf("collect_pair_repair_stream_retry: runtime_stalled_before_artifacts"))
-	if got, max := len([]byte(prompt)), 4*1024; got > max {
-		t.Fatalf("Qwen stream retry prompt is %d bytes, want at most %d", got, max)
+	prompt := ComposeCollectArtifactPairRepairPrompt(acpruntime.ProviderQwenCode, task, fmt.Errorf("collect pair recovery stalled: runtime_stalled_before_artifacts"))
+	if got, max := len([]byte(prompt)), 6*1024; got > max {
+		t.Fatalf("Qwen pre-artifact repair prompt is %d bytes, want at most %d", got, max)
 	}
 	for _, token := range []string{
-		"QWEN COLLECT PAIR STREAM RETRY — TOOL CALL FIRST:",
-		"next response block must be a run_shell_command tool call",
-		"Read at most 4 candidates and 4000 bytes per file",
+		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"next response block must be read_file tool calls",
+		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"at most 4 listed evidence files and at most 4000 bytes per file",
 		"documents[0]: id, kind, title, path=\"root-overview.md\"",
 		"canonical_path=\"reports/as-is/payments/root-overview.md\"",
+		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
+		"Values such as document, report, source, observed, inferred, or asserted are invalid.",
 		"Repository evidence candidates (choose up to 4):",
 		"- README.md",
 	} {
@@ -993,10 +1002,11 @@ func TestComposeCollectArtifactPairRepairPromptUsesQwenToolFirstStreamRetry(t *t
 		}
 	}
 	for _, forbidden := range []string{
-		"CANONICAL SEMANTIC SHAPE:",
 		"COLLECT PAIR RECOVERY CHECKLIST:",
 		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
 		"FINAL SELF-CHECK COMMAND:",
+		"run_shell_command",
+		"python3 heredoc",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("Qwen stream retry prompt must omit bulky token %q:\n%s", forbidden, prompt)

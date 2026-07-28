@@ -10,6 +10,9 @@ import (
 )
 
 func ComposeArtifactOnlyPrompt(provider acpruntime.Provider, task acpruntime.Task) string {
+	if provider == acpruntime.ProviderQwenCode && acpruntime.IsCollectStep(task.StepID) {
+		return composeQwenToolFirstCollectPrompt(task, nil)
+	}
 	sections := []string{
 		fmt.Sprintf("You are ACP runtime provider %q.", provider),
 	}

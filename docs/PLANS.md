@@ -60,71 +60,70 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260728-r3-provenance-kind-shape-recovery
+EP-20260728-r3-qwen-tool-first-collect
 
 ### Context
-Fresh Epic 18 R3 smoke `smoke-tiny-bank-20260728T065407Z` on qualification SHA
-`5422f9b755ba879a58f7eb39c5320d845ae409e5` stopped after Qwen authored an otherwise
-evidence-backed collect manifest with natural-language provenance kinds `observed` and `inferred`.
-The strict schema correctly rejected those values, while the provider-authored manifest-only repair
-stalled without a fresh valid mutation. R3 must restart from a new qualification SHA after a
-provider-free, reviewable runtime-shape recovery fix.
+After PR #177 merged, qualification SHA `e54b4ce6b2d809d56d2de8c1c369e19724a3b7b3`
+passed `make offline-closure`. Fresh smoke `smoke-tiny-bank-20260728T083406Z` then showed Qwen
+spending the normal and focused collect windows in analysis before filesystem writes. The compact
+stream retry eventually authored a manifest with arbitrary `provenance.kind="document"` and
+required provider manifest repair. The run was stopped because this `repair_heavy`/`stall_pressure`
+path is not acceptable R3 evidence.
 
 ### Goals (must have)
-- [x] Canonicalize only the unambiguous lexical aliases `observed`, `inferred`, and `asserted` to
-      `observation`, `inference`, and `assertion` in bounded collect-manifest shape recovery.
-- [x] Accept the recovery only when the complete candidate passes the existing strict manifest and
-      repository-evidence validation.
-- [x] Emit explicit runtime diagnostic/warning evidence with before/after digests and replacement
-      count.
-- [x] Cover success, arbitrary-invalid-kind rejection, and rollback when another manifest defect
-      remains.
-- [x] Pass `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure`.
-- [ ] Merge the bounded fix PR, record the new qualification SHA, and restart R3 from a fresh smoke
-      matrix ID.
+- [x] Give Qwen init/refresh collect a bounded provider-specific prompt whose first actions are at
+      most four `read_file` calls followed immediately by `write_file` for markdown and manifest.
+- [x] Use the same bounded prompt for the first Qwen pre-artifact collect-pair repair, rather than
+      waiting for a second stream-retry marker.
+- [x] State the exact closed `provenance.kind` enum and reject `document`/other semantic aliases
+      without changing schema or deterministic recovery eligibility.
+- [x] Preserve the existing collect prompt behavior for Claude and Codex.
+- [x] Pass focused prompt tests and the full provider-free deterministic DoD/offline closure.
+- [ ] Merge the bounded fix PR, qualify the new `main` SHA, and restart R3 from a fresh smoke ID.
 
 ### Non-goals
-- [x] Do not change schemas, public runtime contracts, canonical matrices, curated repositories,
-      provider aliases, model selection, or timeout profiles.
-- [x] Do not accept arbitrary provenance kinds or weaken raw schema validation.
-- [x] Do not resume R3 from the failed/partial matrix ID or the old qualification SHA.
+- [x] Do not change schemas, public runtime contracts, provider commands/models, canonical matrices,
+      curated repositories, retry counts or timeout profiles.
+- [x] Do not add `document` or any other ambiguous value to the deterministic recovery allowlist.
+- [x] Do not accept the stopped/partial smoke or mix its artifacts with later evidence.
 
 ### Approach
-1. Add an atomic, rollback-safe collect-manifest provenance-kind shape recovery beside the existing
-   missing-findings recovery.
-2. Route eligible invalid manifests through it before provider-authored manifest repair, preserving
-   strict fallback for every non-eligible value or remaining defect.
-3. Add provider-free unit/integration tests and synchronize the live runbook recovery policy.
-4. Merge the bounded fix PR, qualify the new `main` SHA offline, then restart R3 from fresh smoke.
+1. Select a compact Qwen-only normal collect prompt before the shared large collect prompt.
+2. Reuse it for Qwen `runtime_stalled_before_artifacts` pair recovery on the first focused attempt.
+3. Keep exact task identity, targets, evidence roots/scopes and canonical semantic object examples
+   while removing shell/Python/template-writer ambiguity.
+4. Add bounded-size/provider-isolation/enum regressions, synchronize the runbook, pass DoD, merge,
+   qualify a new SHA and restart with fresh smoke.
 
 ### Files expected to change
-- `internal/runtime/providercommon/collect_manifest_shape_recovery.go`
-- `internal/runtime/providercommon/collect_manifest_shape_recovery_test.go`
-- `internal/runtime/providercommon/artifact_recovery.go`
-- `internal/runtime/providercommon/diagnostics.go`
-- `fixtures/scenarios/collect-manifest-provenance-kind-aliases/*`
+- `internal/runtime/promptcontract/promptcontract.go`
+- `internal/runtime/promptcontract/collect_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/runtime/qwencode/runner_test.go`
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - `docs/PLANS.md`
+- `docs/archive/PLANS_ARCHIVE_2026-07.md`
 
 ### Acceptance criteria
-- [x] Tests prove only the three explicit aliases are rewritten.
-- [x] Candidate validation and rollback preserve strict failure for unrelated defects.
-- [x] Diagnostics distinguish runtime shape recovery from provider-authored artifact quality.
-- [x] Full deterministic DoD and offline closure pass without live network dependencies.
+- [x] Qwen normal and pre-artifact repair prompts are at most 6 KiB and require
+      `read_file -> write_file(markdown) -> write_file(manifest)`.
+- [x] Tests require `observation|inference|assertion` and explicitly forbid `document`.
+- [x] Claude/Codex prompt bodies remain unchanged.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
 
 ### Risks
-- Runtime normalization could conceal semantic drift if broadened; eligibility is therefore a closed
-  alias map and the complete recovered manifest must pass existing validation unchanged.
+- A prompt that is too small could omit required evidence or refresh semantics; tests therefore pin
+  task identity, exact targets, canonical semantic examples, evidence candidates and refresh minima.
 
 ### Progress log
-- 2026-07-28: Fresh qwen smoke stopped on invalid `provenance.kind=observed|inferred`; R3 paused and
-  this provider-free remediation plan opened.
-- 2026-07-28: Implemented exact-alias atomic recovery with strict candidate validation, rollback,
-  digest/count diagnostics, runtime warning, readable input/golden fixtures and regression tests.
-  `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` passed on Go
-  1.25.10 with Node 22.21.1/npm 10.9.4. The first full `make test` observed two load-sensitive
-  Claude preflight timing failures; both passed in isolation, and the complete suite then passed
-  twice (standalone and inside offline closure).
+- 2026-07-28: Stopped fresh smoke after the second shard required two pre-artifact stall recoveries
+  and manifest-only repair for `provenance.kind="document"`; no later R3 phase was started.
+- 2026-07-28: Added the Qwen-only bounded normal/first-focused collect contract, rune-safe bounded
+  refresh intent, exact task/target/evidence context and adapter/provider-isolation regressions.
+  `make contracts`, `make test`, `make lint`, `make build` and `make offline-closure` passed with Go
+  1.25.10 and Node 22.21.1/npm 10.9.4. The first full `make test` exposed two deterministic Qwen
+  stub scenarios that could not recover `write_root` from the compact prompt; making `write_root`
+  explicit fixed both, and the complete suite then passed standalone and inside offline closure.
 
 ### Plan ID
 EP-20260722-post-implementation-trust-audit

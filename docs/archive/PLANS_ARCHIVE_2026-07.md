@@ -1420,5 +1420,21 @@ EP-20260726-epic22o-offline-closure
   scenarios and left no tracked drift.
 - Live E2E was intentionally not run. Epic 18 R3 remains active and must use this exact code input.
 
+---
+
+### Plan ID
+EP-20260728-r3-provenance-kind-shape-recovery
+
+### Result
+- Fresh smoke `smoke-tiny-bank-20260728T065407Z` exposed otherwise valid collect semantic objects
+  using the unambiguous lexical aliases `observed`, `inferred` and `asserted`.
+- PR #177 added exact-alias-only atomic recovery under unchanged full schema/repository-evidence
+  validation, rollback, digest/count diagnostics, runtime warning and readable input/golden fixtures.
+- Full DoD/offline closure and all 11 PR checks passed; PR #177 merged as
+  `e54b4ce6b2d809d56d2de8c1c369e19724a3b7b3`.
+- The merge SHA passed a fresh detached-worktree `make offline-closure`, and R3 restarted as
+  `smoke-tiny-bank-20260728T083406Z`. That smoke found a separate Qwen tool-first prompt defect, so
+  no stopped/partial matrix evidence was promoted.
+
 
 ---
