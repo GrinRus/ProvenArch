@@ -60,6 +60,65 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-r3-preflight-retry-test-quiescence
+
+### Context
+Fresh standalone regression matrix `regres-fast-bank-openedx-20260728T144845Z` stopped before
+provider execution because the deterministic precheck failed
+`test_claude_artifact_smoke_retries_timeout_even_with_output`. The test used a two-second real
+process timeout and assumed the first shell stub would be scheduled soon enough to persist its
+attempt counter. Under the loaded full Python suite that assumption failed once; 30 isolated
+repetitions then passed, confirming a timing-sensitive test fixture rather than a provider or
+production harness failure. The partial matrix is not qualification evidence.
+
+### Goals (must have)
+- [x] Replace wall-clock-dependent Claude retry-policy fixtures with deterministic mocked probe
+      outcomes for both empty-output and output-bearing timeouts.
+- [x] Preserve assertions that exactly one retry occurs and a valid second-attempt sentinel produces
+      `ready`/`artifact_smoke=passed`.
+- [x] Pass focused stress plus the full pinned provider-free DoD/offline closure.
+- [ ] Merge the isolated fix and restart R3 from a new qualification SHA and fresh smoke ID.
+
+### Non-goals
+- [x] Do not change production preflight logic, provider commands, timeout/retry budgets, canonical
+      matrices, curated repositories, schemas or runtime contracts.
+- [x] Do not accept any profile from the stopped regression matrix as R3 evidence.
+
+### Approach
+1. Mock only the process supervisor boundary in the two retry-policy unit tests.
+2. Return a real version result, raise a deterministic first-attempt `TimeoutExpired`, and write the
+   expected sentinel on the second artifact-smoke attempt.
+3. Stress the focused tests, run the full deterministic DoD/offline closure, merge, and restart all
+   live phases from the new `main` SHA.
+
+### Files expected to change
+- `scripts/tests/write_batch_preflight_test.py`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Both Claude timeout retry tests are wall-clock independent and assert exactly two smoke
+      attempts.
+- [x] Focused tests pass repeatedly under load.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass with
+      the pinned toolchains.
+
+### Risks
+- Over-mocking could stop exercising process-group termination. This slice keeps production code
+  unchanged and scopes the mocked boundary to retry-policy tests; watchdog process-group behavior
+  remains covered separately.
+
+### Progress log
+- 2026-07-28: Stopped the fresh regression matrix after the bank profile reported
+  `precheck_failed`; Open edX had only begun its own precheck and is not accepted. The failing test
+  passed 30 consecutive isolated repetitions, confirming a scheduler-sensitive fixture.
+- 2026-07-28: Replaced both wall-clock retry-policy fixtures with deterministic supervisor outcomes.
+  The two focused cases passed 200 consecutive paired repetitions; the full test module passed
+  `32/32`; pinned offline closure passed race suites, 90 readable fixtures, UI `158/158`, mock E2E
+  `7/7`, Go, Python `263/263`, contracts, lint, build and deterministic embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260728-r3-qwen-scope-array-contract
 
 ### Context

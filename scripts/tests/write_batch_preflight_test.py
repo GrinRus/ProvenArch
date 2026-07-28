@@ -1,10 +1,12 @@
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +46,49 @@ class WriteBatchPreflightTest(unittest.TestCase):
         path.write_text(body, encoding="utf-8")
         path.chmod(0o755)
         return str(path)
+
+    def _probe_claude_artifact_smoke_timeout_retry(
+        self,
+        timeout_output: str,
+    ) -> tuple[dict[str, object], int]:
+        smoke_attempts = 0
+
+        def fake_run_probe_command(
+            command: str,
+            args: list[str],
+            repo_root: str,
+            stdin_text: str = "",
+            env_extra: dict[str, str] | None = None,
+            timeout_sec: int | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            del repo_root, stdin_text
+            nonlocal smoke_attempts
+            if args == ["--version"]:
+                return subprocess.CompletedProcess(
+                    [command, *args],
+                    0,
+                    "2.1.85 (Claude Code)\n",
+                    "",
+                )
+
+            smoke_attempts += 1
+            if smoke_attempts == 1:
+                raise subprocess.TimeoutExpired(
+                    [command, *args],
+                    timeout_sec or 0,
+                    output=timeout_output,
+                    stderr="",
+                )
+
+            assert env_extra is not None
+            sentinel = Path(env_extra["ACP_PREFLIGHT_SMOKE_SENTINEL"])
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text(env_extra["ACP_PREFLIGHT_SMOKE_TEXT"] + "\n", encoding="utf-8")
+            return subprocess.CompletedProcess([command, *args], 0, "", "")
+
+        with mock.patch.object(self.module, "run_probe_command", side_effect=fake_run_probe_command):
+            result = self.module.probe_provider_readiness("claude", "/test/claude", str(REPO_ROOT))
+        return result, smoke_attempts
 
     def test_probe_provider_readiness_returns_not_selected(self) -> None:
         result = self.module.probe_provider_readiness("qwen", "not-selected", str(REPO_ROOT))
@@ -273,72 +318,20 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertIn("-p", args)
 
     def test_claude_artifact_smoke_retries_timeout_once(self) -> None:
-        attempts = self.root / "claude-smoke-attempts"
-        command = self._write_script(
-            "claude-flaky-artifact-smoke-stub",
-            "#!/bin/sh\n"
-            f"attempts='{attempts}'\n"
-            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
-            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
-            "  count=0\n"
-            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
-            "  count=$((count + 1))\n"
-            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
-            "  if [ \"$count\" = \"1\" ]; then sleep 3; exit 0; fi\n"
-            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
-            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
-            "  exit 0\n"
-            "fi\n"
-            "printf '%s\n' 'ACP_READY'\n",
-        )
-        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
-        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
-        try:
-            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
-        finally:
-            if old_timeout is None:
-                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
-            else:
-                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+        result, attempts = self._probe_claude_artifact_smoke_timeout_retry("")
 
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
         self.assertEqual("passed", result["artifact_smoke"])
-        self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
+        self.assertEqual(2, attempts)
 
     def test_claude_artifact_smoke_retries_timeout_even_with_output(self) -> None:
-        attempts = self.root / "claude-smoke-output-attempts"
-        command = self._write_script(
-            "claude-flaky-artifact-smoke-output-stub",
-            "#!/bin/sh\n"
-            f"attempts='{attempts}'\n"
-            "if [ \"${1:-}\" = \"--version\" ]; then printf '%s\n' '2.1.85 (Claude Code)'; exit 0; fi\n"
-            "if [ -n \"${ACP_PREFLIGHT_SMOKE_SENTINEL:-}\" ]; then\n"
-            "  count=0\n"
-            "  if [ -f \"$attempts\" ]; then count=$(cat \"$attempts\"); fi\n"
-            "  count=$((count + 1))\n"
-            "  printf '%s\\n' \"$count\" > \"$attempts\"\n"
-            "  if [ \"$count\" = \"1\" ]; then printf '%s\\n' 'transient smoke output'; sleep 3; exit 0; fi\n"
-            "  mkdir -p \"$(dirname \"$ACP_PREFLIGHT_SMOKE_SENTINEL\")\"\n"
-            "  printf '%s\\n' \"$ACP_PREFLIGHT_SMOKE_TEXT\" > \"$ACP_PREFLIGHT_SMOKE_SENTINEL\"\n"
-            "  exit 0\n"
-            "fi\n"
-            "printf '%s\n' 'ACP_READY'\n",
-        )
-        old_timeout = os.environ.get("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC")
-        os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = "2"
-        try:
-            result = self.module.probe_provider_readiness("claude", command, str(REPO_ROOT))
-        finally:
-            if old_timeout is None:
-                os.environ.pop("ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC", None)
-            else:
-                os.environ["ACP_PREFLIGHT_HEADLESS_PROBE_TIMEOUT_SEC"] = old_timeout
+        result, attempts = self._probe_claude_artifact_smoke_timeout_retry("transient smoke output")
 
         self.assertEqual("ready", result["status"])
         self.assertEqual("", result["subclass"])
         self.assertEqual("passed", result["artifact_smoke"])
-        self.assertEqual("2", attempts.read_text(encoding="utf-8").strip())
+        self.assertEqual(2, attempts)
 
     def test_claude_artifact_smoke_preserves_timeout_output_after_exhausted_retry(self) -> None:
         attempts = self.root / "claude-smoke-output-exhausted-attempts"
