@@ -544,9 +544,6 @@ func assessLiveReportSurfaceSignals(ws workspace.Root, ctx reports.ReportRenderC
 
 func overviewLooksPlaceholder(text string) bool {
 	lower := strings.ToLower(text)
-	if strings.Contains(lower, "no ") && strings.Contains(lower, " yet") {
-		return true
-	}
 	placeholderMarkers := []string{
 		"provider wrote this draft artifact under the required draft_final_root",
 		"draft artifact under the required draft_final_root",
@@ -557,6 +554,9 @@ func overviewLooksPlaceholder(text string) bool {
 		}
 	}
 	for _, line := range strings.Split(lower, "\n") {
+		if strings.Contains(line, "no ") && strings.Contains(line, " yet") {
+			return true
+		}
 		trimmed := strings.TrimSpace(strings.TrimLeft(line, "#-* "))
 		if trimmed == "placeholder" || trimmed == "todo" ||
 			strings.HasPrefix(trimmed, "placeholder:") || strings.HasPrefix(trimmed, "todo:") ||
