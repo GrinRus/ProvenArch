@@ -37,7 +37,37 @@ var (
 		regexp.MustCompile(`(?i)\bshard[- ]packs?(?:[- ]manifests?)?\b`),
 		regexp.MustCompile(`(?i)\bplanned\s*=\s*\d+\b.*\bsucceeded\s*=\s*\d+\b.*\bfailed\s*=\s*\d+\b.*\bincomplete\s*=\s*\d+\b`),
 	}
+	architectureHomeProcessNarrationMarkers = []string{
+		"runtime provider",
+		"provider execution",
+		"provider generated",
+		"manifest recap",
+		"taskrun mechanics",
+		"derived from the run",
+		"derived from run",
+		"current run collect",
+		"current-run collect",
+		"collect pass",
+		"current run analyzed",
+		"current analysis covers",
+		"staged in the current run",
+		"typed shard plan",
+		"typed shard summary",
+		"shard plan/summary",
+		"shard-pack manifest",
+		"shard completeness for this run",
+		"based on the staged source",
+		"confidence:",
+		"confidence level",
+	}
 )
+
+// ArchitectureHomeForbiddenProcessNarrationMarkers returns the literal
+// validator markers that provider prompts must forbid in Architecture Home.
+// Return a copy so prompt composition cannot mutate validation behavior.
+func ArchitectureHomeForbiddenProcessNarrationMarkers() []string {
+	return append([]string(nil), architectureHomeProcessNarrationMarkers...)
+}
 
 type Manifest struct {
 	Version      int      `json:"version"`
@@ -388,30 +418,7 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 
 func runtimeDraftArchitectureHomeHasProcessNarration(text string) bool {
 	lower := strings.ToLower(text)
-	markers := []string{
-		"runtime provider",
-		"provider execution",
-		"provider generated",
-		"manifest recap",
-		"taskrun mechanics",
-		"derived from the run",
-		"derived from run",
-		"current run collect",
-		"current-run collect",
-		"collect pass",
-		"current run analyzed",
-		"current analysis covers",
-		"staged in the current run",
-		"typed shard plan",
-		"typed shard summary",
-		"shard plan/summary",
-		"shard-pack manifest",
-		"shard completeness for this run",
-		"based on the staged source",
-		"confidence:",
-		"confidence level",
-	}
-	for _, marker := range markers {
+	for _, marker := range architectureHomeProcessNarrationMarkers {
 		if strings.Contains(lower, marker) {
 			return true
 		}

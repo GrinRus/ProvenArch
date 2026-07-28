@@ -6888,3 +6888,52 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   same-run citation identity, no foreign staged paths, and no taskrun-path contamination.
 - 2026-07-19: Full deterministic DoD is green with the pinned toolchains: contracts, Go/Python/UI
   tests (including 142 UI tests), lint, embedded UI build, and mock E2E `7/7` all pass.
+
+---
+
+## EP-20260728-r3-qwen-architecture-home-marker-contract
+
+### Context
+- Fresh diagnostic matrix `smoke-tiny-bank-20260728T200211Z` ran from qualification SHA
+  `96824c47206a9bca95b72f097ad97fb2fceaf36a`. Host/provider/DoD preflight passed and headless
+  collect completed all 10 typed shards as `succeeded`.
+- `init.step2.asis_docs` then failed strict Architecture Home validation because Qwen wrote the
+  exact deterministic validator marker `current analysis covers`. The focused enrichment prompt
+  described the error class but did not enumerate that literal marker; it produced stream output
+  without a fresh mutation and exhausted as `runtime_stalled_before_artifacts`.
+- The matrix is diagnostic failure evidence only: `runtime_contract_failed=1`,
+  `repair_exhausted=1`, and `stall_pressure=1`. Regression and release phases did not start.
+
+### Goals
+- [x] Keep the Architecture Home process-narration marker set in one validator-owned source.
+- [x] Copy the closed marker set into normal step2, first-action, enrichment and compact/command-text
+  provider prompts so validation and provider instructions cannot drift.
+- [x] Add deterministic tests for defensive-copy behavior and prompt/validator marker parity.
+- [x] Synchronize architecture and live-runbook behavior.
+- [x] Pass the full provider-free offline closure.
+- [ ] Merge the isolated fix, establish a new qualification SHA, and restart with a fresh smoke
+  matrix ID.
+
+### Non-goals
+- No validator relaxation, ACP-authored narrative sanitization, schema/API change, timeout change,
+  provider alias, canonical matrix or curated repository change.
+- No acceptance of the stopped smoke, stale drafts, analysis-only recovery output, repair exhaustion
+  or stall pressure.
+
+### Acceptance
+- Every literal Architecture Home process marker rejected by the validator is present in the normal
+  and focused step2 prompt contracts.
+- Provider-authored Architecture Home content still passes the complete strict draft contract;
+  invalid or unchanged recovery output remains terminal.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-28: Recorded the stopped matrix operator report at
+  `/tmp/provenarch-test_arch_project/reports/operator_step_report_smoke-tiny-bank-20260728T200211Z.md`;
+  no release evidence was produced or accepted.
+- 2026-07-28: Centralized the 21 literal process-narration markers in `internal/runtimedrafts`,
+  added a defensive-copy prompt policy line, and wired it into normal and all focused step2 prompt
+  modes. Focused runtimedrafts/step-policy/prompt/providercommon tests pass.
+- 2026-07-28: Full pinned offline closure passed: race suites, 90 readable fixtures, UI `158/158`,
+  mock E2E `7/7`, full Go suite, Python `263/263`, contracts, lint/typecheck, build and deterministic
+  embedded `ui_dist`.

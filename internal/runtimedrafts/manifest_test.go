@@ -3,6 +3,7 @@ package runtimedrafts
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -800,6 +801,26 @@ func TestValidateRequiredManifestRejectsArchitectureHomeExecutionReferences(t *t
 			t.Parallel()
 			testValidateArchitectureHomeFixtureRejected(t, tt.fixture, tt.wantError)
 		})
+	}
+}
+
+func TestArchitectureHomeForbiddenProcessNarrationMarkersAreClosedAndImmutable(t *testing.T) {
+	t.Parallel()
+
+	markers := ArchitectureHomeForbiddenProcessNarrationMarkers()
+	for _, want := range []string{
+		"current analysis covers",
+		"based on the staged source",
+		"derived from the run",
+		"confidence level",
+	} {
+		if !slices.Contains(markers, want) {
+			t.Fatalf("expected forbidden marker %q in %v", want, markers)
+		}
+	}
+	markers[0] = "mutated by caller"
+	if slices.Contains(ArchitectureHomeForbiddenProcessNarrationMarkers(), "mutated by caller") {
+		t.Fatalf("forbidden marker accessor must return a defensive copy")
 	}
 }
 
