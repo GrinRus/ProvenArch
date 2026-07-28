@@ -1,6 +1,7 @@
 package promptcontract
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -347,6 +348,7 @@ func composeQwenToolFirstCollectPromptWithTargets(task acpruntime.Task, validati
 		"- Use exactly 1 document, 1-3 citations, 1-3 entities, 0-2 edges, exactly 1 finding, and exactly 1 question.",
 		"MINIMUM MANIFEST SHAPE:",
 		fmt.Sprintf("- Top level: version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q, artifact_root=%q, repo_scopes, path_scopes, summary, documents, citations, semantic.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole), strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf("- Use these exact JSON array values: repo_scopes=%s and path_scopes=%s. Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.", jsonStringArrayLiteral(task.RepoScopes), jsonStringArrayLiteral(task.PathScopes)),
 		fmt.Sprintf("- documents[0]: id, kind, title, path=%q, canonical_path=%q, topics, citation_ids.", filepath.ToSlash(docRel), steppolicy.CollectManifestCanonicalPath(task, docRel)),
 		"- citations[0]: unique id, repo, concrete file path, non-empty claim_ids, document_ids containing documents[0].id.",
 		"- semantic.coverage: observed[], missing[], notes[]. semantic.questions: objects with id and text.",
@@ -357,7 +359,6 @@ func composeQwenToolFirstCollectPromptWithTargets(task acpruntime.Task, validati
 		"- Stop after the same-response pair of write_file calls. Backend validation, not stdout claims, is the only success surface.",
 		fmt.Sprintf("- write_root=%q", strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf("- read_context_roots=%q", strings.Join(task.ReadContextRoots, ", ")),
-		fmt.Sprintf("- repo_scopes=%q; path_scopes=%q", strings.Join(task.RepoScopes, ", "), strings.Join(task.PathScopes, ", ")),
 	}
 	lines = append(lines, "CANONICAL SEMANTIC OBJECTS:")
 	lines = append(lines, collectManifestCanonicalShapeBlock()...)
@@ -385,6 +386,17 @@ func composeQwenToolFirstCollectPromptWithTargets(task acpruntime.Task, validati
 		lines = append(lines, "- Retry reason: "+detail)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func jsonStringArrayLiteral(values []string) string {
+	if values == nil {
+		values = []string{}
+	}
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 func boundedQwenCollectIntent(value string, maxRunes int) string {

@@ -240,6 +240,8 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 		"exactly two write_file tool calls in the same response block",
 		"Do not wait for the markdown tool result before issuing the manifest write_file call.",
 		"Manifest JSON must be at most 6000 characters",
+		`repo_scopes=["repo-a"] and path_scopes=["README.md"]`,
+		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
 		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
 		"README.md",
 		writeRoot,

@@ -60,68 +60,63 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260728-r3-qwen-atomic-pair-write
+EP-20260728-r3-qwen-scope-array-contract
 
 ### Context
-PR #178 merged as qualification SHA `e9025647d13690b5ea236d14fc476bc89b556f12`, which passed
-fresh detached-worktree `make offline-closure`. In fresh smoke
-`smoke-tiny-bank-20260728T101010Z`, Qwen obeyed the bounded read contract and wrote markdown, but
-then spent the full 90-second partial-artifact window designing an oversized manifest instead of
-issuing the second `write_file`. Runtime reconstructed the manifest from markdown, so the smoke was
-stopped as a recovery-heavy path that cannot qualify R3.
+PR #179 merged as qualification SHA `0fe8793ce179e668b2cb5cd43a51ac1cc09500d6`, and the
+fresh detached-worktree offline closure passed. Fresh diagnostic smoke
+`smoke-tiny-bank-20260728T111000Z` proved that Qwen now writes the markdown/manifest pair in one
+assistant response, but the `bank-of-anthos-docs` manifest encoded the single
+`repo_scopes`/`path_scopes` values as strings. Schema validation correctly scheduled
+`collect_manifest_repair`, so the matrix was stopped and is not qualification evidence.
 
 ### Goals (must have)
-- [x] Require Qwen to compose both final payloads before writing and issue markdown + manifest
-      `write_file` calls in the same assistant response block.
-- [x] Bound markdown to 3000 characters and manifest JSON to 6000 characters.
-- [x] Bound semantic cardinality to a small evidence-backed subset without weakening schema or
-      repository-evidence validation.
-- [x] Preserve the existing Claude/Codex prompt behavior and Qwen refresh requirements.
-- [x] Pass focused prompt tests and the full provider-free deterministic DoD/offline closure.
-- [ ] Merge the fix PR, qualify the new `main` SHA, and restart R3 from a fresh smoke ID.
+- [x] Render task `repo_scopes` and `path_scopes` as exact JSON array literals in the bounded Qwen
+      normal/first-focused collect contract.
+- [x] State explicitly that both fields remain arrays for a single value and must never be strings.
+- [x] Add provider-free prompt and adapter regressions for the live-observed single-scope shape.
+- [x] Preserve the prompt size cap, atomic pair sequencing, semantic bounds and Claude/Codex
+      behavior.
+- [ ] Pass the full deterministic DoD/offline closure, merge the fix, qualify the new `main` SHA and
+      restart R3 from a fresh smoke ID.
 
 ### Non-goals
-- [x] Do not change schemas, public runtime contracts, provider commands/models, canonical matrices,
-      curated repositories, retry counts or timeout profiles.
-- [x] Do not relabel runtime-reconstructed manifests as normal provider-authored success.
-- [x] Do not accept the stopped/partial smoke or mix its artifacts with later evidence.
+- [x] Do not change schemas, validators, recovery routing, provider commands/models, canonical
+      matrices, curated repositories, retry counts or timeout profiles.
+- [x] Do not accept the stopped/partial smoke or its manifest-only repair as release evidence.
 
 ### Approach
-1. Keep the successful bounded `read_file` phase from PR #178.
-2. Require two `write_file` calls in one response so Qwen cannot wait for the markdown tool result
-   and enter another long reasoning turn before the manifest write.
-3. Cap payload size and semantic cardinality while retaining exact identity, paths, enum and
-   canonical shape.
-4. Pin this sequencing in provider-free prompt/adapter tests, synchronize the runbook, pass DoD,
-   merge, qualify a new SHA and restart with fresh smoke.
+1. Replace ambiguous comma-joined scope prose in the compact Qwen collect contract with serialized
+   JSON array literals.
+2. Pin exact one- and multi-scope renderings in prompt/adapter tests.
+3. Synchronize runbook/architecture wording, pass DoD, merge and restart the entire R3 sequence.
 
 ### Files expected to change
-- `internal/runtime/promptcontract/promptcontract.go`
 - `internal/runtime/promptcontract/collect_repair.go`
 - `internal/runtime/promptcontract/promptcontract_test.go`
 - `internal/runtime/qwencode/runner_test.go`
 - `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/ARCHITECTURE.md`
 - `docs/PLANS.md`
-- `docs/archive/PLANS_ARCHIVE_2026-07.md`
 
 ### Acceptance criteria
 - [x] Qwen normal and pre-artifact repair prompts remain at most 6 KiB.
-- [x] Tests require same-response markdown + manifest tool calls and both payload/cardinality caps.
-- [x] Tests preserve `observation|inference|assertion`, refresh minima and Claude/Codex isolation.
+- [x] Prompt tests require `repo_scopes=["..."]` and `path_scopes=["..."]` JSON literals and reject
+      scalar guidance.
 - [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
 
 ### Risks
-- Over-bounding could make artifacts shallow; the limits still allow three entities, two edges,
-  three citations, one finding and one question per shard, while downstream aggregation spans all
-  planned shards.
+- Extra prompt wording consumes the strict Qwen budget; the change replaces ambiguous identity
+  lines instead of adding a full schema example.
 
 ### Progress log
-- 2026-07-28: Stopped fresh smoke when the first collect shard required
-  `collect_manifest_runtime_recovery`; later shards and the partial matrix were not accepted.
-- 2026-07-28: Added same-response atomic pair-write sequencing plus payload/cardinality caps to the
-  existing bounded Qwen normal/first-focused collect contract. Focused cross-provider regressions,
-  `make contracts`, `make test`, `make lint`, `make build` and `make offline-closure` passed with Go
-  1.25.10 and Node 22.21.1/npm 10.9.4.
+- 2026-07-28: Stopped fresh smoke after exact validation evidence showed
+  `path_scopes` was a string and `collect_manifest_repair` had been scheduled. The same manifest
+  also encoded `repo_scopes` as a string; neither repaired nor partial artifacts are accepted.
+- 2026-07-28: Replaced ambiguous comma-joined scope prose with exact JSON array literals in the
+  bounded Qwen normal/first-focused contract. Focused prompt/adapter tests and the full pinned
+  provider-free DoD/offline closure passed; schemas, validators, recovery and live harness inputs
+  remain unchanged.
 
 ### Plan ID
 EP-20260722-post-implementation-trust-audit
