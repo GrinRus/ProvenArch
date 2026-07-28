@@ -175,6 +175,8 @@ func TestComposeArtifactOnlyPromptUsesBoundedQwenToolFirstCollectContract(t *tes
 		"Markdown must be at most 3000 characters",
 		"Manifest JSON must be at most 6000 characters",
 		"exactly 1 document, 1-3 citations, 1-3 entities, 0-2 edges, exactly 1 finding, and exactly 1 question",
+		`repo_scopes=["bank"] and path_scopes=[".gitignore","LICENSE","Makefile","README.md","pom.xml"]`,
+		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
 		"Do not plan, explain, use a todo, or generate a shell/Python/template writer.",
 		`step_id="refresh.step1.collect"`,
 		`path="root-overview.md"`,
@@ -198,6 +200,8 @@ func TestComposeArtifactOnlyPromptUsesBoundedQwenToolFirstCollectContract(t *tes
 		"DOCS-FIRST FILESYSTEM CONTRACT:",
 		"run_shell_command",
 		"python3 heredoc",
+		`repo_scopes="bank"`,
+		`path_scopes=".gitignore, LICENSE, Makefile, README.md, pom.xml"`,
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("qwen collect prompt must omit bulky/script token %q:\n%s", forbidden, prompt)
@@ -997,6 +1001,8 @@ func TestComposeCollectArtifactPairRepairPromptUsesQwenReadThenWriteForAnyPreArt
 		"Do not wait for the markdown tool result before issuing the manifest write_file call.",
 		"Manifest JSON must be at most 6000 characters",
 		"at most 4 listed evidence files and at most 4000 bytes per file",
+		`repo_scopes=["payments-service"] and path_scopes=["README.md"]`,
+		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
 		"documents[0]: id, kind, title, path=\"root-overview.md\"",
 		"canonical_path=\"reports/as-is/payments/root-overview.md\"",
 		"Every provenance.kind must be exactly one of: observation, inference, assertion.",

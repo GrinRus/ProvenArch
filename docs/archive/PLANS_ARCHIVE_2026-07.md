@@ -18,6 +18,42 @@ EP-20260721-epic18-valid-artifact-stall-accounting
 ---
 
 ### Plan ID
+EP-20260728-async-shutdown-quiescence
+
+### Result
+- PR #180 backend CI exposed two async workspace-cleanup races after terminal status publication:
+  `TestGitCommitBlockedWhileRunIsActive` and
+  `TestAsyncRunPanicReleasesSlotAndStartsPendingRun`.
+- `Service.Shutdown` now waits for terminal state plus release of the selected run's active/cancel
+  ownership; the package-local lifecycle helper observes the same real quiescence condition.
+- Both live-observed tests passed 50 consecutive repetitions. Full pinned deterministic DoD and
+  `make offline-closure` passed, including API/orchestrator race suites, 263 Python tests, 158 UI
+  tests, 7/7 mock E2E and deterministic embedded `ui_dist`.
+- PR #181 passed all 11 required checks and merged as
+  `cb126be6cdfaf7766d88694ed80a6a2d72c845dc`. The remote branch remains available during R3.
+
+---
+
+### Plan ID
+EP-20260728-r3-qwen-atomic-pair-write
+
+### Result
+- PR #179 required Qwen to compose both final payloads and issue markdown plus manifest
+  `write_file` calls in the same assistant response, with 3000/6000-character payload limits and a
+  bounded semantic subset.
+- Provider-free prompt/adapter tests preserved the exact provenance enum, refresh minima,
+  Claude/Codex isolation and the 6 KiB Qwen prompt limit.
+- Full DoD/offline closure and all 11 PR checks passed; PR #179 merged as
+  `0fe8793ce179e668b2cb5cd43a51ac1cc09500d6`, and the merge SHA passed fresh detached-worktree
+  `make offline-closure`.
+- Fresh smoke `smoke-tiny-bank-20260728T111000Z` confirmed the atomic pair write, then exposed
+  scalar `repo_scopes`/`path_scopes` in one Qwen manifest. The runtime scheduled manifest-only
+  repair, so the matrix was stopped and no partial evidence was promoted.
+- Follow-up is `EP-20260728-r3-qwen-scope-array-contract`.
+
+---
+
+### Plan ID
 EP-20260720-epic18-step2-first-pass-marker-free
 
 ### Context
