@@ -60,6 +60,73 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-r3-shutdown-test-barrier
+
+### Context
+Post-merge offline closure on qualification SHA
+`388af86df5053bf515659e9f5f4e78d749a5a8dc` failed
+`TestServiceShutdownCancelsActiveRunAndRejectsNewStarts`: its one-second shutdown context began
+immediately after async admission, before the fixture established that the blocking runner had
+started. Under the loaded full Go suite, scheduler/startup latency consumed that deadline and the
+test reported `context deadline exceeded`. The earlier race pass succeeded, and no live phase was
+started on this SHA. The first fix gate then exposed a second timing assumption in
+`TestRunHeadlessProviderKeepsRepeatedStreamOnlyCollectPairRepairStallAsContractFailure`: its
+full-engine setup could consume the outer context before entering the focused repair path, yielding
+zero repair calls. The adjacent tests already cover full-engine routing; this case's intended
+invariant is the two-attempt focused repair exhaustion itself.
+
+### Goals (must have)
+- [x] Establish a deterministic runner-start barrier before measuring shutdown cancellation.
+- [x] Exercise repeated stream-only focused repair directly, without unrelated full-engine process
+      startup/retry latency.
+- [x] Keep the production shutdown path and its quiescence guarantees unchanged.
+- [x] Stress both focused fixtures and pass the full pinned provider-free offline closure.
+- [ ] Merge the isolated fixture fix, establish a new qualification SHA and restart qualification.
+
+### Non-goals
+- [x] Do not loosen the one-second shutdown assertion after the blocking runner is active.
+- [x] Do not change production lifecycle behavior, schemas, live harness inputs, providers,
+      matrices, curated repositories or timeout profiles.
+- [x] Do not accept any evidence from the failed post-merge gate.
+
+### Approach
+1. Reuse the existing counting blocking runner used by the adjacent pending-run shutdown test.
+2. Wait on the shared bounded runner-start helper before creating the shutdown timeout context.
+3. Drive the focused collect-pair recovery helper with an explicit diagnostic result and missing
+   manifest error, preserving both real stream-only repair subprocess attempts.
+4. Stress both focused tests, run the full deterministic DoD/offline closure, merge and restart.
+
+### Files expected to change
+- `internal/orchestrator/run_lifecycle_test.go`
+- `internal/runtime/providercommon/engine_test.go`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Focused shutdown lifecycle test passes repeatedly.
+- [x] The test still requires shutdown completion within one second after runner activation.
+- [x] Focused collect-pair exhaustion performs and verifies exactly two monitored repair attempts.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- A broad timeout increase would hide lifecycle regressions. This slice adds only the missing
+  precondition barrier and leaves the measured shutdown budget intact. The collect-pair fixture
+  still executes and monitors both real stream-only repair processes; only unrelated initial
+  provider routing is removed from this focused exhaustion assertion.
+
+### Progress log
+- 2026-07-28: Stopped qualification before live execution after the post-merge offline gate failed
+  at the shutdown fixture. Exact failure: `shutdown service: context deadline exceeded`.
+- 2026-07-28: The first fix gate passed the shutdown race suite, then stopped at a second fixture
+  assumption: focused collect-pair exhaustion observed zero repair calls because the outer context
+  expired in unrelated full-engine setup. No failed gate output is qualification evidence.
+- 2026-07-28: Final fixtures passed stress runs: shutdown `100/100` plus race `25/25`, focused
+  collect-pair exhaustion `25/25` plus race `10/10`. The full pinned offline closure then passed
+  race suites, 90 readable fixtures, UI `158/158`, mock E2E `7/7`, Go, Python `263/263`,
+  contracts, lint, build and deterministic embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260728-r3-qwen-citation-binding
 
 ### Context

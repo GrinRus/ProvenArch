@@ -1962,7 +1962,7 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 	}
 }
 
-func TestRunHeadlessProviderKeepsRepeatedStreamOnlyCollectPairRepairStallAsContractFailure(t *testing.T) {
+func TestRecoverCollectPairKeepsRepeatedStreamOnlyStallAsContractFailure(t *testing.T) {
 	task := newCollectTask(t, "run-collect-pair-repair-stream-only-exhausted")
 	streamOnlyScript := `#!/usr/bin/env bash
 set -eu
@@ -1977,10 +1977,6 @@ done
 	}
 	runner := &pairRepairSequenceAdapter{
 		testAdapter: testAdapter{
-			command: writeEngineScript(t, `#!/usr/bin/env bash
-set -eu
-printf '%s\n' 'initial provider diagnostics without artifacts'
-`),
 			activity: ActivityPolicy{
 				MonitorArtifacts:            true,
 				MonitorPreArtifact:          true,
@@ -2011,7 +2007,17 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 
 	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
-	_, err := RunHeadlessProvider(ctx, task, runner)
+	recovered, _, err := recoverCollectArtifactPairRepair(
+		ctx,
+		task,
+		runner,
+		acpruntime.Result{Stdout: "initial provider diagnostics without artifacts"},
+		errors.New("shard pack manifest is missing"),
+		"contract",
+	)
+	if !recovered {
+		t.Fatal("expected collect pair recovery to handle the missing artifact contract")
+	}
 	if err == nil {
 		t.Fatal("expected repeated stream-only collect pair repair stall to fail")
 	}

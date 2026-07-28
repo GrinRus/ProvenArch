@@ -522,8 +522,9 @@ func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
 	t.Parallel()
 
 	ws := createWorkspace(t)
+	runner := &countingBlockingRunner{release: make(chan struct{})}
 	service := NewService(
-		WithRunner(blockingRunner{release: make(chan struct{})}),
+		WithRunner(runner),
 		WithHistoryWorkspace(ws),
 	)
 	runID, err := service.StartAsyncRun(context.Background(), RunRequest{
@@ -534,6 +535,7 @@ func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start async run: %v", err)
 	}
+	waitForRunnerCalls(t, runner, 1, asyncRunnerStartTimeout)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
