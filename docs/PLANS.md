@@ -60,6 +60,63 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-r3-qwen-citation-binding
+
+### Context
+Fresh standalone regression `regres-fast-bank-openedx-20260728T164734Z` on qualification SHA
+`a61aae6e8711a7dc940406b320019cfb0aeb2c3a` completed Bank init cleanly, then stopped during
+Bank refresh because the Qwen-authored manifest referenced unknown citation id
+`cite.backup.readme` from `documents[0].citation_ids`. Validation correctly scheduled
+`manifest_only_repair`; Open edX was not run, and the partial matrix is not qualification evidence.
+
+### Goals (must have)
+- [x] Require reciprocal document/citation bindings in the bounded Qwen normal and first-focused
+      collect contract.
+- [x] Add provider-free prompt and adapter regressions for an omitted citation reference.
+- [x] Preserve the 6 KiB prompt cap, atomic pair sequencing, semantic bounds and non-Qwen behavior.
+- [x] Pass the full pinned provider-free DoD/offline closure.
+- [ ] Merge the isolated fix, establish a new qualification SHA and restart R3 from a fresh smoke
+      ID.
+
+### Non-goals
+- [x] Do not change schemas, validators, recovery routing, provider commands/models, canonical
+      matrices, curated repositories, retry counts or timeout profiles.
+- [x] Do not accept the stopped regression matrix or repaired artifacts as R3 evidence.
+
+### Approach
+1. Replace the compact citation shape hint with an explicit two-way identity invariant.
+2. Pin both directions and the omitted-citation prohibition in prompt/adapter tests.
+3. Synchronize runbook/architecture, pass the full DoD, merge and restart every live phase.
+
+### Files expected to change
+- `internal/runtime/promptcontract/collect_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Qwen normal and first-focused collect prompts remain at most 6 KiB.
+- [x] Focused prompt/adapter tests pass.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- Extra identity wording consumes the strict Qwen prompt budget; the change replaces the previous
+  single-citation shape line rather than adding a schema example.
+
+### Progress log
+- 2026-07-28: Stopped the fresh regression matrix at the first provider-authored contract defect;
+  the exact validator error was `documents[0] references unknown citation_id
+  "cite.backup.readme"`. No stopped/partial output will be reused.
+- 2026-07-28: Replaced the compact citation hint with a reciprocal document/citation invariant.
+  Focused prompt/adapter tests and the full pinned offline closure passed: race suites, 90 readable
+  fixtures, UI `158/158`, mock E2E `7/7`, Go, Python `263/263`, contracts, lint, build and
+  deterministic embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260728-r3-preflight-retry-test-quiescence
 
 ### Context
