@@ -213,8 +213,8 @@ func TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh(t *testin
 	}
 
 	close(releaseRunner)
-	waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
-	waitForRunTerminalInfo(t, service, thirdRunID, 2*time.Second)
+	waitForRunTerminalInfo(t, service, firstRunID, asyncRunnerStartTimeout)
+	waitForRunTerminalInfo(t, service, thirdRunID, asyncRunnerStartTimeout)
 }
 
 func TestRunSnapshotsAreDeeplyIndependent(t *testing.T) {

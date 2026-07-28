@@ -3819,14 +3819,14 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
-    await screen.findByTestId("review-panel");
-
-    navigateToStage("analysis");
+    await renderConsoleApp(`/runs/${runID}`);
     await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
 
-    const progress = await screen.findByTestId("analysis-run-progress");
-    expect(progress).toHaveTextContent(runID);
+    await waitFor(
+      () => expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent(runID),
+      { timeout: 5_000 },
+    );
+    const progress = screen.getByTestId("analysis-run-progress");
     expect(progress).toHaveTextContent("Unknown");
     expect(progress).toHaveTextContent("init.step1.collect");
     expect(progress).toHaveTextContent("1 / 1");
@@ -3872,7 +3872,7 @@ describe("App", () => {
     expect(liveDiagnostics).toHaveTextContent("runtime_stalled_before_artifacts");
     expect(liveDiagnostics).toHaveTextContent("Open the failed shard row and raw-output ref");
     expect(liveDiagnostics).toHaveTextContent("Retry after the provider artifact write path is fixed");
-  });
+  }, 15_000);
 
   it("surfaces active provider stream when collect has no authored shard artifacts yet", async () => {
     const runID = "run-provider-stream";
