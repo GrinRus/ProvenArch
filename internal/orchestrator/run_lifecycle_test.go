@@ -1109,7 +1109,10 @@ func waitForServiceQuiescent(t *testing.T, service *Service, timeout time.Durati
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !service.HasInFlightRun() {
+		service.mu.RLock()
+		quiescent := service.activeRunID == "" && service.pendingRun == nil && len(service.runCancels) == 0
+		service.mu.RUnlock()
+		if quiescent {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

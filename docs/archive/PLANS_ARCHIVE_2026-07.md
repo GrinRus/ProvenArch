@@ -18,6 +18,23 @@ EP-20260721-epic18-valid-artifact-stall-accounting
 ---
 
 ### Plan ID
+EP-20260728-async-shutdown-quiescence
+
+### Result
+- PR #180 backend CI exposed two async workspace-cleanup races after terminal status publication:
+  `TestGitCommitBlockedWhileRunIsActive` and
+  `TestAsyncRunPanicReleasesSlotAndStartsPendingRun`.
+- `Service.Shutdown` now waits for terminal state plus release of the selected run's active/cancel
+  ownership; the package-local lifecycle helper observes the same real quiescence condition.
+- Both live-observed tests passed 50 consecutive repetitions. Full pinned deterministic DoD and
+  `make offline-closure` passed, including API/orchestrator race suites, 263 Python tests, 158 UI
+  tests, 7/7 mock E2E and deterministic embedded `ui_dist`.
+- PR #181 passed all 11 required checks and merged as
+  `cb126be6cdfaf7766d88694ed80a6a2d72c845dc`. The remote branch remains available during R3.
+
+---
+
+### Plan ID
 EP-20260728-r3-qwen-atomic-pair-write
 
 ### Result
