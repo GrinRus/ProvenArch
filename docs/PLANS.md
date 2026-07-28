@@ -60,6 +60,65 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-r3-qwen-citation-closed-shape
+
+### Context
+Post-merge offline closure passed on qualification SHA
+`8d0c182fdc3a63bd60f945918db71f8822520be2`. Fresh diagnostic smoke
+`smoke-tiny-bank-20260728T190233Z` then failed its first live init collect shard because Qwen added
+`provenance` to `citations[0]`. Schema validation correctly rejected the additional property and
+scheduled `manifest_only_repair`; the repair exhausted as `runtime_stalled_after_artifacts`, so the
+operator stopped the matrix. Later canceled shards are stop consequences and the matrix is not
+qualification evidence.
+
+### Goals (must have)
+- [x] State the exact closed citation item field set in the bounded Qwen collect contract.
+- [x] Explicitly forbid citation-level provenance while preserving semantic provenance guidance.
+- [x] Pin the live-observed extra-field regression in shared prompt and adapter tests.
+- [x] Pass the full pinned provider-free DoD/offline closure.
+- [ ] Merge, establish a new qualification SHA and restart from a fresh smoke ID.
+
+### Non-goals
+- [x] Do not change schemas, validators, repair routing, provider commands/models, retry/timeout
+      budgets, matrices or curated repositories.
+- [x] Do not accept the stopped smoke or its repair output as R3 evidence.
+
+### Approach
+1. Replace the compact citation guidance with the schema's exact five-field allow-list.
+2. Keep unique IDs, concrete paths, non-empty claim IDs and reciprocal document bindings.
+3. Add positive closed-shape and negative citation-provenance assertions at prompt and adapter
+   boundaries.
+4. Synchronize architecture/runbook, pass DoD, merge and restart the full sequence.
+
+### Files expected to change
+- `internal/runtime/promptcontract/collect_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/runtime/qwencode/runner_test.go`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Qwen normal and first-focused collect prompts remain at most 6 KiB.
+- [x] Focused prompt/adapter tests pass.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- The word `provenance` remains necessary for semantic entities/edges/findings; the prompt must
+  scope the prohibition to citations instead of banning provenance globally.
+
+### Progress log
+- 2026-07-28: Stopped fresh smoke after exact schema evidence:
+  `/citations/0 ... additionalProperties 'provenance' not allowed`. The matrix is partial and will
+  not be reused.
+- 2026-07-28: Added the exact five-field citation allow-list and scoped provenance prohibition.
+  Focused tests and the full pinned offline closure passed: race suites, 90 readable fixtures, UI
+  `158/158`, mock E2E `7/7`, Go, Python `263/263`, contracts, lint, build and deterministic
+  embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260728-r3-shutdown-test-barrier
 
 ### Context
