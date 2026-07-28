@@ -13,6 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestArchitectureHomeProcessNarrationPolicyMirrorsValidatorMarkers(t *testing.T) {
+	t.Parallel()
+
+	line := ArchitectureHomeProcessNarrationPolicyLine()
+	for _, marker := range runtimedrafts.ArchitectureHomeForbiddenProcessNarrationMarkers() {
+		if !strings.Contains(line, "`"+marker+"`") {
+			t.Fatalf("policy line is missing validator marker %q: %s", marker, line)
+		}
+	}
+}
+
 func TestStepSpecificPolicyDefinesSharedDraftOnlyObligationsForStep0(t *testing.T) {
 	t.Parallel()
 
@@ -622,6 +633,9 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`Never publish repository-root shorthand such as repo:. or repo:./, and never use glob or wildcard syntax such as repo:src/*`,
 		`Architecture Home must not use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording`,
 		`those execution details belong only in summary.md and architect-summary.md`,
+		`Architecture Home must not contain any literal validator-blocked process marker (case-insensitive)`,
+		"`current analysis covers`",
+		"`based on the staged source`",
 		`All three markdown targets must be operator-facing and marker-free on the first pass`,
 		`the direct-literal write command must scan all three completed markdown targets for those forbidden markers before it writes asis-draft-manifest.json`,
 		`AS-IS DRAFT MANIFEST SHAPE GUIDE:`,

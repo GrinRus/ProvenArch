@@ -38,6 +38,15 @@ func TopLevelSemanticOutputRule(stepID string) string {
 	return `Do NOT emit semantic payloads on stdout unless the step contract explicitly defines a runtime artifact for them under write_root.`
 }
 
+func ArchitectureHomeProcessNarrationPolicyLine() string {
+	markers := runtimedrafts.ArchitectureHomeForbiddenProcessNarrationMarkers()
+	quoted := make([]string, 0, len(markers))
+	for _, marker := range markers {
+		quoted = append(quoted, "`"+marker+"`")
+	}
+	return "- Architecture Home must not contain any literal validator-blocked process marker (case-insensitive): " + strings.Join(quoted, "; ") + ". Rewrite those phrases as repository facts or evidence gaps before writing the manifest."
+}
+
 func StepSpecificPolicy(stepID string) string {
 	switch strings.TrimSpace(stepID) {
 	case "init.step0.constitution":
@@ -324,6 +333,7 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Repo evidence references must use exact non-root paths. Never publish repository-root shorthand such as repo:. or repo:./, and never use glob or wildcard syntax such as repo:src/*; cite a concrete existing file or directory instead.`,
 			`- Architecture Home must never reference reports/taskruns/**, taskrun staging paths, write_root, draft_final_root, raw runtime artifacts, absolute runtime checkout paths, or .acp/repos paths; navigation must use canonical reports/model/proposals paths or stable repo-relative references such as bank-of-anthos:src/frontend.`,
 			`- Architecture Home must not use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording; those execution details belong only in summary.md and architect-summary.md. It also must not mention run IDs, pipeline step names, collect passes, repair/enrichment attempts, staged-source mechanics, or how runtime assembled the document; state repository facts and evidence gaps directly.`,
+			ArchitectureHomeProcessNarrationPolicyLine(),
 			`- Use staged final evidence from read_context_roots only; do NOT read sibling baseline workspaces or previously published as-is drafts as templates.`,
 			`- If asis-draft-manifest.json already describes the publish surface, stop only after confirming referenced draft files are validation-ready and not bootstrap placeholders; do NOT re-register draft artifacts through any legacy metadata op.`,
 			`- Compiler may materialize indexes and derived technical artifacts only; canonical narratives come from your drafts.`,
@@ -513,6 +523,7 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"- Repo evidence references must use exact non-root paths. Never publish repository-root shorthand such as repo:. or repo:./, and never use glob or wildcard syntax such as repo:src/*; cite a concrete existing file or directory instead.",
 		"- Architecture Home must never reference reports/taskruns/**, taskrun staging paths, write_root, draft_final_root, raw runtime artifacts, absolute runtime checkout paths, or .acp/repos paths; navigation must use canonical reports/model/proposals paths or stable repo-relative references such as bank-of-anthos:src/frontend.",
 		"- Architecture Home must not use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording; those execution details belong only in summary.md and architect-summary.md. It also must not mention run IDs, pipeline step names, collect passes, repair/enrichment attempts, staged-source mechanics, or how runtime assembled the document; state repository facts and evidence gaps directly.",
+		ArchitectureHomeProcessNarrationPolicyLine(),
 		"- All three markdown targets must be operator-facing and marker-free on the first pass. overview.md, summary.md, and architect-summary.md must not contain runtime/recovery narration such as bounded evidence read, bounded staged evidence, bounded read roots/pass, recovery or enrichment pass/action, draft surface/root/manifest recap, bootstrap/placeholder replacement, provider narration, or text saying the artifacts were generated or assembled by the runtime.",
 		"- Treat this as a write-time contract, not a repair hint: the direct-literal write command must scan all three completed markdown targets for those forbidden markers before it writes asis-draft-manifest.json. If a marker is found, overwrite the affected target with corrected literal content and repeat the scan before writing the manifest.",
 		"- If evidence is sparse, write explicit evidence-backed insufficiency tied to current-run coverage/questions instead of generic placeholder text.",
