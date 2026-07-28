@@ -242,10 +242,11 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 		"Manifest JSON must be at most 6000 characters",
 		`repo_scopes=["repo-a"] and path_scopes=["README.md"]`,
 		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
+		"Citations only: id, repo, path, claim_ids, document_ids.",
 		"non-empty claim_ids",
-		"every documents[0].citation_ids value exists in citations[]",
-		"every citations[].document_ids value equals documents[0].id",
-		"Never reference omitted citations.",
+		"every document citation_id exists",
+		"every citation document_id equals documents[0].id",
+		"No citation provenance or omitted ids.",
 		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
 		"README.md",
 		writeRoot,
@@ -255,7 +256,7 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 			t.Fatalf("expected qwen collect prompt arg to contain %q, got %v", token, spec.Args)
 		}
 	}
-	for _, forbidden := range []string{"run_shell_command", "python", "python3", "Artifact-only contract:"} {
+	for _, forbidden := range []string{"run_shell_command", "python", "python3", "Artifact-only contract:", `"citations":[{"provenance"`} {
 		if strings.Contains(args, forbidden) {
 			t.Fatalf("qwen collect prompt must not contain %q, got %v", forbidden, spec.Args)
 		}
