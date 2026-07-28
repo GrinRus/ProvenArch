@@ -60,6 +60,73 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-r3-provenance-kind-shape-recovery
+
+### Context
+Fresh Epic 18 R3 smoke `smoke-tiny-bank-20260728T065407Z` on qualification SHA
+`5422f9b755ba879a58f7eb39c5320d845ae409e5` stopped after Qwen authored an otherwise
+evidence-backed collect manifest with natural-language provenance kinds `observed` and `inferred`.
+The strict schema correctly rejected those values, while the provider-authored manifest-only repair
+stalled without a fresh valid mutation. R3 must restart from a new qualification SHA after a
+provider-free, reviewable runtime-shape recovery fix.
+
+### Goals (must have)
+- [x] Canonicalize only the unambiguous lexical aliases `observed`, `inferred`, and `asserted` to
+      `observation`, `inference`, and `assertion` in bounded collect-manifest shape recovery.
+- [x] Accept the recovery only when the complete candidate passes the existing strict manifest and
+      repository-evidence validation.
+- [x] Emit explicit runtime diagnostic/warning evidence with before/after digests and replacement
+      count.
+- [x] Cover success, arbitrary-invalid-kind rejection, and rollback when another manifest defect
+      remains.
+- [x] Pass `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure`.
+- [ ] Merge the bounded fix PR, record the new qualification SHA, and restart R3 from a fresh smoke
+      matrix ID.
+
+### Non-goals
+- [x] Do not change schemas, public runtime contracts, canonical matrices, curated repositories,
+      provider aliases, model selection, or timeout profiles.
+- [x] Do not accept arbitrary provenance kinds or weaken raw schema validation.
+- [x] Do not resume R3 from the failed/partial matrix ID or the old qualification SHA.
+
+### Approach
+1. Add an atomic, rollback-safe collect-manifest provenance-kind shape recovery beside the existing
+   missing-findings recovery.
+2. Route eligible invalid manifests through it before provider-authored manifest repair, preserving
+   strict fallback for every non-eligible value or remaining defect.
+3. Add provider-free unit/integration tests and synchronize the live runbook recovery policy.
+4. Merge the bounded fix PR, qualify the new `main` SHA offline, then restart R3 from fresh smoke.
+
+### Files expected to change
+- `internal/runtime/providercommon/collect_manifest_shape_recovery.go`
+- `internal/runtime/providercommon/collect_manifest_shape_recovery_test.go`
+- `internal/runtime/providercommon/artifact_recovery.go`
+- `internal/runtime/providercommon/diagnostics.go`
+- `fixtures/scenarios/collect-manifest-provenance-kind-aliases/*`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Tests prove only the three explicit aliases are rewritten.
+- [x] Candidate validation and rollback preserve strict failure for unrelated defects.
+- [x] Diagnostics distinguish runtime shape recovery from provider-authored artifact quality.
+- [x] Full deterministic DoD and offline closure pass without live network dependencies.
+
+### Risks
+- Runtime normalization could conceal semantic drift if broadened; eligibility is therefore a closed
+  alias map and the complete recovered manifest must pass existing validation unchanged.
+
+### Progress log
+- 2026-07-28: Fresh qwen smoke stopped on invalid `provenance.kind=observed|inferred`; R3 paused and
+  this provider-free remediation plan opened.
+- 2026-07-28: Implemented exact-alias atomic recovery with strict candidate validation, rollback,
+  digest/count diagnostics, runtime warning, readable input/golden fixtures and regression tests.
+  `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` passed on Go
+  1.25.10 with Node 22.21.1/npm 10.9.4. The first full `make test` observed two load-sensitive
+  Claude preflight timing failures; both passed in isolation, and the complete suite then passed
+  twice (standalone and inside offline closure).
+
+### Plan ID
 EP-20260722-post-implementation-trust-audit
 
 ### Context

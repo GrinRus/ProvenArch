@@ -254,6 +254,17 @@ func emitCollectManifestMissingFindingsRecoveryFailedDiagnostic(task acpruntime.
 	emitDiagnostic(task, "collect manifest missing findings recovery failed", fields)
 }
 
+func emitCollectManifestProvenanceKindRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestProvenanceKindRecoveryReport) {
+	emitDiagnostic(task, "collect manifest provenance kind recovery completed", map[string]any{
+		"provider":          string(provider),
+		"shard_id":          strings.TrimSpace(task.ShardID),
+		"recovery_mode":     collectManifestProvenanceKindRecoveryMode,
+		"replacement_count": report.ReplacementCount,
+		"before_digest":     report.BeforeDigest,
+		"after_digest":      report.AfterDigest,
+	})
+}
+
 func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestRuntimeRecoveryReport) {
 	fields := map[string]any{
 		"provider":       string(provider),

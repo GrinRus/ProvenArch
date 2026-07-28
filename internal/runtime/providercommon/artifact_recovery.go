@@ -544,6 +544,14 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 			emitCollectManifestMissingFindingsRecoveryFailedDiagnostic(task, adapter.Provider(), recoveryErr)
 		}
 	}
+	if report, recoveryErr := recoverCollectManifestProvenanceKindAliases(task); recoveryErr == nil {
+		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, collectManifestProvenanceKindRecoveryMode, "provenance-kind recovery wrote outside shard-pack-manifest.json", err)
+		}
+		emitCollectManifestProvenanceKindRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+		result = markCollectManifestProvenanceKindRecovered(result, report)
+		return true, result, nil
+	}
 	if collectManifestFileMissing(task) ||
 		isCollectManifestSemanticScaffoldFailure(validationErr) ||
 		isCollectManifestEmptyPayloadFailure(validationErr) ||
@@ -622,6 +630,26 @@ func markCollectManifestMissingFindingsRecovered(result acpruntime.Result, repor
 		"operator_review_required": true,
 	}
 	warning := "runtime_recovery: collect_manifest_missing_findings_recovery inserted an empty semantic.findings collection; treat as shape recovery evidence, not artifact-quality acceptance"
+	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
+		result.Execution.Warnings = append(result.Execution.Warnings, warning)
+	}
+	return result
+}
+
+func markCollectManifestProvenanceKindRecovered(result acpruntime.Result, report collectManifestProvenanceKindRecoveryReport) acpruntime.Result {
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics[collectManifestProvenanceKindRecoveryMode] = map[string]any{
+		"recovery_mode":            collectManifestProvenanceKindRecoveryMode,
+		"source":                   "runtime_shape_recovery",
+		"provider_authored":        false,
+		"replacement_count":        report.ReplacementCount,
+		"before_digest":            report.BeforeDigest,
+		"after_digest":             report.AfterDigest,
+		"operator_review_required": true,
+	}
+	warning := fmt.Sprintf("runtime_recovery: collect_manifest_provenance_kind_recovery canonicalized %d lexical provenance.kind aliases; treat as shape recovery evidence, not artifact-quality acceptance", report.ReplacementCount)
 	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
 		result.Execution.Warnings = append(result.Execution.Warnings, warning)
 	}

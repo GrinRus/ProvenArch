@@ -13,11 +13,26 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 )
 
-const collectManifestMissingFindingsRecoveryMode = "collect_manifest_missing_findings_recovery"
+const (
+	collectManifestMissingFindingsRecoveryMode = "collect_manifest_missing_findings_recovery"
+	collectManifestProvenanceKindRecoveryMode  = "collect_manifest_provenance_kind_recovery"
+)
 
 type collectManifestMissingFindingsRecoveryReport struct {
 	BeforeDigest string
 	AfterDigest  string
+}
+
+type collectManifestProvenanceKindRecoveryReport struct {
+	BeforeDigest     string
+	AfterDigest      string
+	ReplacementCount int
+}
+
+var collectManifestProvenanceKindAliases = map[string]string{
+	"observed": "observation",
+	"inferred": "inference",
+	"asserted": "assertion",
 }
 
 func recoverCollectManifestMissingFindings(task acpruntime.Task, validationErr error) (collectManifestMissingFindingsRecoveryReport, error) {
@@ -80,6 +95,83 @@ func isCollectManifestMissingFindingsOnlyCandidate(err error) bool {
 	detail := strings.ToLower(strings.TrimSpace(err.Error()))
 	return strings.Contains(detail, "/semantic") &&
 		strings.Contains(detail, "required: missing properties: 'findings'")
+}
+
+func recoverCollectManifestProvenanceKindAliases(task acpruntime.Task) (collectManifestProvenanceKindRecoveryReport, error) {
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "." || strings.TrimSpace(task.WriteRoot) == "" {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("collect manifest provenance-kind recovery requires write_root")
+	}
+	manifestPath := filepath.Join(root, ShardPackManifestFileName)
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("read collect manifest: %w", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(original, &manifest); err != nil {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("decode collect manifest: %w", err)
+	}
+	semantic, ok := manifest["semantic"].(map[string]any)
+	if !ok {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("collect manifest semantic must be an object")
+	}
+	replacementCount := 0
+	for _, collectionName := range []string{"entities", "edges", "findings"} {
+		collection, ok := semantic[collectionName].([]any)
+		if !ok {
+			continue
+		}
+		for _, rawItem := range collection {
+			item, ok := rawItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			provenance, ok := item["provenance"].(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, ok := provenance["kind"].(string)
+			if !ok {
+				continue
+			}
+			canonical, ok := collectManifestProvenanceKindAliases[kind]
+			if !ok {
+				continue
+			}
+			provenance["kind"] = canonical
+			replacementCount++
+		}
+	}
+	if replacementCount == 0 {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("collect manifest has no eligible provenance.kind aliases")
+	}
+	candidate, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("encode collect manifest: %w", err)
+	}
+	candidate = append(candidate, '\n')
+	if err := artifactquality.ValidateCollectManifestBytes(candidate); err != nil {
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("validate collect manifest candidate: %w", err)
+	}
+
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(manifestPath); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeCollectManifestAtomic(manifestPath, candidate, mode); err != nil {
+		return collectManifestProvenanceKindRecoveryReport{}, err
+	}
+	if err := artifactquality.ValidateCollectManifestInRootWithRepoRoots(root, collectTaskRepoRoots(task)); err != nil {
+		if restoreErr := writeCollectManifestAtomic(manifestPath, original, mode); restoreErr != nil {
+			return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("candidate validation failed (%v) and original manifest restore failed: %w", err, restoreErr)
+		}
+		return collectManifestProvenanceKindRecoveryReport{}, fmt.Errorf("validate completed collect manifest: %w", err)
+	}
+	return collectManifestProvenanceKindRecoveryReport{
+		BeforeDigest:     collectManifestSHA256(original),
+		AfterDigest:      collectManifestSHA256(candidate),
+		ReplacementCount: replacementCount,
+	}, nil
 }
 
 func writeCollectManifestAtomic(path string, content []byte, mode os.FileMode) error {
