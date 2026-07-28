@@ -60,40 +60,40 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
-EP-20260728-r3-qwen-tool-first-collect
+EP-20260728-r3-qwen-atomic-pair-write
 
 ### Context
-After PR #177 merged, qualification SHA `e54b4ce6b2d809d56d2de8c1c369e19724a3b7b3`
-passed `make offline-closure`. Fresh smoke `smoke-tiny-bank-20260728T083406Z` then showed Qwen
-spending the normal and focused collect windows in analysis before filesystem writes. The compact
-stream retry eventually authored a manifest with arbitrary `provenance.kind="document"` and
-required provider manifest repair. The run was stopped because this `repair_heavy`/`stall_pressure`
-path is not acceptable R3 evidence.
+PR #178 merged as qualification SHA `e9025647d13690b5ea236d14fc476bc89b556f12`, which passed
+fresh detached-worktree `make offline-closure`. In fresh smoke
+`smoke-tiny-bank-20260728T101010Z`, Qwen obeyed the bounded read contract and wrote markdown, but
+then spent the full 90-second partial-artifact window designing an oversized manifest instead of
+issuing the second `write_file`. Runtime reconstructed the manifest from markdown, so the smoke was
+stopped as a recovery-heavy path that cannot qualify R3.
 
 ### Goals (must have)
-- [x] Give Qwen init/refresh collect a bounded provider-specific prompt whose first actions are at
-      most four `read_file` calls followed immediately by `write_file` for markdown and manifest.
-- [x] Use the same bounded prompt for the first Qwen pre-artifact collect-pair repair, rather than
-      waiting for a second stream-retry marker.
-- [x] State the exact closed `provenance.kind` enum and reject `document`/other semantic aliases
-      without changing schema or deterministic recovery eligibility.
-- [x] Preserve the existing collect prompt behavior for Claude and Codex.
+- [x] Require Qwen to compose both final payloads before writing and issue markdown + manifest
+      `write_file` calls in the same assistant response block.
+- [x] Bound markdown to 3000 characters and manifest JSON to 6000 characters.
+- [x] Bound semantic cardinality to a small evidence-backed subset without weakening schema or
+      repository-evidence validation.
+- [x] Preserve the existing Claude/Codex prompt behavior and Qwen refresh requirements.
 - [x] Pass focused prompt tests and the full provider-free deterministic DoD/offline closure.
-- [ ] Merge the bounded fix PR, qualify the new `main` SHA, and restart R3 from a fresh smoke ID.
+- [ ] Merge the fix PR, qualify the new `main` SHA, and restart R3 from a fresh smoke ID.
 
 ### Non-goals
 - [x] Do not change schemas, public runtime contracts, provider commands/models, canonical matrices,
       curated repositories, retry counts or timeout profiles.
-- [x] Do not add `document` or any other ambiguous value to the deterministic recovery allowlist.
+- [x] Do not relabel runtime-reconstructed manifests as normal provider-authored success.
 - [x] Do not accept the stopped/partial smoke or mix its artifacts with later evidence.
 
 ### Approach
-1. Select a compact Qwen-only normal collect prompt before the shared large collect prompt.
-2. Reuse it for Qwen `runtime_stalled_before_artifacts` pair recovery on the first focused attempt.
-3. Keep exact task identity, targets, evidence roots/scopes and canonical semantic object examples
-   while removing shell/Python/template-writer ambiguity.
-4. Add bounded-size/provider-isolation/enum regressions, synchronize the runbook, pass DoD, merge,
-   qualify a new SHA and restart with fresh smoke.
+1. Keep the successful bounded `read_file` phase from PR #178.
+2. Require two `write_file` calls in one response so Qwen cannot wait for the markdown tool result
+   and enter another long reasoning turn before the manifest write.
+3. Cap payload size and semantic cardinality while retaining exact identity, paths, enum and
+   canonical shape.
+4. Pin this sequencing in provider-free prompt/adapter tests, synchronize the runbook, pass DoD,
+   merge, qualify a new SHA and restart with fresh smoke.
 
 ### Files expected to change
 - `internal/runtime/promptcontract/promptcontract.go`
@@ -105,25 +105,23 @@ path is not acceptable R3 evidence.
 - `docs/archive/PLANS_ARCHIVE_2026-07.md`
 
 ### Acceptance criteria
-- [x] Qwen normal and pre-artifact repair prompts are at most 6 KiB and require
-      `read_file -> write_file(markdown) -> write_file(manifest)`.
-- [x] Tests require `observation|inference|assertion` and explicitly forbid `document`.
-- [x] Claude/Codex prompt bodies remain unchanged.
+- [x] Qwen normal and pre-artifact repair prompts remain at most 6 KiB.
+- [x] Tests require same-response markdown + manifest tool calls and both payload/cardinality caps.
+- [x] Tests preserve `observation|inference|assertion`, refresh minima and Claude/Codex isolation.
 - [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
 
 ### Risks
-- A prompt that is too small could omit required evidence or refresh semantics; tests therefore pin
-  task identity, exact targets, canonical semantic examples, evidence candidates and refresh minima.
+- Over-bounding could make artifacts shallow; the limits still allow three entities, two edges,
+  three citations, one finding and one question per shard, while downstream aggregation spans all
+  planned shards.
 
 ### Progress log
-- 2026-07-28: Stopped fresh smoke after the second shard required two pre-artifact stall recoveries
-  and manifest-only repair for `provenance.kind="document"`; no later R3 phase was started.
-- 2026-07-28: Added the Qwen-only bounded normal/first-focused collect contract, rune-safe bounded
-  refresh intent, exact task/target/evidence context and adapter/provider-isolation regressions.
+- 2026-07-28: Stopped fresh smoke when the first collect shard required
+  `collect_manifest_runtime_recovery`; later shards and the partial matrix were not accepted.
+- 2026-07-28: Added same-response atomic pair-write sequencing plus payload/cardinality caps to the
+  existing bounded Qwen normal/first-focused collect contract. Focused cross-provider regressions,
   `make contracts`, `make test`, `make lint`, `make build` and `make offline-closure` passed with Go
-  1.25.10 and Node 22.21.1/npm 10.9.4. The first full `make test` exposed two deterministic Qwen
-  stub scenarios that could not recover `write_root` from the compact prompt; making `write_root`
-  explicit fixed both, and the complete suite then passed standalone and inside offline closure.
+  1.25.10 and Node 22.21.1/npm 10.9.4.
 
 ### Plan ID
 EP-20260722-post-implementation-trust-audit

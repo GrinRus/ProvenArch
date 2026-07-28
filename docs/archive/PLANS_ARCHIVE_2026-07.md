@@ -1436,5 +1436,20 @@ EP-20260728-r3-provenance-kind-shape-recovery
   `smoke-tiny-bank-20260728T083406Z`. That smoke found a separate Qwen tool-first prompt defect, so
   no stopped/partial matrix evidence was promoted.
 
+---
+
+### Plan ID
+EP-20260728-r3-qwen-tool-first-collect
+
+### Result
+- PR #178 replaced Qwen normal and first pre-artifact focused collect prompts with a bounded
+  `read_file -> write_file` contract, exact provenance enum and provider-isolation regressions.
+- Full DoD/offline closure and all 11 PR checks passed; PR #178 merged as
+  `e9025647d13690b5ea236d14fc476bc89b556f12`.
+- The merge SHA passed fresh detached-worktree `make offline-closure`. Fresh smoke
+  `smoke-tiny-bank-20260728T101010Z` proved the bounded reads and markdown write, but Qwen waited for
+  that tool result and then exhausted the partial-artifact window before writing the manifest.
+- Runtime reconstruction made the shard recovery-heavy, so the smoke was stopped and no partial
+  evidence was promoted. Same-response atomic pair writing supersedes this plan.
 
 ---

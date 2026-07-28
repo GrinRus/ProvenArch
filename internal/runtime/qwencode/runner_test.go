@@ -235,9 +235,11 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 	}
 	args := strings.Join(spec.Args, "\n")
 	for _, token := range []string{
-		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"QWEN COLLECT — READ THEN ATOMIC PAIR WRITE:",
 		"next response block must be read_file tool calls",
-		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"exactly two write_file tool calls in the same response block",
+		"Do not wait for the markdown tool result before issuing the manifest write_file call.",
+		"Manifest JSON must be at most 6000 characters",
 		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
 		"README.md",
 		writeRoot,

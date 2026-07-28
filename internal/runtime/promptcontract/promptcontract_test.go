@@ -167,9 +167,14 @@ func TestComposeArtifactOnlyPromptUsesBoundedQwenToolFirstCollectContract(t *tes
 	prompt := qwenPrompt
 	for _, token := range []string{
 		`You are ACP runtime provider "qwen-code".`,
-		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"QWEN COLLECT — READ THEN ATOMIC PAIR WRITE:",
 		"next response block must be read_file tool calls",
-		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"compose BOTH final payloads before calling any write tool",
+		"exactly two write_file tool calls in the same response block",
+		"Do not wait for the markdown tool result before issuing the manifest write_file call.",
+		"Markdown must be at most 3000 characters",
+		"Manifest JSON must be at most 6000 characters",
+		"exactly 1 document, 1-3 citations, 1-3 entities, 0-2 edges, exactly 1 finding, and exactly 1 question",
 		"Do not plan, explain, use a todo, or generate a shell/Python/template writer.",
 		`step_id="refresh.step1.collect"`,
 		`path="root-overview.md"`,
@@ -986,9 +991,11 @@ func TestComposeCollectArtifactPairRepairPromptUsesQwenReadThenWriteForAnyPreArt
 		t.Fatalf("Qwen pre-artifact repair prompt is %d bytes, want at most %d", got, max)
 	}
 	for _, token := range []string{
-		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"QWEN COLLECT — READ THEN ATOMIC PAIR WRITE:",
 		"next response block must be read_file tool calls",
-		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"exactly two write_file tool calls in the same response block",
+		"Do not wait for the markdown tool result before issuing the manifest write_file call.",
+		"Manifest JSON must be at most 6000 characters",
 		"at most 4 listed evidence files and at most 4000 bytes per file",
 		"documents[0]: id, kind, title, path=\"root-overview.md\"",
 		"canonical_path=\"reports/as-is/payments/root-overview.md\"",
