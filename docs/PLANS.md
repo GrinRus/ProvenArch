@@ -60,6 +60,58 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260728-async-shutdown-quiescence
+
+### Context
+PR #180 backend CI failed twice after all changed prompt packages passed. The failures were
+`TempDir RemoveAll: directory not empty` in two different async lifecycle tests. Service shutdown
+waits only for a terminal status, although the async goroutine may still own the workspace until
+`finishAsyncRun` clears its coordination state. The existing test quiescence helper repeats the
+same mistake by using `HasInFlightRun`, which intentionally hides terminal active records.
+
+### Goals (must have)
+- [x] Make shutdown wait until the selected async run has terminal state and releases its active
+      coordination/cancel ownership.
+- [x] Make the orchestrator lifecycle test helper observe the same real quiescence condition.
+- [x] Reproduce the two CI failures under repeated provider-free test runs and keep them stable.
+- [ ] Pass full deterministic DoD/offline closure and merge this fix before resuming PR #180.
+
+### Non-goals
+- [x] Do not change run status, admission, queue, cancellation, history or public API contracts.
+- [x] Do not change live providers, harness, matrices, curated repositories or timeout profiles.
+
+### Approach
+1. Replace the shutdown terminal-status poll with a terminal-plus-ownership-release poll.
+2. Update the package-local test helper to wait for empty active/pending/cancel coordination.
+3. Stress both live-observed tests, run full DoD/offline closure and deliver a separate fix PR.
+
+### Files expected to change
+- `internal/orchestrator/service_runs.go`
+- `internal/orchestrator/run_lifecycle_test.go`
+- `docs/PLANS.md`
+- `docs/ARCHITECTURE.md`
+
+### Acceptance criteria
+- [x] Repeated `TestAsyncRunPanicReleasesSlotAndStartsPendingRun` passes.
+- [x] Repeated `TestGitCommitBlockedWhileRunIsActive` passes.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- Waiting on the wrong run could block shutdown after queue handoff; the predicate is scoped to the
+  captured run ID and requires only that run's ownership to be released.
+
+### Progress log
+- 2026-07-28: PR #180 backend job first failed in the API Git lease test and its failed-job rerun
+  failed in the orchestrator panic/queued-run test. Both errors were async writes racing TempDir
+  cleanup after a terminal status had already been observed.
+- 2026-07-28: Shutdown now waits for terminal state plus release of the selected run's active/cancel
+  ownership; the package-local helper observes the same condition. Both CI-failing tests passed 50
+  consecutive provider-free repetitions.
+- 2026-07-28: Full pinned deterministic DoD and `make offline-closure` passed, including race suites
+  for API/orchestrator, 263 Python tests, 158 UI tests, 7/7 mock E2E and deterministic embedded
+  `ui_dist`.
+
+### Plan ID
 EP-20260728-r3-qwen-atomic-pair-write
 
 ### Context
