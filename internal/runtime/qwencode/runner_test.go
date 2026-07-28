@@ -195,6 +195,65 @@ func TestQwenCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 	}
 }
 
+func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "arch-workspace")
+	repoRoot := filepath.Join(root, "repo-a")
+	writeRoot := filepath.Join(workspace, "reports", "taskruns", "run-1", "staging", "shards", "repo-a-root-files")
+	for _, dir := range []string{workspace, repoRoot, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Repo A\n\nRuntime entrypoint.\n"), 0o644); err != nil {
+		t.Fatalf("write repo evidence: %v", err)
+	}
+
+	task := acpruntime.Task{
+		RunID:            "run-1",
+		StepID:           "init.step1.collect",
+		Workspace:        workspace,
+		WriteRoot:        writeRoot,
+		ArtifactRoot:     "reports/taskruns/run-1/staging/shards/repo-a-root-files",
+		ReadContextRoots: []string{workspace, repoRoot},
+		RepoScopes:       []string{"repo-a"},
+		PathScopes:       []string{"README.md"},
+		ShardID:          "repo-a-root-files",
+	}
+
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).CommandSpec(task)
+	if err != nil {
+		t.Fatalf("collect command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen collect invocation must keep stdin empty; collect contract belongs in -p prompt")
+	}
+	if spec.PromptBytes > 6*1024 {
+		t.Fatalf("qwen collect prompt must remain within 6 KiB, got %d bytes", spec.PromptBytes)
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"next response block must be read_file tool calls",
+		"use write_file for the exact markdown target, then write_file for the exact manifest target",
+		"Every provenance.kind must be exactly one of: observation, inference, assertion.",
+		"README.md",
+		writeRoot,
+		"shard-pack-manifest.json",
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected qwen collect prompt arg to contain %q, got %v", token, spec.Args)
+		}
+	}
+	for _, forbidden := range []string{"run_shell_command", "python", "python3", "Artifact-only contract:"} {
+		if strings.Contains(args, forbidden) {
+			t.Fatalf("qwen collect prompt must not contain %q, got %v", forbidden, spec.Args)
+		}
+	}
+}
+
 func TestQwenCommandSpecAppendsPromptForCustomArgsWithoutTaskJSONStdin(t *testing.T) {
 	t.Parallel()
 

@@ -221,8 +221,8 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	evidencePaths := repairEvidenceCandidates(task)
-	if provider == acpruntime.ProviderQwenCode && strings.Contains(strings.ToLower(errorText(validationErr)), "collect_pair_repair_stream_retry") {
-		return composeQwenStreamRetryCollectArtifactPairPrompt(task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
+	if provider == acpruntime.ProviderQwenCode && strings.Contains(strings.ToLower(errorText(validationErr)), "runtime_stalled_before_artifacts") {
+		return composeQwenToolFirstCollectPromptWithTargets(task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
 	}
 	if useCompactCollectPairRepairPrompt(validationErr) {
 		return composeCompactCollectArtifactPairRepairPrompt(provider, task, validationErr, docRel, docTarget, manifestTarget, evidencePaths)
@@ -323,28 +323,51 @@ func ComposeCollectArtifactPairRepairPrompt(provider acpruntime.Provider, task a
 	return strings.Join(lines, "\n")
 }
 
-func composeQwenStreamRetryCollectArtifactPairPrompt(task acpruntime.Task, validationErr error, docRel string, docTarget string, manifestTarget string, evidencePaths []string) string {
+func composeQwenToolFirstCollectPrompt(task acpruntime.Task, validationErr error) string {
+	docRel := steppolicy.SuggestedCollectDocumentPath(task)
+	docTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), filepath.FromSlash(docRel))
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
+	return composeQwenToolFirstCollectPromptWithTargets(task, validationErr, docRel, docTarget, manifestTarget, repairEvidenceCandidates(task))
+}
+
+func composeQwenToolFirstCollectPromptWithTargets(task acpruntime.Task, validationErr error, docRel string, docTarget string, manifestTarget string, evidencePaths []string) string {
 	lines := []string{
-		"QWEN COLLECT PAIR STREAM RETRY — TOOL CALL FIRST:",
-		"- The previous focused repair spent its entire window in thinking and wrote no file.",
-		"- Your next response block must be a run_shell_command tool call. Do not emit thinking, a plan, JSON, or prose before that tool call.",
-		"- Use one short shell command (a simple python3 heredoc is allowed): read bounded prefixes from listed repository files, then write both exact targets before returning.",
+		"You are ACP runtime provider \"qwen-code\".",
+		"QWEN COLLECT — READ_FILE THEN WRITE_FILE:",
+		"- Do not plan, explain, use a todo, or generate a shell/Python/template writer.",
+		"- Your next response block must be read_file tool calls for at most 4 listed evidence files and at most 4000 bytes per file.",
+		"- Immediately after those tool results, use write_file for the exact markdown target, then write_file for the exact manifest target. Do not run another read/preflight first.",
 		fmt.Sprintf("- Exact markdown target: %q.", docTarget),
 		fmt.Sprintf("- Exact manifest target: %q.", manifestTarget),
-		"- Read at most 4 candidates and 4000 bytes per file. Use only concrete existing files; do not inspect taskruns, raw logs, or sibling shards.",
+		"- Read only concrete existing files under read_context_roots; do not inspect taskruns, raw logs, sibling shards, or source outside the listed roots.",
 		"- Markdown must be concise operator-facing architecture evidence: observed components/config/runtime behavior, concrete file references, and honest gaps. Do not mention repair, bounded reads, providers, or process mechanics.",
-		"- Write markdown first, then a valid JSON manifest. Keep the manifest small; one well-supported entity and one finding are sufficient when the evidence is sparse. edges may be empty.",
+		"- Keep the manifest small: one well-supported entity and one finding are sufficient when evidence is sparse; edges may be empty.",
 		"MINIMUM MANIFEST SHAPE:",
 		fmt.Sprintf("- Top level: version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q, artifact_root=%q, repo_scopes, path_scopes, summary, documents, citations, semantic.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole), strings.TrimSpace(task.ArtifactRoot)),
 		fmt.Sprintf("- documents[0]: id, kind, title, path=%q, canonical_path=%q, topics, citation_ids.", filepath.ToSlash(docRel), steppolicy.CollectManifestCanonicalPath(task, docRel)),
 		"- citations[0]: unique id, repo, concrete file path, non-empty claim_ids, document_ids containing documents[0].id.",
 		"- semantic.coverage: observed[], missing[], notes[]. semantic.questions: objects with id and text.",
 		"- semantic.entities: objects with id, name, type, provenance. semantic.edges and semantic.findings use the same provenance shape.",
-		"- provenance: {kind, numeric confidence, evidence:[{repo,path}]}; finding also needs id, severity, title, description.",
+		"- Every provenance.kind must be exactly one of: observation, inference, assertion. Values such as document, report, source, observed, inferred, or asserted are invalid.",
+		"- provenance: {kind, numeric confidence, evidence:[{repo,path}]}; every finding also needs id, severity, title, description.",
 		"- Do not add alternate/legacy keys. Every evidence path must be an existing repository file, not a directory.",
-		"- Finish the same tool call with test -s checks for both targets. Backend validation is the only success surface.",
+		"- Stop after both write_file calls. Backend validation, not stdout claims, is the only success surface.",
+		fmt.Sprintf("- write_root=%q", strings.TrimSpace(task.WriteRoot)),
 		fmt.Sprintf("- read_context_roots=%q", strings.Join(task.ReadContextRoots, ", ")),
 		fmt.Sprintf("- repo_scopes=%q; path_scopes=%q", strings.Join(task.RepoScopes, ", "), strings.Join(task.PathScopes, ", ")),
+	}
+	lines = append(lines, "CANONICAL SEMANTIC OBJECTS:")
+	lines = append(lines, collectManifestCanonicalShapeBlock()...)
+	if strings.TrimSpace(task.StepID) == "refresh.step1.collect" {
+		lines = append(lines,
+			"- Refresh collect requires at least one semantic question and at least three concrete coverage.missing items.",
+		)
+		if intent := boundedQwenCollectIntent(task.RefreshIntentContext, 600); intent != "" {
+			lines = append(lines,
+				"- Current source files and observed evidence are authoritative; this bounded refresh intent is a secondary hint only:",
+				intent,
+			)
+		}
 	}
 	if len(evidencePaths) > 0 {
 		lines = append(lines, "Repository evidence candidates (choose up to 4):")
@@ -359,6 +382,18 @@ func composeQwenStreamRetryCollectArtifactPairPrompt(task acpruntime.Task, valid
 		lines = append(lines, "- Retry reason: "+detail)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func boundedQwenCollectIntent(value string, maxRunes int) string {
+	value = strings.TrimSpace(value)
+	if value == "" || maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "…"
 }
 
 func useCompactCollectPairRepairPrompt(validationErr error) bool {
