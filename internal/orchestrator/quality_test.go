@@ -43,6 +43,28 @@ func TestAssessLiveReportSurfaceSignalsOverviewAllowsSubstantivePlaceholderGuida
 	}
 }
 
+func TestAssessLiveReportSurfaceSignalsOverviewDoesNotJoinNoAndYetAcrossLines(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"reports/as-is/overview.md": strings.Join([]string{
+			"# Architecture Home: Bank of Anthos",
+			"",
+			"## Integrations and datastores",
+			"No explicit message broker is visible in the cited manifests.",
+			"",
+			"## Evidence gaps and open questions",
+			"Runtime behavior and inter-service API contracts are not yet traced from source.",
+			"",
+		}, "\n"),
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+	for _, signal := range signals {
+		if signal.Code == "artifact_quality.overview_placeholder" {
+			t.Fatalf("independent substantive no/not-yet gap lines must not be joined into a placeholder signal: %+v", signals)
+		}
+	}
+}
+
 func TestAssessLiveReportSurfaceSignalsEmptyFindingsWithCriticalGaps(t *testing.T) {
 	ws := qualitySignalWorkspace(t, map[string]string{
 		"reports/findings/findings.md": "# Findings\n\nNo findings reported.\n",

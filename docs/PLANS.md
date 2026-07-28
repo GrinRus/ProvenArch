@@ -6937,3 +6937,52 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-28: Full pinned offline closure passed: race suites, 90 readable fixtures, UI `158/158`,
   mock E2E `7/7`, full Go suite, Python `263/263`, contracts, lint/typecheck, build and deterministic
   embedded `ui_dist`.
+
+---
+
+## EP-20260728-r3-overview-placeholder-line-scope
+
+### Context
+- Fresh diagnostic `smoke-tiny-bank-20260728T211536Z` ran from qualification SHA
+  `5a61a86c0d9d51f5466f731b1ca27e29ce27266d`. Host/provider/DoD/UI/browser preflight passed,
+  headless init collect completed `10/10`, and step2 passed strict validation with all eight
+  Architecture Home sections, concrete repository references, no forbidden process marker and no
+  focused repair/stall pressure.
+- The succeeded init quality report still emitted `artifact_quality.overview_placeholder`.
+  `overviewLooksPlaceholder` searched the entire document for any `no ` and any ` yet`, joining
+  separate substantive lines: `No explicit message broker is visible` and
+  `Runtime behavior ... is not yet traced`.
+- The operator stopped the non-evidence matrix during refresh after proving the deterministic
+  product-side false positive. All matrix/provider processes terminated; regression and release
+  phases did not start.
+
+### Goals
+- [x] Scope the legacy `no ... yet` placeholder phrase to one Markdown line.
+- [x] Preserve real same-line placeholder detection such as `no services yet`.
+- [x] Add the live-observed multiline substantive wording as a deterministic regression.
+- [x] Synchronize architecture and live-runbook behavior.
+- [x] Pass full provider-free offline closure.
+- [ ] Merge the isolated fix, establish a new qualification SHA, and restart with a fresh smoke
+  matrix ID.
+
+### Non-goals
+- No weakening of exact scaffold/placeholder/TODO markers, artifact-quality gate policy, schema/API,
+  runtime/provider behavior, timeout, canonical matrix or curated repository.
+- No acceptance of the stopped matrix or manual suppression of its quality signal.
+
+### Acceptance
+- Independent `no <integration>` and `not yet traced` lines do not produce
+  `artifact_quality.overview_placeholder`.
+- Same-line `no services yet` and existing scaffold/TODO fixtures still produce the warning.
+- `make contracts`, `make test`, `make lint`, and `make build` pass with pinned toolchains.
+
+### Progress log
+- 2026-07-28: Saved
+  `/tmp/provenarch-test_arch_project/reports/operator_step_report_smoke-tiny-bank-20260728T211536Z.md`
+  and stopped the diagnostic before it could be mistaken for release evidence.
+- 2026-07-28: Moved the `no`/`yet` conjunction into the existing per-line scan. Focused overview
+  quality tests pass 50 consecutive runs, including the live-observed multiline regression and the
+  original `no services yet` placeholder case.
+- 2026-07-28: Full pinned offline closure passed: race suites, 90 readable fixtures, UI `158/158`,
+  mock E2E `7/7`, full Go suite, Python `263/263`, contracts, lint/typecheck, build and deterministic
+  embedded `ui_dist`.
