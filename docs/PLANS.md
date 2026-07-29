@@ -60,6 +60,61 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260729-r3-overview-evidence-gap-quality-signal
+
+### Context
+Fresh diagnostic smoke on qualification SHA `718f6bb80533874f5cb36d7251f2f36524544b22`
+completed successfully, but init quality emitted `artifact_quality.overview_placeholder` for a
+substantive Architecture Home. The broad line heuristic matched the evidence-gap sentence
+`No explicit CODEOWNERS or per-service ownership evidence has been read yet.` The subsequent
+refresh artifact was clean, but R3 policy requires a provider-free fix and a new qualification SHA
+before live qualification continues.
+
+### Goals (must have)
+- [x] Restrict the short `no … yet` placeholder heuristic to known empty surface labels.
+- [x] Preserve detection of actual placeholders such as `Services: no services yet`.
+- [x] Pin the live-observed evidence-gap sentence in a regression test.
+- [x] Pass the full provider-free DoD and offline closure.
+- [ ] Merge and restart fresh smoke from the new qualification SHA.
+
+### Non-goals
+- [x] Do not change schemas, runtime contracts, provider prompts, matrices, curated repositories,
+      provider commands/models, retries, or timeout budgets.
+- [x] Do not reuse the diagnostic smoke as R3 evidence.
+
+### Approach
+1. Replace the broad same-line substring check with a closed empty-surface subject allow-list.
+2. Add positive placeholder and negative live-evidence regression fixtures.
+3. Run focused tests, deterministic DoD and offline closure before merging.
+
+### Files expected to change
+- `internal/orchestrator/quality.go`
+- `internal/orchestrator/quality_test.go`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Focused overview quality tests pass.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+- [ ] The merged `main` SHA becomes the only new R3 qualification input.
+
+### Risks
+- Making the heuristic too narrow could miss novel placeholder wording. Explicit bootstrap markers
+  and exact standalone `placeholder`/`todo` checks remain unchanged; this slice only narrows the
+  ambiguous natural-language `no … yet` branch.
+
+### Progress log
+- 2026-07-29: Classified the fresh smoke signal as a deterministic false positive against the
+  immutable init snapshot; stopped progression to `regres fast` under the R3 restart policy.
+- 2026-07-29: Replaced the ambiguous substring heuristic with a closed empty-surface subject
+  classifier. Focused tests passed 20 consecutive runs; full pinned offline closure passed with
+  race suites, 90 readable fixtures, UI `158/158` twice, mock E2E `7/7`, Go, Python `263/263`,
+  contracts, lint, build, and deterministic embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260728-r3-qwen-citation-closed-shape
 
 ### Context

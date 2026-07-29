@@ -43,6 +43,40 @@ func TestAssessLiveReportSurfaceSignalsOverviewAllowsSubstantivePlaceholderGuida
 	}
 }
 
+func TestAssessLiveReportSurfaceSignalsOverviewRecognizesEmptySurfacePlaceholder(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"reports/as-is/overview.md": "# Architecture Home\n\n## Services\n\n- Services: no services yet.\n",
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+
+	assertQualitySignal(t, signals, "artifact_quality.overview_placeholder")
+}
+
+func TestAssessLiveReportSurfaceSignalsOverviewAllowsSubstantiveEvidenceGap(t *testing.T) {
+	ws := qualitySignalWorkspace(t, map[string]string{
+		"reports/as-is/overview.md": strings.Join([]string{
+			"# Bank of Anthos — System Overview",
+			"",
+			"## Domains and ownership",
+			"Accounts, frontend, and ledger are the three observed capability domains.",
+			"",
+			"No explicit CODEOWNERS or per-service ownership evidence has been read yet.",
+			"",
+			"## Evidence gaps and open questions",
+			"Detailed sequence-level flows, API contracts, and event formats are not yet extracted from source code.",
+			"",
+		}, "\n"),
+	})
+
+	signals := assessLiveReportSurfaceSignals(ws, reports.DefaultReportRenderContext(), RunStatusSucceeded, usefulQualitySteps(), usefulQualityTotals())
+	for _, signal := range signals {
+		if signal.Code == "artifact_quality.overview_placeholder" {
+			t.Fatalf("substantive evidence-gap prose must not be classified as placeholder: %+v", signals)
+		}
+	}
+}
+
 func TestAssessLiveReportSurfaceSignalsOverviewDoesNotJoinNoAndYetAcrossLines(t *testing.T) {
 	ws := qualitySignalWorkspace(t, map[string]string{
 		"reports/as-is/overview.md": strings.Join([]string{
