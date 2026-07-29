@@ -1,0 +1,138 @@
+{
+  "coverage": {
+    "observed": [
+      "ledger services"
+    ],
+    "missing": [],
+    "notes": []
+  },
+  "questions": [],
+  "entities": [
+    {
+      "id": "svc.ledgerwriter",
+      "type": "service",
+      "name": "Ledger Writer",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/ledgerwriter/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "svc.balance-reader",
+      "type": "service",
+      "name": "Balance Reader",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/balancereader/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "svc.balancereader",
+      "type": "service",
+      "name": "balancereader",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "kubernetes-manifests/balance-reader.yaml"
+          }
+        ]
+      }
+    },
+    {
+      "id": "db.ledger-db",
+      "type": "database",
+      "name": "ledger-db",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/balancereader/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "db.ledgerdb",
+      "type": "database",
+      "name": "ledger-db",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/ledgerwriter/README.md"
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge.writer.reader",
+      "type": "calls",
+      "from": "svc.ledgerwriter",
+      "to": "svc.balancereader",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/ledgerwriter/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "edge.writer.db",
+      "type": "writes_to",
+      "from": "svc.ledgerwriter",
+      "to": "db.ledgerdb",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/ledgerwriter/README.md"
+          }
+        ]
+      }
+    },
+    {
+      "id": "edge.writer.store",
+      "type": "reads",
+      "from": "svc.ledgerwriter",
+      "to": "store.ledgerdb",
+      "provenance": {
+        "kind": "observation",
+        "confidence": 0.8,
+        "evidence": [
+          {
+            "repo": "bank-of-anthos",
+            "path": "src/ledger/ledgerwriter/README.md"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": []
+}

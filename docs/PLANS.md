@@ -60,6 +60,68 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260729-r3-cross-shard-semantic-aliases
+
+### Context
+Fresh diagnostic smoke `smoke-tiny-bank-20260729T015647Z` on qualification SHA
+`d33dac87c269b88a3854152175b64cf8fab26233` completed all collect shards and produced valid
+provider-authored artifacts, but the validator correctly returned `FAIL`: cross-shard semantic
+assembly retained `svc.balance-reader`/`svc.balancereader` and
+`db.ledger-db`/`db.ledgerdb` because their evidence paths differed, then left
+`store.ledgerdb` as a dangling edge endpoint. R3 stopped before regression matrices.
+
+### Goals (must have)
+- [x] Deterministically merge cross-shard entity aliases only when type, logical repo, normalized
+      ID identity and ID leaf/name agree.
+- [x] Rewrite exact aliases and uniquely resolvable endpoint tokens to the canonical entity ID.
+- [x] Preserve validator fail-closed behavior for ambiguous endpoint tokens.
+- [x] Pin the live-observed Bank of Anthos entity/evidence/edge combination in regression tests.
+- [ ] Pass full provider-free DoD/offline closure, merge, and restart from fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public runtime contracts, provider prompts, matrices, curated
+      repositories, provider commands/models, retries, or timeout budgets.
+- [x] Do not synthesize a validator verdict or accept the stopped smoke as R3 evidence.
+
+### Approach
+1. Add a conservative entity identity key independent of evidence path only when full ID variants
+   normalize identically and ID leaf/name agree within the same entity type and logical repo.
+2. Build an endpoint-only resolver from canonical IDs and retained aliases; use token fallback only
+   when exactly one canonical entity owns that token.
+3. Keep findings/questions on exact remaps and leave ambiguous edge aliases untouched for validator.
+4. Run focused repetition, deterministic DoD and offline closure before merge.
+
+### Files expected to change
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/docflow_test.go`
+- `internal/orchestrator/testdata/bank_cross_shard_semantic_aliases.json`
+- `docs/ARCHITECTURE.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Live-observed cross-path aliases merge with all provenance retained.
+- [x] `store.ledgerdb` resolves only when the normalized token has one canonical target.
+- [x] Ambiguous token regression remains unresolved and validator-visible.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+- [ ] The merged `main` SHA becomes the only new R3 qualification input.
+
+### Risks
+- Token fallback can over-map generic endpoint names. The resolver therefore applies only to edge
+  endpoints, requires a unique canonical token target, and never changes ambiguous values or
+  finding/question references.
+
+### Progress log
+- 2026-07-29: Classified the fresh smoke failure from its immutable validator verdict and stopped
+  R3 before `regres fast`; no stopped/partial matrix evidence will be reused.
+- 2026-07-29: Added conservative full-ID alias grouping, endpoint-only unique token resolution and
+  ambiguity guards. Focused regressions passed 20 consecutive runs; full pinned offline closure
+  passed race suites, 90 readable fixtures, UI `158/158` twice, mock E2E `7/7`, Go, Python
+  `263/263`, contracts, lint, build, and deterministic embedded UI verification.
+
+---
+
+### Plan ID
 EP-20260729-r3-overview-evidence-gap-quality-signal
 
 ### Context

@@ -912,7 +912,8 @@ func normalizeSemanticSnapshot(snapshot contracts.SemanticSnapshot, repoAliases 
 
 	entities, entityRemap := dedupeSemanticEntities(snapshot.Entities, repoAliases, evidencePaths)
 	snapshot.Entities = entities
-	snapshot.Edges = dedupeSemanticEdges(snapshot.Edges, repoAliases, evidencePaths, entityRemap)
+	endpointRemap := newSemanticEndpointRemap(entities, entityRemap)
+	snapshot.Edges = dedupeSemanticEdges(snapshot.Edges, repoAliases, evidencePaths, endpointRemap)
 	snapshot.Findings = dedupeSemanticFindings(snapshot.Findings, repoAliases, evidencePaths, entityRemap)
 	snapshot.Questions = mergeQuestions(nil, rewriteSemanticQuestions(snapshot.Questions, entityRemap))
 	return snapshot
@@ -953,6 +954,50 @@ func dedupeSemanticEntities(entities []contracts.Entity, repoAliases semanticRep
 	return mergedEntities, remap
 }
 
+type semanticEndpointRemap struct {
+	exact map[string]string
+	token map[string]string
+}
+
+func newSemanticEndpointRemap(entities []contracts.Entity, entityRemap map[string]string) semanticEndpointRemap {
+	resolver := semanticEndpointRemap{
+		exact: map[string]string{},
+		token: map[string]string{},
+	}
+	ambiguousExact := map[string]struct{}{}
+	ambiguousToken := map[string]struct{}{}
+	registerUnique := func(values map[string]string, ambiguous map[string]struct{}, key string, canonicalID string) {
+		key = strings.TrimSpace(key)
+		canonicalID = strings.TrimSpace(canonicalID)
+		if key == "" || canonicalID == "" {
+			return
+		}
+		if _, blocked := ambiguous[key]; blocked {
+			return
+		}
+		if existing, exists := values[key]; exists && existing != canonicalID {
+			delete(values, key)
+			ambiguous[key] = struct{}{}
+			return
+		}
+		values[key] = canonicalID
+	}
+	for candidateID, canonicalID := range entityRemap {
+		registerUnique(resolver.exact, ambiguousExact, candidateID, canonicalID)
+	}
+	for _, entity := range entities {
+		canonicalID := strings.TrimSpace(entity.ID)
+		registerUnique(resolver.exact, ambiguousExact, canonicalID, canonicalID)
+		for _, alias := range entity.Aliases {
+			registerUnique(resolver.exact, ambiguousExact, alias, canonicalID)
+		}
+		for _, value := range append([]string{canonicalID, entity.Name}, entity.Aliases...) {
+			registerUnique(resolver.token, ambiguousToken, semanticEntityIdentityToken(value), canonicalID)
+		}
+	}
+	return resolver
+}
+
 func normalizeSemanticEntity(entity contracts.Entity, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.Entity {
 	entity.ID = strings.TrimSpace(entity.ID)
 	entity.Type = strings.TrimSpace(entity.Type)
@@ -981,15 +1026,15 @@ func mergeSemanticEntity(winner contracts.Entity, candidate contracts.Entity) co
 	return winner
 }
 
-func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver, entityRemap map[string]string) []contracts.Edge {
+func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver, endpointRemap semanticEndpointRemap) []contracts.Edge {
 	grouped := map[string][]contracts.Edge{}
 	order := []string{}
 	for _, edge := range edges {
 		edge.ID = strings.TrimSpace(edge.ID)
 		edge.Type = strings.TrimSpace(edge.Type)
 		edge.Name = strings.TrimSpace(edge.Name)
-		edge.From = rewriteSemanticID(edge.From, entityRemap)
-		edge.To = rewriteSemanticID(edge.To, entityRemap)
+		edge.From = rewriteSemanticEndpointID(edge.From, endpointRemap)
+		edge.To = rewriteSemanticEndpointID(edge.To, endpointRemap)
 		edge.Provenance = normalizeSemanticProvenance(edge.Provenance, repoAliases, evidencePaths)
 		key := semanticEdgeDedupKey(edge)
 		if _, exists := grouped[key]; !exists {
@@ -1119,6 +1164,21 @@ func rewriteSemanticID(value string, entityRemap map[string]string) string {
 	return value
 }
 
+func rewriteSemanticEndpointID(value string, endpointRemap semanticEndpointRemap) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if remapped, ok := endpointRemap.exact[value]; ok && strings.TrimSpace(remapped) != "" {
+		return strings.TrimSpace(remapped)
+	}
+	token := semanticEntityIdentityToken(value)
+	if remapped, ok := endpointRemap.token[token]; ok && strings.TrimSpace(remapped) != "" {
+		return strings.TrimSpace(remapped)
+	}
+	return value
+}
+
 func normalizeSemanticProvenance(provenance contracts.Provenance, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.Provenance {
 	provenance.Kind = strings.TrimSpace(provenance.Kind)
 	provenance.Evidence = normalizeSemanticEvidenceSet(provenance.Evidence, repoAliases, evidencePaths)
@@ -1176,6 +1236,11 @@ func semanticEntityDedupKey(entity contracts.Entity) string {
 	entityType := normalizeSemanticKey(entity.Type)
 	repo := normalizeSemanticKey(primarySemanticEvidenceRepo(entity.Provenance.Evidence))
 	name := normalizeSemanticEntityNameDedupKey(entity.Type, entity.Name)
+	idToken := semanticEntityIdentityToken(entity.ID)
+	nameToken := semanticEntityIdentityToken(entity.Name)
+	if entityType != "" && repo != "" && idToken != "" && idToken == nameToken {
+		return strings.Join([]string{"identity", entityType, repo, semanticEntityIDIdentityToken(entity.ID)}, "|")
+	}
 	evidencePath := normalizeSemanticKey(primarySemanticEvidencePath(entity.Provenance.Evidence))
 	if name == "" || (repo == "" && evidencePath == "") {
 		return "id|" + strings.TrimSpace(entity.ID)
@@ -1195,6 +1260,19 @@ func normalizeSemanticEntityNameDedupKey(entityType string, name string) string 
 		}
 	}
 	return normalizedName
+}
+
+func semanticEntityIdentityToken(value string) string {
+	value = strings.TrimSpace(value)
+	if splitAt := strings.LastIndexAny(value, ".:/\\"); splitAt >= 0 {
+		value = value[splitAt+1:]
+	}
+	return strings.ReplaceAll(normalizeSemanticKey(value), " ", "")
+}
+
+func semanticEntityIDIdentityToken(value string) string {
+	value = strings.NewReplacer(".", " ", ":", " ", "/", " ", "\\", " ").Replace(strings.TrimSpace(value))
+	return strings.ReplaceAll(normalizeSemanticKey(value), " ", "")
 }
 
 func semanticFindingDedupKey(finding contracts.Finding) string {
