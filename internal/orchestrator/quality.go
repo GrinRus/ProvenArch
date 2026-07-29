@@ -554,7 +554,7 @@ func overviewLooksPlaceholder(text string) bool {
 		}
 	}
 	for _, line := range strings.Split(lower, "\n") {
-		if strings.Contains(line, "no ") && strings.Contains(line, " yet") {
+		if overviewLineLooksPlaceholder(line) {
 			return true
 		}
 		trimmed := strings.TrimSpace(strings.TrimLeft(line, "#-* "))
@@ -565,6 +565,35 @@ func overviewLooksPlaceholder(text string) bool {
 		}
 	}
 	return false
+}
+
+func overviewLineLooksPlaceholder(line string) bool {
+	trimmed := strings.TrimSpace(strings.TrimLeft(strings.ToLower(line), "#-* "))
+	if _, value, ok := strings.Cut(trimmed, ":"); ok {
+		trimmed = strings.TrimSpace(value)
+	}
+	trimmed = strings.TrimSuffix(strings.TrimSuffix(trimmed, "."), "!")
+	if !strings.HasPrefix(trimmed, "no ") || !strings.HasSuffix(trimmed, " yet") {
+		return false
+	}
+	subject := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "no "), " yet"))
+	switch subject {
+	case "artifact", "artifacts",
+		"component", "components",
+		"content",
+		"data",
+		"domain", "domains",
+		"entry", "entries",
+		"evidence",
+		"finding", "findings",
+		"item", "items",
+		"question", "questions",
+		"result", "results",
+		"service", "services":
+		return true
+	default:
+		return false
+	}
 }
 
 func criticalCoverageGapCategories(text string) []string {
