@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1447,5 +1448,106 @@ func TestNormalizeSemanticSnapshotDedupesServiceTokenVariantsAndFindingSignature
 	}
 	if got := snapshot.Questions[0].RelatedIDs; len(got) != 1 || got[0] != winnerID {
 		t.Fatalf("expected question related_ids to be rewritten to %q, got %v", winnerID, got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotDedupesLiveCrossShardAliasesAndRewritesUniqueEndpointAliases(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "bank_cross_shard_semantic_aliases.json"))
+	if err != nil {
+		t.Fatalf("read live semantic alias fixture: %v", err)
+	}
+	var fixture contracts.SemanticSnapshot
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("decode live semantic alias fixture: %v", err)
+	}
+	snapshot := normalizeSemanticSnapshot(fixture, newSemanticRepoAliasResolver(
+		map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"},
+		nil,
+	))
+
+	if got, want := len(snapshot.Entities), 3; got != want {
+		t.Fatalf("expected three canonical entities after cross-shard dedupe, got=%d want=%d: %#v", got, want, snapshot.Entities)
+	}
+	entitiesByID := map[string]contracts.Entity{}
+	for _, entity := range snapshot.Entities {
+		entitiesByID[entity.ID] = entity
+	}
+	reader := entitiesByID["svc.balance-reader"]
+	if got := strings.Join(reader.Aliases, ","); !strings.Contains(got, "svc.balancereader") {
+		t.Fatalf("expected reader alias to be retained, got %v", reader.Aliases)
+	}
+	if got, want := len(reader.Provenance.Evidence), 2; got != want {
+		t.Fatalf("expected reader evidence from both shard paths, got=%d want=%d: %#v", got, want, reader.Provenance.Evidence)
+	}
+	database := entitiesByID["db.ledger-db"]
+	if got := strings.Join(database.Aliases, ","); !strings.Contains(got, "db.ledgerdb") {
+		t.Fatalf("expected database alias to be retained, got %v", database.Aliases)
+	}
+	if got, want := len(database.Provenance.Evidence), 2; got != want {
+		t.Fatalf("expected database evidence from both shard paths, got=%d want=%d: %#v", got, want, database.Provenance.Evidence)
+	}
+	for _, edge := range snapshot.Edges {
+		if edge.From != "svc.ledgerwriter" {
+			t.Fatalf("expected canonical writer source, edge=%q from=%q", edge.ID, edge.From)
+		}
+		switch edge.ID {
+		case "edge.writer.reader":
+			if edge.To != "svc.balance-reader" {
+				t.Fatalf("expected direct reader alias rewrite, got %q", edge.To)
+			}
+		case "edge.writer.db", "edge.writer.store":
+			if edge.To != "db.ledger-db" {
+				t.Fatalf("expected unique ledger database endpoint rewrite for %q, got %q", edge.ID, edge.To)
+			}
+		}
+	}
+}
+
+func TestNormalizeSemanticSnapshotLeavesAmbiguousEndpointTokenUnchanged(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "sample", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "svc.ledgerdb", Type: "service", Name: "Ledger DB", Provenance: evidence("services/ledgerdb/README.md")},
+			{ID: "db.ledgerdb", Type: "database", Name: "Ledger DB", Provenance: evidence("databases/ledgerdb/README.md")},
+		},
+		Edges: []contracts.Edge{
+			{ID: "edge.ambiguous", Type: "reads", From: "svc.caller", To: "store.ledgerdb", Provenance: evidence("README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"sample": "/tmp/repos/sample"}, nil))
+
+	if got, want := snapshot.Edges[0].To, "store.ledgerdb"; got != want {
+		t.Fatalf("ambiguous endpoint token must remain unresolved for validator, got=%q want=%q", got, want)
+	}
+}
+
+func TestNormalizeSemanticSnapshotDoesNotMergeSameLeafAcrossDistinctEntityIDs(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "sample", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "svc.payments.api", Type: "service", Name: "API", Provenance: evidence("services/payments/api.go")},
+			{ID: "svc.orders.api", Type: "service", Name: "API", Provenance: evidence("services/orders/api.go")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"sample": "/tmp/repos/sample"}, nil))
+
+	if got, want := len(snapshot.Entities), 2; got != want {
+		t.Fatalf("same leaf/name under distinct full IDs must not merge, got=%d want=%d: %#v", got, want, snapshot.Entities)
 	}
 }
