@@ -15,6 +15,11 @@ import (
 )
 
 func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpruntime.Task, validationErr error) string {
+	if provider == acpruntime.ProviderQwenCode {
+		if field, ok := collectManifestTopLevelAdditionalProperty(validationErr); ok {
+			return composeQwenTopLevelAdditionalPropertyRepairPrompt(task, field)
+		}
+	}
 	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
 	authoredDocs := authoredRepairDocuments(task.WriteRoot)
 	evidencePaths := repairEvidenceCandidates(task)
@@ -117,6 +122,49 @@ func ComposeCollectManifestRepairPrompt(provider acpruntime.Provider, task acpru
 	}
 	sections = append(sections, strings.Join(repairLines, "\n"))
 	return strings.Join(sections, "\n\n")
+}
+
+func collectManifestTopLevelAdditionalProperty(validationErr error) (string, bool) {
+	detail := errorText(validationErr)
+	if !strings.Contains(detail, `jsonschema: '' does not validate`) ||
+		!strings.Contains(detail, `shard-pack-manifest.schema.json#/additionalProperties`) {
+		return "", false
+	}
+	const marker = "additionalProperties '"
+	start := strings.LastIndex(detail, marker)
+	if start < 0 {
+		return "", false
+	}
+	value := detail[start+len(marker):]
+	end := strings.IndexByte(value, '\'')
+	if end <= 0 || !strings.Contains(value[end:], "not allowed") {
+		return "", false
+	}
+	field := strings.TrimSpace(value[:end])
+	switch field {
+	case "claims", "claim_map", "validation", "metadata", "compatibility", "schema":
+		return field, true
+	default:
+		return "", false
+	}
+}
+
+func composeQwenTopLevelAdditionalPropertyRepairPrompt(task acpruntime.Task, field string) string {
+	manifestTarget := filepath.Join(strings.TrimSpace(task.WriteRoot), "shard-pack-manifest.json")
+	return strings.Join([]string{
+		`You are ACP runtime provider "qwen-code" in exact collect manifest closed-shape repair mode.`,
+		"QWEN COLLECT MANIFEST — REMOVE ONE FORBIDDEN TOP-LEVEL FIELD:",
+		"- Do not plan, explain, use shell, Python, jq, a todo, or any repository/evidence reads.",
+		fmt.Sprintf("- The validator found exactly one forbidden root field: %q.", field),
+		fmt.Sprintf("- Your next response block must contain exactly one read_file call for %q and no other tool call.", manifestTarget),
+		"- After that tool result, parse the existing JSON and preserve every canonical key and nested value byte-for-byte in meaning.",
+		fmt.Sprintf("- Your next assistant response must contain exactly one write_file call to the same target with only top-level %q removed.", field),
+		"- Do not add, remove, rename, reorder semantically, summarize, regenerate, or enrich any other field or nested value.",
+		"- Allowed top-level keys after the rewrite are only: version, run_id, step_id, shard_id, domain_id, agent_role, artifact_root, repo_scopes, path_scopes, summary, documents, citations, semantic.",
+		"- Top-level claims, claim_map, validation, metadata, compatibility, schema, and every alternate wrapper are forbidden; claim IDs remain only in citations[].claim_ids.",
+		"- Stop immediately after the single write_file call. Backend validation, not stdout claims, is the success surface.",
+		fmt.Sprintf("- Exact manifest target: %q.", manifestTarget),
+	}, "\n")
 }
 
 func collectManifestRepairWriteFirstGuidance(task acpruntime.Task, authoredDocs []string, evidencePaths []string) string {
@@ -347,7 +395,8 @@ func composeQwenToolFirstCollectPromptWithTargets(task acpruntime.Task, validati
 		"- Manifest JSON must be at most 6000 characters. Do not model every observed component.",
 		"- Use exactly 1 document, 1-3 citations, 1-3 entities, 0-2 edges, exactly 1 finding, and exactly 1 question.",
 		"MINIMUM MANIFEST SHAPE:",
-		fmt.Sprintf("- Top level: version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q, artifact_root=%q, repo_scopes, path_scopes, summary, documents, citations, semantic.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole), strings.TrimSpace(task.ArtifactRoot)),
+		fmt.Sprintf("- Top-level keys are closed and may contain only: version=1, run_id=%q, step_id=%q, shard_id=%q, domain_id=%q, agent_role=%q, artifact_root=%q, repo_scopes, path_scopes, summary, documents, citations, semantic.", strings.TrimSpace(task.RunID), strings.TrimSpace(task.StepID), strings.TrimSpace(task.ShardID), strings.TrimSpace(task.DomainID), strings.TrimSpace(task.AgentRole), strings.TrimSpace(task.ArtifactRoot)),
+		"- Never add top-level claims or claim_map. Claim IDs exist only inside citations[].claim_ids; if the composed root object contains claims, remove that root field before either write_file call.",
 		fmt.Sprintf("- Use these exact JSON array values: repo_scopes=%s and path_scopes=%s. Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.", jsonStringArrayLiteral(task.RepoScopes), jsonStringArrayLiteral(task.PathScopes)),
 		fmt.Sprintf("- documents[0]: id, kind, title, path=%q, canonical_path=%q, topics, citation_ids.", filepath.ToSlash(docRel), steppolicy.CollectManifestCanonicalPath(task, docRel)),
 		`- Every citation object must contain all five keys: {"id":"...","repo":"...","path":"...","claim_ids":["..."],"document_ids":[documents[0].id]}. document_ids is mandatory and non-empty; never omit it. Use unique ids and concrete files; every document citation_id exists; every citation document_id equals documents[0].id. No citation provenance or omitted ids.`,

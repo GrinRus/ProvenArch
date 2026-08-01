@@ -3,6 +3,7 @@ package qwencode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,6 +243,9 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 		"Manifest JSON must be at most 6000 characters",
 		`repo_scopes=["repo-a"] and path_scopes=["README.md"]`,
 		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
+		"Top-level keys are closed and may contain only",
+		"Never add top-level claims or claim_map",
+		"if the composed root object contains claims, remove that root field before either write_file call",
 		"Every citation object must contain all five keys",
 		`"document_ids":[documents[0].id]`,
 		"document_ids is mandatory and non-empty; never omit it",
@@ -481,6 +485,42 @@ func TestQwenRepairCommandSpecUsesPromptOnlyWithoutTaskJSONStdin(t *testing.T) {
 		if strings.Contains(args, forbidden) {
 			t.Fatalf("qwen repair prompt must not contain scaffold-first wording %q, got %v", forbidden, spec.Args)
 		}
+	}
+}
+
+func TestQwenCollectManifestRepairCommandSpecUsesCompactRootFieldRemoval(t *testing.T) {
+	t.Parallel()
+
+	task := newQwenDraftTask(t, "run-root-field-repair")
+	task.StepID = "init.step1.collect"
+	task.WriteRoot = filepath.Join(task.Workspace, "reports", "taskruns", task.RunID, "staging", "shards", "bank-src")
+	task.ArtifactRoot = "reports/taskruns/" + task.RunID + "/staging/shards/bank-src"
+	task.ExpectedArtifacts = []string{"shard-pack-manifest.json"}
+	if err := os.MkdirAll(task.WriteRoot, 0o755); err != nil {
+		t.Fatalf("mkdir collect write root: %v", err)
+	}
+	validationErr := fmt.Errorf("shard pack manifest is invalid: jsonschema: '' does not validate with https://example.local/acp/schemas/shard-pack-manifest.schema.json#/additionalProperties: additionalProperties 'claims' not allowed")
+	spec, err := (qwenAdapter{runner: HeadlessRunner{Command: "qwen-test"}}).CollectManifestRepairCommandSpec(task, validationErr)
+	if err != nil {
+		t.Fatalf("repair command spec: %v", err)
+	}
+	if spec.Stdin != nil {
+		t.Fatalf("qwen compact repair invocation must keep stdin empty")
+	}
+	args := strings.Join(spec.Args, "\n")
+	for _, token := range []string{
+		"QWEN COLLECT MANIFEST — REMOVE ONE FORBIDDEN TOP-LEVEL FIELD:",
+		"exactly one read_file call",
+		"exactly one write_file call",
+		`with only top-level "claims" removed`,
+		"claim IDs remain only in citations[].claim_ids",
+	} {
+		if !strings.Contains(args, token) {
+			t.Fatalf("expected compact qwen repair args to contain %q, got %v", token, spec.Args)
+		}
+	}
+	if strings.Contains(args, "TASK-SPECIFIC MANIFEST JSON SKELETON:") {
+		t.Fatalf("compact qwen repair args must exclude full skeleton, got %v", spec.Args)
 	}
 }
 

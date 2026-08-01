@@ -60,6 +60,77 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260801-r3-collect-root-claims-repair
+
+### Context
+PR #197 merged as qualification SHA `ed68d3bfdac48a83b5956abab4a396699a9e7c54`; detached
+post-merge offline closure passed. Fresh diagnostic smoke `smoke-tiny-bank-20260801T213628Z`
+then failed one of ten init collect shards. The bounded Qwen manifest was otherwise populated but
+added forbidden top-level `claims`. Strict schema validation correctly rejected it. The generic
+manifest-only repair prompt then produced about 2 MiB of stream output without a valid replacement
+before `runtime_stalled_after_artifacts`, so the matrix ended `FAIL` with
+`runtime_contract_failed=1`, `repair_exhausted=1` and `stall_pressure=1`. Regression and release
+phases were not started; the matrix is diagnostic only.
+
+### Goals (must have)
+- [x] Make the bounded normal Qwen collect contract explicitly close the root key allowlist and
+      name top-level `claims`/`claim_map` as forbidden before the atomic pair write.
+- [x] Route only the exact root-level additional-property family for known forbidden wrapper keys
+      to a compact Qwen read-once/write-once repair contract that removes that one root field and
+      preserves every canonical nested value.
+- [x] Keep unknown and nested additional-property failures on the full provider-authored,
+      fail-closed manifest repair path.
+- [x] Add prompt/adapter regressions, synchronize docs, and pass full deterministic DoD/offline
+      closure before a fix PR.
+- [ ] Merge the isolated fix, establish a new qualification SHA and restart R3 from fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public APIs, server-side validation, provider models/commands, repair
+      attempt counts, timeout budgets, matrices, repositories or release acceptance.
+- [x] Do not create a generic extra-field sanitizer or alter canonical semantic content.
+- [x] Do not accept the failed smoke or its partial artifacts as R3 evidence.
+
+### Approach
+1. Strengthen the normal bounded prompt with the exact root allowlist and a named `claims` check.
+2. Recognize only schema diagnostics whose instance path is the root object, schema target is the
+   root `additionalProperties` rule, and field is one of the already-forbidden wrapper keys.
+3. For Qwen only, replace the large evidence/skeleton repair prompt with one `read_file` followed
+   by one same-target `write_file`, allowing removal of exactly the diagnosed root field.
+4. Prove that nested/unknown extras retain the existing full repair prompt and backend validation
+   remains the only success surface.
+
+### Files expected to change
+- `internal/runtime/promptcontract/collect_repair.go`
+- prompt-contract and Qwen adapter tests
+- runtime architecture/spec/testing/runbook documentation and this ExecPlan
+
+### Acceptance criteria
+- [x] Normal bounded Qwen prompt remains within 6 KiB and forbids root `claims` explicitly.
+- [x] Exact root `claims` diagnostics produce a compact prompt below 2.4 KiB with one read and one
+      write; nested `citation_ids` diagnostics do not use it.
+- [x] Focused tests pass 20 repetitions; `make contracts`, `make test`, `make lint`, `make build`
+      and separate `make offline-closure` pass on pinned toolchains.
+- [x] Embedded UI and all 12 source repositories remain clean.
+
+### Risks
+- Error-text routing must not mistake nested schema failures for root drift. The matcher therefore
+  requires both the empty instance path and the root schema location, plus a closed known field
+  set; every resulting artifact still receives full task-aware backend validation.
+
+### Progress log
+- 2026-08-01: Recorded the failed smoke in a bounded external operator report and stopped R3. The
+  failure is product prompt-contract behavior, not host/auth/quota/timeout/infrastructure failure.
+- 2026-08-01: Closed the normal bounded Qwen root allowlist and added the exact compact root-field
+  removal prompt. Matching requires Qwen, the empty root instance path, the root schema
+  `additionalProperties` location and one known forbidden wrapper; nested, unknown and non-Qwen
+  cases are pinned to the existing full repair path.
+- 2026-08-01: Focused normal/compact/negative prompt and adapter tests passed 20 repetitions. Exact
+  Go 1.25.10 / Node 22.21.1 / npm 10.9.4 `make contracts`, `make test`, `make lint`, `make build`
+  and separate `make offline-closure` completed with exit code 0, including race suites, 263 Python
+  tests, 158 UI tests, seven mock E2E scenarios, 90 readable fixtures and embedded UI drift checks.
+  All 12 pinned source repositories remain clean.
+
+### Plan ID
 EP-20260801-r3-live-prompt-canonical-shapes
 
 ### Context
