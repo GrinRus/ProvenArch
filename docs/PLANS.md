@@ -144,6 +144,7 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
       removed.
 - [x] Repeat the affected parallel endpoint tests and complete the deterministic DoD/offline gate.
 - [x] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
+- [ ] Archive this completed lifecycle slice during the post-R3 tracker cleanup.
 
 ### Non-goals
 - [x] Do not change production lifecycle behavior, API contracts, schemas, timeouts, canonical live
