@@ -265,6 +265,41 @@ func emitCollectManifestProvenanceKindRecoveryCompletedDiagnostic(task acpruntim
 	})
 }
 
+func emitCollectManifestTaskIdentityRecoveryScheduledDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"recovery_mode": collectManifestTaskIdentityRecoveryMode,
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest task identity recovery scheduled", fields)
+}
+
+func emitCollectManifestTaskIdentityRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestTaskIdentityRecoveryReport) {
+	emitDiagnostic(task, "collect manifest task identity recovery completed", map[string]any{
+		"provider":         string(provider),
+		"shard_id":         strings.TrimSpace(task.ShardID),
+		"recovery_mode":    collectManifestTaskIdentityRecoveryMode,
+		"corrected_fields": append([]string(nil), report.CorrectedFields...),
+		"before_digest":    report.BeforeDigest,
+		"after_digest":     report.AfterDigest,
+	})
+}
+
+func emitCollectManifestTaskIdentityRecoveryFailedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, cause error) {
+	fields := map[string]any{
+		"provider":      string(provider),
+		"shard_id":      strings.TrimSpace(task.ShardID),
+		"recovery_mode": collectManifestTaskIdentityRecoveryMode,
+	}
+	if cause != nil {
+		fields["validation_error"] = strings.TrimSpace(cause.Error())
+	}
+	emitDiagnostic(task, "collect manifest task identity recovery failed", fields)
+}
+
 func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime.Task, provider acpruntime.Provider, report collectManifestRuntimeRecoveryReport) {
 	fields := map[string]any{
 		"provider":       string(provider),

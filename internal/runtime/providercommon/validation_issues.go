@@ -45,6 +45,7 @@ const (
 	issueCollectClaimBinding      = "collect.claim_binding"
 	issueCollectDocumentBinding   = "collect.document_binding"
 	issueCollectCitationReference = "collect.citation_reference"
+	issueCollectTaskIdentity      = "collect.task_identity"
 	issueCollectSemanticScaffold  = "collect.semantic_scaffold"
 	issueCollectEmptyPayload      = "collect.empty_payload"
 	issueDraftManifestParse       = "draft.manifest_parse"
@@ -100,6 +101,7 @@ func classifyValidationIssues(err error) validationIssueSet {
 		{issueCollectBootstrap, validationIssueSemantic, []string{"bootstrap-only"}},
 		{issueCollectSemanticScaffold, validationIssueSemantic, []string{"semantic snapshot is bootstrap-only collect scaffold"}},
 		{issueCollectEmptyPayload, validationIssueStructural, []string{"shard-pack-manifest.schema.json validation failed: empty payload"}},
+		{issueCollectTaskIdentity, validationIssueStructural, []string{"shard pack manifest task identity is invalid:"}},
 		{issueDraftManifestParse, validationIssueStructural, []string{"parse runtime draft manifest:"}},
 		{issueDraftManifestOutputs, validationIssueSemantic, []string{"runtime draft manifest outputs are invalid:"}},
 		{issueDraftUnknownField, validationIssueStructural, []string{"unknown field"}},

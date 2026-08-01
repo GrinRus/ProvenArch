@@ -499,6 +499,19 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if collectWriteRootHasBootstrapOnlyAuthoredDoc(task) {
 		return false, acpruntime.Result{}, nil
 	}
+	if classifyValidationIssues(validationErr).Has(issueCollectTaskIdentity) {
+		emitCollectManifestTaskIdentityRecoveryScheduledDiagnostic(task, adapter.Provider(), validationErr)
+		if report, recoveryErr := recoverCollectManifestTaskIdentity(task, validationErr); recoveryErr == nil {
+			if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
+				return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, collectManifestTaskIdentityRecoveryMode, "task-identity recovery wrote outside shard-pack-manifest.json", err)
+			}
+			emitCollectManifestTaskIdentityRecoveryCompletedDiagnostic(task, adapter.Provider(), report)
+			result = markCollectManifestTaskIdentityRecovered(result, report)
+			return true, result, nil
+		} else {
+			emitCollectManifestTaskIdentityRecoveryFailedDiagnostic(task, adapter.Provider(), recoveryErr)
+		}
+	}
 	if emptyDocs := collectWhitespaceOnlyAuthoredDocs(task); len(emptyDocs) > 0 {
 		if recovered, recoveredResult, recoveredErr := recoverCollectArtifactPairRepairWithOptions(ctx, task, adapter, result, validationErr, stage+"_empty_authored_markdown", collectArtifactPairRepairOptions{
 			allowNoProviderDiagnostics:               true,
@@ -650,6 +663,26 @@ func markCollectManifestProvenanceKindRecovered(result acpruntime.Result, report
 		"operator_review_required": true,
 	}
 	warning := fmt.Sprintf("runtime_recovery: collect_manifest_provenance_kind_recovery canonicalized %d lexical provenance.kind aliases; treat as shape recovery evidence, not artifact-quality acceptance", report.ReplacementCount)
+	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
+		result.Execution.Warnings = append(result.Execution.Warnings, warning)
+	}
+	return result
+}
+
+func markCollectManifestTaskIdentityRecovered(result acpruntime.Result, report collectManifestTaskIdentityRecoveryReport) acpruntime.Result {
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics[collectManifestTaskIdentityRecoveryMode] = map[string]any{
+		"recovery_mode":            collectManifestTaskIdentityRecoveryMode,
+		"source":                   "runtime_shape_recovery",
+		"provider_authored":        false,
+		"corrected_fields":         append([]string(nil), report.CorrectedFields...),
+		"before_digest":            report.BeforeDigest,
+		"after_digest":             report.AfterDigest,
+		"operator_review_required": true,
+	}
+	warning := fmt.Sprintf("runtime_recovery: collect_manifest_task_identity_recovery restored authoritative task identity fields %s; treat as shape recovery evidence, not artifact-quality acceptance", strings.Join(report.CorrectedFields, ","))
 	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
 		result.Execution.Warnings = append(result.Execution.Warnings, warning)
 	}
