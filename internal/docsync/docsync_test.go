@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestStakeholderMatrixIsCanonicalSource(t *testing.T) {
@@ -33,6 +34,7 @@ func TestCoreDocsReferenceCanonicalStakeholderMatrix(t *testing.T) {
 	t.Parallel()
 
 	paths := []string{
+		"README.md",
 		"docs/ARCHITECTURE.md",
 		"docs/PLANS.md",
 		"docs/spec/PIPELINE_SPEC.md",
@@ -59,7 +61,6 @@ func TestRuntimeAndQABoundaryConsistentAcrossDocs(t *testing.T) {
 	t.Parallel()
 
 	paths := []string{
-		"README.md",
 		"docs/ARCHITECTURE.md",
 		"docs/spec/API_SPEC.md",
 		"docs/spec/PIPELINE_SPEC.md",
@@ -128,7 +129,6 @@ func TestBaselineBundleInventoryDocumentsQASkill(t *testing.T) {
 	assertContains(t, code, "skills: [qa]")
 
 	requiredSkillsLineByPath := map[string]string{
-		"README.md":               "skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
 		"docs/STAKEHOLDER_DOC.md": "skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
 		"docs/BACKLOG.md":         "baseline skills фиксированы: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`",
 	}
@@ -152,7 +152,6 @@ func TestQABoundaryDocumentsAsyncTargetAndDeterministicCompatibility(t *testing.
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "UI stage `Ask` uses async runtime-backed `POST /api/qa/runs`",
 		"docs/ARCHITECTURE.md":       "Target Q&A capability использует async runtime-backed run `pipeline=\"qa\"` / step id `qa.ask`",
 		"docs/STAKEHOLDER_DOC.md":    "UI stage `Ask` target — async runtime-backed `qa.ask` run",
 		"docs/spec/PIPELINE_SPEC.md": "Target System Analyst Q&A capability работает как async runtime-backed run",
@@ -168,9 +167,7 @@ func TestQABoundaryDocumentsAsyncTargetAndDeterministicCompatibility(t *testing.
 			assertContains(t, content, "/api/qa/runs")
 			assertContains(t, content, "POST /api/qa/ask")
 			assertContains(t, content, "compat")
-			if path != "README.md" {
-				assertContains(t, content, "skills/prompt-packs/qa.md")
-			}
+			assertContains(t, content, "skills/prompt-packs/qa.md")
 		})
 	}
 }
@@ -196,7 +193,6 @@ func TestSCMWebhookBoundaryDocumentsExternalCIOnly(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                  "ACP не принимает public SCM webhooks сам: native webhook listener / external SCM app integration остаются вне MVP",
 		"docs/spec/PIPELINE_SPEC.md": "Webhook принимает CI provider, не ACP: native SCM webhook listener / external SCM app integration остаются вне MVP",
 		"docs/BACKLOG.md":            "SCM hooks обрабатываются CI provider; native ACP webhook listener / external SCM app integration остаются вне MVP",
 		"docs/ARCHITECTURE.md":       "Native GitHub/GitLab webhook listener, hosted control plane and external SCM app integration остаются вне MVP",
@@ -210,13 +206,21 @@ func TestSCMWebhookBoundaryDocumentsExternalCIOnly(t *testing.T) {
 			assertContains(t, readDoc(t, path), required)
 		})
 	}
+
+	readme := readDoc(t, "README.md")
+	for _, required := range []string{
+		"`acp run --non-interactive` is the supported integration surface",
+		"public webhook listener",
+		"hosted control",
+	} {
+		assertContains(t, readme, required)
+	}
 }
 
 func TestDocsImportsMetadataIndexContractDocumented(t *testing.T) {
 	t.Parallel()
 
 	requiredByPath := map[string]string{
-		"README.md":                   "<docs.imports_path>/index.yaml",
 		"docs/spec/WORKSPACE_SPEC.md": "Canonical metadata index: `<imports_path>/index.yaml`",
 		"docs/spec/PIPELINE_SPEC.md":  "<docs.imports_path>/index.yaml",
 		"docs/STAKEHOLDER_DOC.md":     "<docs.imports_path>/index.yaml",
@@ -261,10 +265,6 @@ func TestPromptPackCoverageDocumentsStep2Boundary(t *testing.T) {
 	assertNotContains(t, packFunc, "as-is.md")
 
 	required := map[string][]string{
-		"README.md": {
-			"Editable prompt pack layer",
-			"`step2.asis_docs` использует enforced policy only и не имеет отдельного editable `as-is` prompt pack",
-		},
 		"docs/ARCHITECTURE.md": {
 			"Editable prompt pack layer",
 			"`step2.asis_docs` остаётся enforced-policy-only и не имеет отдельного editable `as-is` prompt pack",
@@ -291,7 +291,7 @@ func TestPromptPackCoverageDocumentsStep2Boundary(t *testing.T) {
 func TestArtifactOwnershipTaxonomyDocumented(t *testing.T) {
 	t.Parallel()
 
-	for _, path := range []string{"README.md", "docs/ARCHITECTURE.md", "docs/spec/PIPELINE_SPEC.md"} {
+	for _, path := range []string{"docs/ARCHITECTURE.md", "docs/spec/PIPELINE_SPEC.md"} {
 		path := path
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
@@ -553,14 +553,29 @@ func TestREADMEStaysUserFacing(t *testing.T) {
 
 	content := readDoc(t, "README.md")
 	for _, required := range []string{
-		"## Первый анализ",
-		"## Выбор runtime",
-		"ACP_CLAUDE_CMD=claude",
-		"## Проверка установки и качества",
-		"## Пользовательские документы",
+		"**Local-first, evidence-backed architecture knowledge for real codebases.**",
+		"## Why ProvenArch",
+		"## What it produces",
+		"## Quick start",
+		"## Live analysis providers",
+		"## Runtime trust and data handling",
+		"## Current scope and non-goals",
+		"## Documentation",
+		"## Community",
+		"does not perform live architecture analysis",
+		"evidence-backed Q&A over the current workspace through the local UI",
+		"Runtime drafts stay in run-scoped staging directories",
+		"docs/STAKEHOLDER_DOC.md",
+		"CONTRIBUTING.md",
 	} {
 		assertContains(t, content, required)
 	}
+	for _, r := range content {
+		if unicode.In(r, unicode.Cyrillic) {
+			t.Fatalf("expected README.md to remain an English project entrypoint, found Cyrillic rune %q", r)
+		}
+	}
+	assertContains(t, readDoc(t, "docs/DOCS_POLICY.md"), "Repository entrypoint `README.md`: **EN**")
 	for _, forbidden := range []string{
 		"docs/LOCAL_FULL_RUN_AI_ADVENT.md",
 		"docs/RELEASE_LIVE_E2E_RUNBOOK.md",
