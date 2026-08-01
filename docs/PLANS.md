@@ -143,7 +143,7 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
 - [x] Make every shared API test server stop its orchestrator before its temporary workspace is
       removed.
 - [x] Repeat the affected parallel endpoint tests and complete the deterministic DoD/offline gate.
-- [ ] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
+- [x] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
 
 ### Non-goals
 - [x] Do not change production lifecycle behavior, API contracts, schemas, timeouts, canonical live
@@ -164,7 +164,7 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
 ### Acceptance criteria
 - [x] The two CI-failing cancellation endpoint tests pass repeatedly and without cleanup errors.
 - [x] The complete API package, provider-free DoD and offline closure pass.
-- [ ] PR #195 receives green backend CI after incorporating the merged fix.
+- [x] PR #195 receives green backend CI after incorporating the merged fix.
 
 ### Risks
 - Some tests already call `Shutdown` explicitly. Service shutdown is idempotent; the registered
@@ -182,7 +182,9 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
   remain clean at their curated revisions.
 - 2026-08-01: PR #196 passed all 11 CI checks and merged as
   `0d1e146435d61595becd82fd7f8b173467a508ea`. Parser PR #195 incorporated the resulting `main`;
-  its post-integration deterministic gate and CI are pending.
+  its post-integration deterministic gate and CI were then repeated from the combined tree.
+- 2026-08-01: The integrated parser branch passed the complete local DoD/offline closure again,
+  then PR #195 passed all 11 CI checks, including backend in 5m54s, with no review threads.
 ### Plan ID
 EP-20260801-r3-collect-task-identity-recovery
 
