@@ -242,7 +242,9 @@ func TestQwenCollectCommandSpecUsesBoundedReadThenWritePrompt(t *testing.T) {
 		"Manifest JSON must be at most 6000 characters",
 		`repo_scopes=["repo-a"] and path_scopes=["README.md"]`,
 		"Both fields MUST remain arrays even when they contain exactly one value; never encode either field as a string.",
-		"Citations only: id, repo, path, claim_ids, document_ids.",
+		"Every citation object must contain all five keys",
+		`"document_ids":[documents[0].id]`,
+		"document_ids is mandatory and non-empty; never omit it",
 		"non-empty claim_ids",
 		"every document citation_id exists",
 		"every citation document_id equals documents[0].id",
@@ -586,6 +588,8 @@ func TestQwenValidatorRepairCommandSpecUsesPromptOnly(t *testing.T) {
 		"<<'ACP_VALIDATOR_VERDICT_JSON'",
 		"issues[] items must use only: code, severity, message, path, document_id, citation_id",
 		"Legacy issue fields are forbidden inside issues[]",
+		"questions[] items MUST include id and text",
+		"citation_ids and all other extra question fields are forbidden",
 		`"issues": []`,
 	} {
 		if !strings.Contains(args, token) {
