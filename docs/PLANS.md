@@ -60,6 +60,76 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260801-r3-proposal-nested-section-validation
+
+### Context
+PR #194 merged as qualification SHA `0214fc6d369bb48d409277980ac15e001f0ecb30`, and a
+detached post-merge offline closure passed. Fresh diagnostic smoke
+`smoke-tiny-bank-20260801T171936Z` then completed 10/10 init collect shards, Architecture Home and
+validator findings before failing `init.step4.proposals`. The final `proposal.md` contains the exact
+required H2 `Proposed changes or follow-up plan` and three substantive H3 Sprint subsections, but
+the shared Markdown section parser ends every section at the next heading regardless of level. It
+therefore treats the H2 body as empty and exhausts draft enrichment. Regression and release phases
+were not started; the smoke is diagnostic only.
+
+### Goals (must have)
+- [x] Preserve nested H3-H6 subsections inside a matched H1-H5 runtime draft section.
+- [x] Stop section extraction at the next heading of the same or a higher hierarchy level.
+- [x] Keep empty nested headings non-substantive and prevent content from a sibling section from
+      satisfying the required section.
+- [x] Add provider-free live-shaped positive and negative regressions and synchronize docs.
+- [ ] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
+      restart R3 from fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public API, required proposal sections, actionability thresholds,
+      provider prompts/models, timeouts, matrices, repositories or release acceptance.
+- [x] Do not accept the failed smoke as release evidence.
+- [x] Do not relax final draft validation or synthesize proposal content.
+
+### Approach
+1. Parse the ATX heading level selected for a required Markdown section.
+2. Include later headings only when they are deeper than the selected section; stop at the first
+   same/higher-level heading.
+3. Exclude heading-only lines from substantive/actionable body checks.
+4. Pin the observed H2 + H3 Sprint shape, an empty nested subsection and a sibling-section leak.
+
+### Files expected to change
+- `internal/runtimedrafts/manifest.go`
+- `internal/runtimedrafts/manifest_test.go`
+- runtime architecture/spec/testing documentation and this ExecPlan
+
+### Acceptance criteria
+- [x] The live-observed proposal passes the required-section and actionability checks.
+- [x] An H2 followed only by an H3 title remains invalid.
+- [x] Actionable text in the next H2 cannot satisfy an empty required H2.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- Hierarchy-aware extraction affects every runtime draft section consumer. Focused tests therefore
+  cover both nested acceptance and sibling isolation, while all existing draft fixtures remain the
+  compatibility baseline.
+
+### Progress log
+- 2026-08-01: Classified fresh smoke failure as product validation defect. The authored proposal
+  was substantive and correctly structured; only nested-heading extraction made it appear empty.
+- 2026-08-01: Added hierarchy-aware section extraction plus heading-only exclusion. The
+  live-shaped positive, empty nested-heading negative and sibling-leak negative tests passed 20
+  repetitions; the complete `internal/runtimedrafts` package passed.
+- 2026-08-01: Exact Go 1.25.10 / Node 22.21.1 / npm 10.9.4 `make contracts test lint build` and
+  a separate `make offline-closure` completed with exit code 0, including race suites, 263 Python
+  tests, 158 UI tests, 7 rendered mock scenarios, 90 readable fixture artifacts, embedded UI drift
+  and live/product boundary checks. The worktree contains only the expected parser/tests/docs diff
+  and all 12 pinned source repositories remain clean.
+- 2026-08-01: Two backend CI attempts exposed an unrelated shared API test-server shutdown race.
+  The parser PR remained open while the isolated test-only fix passed its own offline closure and
+  merged as PR #196 (`0d1e146435d61595becd82fd7f8b173467a508ea`); this branch now includes that
+  merge and will repeat the complete provider-free gate before CI restarts.
+- 2026-08-01: The post-integration exact-toolchain `make contracts`, `make test`, `make lint`,
+  `make build`, and separate `make offline-closure` all completed with exit code 0. The combined
+  tree passed API/provider race suites, 263 Python tests, 158 UI tests, all 7 mock E2E scenarios,
+  readable-fixture and embedded-UI drift checks; the 12 pinned source repositories remain clean.
+### Plan ID
 EP-20260801-api-test-server-shutdown
 
 ### Context
@@ -73,7 +143,8 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
 - [x] Make every shared API test server stop its orchestrator before its temporary workspace is
       removed.
 - [x] Repeat the affected parallel endpoint tests and complete the deterministic DoD/offline gate.
-- [ ] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
+- [x] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
+- [ ] Archive this completed lifecycle slice during the post-R3 tracker cleanup.
 
 ### Non-goals
 - [x] Do not change production lifecycle behavior, API contracts, schemas, timeouts, canonical live
@@ -94,7 +165,7 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
 ### Acceptance criteria
 - [x] The two CI-failing cancellation endpoint tests pass repeatedly and without cleanup errors.
 - [x] The complete API package, provider-free DoD and offline closure pass.
-- [ ] PR #195 receives green backend CI after incorporating the merged fix.
+- [x] PR #195 receives green backend CI after incorporating the merged fix.
 
 ### Risks
 - Some tests already call `Shutdown` explicitly. Service shutdown is idempotent; the registered
@@ -110,7 +181,11 @@ a provider-free test lifecycle defect and is intentionally isolated from the par
   `make offline-closure` completed with exit code 0. Embedded UI is deterministic, the fix
   worktree contains only the two expected test/docs files, and all 12 pinned source repositories
   remain clean at their curated revisions.
-
+- 2026-08-01: PR #196 passed all 11 CI checks and merged as
+  `0d1e146435d61595becd82fd7f8b173467a508ea`. Parser PR #195 incorporated the resulting `main`;
+  its post-integration deterministic gate and CI were then repeated from the combined tree.
+- 2026-08-01: The integrated parser branch passed the complete local DoD/offline closure again,
+  then PR #195 passed all 11 CI checks, including backend in 5m54s, with no review threads.
 ### Plan ID
 EP-20260801-r3-collect-task-identity-recovery
 
@@ -130,8 +205,9 @@ provider manifest repair did not rewrite it. The smoke is diagnostic only and R3
       write, full task-aware revalidation, rollback and explicit recovery telemetry.
 - [x] Add a provider-free fixture matching the observed one-character shard ID typo and negative
       no-mutation coverage.
-- [ ] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
+- [x] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
       restart R3 from fresh smoke.
+- [ ] Confirm the task-identity recovery boundary in fresh R3 release constituents before archive.
 
 ### Non-goals
 - [x] Do not change schemas, public API, provider prompts/models, timeout durations, canonical
@@ -176,6 +252,10 @@ provider manifest repair did not rewrite it. The smoke is diagnostic only and R3
   fixture artifacts, embedded UI drift and live/product boundary checks. The implementation
   worktree contains only the expected code/docs/fixture diff and all 12 pinned source repositories
   remain clean.
+- 2026-08-01: PR #194 merged as `0214fc6d369bb48d409277980ac15e001f0ecb30`; detached
+  post-merge offline closure passed. Fresh Bank smoke completed all collect shards, including the
+  previously mismatched combined source shard, then exposed the separate nested proposal-section
+  validator defect tracked by the plan above.
 
 ### Plan ID
 EP-20260801-r3-focused-repair-fresh-mutation

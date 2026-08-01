@@ -1463,14 +1463,17 @@ func runtimeDraftMissingMarkdownSections(text string, specs []runtimeDraftMarkdo
 func runtimeDraftMarkdownSectionBody(text string, spec runtimeDraftMarkdownSectionSpec) (string, bool) {
 	lines := strings.Split(text, "\n")
 	start := -1
+	sectionLevel := 0
 	for idx, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
+		level, ok := runtimeDraftMarkdownHeadingLevel(trimmed)
+		if !ok {
 			continue
 		}
 		heading := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
 		if runtimeDraftHeadingMatches(heading, spec.alternatives) {
 			start = idx + 1
+			sectionLevel = level
 			break
 		}
 	}
@@ -1479,12 +1482,21 @@ func runtimeDraftMarkdownSectionBody(text string, spec runtimeDraftMarkdownSecti
 	}
 	end := len(lines)
 	for idx := start; idx < len(lines); idx++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[idx]), "#") {
+		if level, ok := runtimeDraftMarkdownHeadingLevel(strings.TrimSpace(lines[idx])); ok && level <= sectionLevel {
 			end = idx
 			break
 		}
 	}
 	return strings.Join(lines[start:end], "\n"), true
+}
+
+func runtimeDraftMarkdownHeadingLevel(line string) (int, bool) {
+	trimmed := strings.TrimSpace(line)
+	level := 0
+	for level < len(trimmed) && trimmed[level] == '#' {
+		level++
+	}
+	return level, level > 0 && level <= 6
 }
 
 func runtimeDraftHeadingMatches(heading string, alternatives [][]string) bool {
@@ -1506,6 +1518,9 @@ func runtimeDraftHeadingMatches(heading string, alternatives [][]string) bool {
 func runtimeDraftMarkdownBodyHasSubstantiveContent(body string) bool {
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if _, ok := runtimeDraftMarkdownHeadingLevel(trimmed); ok {
+			continue
+		}
 		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
 		trimmed = strings.TrimSpace(trimmed)
 		if len(trimmed) >= 12 {
@@ -1585,6 +1600,9 @@ func runtimeDraftTextHasExplicitNoActionableProposalGap(text string) bool {
 func runtimeDraftProposalBodyHasActionableLine(body string) bool {
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if _, ok := runtimeDraftMarkdownHeadingLevel(trimmed); ok {
+			continue
+		}
 		trimmed = strings.TrimLeft(trimmed, "-*0123456789. )\t")
 		trimmed = strings.TrimSpace(trimmed)
 		if len(trimmed) < 20 {

@@ -1363,6 +1363,81 @@ Accept the CODEOWNERS follow-up because ` + "`reports/findings/findings.md`" + `
 	}
 }
 
+func TestRuntimeDraftProposalBodyAcceptsNestedSubsections(t *testing.T) {
+	t.Parallel()
+
+	proposal := `# Runtime Recommendations
+
+## Decision / recommended operator action
+Approve a phased remediation plan before production promotion.
+
+## Evidence used
+- Current-run findings and citation index identify the affected surfaces.
+
+## Proposed changes or follow-up plan
+
+### Sprint 1 — Security hardening
+
+1. Rotate the exposed signing key and replace committed credentials with external secret references.
+
+### Sprint 2 — Ownership and SLOs
+
+2. Assign component owners and document latency and availability targets.
+
+## Risks, gaps, and out-of-scope notes
+- Secret distribution workflow remains a residual coverage gap.
+`
+	if mismatch := runtimeDraftTextProposalBodyMismatch(proposal); mismatch != "" {
+		t.Fatalf("nested proposal subsections rejected: %s", mismatch)
+	}
+}
+
+func TestRuntimeDraftProposalBodyRejectsEmptyNestedSubsection(t *testing.T) {
+	t.Parallel()
+
+	proposal := `# Runtime Recommendations
+
+## Decision / recommended operator action
+Keep the proposal blocked until a concrete follow-up is documented.
+
+## Evidence used
+- Current-run findings identify an unresolved ownership gap.
+
+## Proposed changes or follow-up plan
+
+### Sprint 1 — Follow-up
+
+## Risks, gaps, and out-of-scope notes
+- Ownership evidence remains a residual coverage gap.
+`
+	want := "is missing substantive proposal section(s): Proposed changes or follow-up plan"
+	if mismatch := runtimeDraftTextProposalBodyMismatch(proposal); mismatch != want {
+		t.Fatalf("mismatch = %q, want %q", mismatch, want)
+	}
+}
+
+func TestRuntimeDraftProposalBodyDoesNotUseSiblingSectionContent(t *testing.T) {
+	t.Parallel()
+
+	proposal := `# Runtime Recommendations
+
+## Decision / recommended operator action
+Keep the proposal blocked until a concrete follow-up is documented.
+
+## Evidence used
+- Current-run findings identify an unresolved ownership gap.
+
+## Proposed changes or follow-up plan
+
+## Risks, gaps, and out-of-scope notes
+- Rotate the signing key and externalize committed credentials immediately.
+`
+	want := "is missing substantive proposal section(s): Proposed changes or follow-up plan"
+	if mismatch := runtimeDraftTextProposalBodyMismatch(proposal); mismatch != want {
+		t.Fatalf("mismatch = %q, want %q", mismatch, want)
+	}
+}
+
 func TestValidateRequiredManifestAcceptsProposalPlaceholderCredentialFinding(t *testing.T) {
 	t.Parallel()
 
