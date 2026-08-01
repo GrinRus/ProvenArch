@@ -183,6 +183,44 @@ func TestDocFirstOwnerGapOnlyValidatorFailDowngradesToPass(t *testing.T) {
 	}
 }
 
+func TestDocFirstSourceEvidenceValidatorFailRemainsAdvisory(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	service := NewService(
+		WithRunner(docflowEvidenceAdvisoryValidatorRunner{}),
+		WithExecutionOverrides(acpruntime.ExecutionOverrides{
+			FailurePolicy: strPtr(acpruntime.ExecutionFailurePolicyBestEffort),
+		}),
+		WithClock(func() time.Time {
+			return time.Date(2026, 7, 29, 9, 12, 0, 0, time.UTC)
+		}),
+	)
+
+	info, _, err := service.Run(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("expected source-evidence observation to remain advisory, got %v", err)
+	}
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
+	}
+
+	verdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
+	if verdict.Verdict != "PASS" {
+		t.Fatalf("expected reconciled PASS verdict, got %q", verdict.Verdict)
+	}
+	if len(verdict.Issues) != 1 || verdict.Issues[0].Severity != "warning" {
+		t.Fatalf("expected source-evidence issue to remain visible as warning, got %+v", verdict.Issues)
+	}
+	if !strings.Contains(verdict.Summary, "source-evidence observations remain advisory") {
+		t.Fatalf("expected source-evidence reconciliation note, got %q", verdict.Summary)
+	}
+}
+
 func TestDocFirstAssemblyMaterializesRequiredCanonicalLiveDocsWhenAuthoredPrefixesArePartial(t *testing.T) {
 	t.Parallel()
 
@@ -451,6 +489,8 @@ type docflowPartialCanonicalRunner struct{}
 
 type docflowOwnerGapValidatorRunner struct{}
 
+type docflowEvidenceAdvisoryValidatorRunner struct{}
+
 type collectFailureRunner struct {
 	mu               sync.Mutex
 	asIsInvoked      int
@@ -469,9 +509,12 @@ type permissionRequiredRunner struct{}
 func (docflowFailingValidatorRunner) Preflight(context.Context) error  { return nil }
 func (docflowPartialCanonicalRunner) Preflight(context.Context) error  { return nil }
 func (docflowOwnerGapValidatorRunner) Preflight(context.Context) error { return nil }
-func (*collectFailureRunner) Preflight(context.Context) error          { return nil }
-func (*collectPartialFailureRunner) Preflight(context.Context) error   { return nil }
-func (permissionRequiredRunner) Preflight(context.Context) error       { return nil }
+func (docflowEvidenceAdvisoryValidatorRunner) Preflight(context.Context) error {
+	return nil
+}
+func (*collectFailureRunner) Preflight(context.Context) error        { return nil }
+func (*collectPartialFailureRunner) Preflight(context.Context) error { return nil }
+func (permissionRequiredRunner) Preflight(context.Context) error     { return nil }
 
 func (docflowFailingValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
 	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
@@ -506,6 +549,19 @@ func (docflowOwnerGapValidatorRunner) Run(ctx context.Context, task acpruntime.T
 	}
 	if strings.HasSuffix(task.StepID, "step3.findings") {
 		if err := overwriteOwnerGapValidatorVerdict(task); err != nil {
+			return acpruntime.Result{}, err
+		}
+	}
+	return result, nil
+}
+
+func (docflowEvidenceAdvisoryValidatorRunner) Run(ctx context.Context, task acpruntime.Task) (acpruntime.Result, error) {
+	result, err := docflowCustomProposalRunner{}.Run(ctx, task)
+	if err != nil {
+		return acpruntime.Result{}, err
+	}
+	if strings.HasSuffix(task.StepID, "step3.findings") {
+		if err := overwriteEvidenceAdvisoryValidatorVerdict(task); err != nil {
 			return acpruntime.Result{}, err
 		}
 	}
@@ -921,6 +977,64 @@ func overwriteOwnerGapValidatorVerdict(task acpruntime.Task) error {
 	encoded = append(encoded, '\n')
 	if err := os.WriteFile(filepath.Join(writeRoot, "validator-verdict.json"), encoded, 0o644); err != nil {
 		return fmt.Errorf("write validator verdict: %w", err)
+	}
+	return nil
+}
+
+func overwriteEvidenceAdvisoryValidatorVerdict(task acpruntime.Task) error {
+	writeRoot := strings.TrimSpace(task.WriteRoot)
+	if writeRoot == "" {
+		return fmt.Errorf("write_root is required")
+	}
+	var citationRaw []byte
+	var citationPath string
+	for _, root := range task.ReadContextRoots {
+		candidate := filepath.Join(strings.TrimSpace(root), "citation-index.json")
+		raw, err := os.ReadFile(candidate)
+		if err == nil {
+			citationRaw = raw
+			citationPath = candidate
+			break
+		}
+	}
+	if len(citationRaw) == 0 {
+		return fmt.Errorf("read citation index from current read_context_roots")
+	}
+	citationIndex, err := contracts.ParseCitationIndex(citationRaw)
+	if err != nil {
+		return fmt.Errorf("parse citation index %s: %w", citationPath, err)
+	}
+	if len(citationIndex.Citations) == 0 {
+		return fmt.Errorf("citation index must contain source evidence")
+	}
+	citation := citationIndex.Citations[0]
+	verdict := contracts.ValidatorVerdict{
+		Version:     1,
+		RunID:       strings.TrimSpace(task.RunID),
+		GeneratedAt: task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
+		Verdict:     "FAIL",
+		Summary:     "Synthetic source-repository observation incorrectly marked blocking.",
+		CheckedPaths: []string{
+			path.Join("reports", "taskruns", task.RunID, "staging", "final", "final-run-index.json"),
+			path.Join("reports", "taskruns", task.RunID, "staging", "final", "citation-index.json"),
+		},
+		Issues: []contracts.ValidatorIssue{
+			{
+				Code:       "source_content_policy_observation",
+				Severity:   "error",
+				Message:    "Source evidence contains an operational policy observation.",
+				Path:       citation.Path,
+				CitationID: citation.ID,
+			},
+		},
+	}
+	encoded, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal evidence advisory verdict: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if err := os.WriteFile(filepath.Join(writeRoot, "validator-verdict.json"), encoded, 0o644); err != nil {
+		return fmt.Errorf("write evidence advisory verdict: %w", err)
 	}
 	return nil
 }

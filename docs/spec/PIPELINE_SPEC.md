@@ -205,6 +205,7 @@ Canonical MVP runtime shape:
 - semantic source of truth для `step1` — `shard-pack-manifest.json.semantic`
 - `step1` semantic provenance evidence (`entities/edges/findings[].provenance.evidence[]`) обязаны содержать non-empty `repo` + `path`; citation-only semantic evidence objects невалидны
 - semantic source of truth для `step3` — `validator-verdict.json.findings[]` и `validator-verdict.json.questions[]`
+- `step3` `PASS/FAIL` проверяет только staged artifact integrity и contract correctness (indexes, references, canonical documents, required artifact shape). Source-repository security/privacy/compliance/architecture-risk/operational observations записываются как advisory findings/questions и не могут быть blocking `issues[]` в local-first MVP. После успешной deterministic staged validation orchestrator reconciles provider `FAIL` только если каждый error issue exact-match-ится с current-run citation identity/path; error severity сохраняется как warning. Staged/canonical document targets, missing paths и citation mismatch остаются blocking.
 - для multi-repo `init|refresh.step3.findings` first-action `validator-verdict.json` skeleton обязан включать минимум один PASS-compatible cross-repo finding и один question с repo/path provenance и `related_ids` по нескольким repo scopes; пустой валидный verdict skeleton допустим только для single-repo validator tasks
 - для multi-repo release profiles cross-repo signal считается валидным только через explicit `semantic.edges[]`, finding provenance по нескольким repos или question `related_ids` по нескольким repo scopes при наличии repo-specific citation coverage; простое перечисление repos без связи остаётся `analysis:cross-repo-missing`
 - runtime execution metadata сохраняют только execution context, status, warnings и raw-output references
@@ -522,7 +523,7 @@ Primary runtime output:
 Publish policy:
 - validator остаётся единственным schema/semantic gate для staged final set;
 - richer synthesis/ranking/evidence shaping разрешены, но итог проходит через validator verdict и compile checks.
-- terminal `validator verdict is FAIL` трактуется как completed runtime flow failure, а не как draft/runtime-contract failure; owner-gap-only verdict после technical repairs может быть downgraded в `PASS` при сохранении findings/questions.
+- terminal technical `validator verdict is FAIL` трактуется как completed runtime flow failure, а не как draft/runtime-contract failure; owner-gap-only verdict после technical repairs может быть downgraded в `PASS` при сохранении findings/questions. Provider `FAIL`, основанный только на exact current-run repository-evidence observations, после чистой deterministic staged validation становится `PASS`, сохраняя issues как advisory warnings; это не ослабляет staged artifact validation.
 
 ### Step 4 — Proposals (agent-first + auto-publish)
 

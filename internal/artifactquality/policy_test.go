@@ -61,3 +61,19 @@ func TestCompactCollectManifestValidationChecklistIncludesCitationIDUniqueness(t
 		}
 	}
 }
+
+func TestValidatorVerdictContractLinesKeepSourceEvidenceAdvisory(t *testing.T) {
+	t.Parallel()
+
+	joined := strings.Join(ValidatorVerdictContractLines(), "\n")
+	for _, needle := range []string{
+		"PASS/FAIL is limited to staged artifact integrity and contract correctness",
+		"security, privacy, compliance, architecture-risk, or operational observations",
+		"MUST NOT produce verdict=FAIL or error-severity issues[]",
+		"not a repository evidence path",
+	} {
+		if !strings.Contains(joined, needle) {
+			t.Fatalf("expected validator contract lines to contain %q, got:\n%s", needle, joined)
+		}
+	}
+}

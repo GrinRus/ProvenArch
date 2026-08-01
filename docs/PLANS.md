@@ -60,6 +60,87 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260729-r3-validator-evidence-advisory-boundary
+
+### Context
+Fresh diagnostic smoke `smoke-tiny-bank-20260729T075044Z` on qualification SHA
+`aa69d16191f93311560190fc467edd534ed5e567` completed init and produced a structurally valid
+refresh snapshot, but `refresh.step3.findings` returned `FAIL` only for source-repository security
+observations (demo credentials and a committed example JWT key). This crossed the MVP boundary:
+security/compliance observations are advisory findings, while the validator release gate is limited
+to staged artifact integrity and contract correctness. R3 stopped before regression matrices.
+
+### Goals (must have)
+- [x] Make the enforced validator prompt state that source-content security/compliance/architecture
+      risk observations belong in findings/questions and cannot produce blocking `issues[]`.
+- [x] After deterministic staged validation succeeds, reconcile a provider `FAIL` to `PASS` only
+      when every error issue resolves to current-run repository evidence rather than a staged
+      artifact/document contract target; retain those issues as warnings.
+- [x] Keep technical staged artifact/index/reference/document failures blocking.
+- [x] Pin the live-observed Bank of Anthos verdict/citation combination in a provider-free fixture.
+- [ ] Pass full provider-free DoD/offline closure, merge, and restart R3 from a fresh smoke.
+
+### Non-goals
+- [x] Do not add security/compliance enforcement, change schemas/public API/workspace contracts, or
+      weaken deterministic staged artifact validation.
+- [x] Do not change canonical matrices, curated repositories, provider aliases/models, retry or
+      timeout profiles.
+- [x] Do not accept the stopped smoke or mix its artifacts into R3 evidence.
+
+### Approach
+1. Strengthen the shared normal and focused-repair validator contract with a technical-only
+   PASS/FAIL boundary shared by all providers.
+2. Run deterministic staged validation before verdict acceptance and add a fail-closed
+   evidence-advisory reconciliation keyed by exact current-run citation identity/path.
+3. Preserve advisory issue visibility by changing only `error` to `warning`, persisting the
+   reconciled verdict, and logging the reconciliation.
+4. Add positive live-fixture and negative staged-target/mismatched-citation tests; synchronize
+   architecture, pipeline and live-runbook documentation.
+
+### Files expected to change
+- `internal/artifactquality/policy.go`
+- `internal/artifactquality/policy_test.go`
+- `internal/runtime/steppolicy/policy.go`
+- `internal/runtime/steppolicy/policy_test.go`
+- `internal/runtime/promptcontract/validator_repair.go`
+- `internal/runtime/promptcontract/promptcontract_test.go`
+- `internal/orchestrator/docflow_repair.go`
+- `internal/orchestrator/docflow_repair_test.go`
+- `internal/orchestrator/runtime_task_apply.go`
+- `internal/orchestrator/testdata/bank_validator_evidence_advisory.json`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
+- `docs/STAKEHOLDER_DOC.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Live-observed source-evidence issues remain visible as warnings and the verdict becomes `PASS`.
+- [x] A staged final document/index issue or mismatched citation identity remains `FAIL`.
+- [x] All provider prompt bodies carry the same technical-only validator boundary.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+- [ ] The merged `main` SHA becomes the only new R3 qualification input.
+
+### Risks
+- An overly broad downgrade could hide a genuine artifact defect. Reconciliation therefore runs
+  only after deterministic staged validation passes and requires every error issue to match an
+  exact current-run citation path/identity; staged targets, missing paths and mismatches fail closed.
+
+### Progress log
+- 2026-07-29: Classified the fresh smoke as a product contract-boundary defect and stopped R3
+  before `regres fast`; no stopped/partial evidence will be reused.
+- 2026-08-01: Implemented the fail-closed technical-only validator boundary and pinned the exact
+  Bank verdict/citation incident. Focused suites passed, the critical orchestrator cases passed
+  20 repetitions, and the four previously clock-sensitive providercommon cases passed 10
+  repetitions. Exact-toolchain `make contracts test lint build` and `make offline-closure` then
+  passed, including race suites, 263 Python tests, 158 UI tests, 7 rendered mock scenarios,
+  readable-fixture drift, contracts, lint, build and embedded-UI/source-repository drift checks.
+  The slice is ready for review; R3 remains stopped until its merge commit is requalified.
+
+---
+
+### Plan ID
 EP-20260729-r3-cross-shard-semantic-aliases
 
 ### Context

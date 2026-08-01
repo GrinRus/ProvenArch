@@ -1,0 +1,58 @@
+{
+  "citation_index": {
+    "version": 1,
+    "run_id": "run_bank_refresh",
+    "generated_at": "2026-07-29T09:12:00Z",
+    "citations": [
+      {
+        "id": "cite.config.yaml",
+        "repo": "bank-of-anthos",
+        "path": "kubernetes-manifests/config.yaml",
+        "claim_ids": [
+          "claim.demo.config"
+        ],
+        "document_ids": [
+          "doc.bank.overview"
+        ]
+      },
+      {
+        "id": "cite.iac.acm.jwt",
+        "repo": "bank-of-anthos",
+        "path": "iac/acm-multienv-cicd-anthos-autopilot/base/jwt-secret.yaml",
+        "claim_ids": [
+          "claim.jwt.example"
+        ],
+        "document_ids": [
+          "doc.bank.overview"
+        ]
+      }
+    ]
+  },
+  "verdict": {
+    "version": 1,
+    "run_id": "run_bank_refresh",
+    "generated_at": "2026-07-29T09:12:00Z",
+    "verdict": "FAIL",
+    "summary": "Source-repository security observations were incorrectly treated as blocking.",
+    "checked_paths": [
+      "reports/taskruns/run_bank_refresh/staging/final/final-run-index.json",
+      "reports/taskruns/run_bank_refresh/staging/final/citation-index.json"
+    ],
+    "issues": [
+      {
+        "code": "hardcoded_demo_credentials",
+        "severity": "error",
+        "message": "Demo credentials are present in the example ConfigMap.",
+        "path": "kubernetes-manifests/config.yaml",
+        "citation_id": "cite.config.yaml"
+      },
+      {
+        "code": "jwt_private_key_in_repo",
+        "severity": "error",
+        "message": "An example JWT key is committed in the source repository.",
+        "path": "iac/acm-multienv-cicd-anthos-autopilot/base/jwt-secret.yaml",
+        "citation_id": "cite.iac.acm.jwt"
+      }
+    ]
+  }
+}

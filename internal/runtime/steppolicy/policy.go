@@ -134,6 +134,9 @@ func StepSpecificPolicy(stepID string) string {
 			`- Cross-repo findings must cite concrete repo/path evidence for every related repository; cross-repo questions must use stable related_ids for at least two repository scopes and be backed by repo-specific citations in checked artifacts.`,
 			`- If owner mapping remains unresolved in evidence, include at least one finding and at least one question in validator-verdict.json.`,
 			`- Owner-gap findings/questions may coexist with verdict PASS when no technical validator issues remain.`,
+			`- PASS/FAIL is limited to staged artifact/index/reference/document contract correctness.`,
+			`- Source-repository security, privacy, compliance, architecture-risk, or operational observations are advisory findings/questions; they MUST NOT produce verdict FAIL or error-severity issues[].`,
+			`- Blocking issues[].path values must identify staged artifacts or canonical documents, never repository evidence paths.`,
 		}, "\n")
 	case "init.step4.proposals", "refresh.step4.proposals":
 		return strings.Join([]string{

@@ -372,6 +372,9 @@ Refresh runs переиспользуют steps `1..4`.
 - Headless providers пишут staged shard/final artifacts, manifests и validator outputs.
 - Orchestrator валидирует manifests, строит indexes, выводит `model/*` и публикует reports.
 - Promotion в stable `reports/*` и `proposals/*` требует validator approval.
+- Validator `PASS/FAIL` ограничен staged artifact integrity и contract correctness. Наблюдения о
+  security/privacy/compliance/architecture risk в source repository остаются advisory
+  findings/questions и не превращают local-first MVP в enforcement engine.
 - Required CI использует deterministic fixtures и fake runtime, без live network/provider dependencies.
 
 Baseline bundle включает agents `domain-analyst`, `architect-aggregator`, `system-analyst-qa`; skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`; prompt packs `constitution`, `collect-context`, `findings`, `proposals`, `qa`.

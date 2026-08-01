@@ -445,6 +445,9 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalValidatorVerdictSurface(t *test
 		`"repo": "payments-service"`,
 		`"verdict": "PASS"`,
 		`owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.`,
+		`PASS/FAIL is limited to staged artifact integrity and contract correctness`,
+		`MUST NOT produce verdict=FAIL or error-severity issues[]`,
+		`not a repository evidence path`,
 		`"title": "Owner mapping remains unresolved"`,
 	}
 	for _, needle := range required {
