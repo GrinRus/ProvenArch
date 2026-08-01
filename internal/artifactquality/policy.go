@@ -205,6 +205,9 @@ func ValidatorVerdictContractLines() []string {
 		`- findings[] items MUST use title + description + provenance; do NOT use summary as a finding alias.`,
 		`- For observation provenance, findings[*].provenance.evidence[] MUST be non-empty and each evidence item MUST include non-empty repo and path values.`,
 		`- owner-gap findings/questions remain visible, but owner-only residual evidence gaps may still return verdict=PASS when no technical validator issues remain.`,
+		`- PASS/FAIL is limited to staged artifact integrity and contract correctness: indexes, references, canonical documents, and required artifact shape.`,
+		`- Source-repository security, privacy, compliance, architecture-risk, or operational observations belong in findings/questions and MUST NOT produce verdict=FAIL or error-severity issues[].`,
+		`- A blocking issues[].path MUST identify an inspected staged artifact or canonical document, not a repository evidence path.`,
 	}
 }
 

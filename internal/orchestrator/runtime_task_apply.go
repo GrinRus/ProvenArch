@@ -208,13 +208,20 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 			"task_id": task.TaskID,
 		})
 	}
-	if verdict.Verdict != "PASS" {
-		return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
-	}
 
 	issues := e.validateStagedArtifacts()
 	if len(issues) > 0 {
 		return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
+	}
+	if reconciled, err := e.reconcileEvidenceAdvisoryOnlyVerdict(&verdict); err != nil {
+		return runtimeTaskExecution{}, err
+	} else if reconciled {
+		e.logInfo(stepID, domainID, "source-evidence validator issues downgraded to advisory", map[string]any{
+			"task_id": task.TaskID,
+		})
+	}
+	if verdict.Verdict != "PASS" {
+		return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
 	}
 
 	e.validatorVerdict = &verdict
