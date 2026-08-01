@@ -60,6 +60,72 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260801-r3-collect-task-identity-recovery
+
+### Context
+Qualification SHA `bd52e7aee0793b8cd7471b8cb9507738b4a42129` passed post-merge
+offline closure. Fresh diagnostic smoke `smoke-tiny-bank-20260801T192845Z` then completed all init
+collect shards and draft steps without the previous stale-artifact repair failure. During refresh,
+qwen authored an otherwise valid source-shard manifest whose `shard_id` ended in `dc3a1b6aa9`
+instead of the assigned `dc3a1b6aa0a9`. Strict validation correctly stopped the shard; the generic
+provider manifest repair did not rewrite it. The smoke is diagnostic only and R3 remains stopped.
+
+### Goals (must have)
+- [x] Recognize the existing strict task-identity validation failure as a typed recovery issue.
+- [x] Correct only assigned top-level `run_id`, `step_id`, `shard_id`, `domain_id` and
+      `artifact_root` values in an otherwise contract-valid collect manifest.
+- [x] Keep all schema, authored-document, evidence and semantic failures fail-closed, with atomic
+      write, full task-aware revalidation, rollback and explicit recovery telemetry.
+- [x] Add a provider-free fixture matching the observed one-character shard ID typo and negative
+      no-mutation coverage.
+- [ ] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
+      restart R3 from fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public API, provider prompts/models, timeout durations, canonical
+      matrices, curated repositories or release acceptance thresholds.
+- [x] Do not repair nested identities, evidence paths, semantic content or malformed manifests.
+- [x] Do not accept the failed smoke as release evidence.
+
+### Approach
+1. Classify only the existing `shard pack manifest task identity is invalid` validation family.
+2. Before mutation, require the manifest to pass all task-independent schema, document, evidence
+   and semantic validation.
+3. Replace mismatched non-empty assigned top-level identities, write atomically, run the complete
+   task-aware collect validator and restore the original bytes on any failure.
+4. Record before/after digests, corrected field names and an operator-review warning.
+
+### Files expected to change
+- `internal/runtime/providercommon/{artifact_recovery,collect_manifest_shape_recovery,diagnostics,validation_issues}.go`
+- matching providercommon tests
+- `fixtures/scenarios/collect-manifest-task-identity-typo/shard-pack-manifest.json`
+- runtime architecture/spec/testing documentation and this ExecPlan
+
+### Acceptance criteria
+- [x] The live-observed one-character `shard_id` typo is restored without a provider repair call.
+- [x] A second contract error prevents mutation, and failed final validation restores original bytes.
+- [x] Recovery changes no manifest content beyond assigned top-level task identity fields.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- Deterministic identity correction could hide a manifest copied from another task. Eligibility is
+  therefore limited to a manifest whose complete task-independent contract already validates;
+  the task-aware validator remains the final authority and telemetry prevents silent normalization.
+
+### Progress log
+- 2026-08-01: Stopped R3 after the fresh Bank smoke failed one refresh shard on the exact
+  assigned-versus-authored shard ID mismatch. Regression and release matrices were not started.
+- 2026-08-01: Added typed, atomic task-identity recovery plus the live-shaped positive fixture and
+  a negative other-contract-error fixture; focused tests pass.
+- 2026-08-01: Focused positive/negative/classifier regressions passed 20 repetitions; the full
+  providercommon package passed. Exact Go 1.25.10 / Node 22.21.1 / npm 10.9.4
+  `make contracts test lint build` and a separate `make offline-closure` completed with exit code 0,
+  including race suites, 263 Python tests, 158 UI tests, 7 rendered mock scenarios, 90 readable
+  fixture artifacts, embedded UI drift and live/product boundary checks. The implementation
+  worktree contains only the expected code/docs/fixture diff and all 12 pinned source repositories
+  remain clean.
+
+### Plan ID
 EP-20260801-r3-focused-repair-fresh-mutation
 
 ### Context
@@ -78,8 +144,9 @@ own bounded write window. R3 stopped before Open edX completed and none of these
       command progress.
 - [x] Preserve fail-closed validation, bounded pre/post-artifact windows and controlled-stop rules.
 - [x] Add a provider-free regression and synchronize runtime documentation.
-- [ ] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
+- [x] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
       restart R3 from fresh smoke.
+- [ ] Confirm the fresh-mutation boundary in the fresh R3 release constituents before archiving.
 
 ### Non-goals
 - [x] Do not change schemas, public API, provider commands/models, timeout durations, canonical
@@ -121,6 +188,9 @@ own bounded write window. R3 stopped before Open edX completed and none of these
   `make contracts test lint build` and `make offline-closure` passed, including race suites,
   263 Python tests, 158 UI tests, 7 rendered mock scenarios, readable-fixture drift, embedded UI
   drift and live/product boundary checks. All 12 pinned source repositories remained clean.
+- 2026-08-01: PR #193 merged as `bd52e7aee0793b8cd7471b8cb9507738b4a42129`; detached
+  post-merge offline closure passed. Fresh Bank smoke progressed beyond the stale focused-repair
+  failure and exposed a separate collect task-identity typo tracked by the plan above.
 
 ### Plan ID
 EP-20260729-r3-validator-evidence-advisory-boundary

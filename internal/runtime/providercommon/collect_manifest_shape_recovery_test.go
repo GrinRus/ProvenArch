@@ -3,6 +3,7 @@ package providercommon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,95 @@ EOF
 	recovery, ok := result.Diagnostics[collectManifestMissingFindingsRecoveryMode].(map[string]any)
 	if !ok || recovery["before_digest"] == "" || recovery["after_digest"] == "" || recovery["before_digest"] == recovery["after_digest"] {
 		t.Fatalf("invalid recovery digests: %#v", result.Diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderRestoresCollectManifestTaskIdentityWithoutProviderRepair(t *testing.T) {
+	t.Parallel()
+	task := newCollectTask(t, "run-collect-task-identity-typo")
+	task.StepID = "refresh.step1.collect"
+	task.ShardID = "bank-of-anthos-src-accounts-src-components-src-frontend-src-ledger-cloudbuild-yaml-dc3a1b6aa0a9"
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# Bank of Anthos\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	task.PathScopes = []string{"README.md"}
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) { diagnostics = append(diagnostics, event) }
+	manifest := taskIdentityTypoFixture(t, task)
+	script := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Bank architecture overview
+
+README.md identifies the service entrypoint.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + manifest + `
+EOF
+`
+	runner := &manifestRepairSequenceAdapter{testAdapter: testAdapter{
+		command:  writeEngineScript(t, script),
+		recovery: RecoveryPolicy{AcceptValidArtifactsAfterStop: true, RepairCollectManifestOnce: true},
+	}}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("run provider: %v", err)
+	}
+	if runner.manifestRepairCalls != 0 {
+		t.Fatalf("provider manifest repair calls = %d, want 0", runner.manifestRepairCalls)
+	}
+	if !hasDiagnosticField(diagnostics, "collect manifest task identity recovery completed", "recovery_mode", collectManifestTaskIdentityRecoveryMode) {
+		t.Fatalf("missing recovery diagnostic: %#v", diagnostics)
+	}
+	if !hasRuntimeWarning(result.Execution.Warnings, "restored authoritative task identity fields shard_id") {
+		t.Fatalf("missing recovery warning: %#v", result.Execution.Warnings)
+	}
+	if err := ValidateCollectArtifacts(task, acpruntime.ProviderQwenCode); err != nil {
+		t.Fatalf("completed manifest is invalid: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(task.WriteRoot, ShardPackManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyTopLevelFieldChanged(t, []byte(manifest), raw, "shard_id", task.ShardID)
+}
+
+func TestCollectManifestTaskIdentityRecoveryRollsBackOnAnotherContractError(t *testing.T) {
+	t.Parallel()
+	task := newCollectTask(t, "run-collect-task-identity-rollback")
+	task.StepID = "refresh.step1.collect"
+	task.ShardID = "bank-of-anthos-src-accounts-src-components-src-frontend-src-ledger-cloudbuild-yaml-dc3a1b6aa0a9"
+	repoRoot := filepath.Join(task.Workspace, "repos", "bank-of-anthos")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	task.ReadContextRoots = []string{repoRoot}
+	task.PathScopes = []string{"README.md"}
+	if err := os.WriteFile(filepath.Join(task.WriteRoot, "overview.md"), []byte("# Bank overview\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := strings.Replace(taskIdentityTypoFixture(t, task), `"path": "README.md"`, `"path": "MISSING.md"`, 1)
+	manifestPath := filepath.Join(task.WriteRoot, ShardPackManifestFileName)
+	if err := os.WriteFile(manifestPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New(`shard pack manifest task identity is invalid: shard_id "typo" does not match task shard_id "expected"`)
+	if _, err := recoverCollectManifestTaskIdentity(task, cause); err == nil {
+		t.Fatal("expected other contract error to reject recovery")
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != original {
+		t.Fatal("rejected recovery mutated original manifest")
 	}
 }
 
@@ -298,6 +388,38 @@ func missingFindingsFixture(t *testing.T, task acpruntime.Task) string {
 	}
 	value := strings.ReplaceAll(string(raw), "__RUN_ID__", task.RunID)
 	return strings.ReplaceAll(value, "__ARTIFACT_ROOT__", task.ArtifactRoot)
+}
+
+func taskIdentityTypoFixture(t *testing.T, task acpruntime.Task) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "fixtures", "scenarios", "collect-manifest-task-identity-typo", ShardPackManifestFileName)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	value := strings.ReplaceAll(string(raw), "__RUN_ID__", task.RunID)
+	return strings.ReplaceAll(value, "__ARTIFACT_ROOT__", task.ArtifactRoot)
+}
+
+func assertOnlyTopLevelFieldChanged(t *testing.T, before []byte, after []byte, field string, expected any) {
+	t.Helper()
+	var beforeValue map[string]any
+	var afterValue map[string]any
+	if err := json.Unmarshal(before, &beforeValue); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(after, &afterValue); err != nil {
+		t.Fatal(err)
+	}
+	if afterValue[field] != expected {
+		t.Fatalf("%s = %#v, want %#v", field, afterValue[field], expected)
+	}
+	beforeValue[field] = expected
+	beforeJSON, _ := json.Marshal(beforeValue)
+	afterJSON, _ := json.Marshal(afterValue)
+	if string(beforeJSON) != string(afterJSON) {
+		t.Fatalf("recovery changed fields beyond %s\nbefore=%s\nafter=%s", field, beforeJSON, afterJSON)
+	}
 }
 
 func assertOnlyFindingsInserted(t *testing.T, before []byte, after []byte) {

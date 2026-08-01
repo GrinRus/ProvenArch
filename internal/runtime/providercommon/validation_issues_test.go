@@ -77,3 +77,11 @@ func TestTypedRepoEvidenceIssuesRetainBoundedPaths(t *testing.T) {
 		t.Fatalf("paths=%v want=%v", got, want)
 	}
 }
+
+func TestTypedCollectTaskIdentityIssueIsRecognized(t *testing.T) {
+	err := errors.New(`shard pack manifest task identity is invalid: shard_id "short" does not match task shard_id "exact"`)
+	issues := classifyValidationIssues(err)
+	if !issues.Has(issueCollectTaskIdentity) {
+		t.Fatalf("issues=%#v, want %s", issues.Items, issueCollectTaskIdentity)
+	}
+}

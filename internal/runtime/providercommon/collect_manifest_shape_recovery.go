@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
@@ -16,6 +17,7 @@ import (
 const (
 	collectManifestMissingFindingsRecoveryMode = "collect_manifest_missing_findings_recovery"
 	collectManifestProvenanceKindRecoveryMode  = "collect_manifest_provenance_kind_recovery"
+	collectManifestTaskIdentityRecoveryMode    = "collect_manifest_task_identity_recovery"
 )
 
 type collectManifestMissingFindingsRecoveryReport struct {
@@ -29,10 +31,92 @@ type collectManifestProvenanceKindRecoveryReport struct {
 	ReplacementCount int
 }
 
+type collectManifestTaskIdentityRecoveryReport struct {
+	BeforeDigest    string
+	AfterDigest     string
+	CorrectedFields []string
+}
+
 var collectManifestProvenanceKindAliases = map[string]string{
 	"observed": "observation",
 	"inferred": "inference",
 	"asserted": "assertion",
+}
+
+func recoverCollectManifestTaskIdentity(task acpruntime.Task, validationErr error) (collectManifestTaskIdentityRecoveryReport, error) {
+	if !classifyValidationIssues(validationErr).Has(issueCollectTaskIdentity) {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("collect manifest validation error is not eligible for task-identity recovery")
+	}
+	root := filepath.Clean(strings.TrimSpace(task.WriteRoot))
+	if root == "." || strings.TrimSpace(task.WriteRoot) == "" {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("collect manifest task-identity recovery requires write_root")
+	}
+	manifestPath := filepath.Join(root, ShardPackManifestFileName)
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("read collect manifest: %w", err)
+	}
+	if err := artifactquality.ValidateCollectManifestInRootWithRepoRoots(root, collectTaskRepoRoots(task)); err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("collect manifest has a non-identity contract error: %w", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(original, &manifest); err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("decode collect manifest: %w", err)
+	}
+	assigned := []struct {
+		field string
+		value string
+	}{
+		{field: "run_id", value: task.RunID},
+		{field: "step_id", value: task.StepID},
+		{field: "shard_id", value: task.ShardID},
+		{field: "domain_id", value: task.DomainID},
+		{field: "artifact_root", value: task.ArtifactRoot},
+	}
+	corrected := make([]string, 0, len(assigned))
+	for _, identity := range assigned {
+		expected := strings.TrimSpace(identity.value)
+		if expected == "" {
+			continue
+		}
+		actual, _ := manifest[identity.field].(string)
+		if strings.TrimSpace(actual) == expected {
+			continue
+		}
+		manifest[identity.field] = expected
+		corrected = append(corrected, identity.field)
+	}
+	if len(corrected) == 0 {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("collect manifest has no mismatched assigned task identity fields")
+	}
+	sort.Strings(corrected)
+	candidate, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("encode collect manifest: %w", err)
+	}
+	candidate = append(candidate, '\n')
+	if err := artifactquality.ValidateCollectManifestBytes(candidate); err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("validate collect manifest candidate: %w", err)
+	}
+
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(manifestPath); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeCollectManifestAtomic(manifestPath, candidate, mode); err != nil {
+		return collectManifestTaskIdentityRecoveryReport{}, err
+	}
+	if err := ValidateCollectArtifacts(task, ""); err != nil {
+		if restoreErr := writeCollectManifestAtomic(manifestPath, original, mode); restoreErr != nil {
+			return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("candidate validation failed (%v) and original manifest restore failed: %w", err, restoreErr)
+		}
+		return collectManifestTaskIdentityRecoveryReport{}, fmt.Errorf("validate completed collect manifest: %w", err)
+	}
+	return collectManifestTaskIdentityRecoveryReport{
+		BeforeDigest:    collectManifestSHA256(original),
+		AfterDigest:     collectManifestSHA256(candidate),
+		CorrectedFields: corrected,
+	}, nil
 }
 
 func recoverCollectManifestMissingFindings(task acpruntime.Task, validationErr error) (collectManifestMissingFindingsRecoveryReport, error) {
