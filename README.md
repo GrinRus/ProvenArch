@@ -1,115 +1,106 @@
-# Architecture Control Plane (Local-first MVP)
+# ProvenArch
 
 [![License](https://img.shields.io/github/license/GrinRus/ProvenArch)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/GrinRus/ProvenArch?include_prereleases)](https://github.com/GrinRus/ProvenArch/releases)
-[![backend](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml)
-[![ui](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml)
+[![Backend CI](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/backend.yml)
+[![UI CI](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml/badge.svg)](https://github.com/GrinRus/ProvenArch/actions/workflows/ui.yml)
 
-ACP строит Git-версионируемую compiled architecture knowledge base для одного или
-нескольких локальных репозиториев. Результат - не картинка и не чат-лог, а набор
-файлов с evidence, отчетами, диаграммами, findings, proposals, derived model и
-детерминированный advisory health snapshot по опубликованным workspace artifacts. Health
-проверяет ссылки, model identities/endpoints, canonical text и orphan outputs, оставаясь
-read-only и не блокируя Review/Publish.
+**Local-first, evidence-backed architecture knowledge for real codebases.**
 
-В одну строку:
+ProvenArch ships as `acp`, a local Architecture Control Plane with a Go orchestrator and an
+embedded React UI. Point it at one or more repositories and optional imported documents; it builds
+a separate, Git-reviewable architecture workspace from the evidence it can verify.
+
+The result is not a chat transcript or a standalone diagram. It is a set of ordinary files:
+architecture overviews, service and dependency models, evidence links, diagrams, coverage gaps,
+findings, open questions, and change proposals. You can inspect, diff, commit, and evolve them with
+the same Git workflow you use for code.
+
+> **Project status:** beta, pre-v1 foundation. Public APIs, CLI behavior, and artifact contracts may
+> change before `v1.0.0`. ProvenArch is intended for local evaluation and controlled operator use.
+> This README describes the current `main` branch; check the
+> [release notes](https://github.com/GrinRus/ProvenArch/releases) for the exact contents of a
+> published binary.
+
+![Product UI design reference for Architecture Change Review](docs/assets/ui-architecture-change-review/03-change-review-overview.png)
+
+_Product UI design reference with representative data; this is not a live analysis result._
+
+## Why ProvenArch
+
+Architecture knowledge is usually split across source code, deployment manifests, CI configuration,
+documents, and people's memory. Static diagrams drift, while one-off AI conversations are difficult
+to review or keep current.
+
+ProvenArch treats architecture as a versioned knowledge base:
+
+- **Local-first:** the service, UI, orchestration, and architecture workspace run on your machine.
+- **Evidence-backed:** repository observations are linked to concrete repository paths; missing
+  evidence becomes an explicit gap instead of a guessed fact.
+- **Git-reviewable:** promoted knowledge is stored as Markdown, YAML, JSON, and Mermaid files in a
+  dedicated workspace.
+- **Provider-flexible:** use a deterministic `fake` runtime for the first walkthrough and required
+  CI, or opt into a supported local AI CLI for live analysis.
+- **Reviewable changes:** inspect run-scoped evidence and Git diffs before explicitly committing or
+  branching the workspace.
+
+ProvenArch is designed for tech leads, staff and principal engineers, architects, and platform teams
+working with systems whose architecture spans one or many repositories.
+
+## What it produces
+
+A successful analysis can produce:
+
+- an Architecture Home at `reports/as-is/overview.md`;
+- service, domain, integration, datastore, CI/CD, and ownership views;
+- a derived entity-and-relationship model under `model/`;
+- evidence-linked Mermaid diagrams under `reports/diagrams/`;
+- coverage gaps, findings, open questions, and architect summaries;
+- proposal and changelog packages for follow-up work;
+- retained run history, logs, indexes, and audit artifacts under `reports/taskruns/`;
+- evidence-backed Q&A over the current workspace through the local UI.
+
+The exact output depends on the available evidence. ProvenArch does not promise complete dependency
+discovery or invent missing ownership, interfaces, or infrastructure.
+
+## How it works
 
 ```text
-operator CLI / UI -> ACP Go orchestrator -> runtime provider -> staged artifacts -> validator -> arch-workspace files
+source repositories + imported documents
+                  |
+                  v
+        local ACP orchestrator
+                  |
+                  v
+      fake or headless runtime CLI
+                  |
+                  v
+        run-scoped staged artifacts
+                  |
+                  v
+       contracts + validator checks
+                  |
+                  v
+     Git-versioned architecture workspace
 ```
 
-> **Статус:** MVP beta / pre-v1 foundation. Public API, artifact contracts и UX могут меняться до `v1.0.0`.
-> **Стек реализации:** Go backend/orchestrator + embedded React/TypeScript UI.
-> **Runtime анализа:** deterministic `fake` baseline или headless providers `claude-code`, `qwen-code`, `codex-code`.
-> **Последняя ревизия README:** 2026-07-15.
+The core pipeline is:
 
-## Что это
+1. Build or update a project charter with scope, domains, constraints, NFRs, and rules.
+2. Collect repository evidence into independently validated shard packages.
+3. Assemble the as-is Architecture Home, coverage report, and derived model.
+4. Validate citations, identities, findings, and the final artifact graph.
+5. Promote validator-approved artifacts and prepare proposal packages.
+6. Review the result in `Home`, `Runs`, `Knowledge`, and `Changes`, then publish through an explicit
+   Git action.
 
-Architecture Control Plane (ACP) - **local-first инструмент анализа архитектуры** и
-поддержания проверяемой architecture knowledge base.
-Вы указываете один или несколько репозиториев и, при необходимости, импортированные
-документы. ACP запускает staged pipeline, просит runtime provider собрать архитектурные
-evidence, валидирует созданные артефакты и записывает принятый результат в отдельный
-architecture workspace. LLM/runtime drafts remain staged, orchestrator validates/promotes,
-human review принимает решения, а Git хранит accepted architecture knowledge.
-Succeeded Ask answers remain immutable; an explicit digest-confirmed action can create a new
-traceable proposal package without changing the source taskrun or committing it automatically.
+Runtime drafts stay in run-scoped staging directories. Stable workspace paths are updated only after
+their contract and validator gates pass. A later `refresh` records source revisions and explains
+whether it performed a no-op, selective, or full execution.
 
-`reports/as-is/overview.md` является каноническим Architecture Home: он ведёт к областям,
-потокам, интеграциям, safe-change guidance и явно отмеченным evidence gaps. Repository evidence
-сохраняет точные `<repo>:<path>` identities из валидированных current-run citations/provenance;
-неразрешимый или неподтверждённый путь остаётся gap, а не guessed navigation link. Каждый
-`init|refresh` также сохраняет `source-revisions.json`; `refresh` дополнительно пишет
-schema-validated `refresh-impact-plan.json`, `refresh-execution.json` и `refresh-materialization.json`.
-Безопасный unchanged/out-of-scope refresh завершается без provider и canonical rewrites; selective
-refresh переиспользует только baseline shard packs с полной identity и проверенным SHA-256
-inventory, а документы берёт из immutable staged snapshot baseline run; иначе fail-closed выполняет
-полный pipeline до первого provider call.
-Pipeline/QA start, смена workspace/runtime и Git publication используют одну admission lease:
-active/queued work нельзя перепривязать к другой session generation или пересечь с commit/branch
-mutation.
-Provider artifact recovery выбирается по typed issue codes/classes/paths и bounded transitions,
-поэтому перестановка диагностических сообщений не меняет repair path и не создаёт retry loop.
-Exact selected-run evidence можно перепроверить без provider execution через
-`GET /api/pipeline/runs/<run_id>/audit`: read-only auditor требует matching final/citation indexes
-и validator `PASS`, проверяет containment, reciprocity, реальные repository evidence paths,
-Architecture Home/content invariants и возвращает детерминированный bounded report.
-Live harness отделён от product state: provider children не получают ambient orchestration/release
-identity, frontend snapshot inspection использует реальную сохранённую run history, а live-only
-assessment helpers не входят в production UI bundle.
-Changes routes имеют отдельные Overview/Evidence/Findings/Diff/Proposals/Publish semantics, а Git
-readiness приходит с сервера как `clean|dirty|stale|blocked|unknown`; unknown/stale/blocked не
-открывают publication confirmation.
-Artifact reads bound к полной route identity и abort previous generations; invalid explicit URL
-context очищается через notice + `replaceState`, не создавая лишнюю history entry.
+## Quick start
 
-ACP нужен, когда вы хотите получить:
-
-- актуальный **as-is architecture overview** для repo или multi-repo системы;
-- отчеты по coverage gaps, findings, proposals, diagrams и ownership hints;
-- обычные файлы, которые можно ревьюить через Git, а не opaque chat history;
-- повторяемый локальный pipeline, который также можно запускать в CI job без hosted ACP;
-- deterministic fake runtime для тестов и первого walkthrough до подключения live AI CLI.
-
-ACP не является:
-
-- hosted SaaS control plane;
-- редактором диаграмм;
-- security/compliance enforcement engine;
-- заменой human review архитектурных решений;
-- credential store для GitHub/GitLab или AI providers.
-
-## Статус и безопасность
-
-ACP находится в beta-состоянии и рассчитан на локальную оценку и controlled operator use.
-
-Go orchestrator пишет generated architecture state в настроенный `arch-workspace`.
-Анализируемые source repositories задуманы как read-only inputs. Но в live headless mode
-ACP запускает внешние provider CLI на той же машине. MVP isolation строится на explicit
-staging directories, managed permission policy, live-harness isolated checkouts for canonical
-`path` inputs и runtime write audit, который завершает otherwise-successful provider step
-как `runtime_contract_failed`, если protected workspace surfaces или analyzed repo working
-tree изменились.
-Default остаётся `trusted_full_access`: ACP передаёт provider CLI текущие full-access flags.
-Opt-in `runtime.profile.permissions.mode: managed` отключает эти flags и auto-approves
-только операции внутри runtime task envelope; неизвестные запросы в non-interactive run
-завершаются `runtime_permission_required`. Для чувствительных или рискованных прогонов
-используйте disposable checkout или чистую branch и ревьюйте результат перед commit.
-
-Workspace может содержать prompts, raw runtime logs, repository context, findings, questions
-и другие evidence анализа. Считайте его project data и коммитьте только по политике вашей
-команды.
-
-## Установка
-
-Обычный пользовательский путь - native single-binary `acp` из GitHub Releases.
-Go и Node.js нужны только для разработки ProvenArch из исходников.
-
-Release status:
-
-- latest public release: `v0.1.9`;
-- license: Apache-2.0;
-- maturity: MVP beta / pre-v1 foundation.
+The release installer supports macOS and Linux on `amd64` and `arm64`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GrinRus/ProvenArch/main/install.sh | sh
@@ -117,95 +108,75 @@ export PATH="$HOME/.local/bin:$PATH"
 acp version
 ```
 
-Installer резолвит последний GitHub Release, скачивает platform archive, проверяет
-`checksums.txt` и устанавливает только binary `acp`.
-
-Поддерживаемые release platforms:
-
-| OS | Architectures |
-| --- | --- |
-| macOS | `amd64`, `arm64` |
-| Linux | `amd64`, `arm64` |
-
-Подробнее: [docs/INSTALL.md](docs/INSTALL.md).
-
-## Первый анализ
-
-Начинайте с deterministic `fake` runtime. Он проверяет install, workspace setup, UI,
-pipeline wiring, validators и publication artifacts без AI provider.
-
-Самый простой путь - запустить локальную UI-консоль без заранее выбранного workspace:
+Start the local UI:
 
 ```bash
-mkdir -p "$HOME/acp-workspaces"
-
 acp serve
 ```
 
-Откройте [http://127.0.0.1:8080](http://127.0.0.1:8080).
-`acp serve` обрабатывает SIGINT/SIGTERM/SIGHUP через bounded shutdown: HTTP listener
-останавливается gracefully, active runtime run получает context cancellation, queued pending
-runs завершаются как canceled, а новые async starts после shutdown отклоняются.
-Run registry публикует queued/running/terminal snapshot только после успешной atomic записи
-`reports/taskruns/run-history.json`; вложенные maps/slices не разделяются с API caller-ами, а
-ошибки current/`.last-good` persistence видны в поле `history_diagnostics` ответа
-`GET /api/pipeline/runs`.
-Workspace-owned reads и writes привязаны к открытому filesystem root: symlink может вести только
-внутрь того же workspace, а absolute/dangling/escaping links блокируются. Первичный
-`workspace.yaml` записывается тем же atomic temp/fsync/rename способом, что и остальные critical
-workspace artifacts.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080), then:
 
-В onboarding UI:
+1. Create or open a dedicated architecture workspace.
+2. Add one or more local Git checkout paths or Git URLs.
+3. Save a short analysis brief.
+4. Keep the default `fake` runner.
+5. Review readiness and start the first analysis.
 
-Верхний setup summary показывает текущий шаг, главный blocker и next action; disabled actions в `Ready` объясняют, чего именно не хватает. Для headless runner onboarding дополнительно показывает expected command, env override и provider readiness guidance до первого live analysis.
+The `fake` runtime makes no external AI calls. It produces deterministic synthetic baseline
+artifacts and verifies installation, workspace setup, the UI, pipeline wiring, validators, and
+publication, but **does not perform live architecture analysis**.
 
-1. `Workspace`: создайте или откройте `arch-workspace`, например `$HOME/acp-workspaces/my-service`. ACP инициализирует fixed layout и git в workspace. Успешно открытые workspaces попадают в локальный список Recent workspaces; missing entries можно забыть без изменения самого workspace.
-2. `Sources`: добавьте один или несколько target repos через GitHub/GitLab URL или local checkout
-   path, optional `ref`, guided analysis include/exclude globs и `docs.imports_path`. В scope
-   dialect `*` совпадает внутри одного path segment, standalone `**` рекурсивен, а invalid или
-   escaping pattern отклоняется до запуска.
-3. `Analysis brief`: сохраните project name и scope либо подтвердите запуск без brief с явным quality warning.
-4. `Runner & readiness`: выберите runner. Для первого walkthrough используйте default `fake`; live providers (`claude-code`, `qwen-code`, `codex-code`) включаются явно. Если provider command/auth/quota не готов, recovery panel показывает expected executable, `ACP_*_CMD` override и безопасный fallback на `fake`.
-5. `Review & start`: проверьте summary и запустите первый `init` после successful local readiness check.
+See the [installation guide](docs/INSTALL.md) for manual release installation, checksum
+verification, command overrides, and source-build prerequisites.
 
-Если вы открываете уже существующий workspace, onboarding загружает repos из `workspace.yaml`.
-Валидный manifest можно сразу довести до `Ready` после выбора runner; manifest с ошибками вернёт
-оператора к `Sources` с actionable diagnostics.
+## Live analysis providers
 
-После setup основной shell использует четыре destination: `Home / Runs / Knowledge / Changes`.
-Home показывает четыре authoritative оси и одну next action; Runs объединяет history, Run Studio и
-явную refresh queue; Knowledge читает только authority `promoted_current` без
-`reports/taskruns/**`; Changes открывает immutable
-run snapshot через Evidence/Findings/Proposals/Diff/Publish. Setup остаётся contextual utility, Ask —
-global `Current workspace · read-only` dialog, а diagnostics не влияют на workflow acceptance.
-Back/Forward и reload восстанавливают run, source, view и artifact/entity context.
-Historical Change Review загружает server-resolved snapshot через
-`GET /api/pipeline/runs/<run_id>/snapshot`; UI не угадывает final-index или staged artifact paths и
-не fallback-ится в current workspace при partial/missing run evidence. QA отдельно маркирует
-`qa_snapshot` и `qa_audit`; missing selected answer возвращает `qa_answer_unavailable`.
-Evidence Viewer сохраняет canonical link/run authority, показывает `Demo | Live | Unknown` и
-ограничивает artifact read 2 MiB, а rendered Markdown/Mermaid — 512 KiB с Raw fallback.
-Mobile ProductShell учитывает device safe areas, держит 44 px touch targets и переводит
-некомпаративные Run/Knowledge таблицы в labeled cards.
+Live analysis is opt-in and uses a separately installed headless provider CLI:
 
-Опытные пользователи, scripts, CI и live E2E могут по-прежнему открыть direct-mode console сразу на известном workspace. Ниже используется уже склонированный локальный Git checkout. Для GitHub/GitLab URL замените `--repo-path "$HOME/src/my-service"` на `--repo-git-url https://github.com/org/my-service.git`.
+| Provider ID | Resolved command | Role |
+| --- | --- | --- |
+| `claude-code` | `ACP_CLAUDE_CMD`, then `claude`, then legacy `claude-code` | Default live provider fallback |
+| `qwen-code` | `qwen` or `ACP_QWEN_CMD` | Optional live provider |
+| `codex-code` | `codex` or `ACP_CODEX_CMD` | Supported live provider and release peer |
+
+After creating a workspace, check the repository, local provider executable, and runtime
+configuration before a live run:
 
 ```bash
 acp doctor \
   --workspace "$HOME/acp-workspaces/my-service" \
-  --repo-path "$HOME/src/my-service"
+  --repo-path "$HOME/src/my-service" \
+  --runtime headless \
+  --runtime-provider claude-code
 
 acp serve \
   --workspace "$HOME/acp-workspaces/my-service" \
-  --auto-init \
-  --repo-name my-service \
-  --repo-path "$HOME/src/my-service" \
-  --runtime fake
+  --runtime headless \
+  --runtime-provider claude-code
 ```
 
-Тот же первый анализ можно запустить из CLI:
+`doctor` verifies local configuration and executable discovery. It cannot guarantee provider
+authentication, quota, API availability, or model compatibility; confirm those through the
+provider CLI as well.
+
+Provider selection can also be configured per pipeline step in `workspace.yaml`. See the
+[workspace specification](docs/spec/WORKSPACE_SPEC.md) for precedence and runtime profile options.
+
+## CLI and CI usage
+
+The same binary can run without the UI:
 
 ```bash
+acp init-workspace \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-name my-service \
+  --repo-path "$HOME/src/my-service"
+
+acp doctor \
+  --workspace "$HOME/acp-workspaces/my-service" \
+  --repo-path "$HOME/src/my-service" \
+  --runtime fake
+
 acp run \
   --workspace "$HOME/acp-workspaces/my-service" \
   --pipeline init \
@@ -213,184 +184,16 @@ acp run \
   --non-interactive
 ```
 
-Expected stable outputs после успешного walkthrough:
+Replace `--repo-path` with `--repo-git-url https://github.com/org/my-service.git` to let ACP resolve
+the source through the local `git` command and your existing Git credentials.
 
-```text
-workspace.yaml
-charter/
-skills/
-reports/as-is/overview.md
-reports/coverage/summary.md
-reports/findings/findings.md
-reports/agent-outputs/architect/summary.md
-reports/diagrams/
-reports/taskruns/<run_id>/
-model/entities/*.yaml
-model/edges/*.yaml        # если анализ нашёл связи
-proposals/
-```
+`acp run --non-interactive` is the supported integration surface for GitHub Actions, GitLab CI, and
+other user-managed jobs. ProvenArch does not include a public webhook listener or a hosted control
+plane.
 
-ACP пишет эти файлы в `arch-workspace`, а не в анализируемый source repository.
+## Workspace layout
 
-## Выбор runtime
-
-Используйте `acp doctor`, чтобы проверить local readiness и provider availability.
-Provider ID - это значение для `--runtime-provider`; executable command - это реальная CLI
-команда, установленная на вашей машине.
-
-| Runtime mode/provider ID | Executable command | Typical use |
-| --- | --- | --- |
-| `--runtime fake` или default `acp serve` | не требуется | Первый walkthrough и deterministic baseline |
-| `--runtime headless --runtime-provider claude-code` | `ACP_CLAUDE_CMD`, затем `claude`, затем legacy `claude-code` | Default live analysis provider |
-| `--runtime headless --runtime-provider qwen-code` | `qwen`, либо `ACP_QWEN_CMD=<command>` | Optional live analysis provider |
-| `--runtime headless --runtime-provider codex-code` | `codex`, либо `ACP_CODEX_CMD=<command>` | Optional live analysis provider |
-
-`--runtime headless` - opt-in режим для live анализа; default локальный baseline остается
-`fake`, поэтому для чистого UI onboarding достаточно `acp serve`.
-
-Пример live CLI smoke через Claude CLI. Если ваш binary называется `claude`, env override
-не нужен; если команда называется иначе, задайте `ACP_CLAUDE_CMD`. Explicit
-`ACP_CLAUDE_CMD=claude` остаётся валидным, но для обычной установки больше не требуется.
-
-```bash
-acp doctor \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --repo-path "$HOME/src/my-service" \
-  --runtime headless \
-  --runtime-provider claude-code
-
-acp run \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --pipeline init \
-  --runtime headless \
-  --runtime-provider claude-code \
-  --non-interactive
-```
-
-Тот же workspace можно открыть в UI:
-
-```bash
-acp serve \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --runtime headless \
-  --runtime-provider claude-code
-```
-
-Provider selection precedence для каждого pipeline/QA step:
-
-```text
-workspace.yaml runtime.profile.steps.<step>.provider
-  -> CLI --runtime-provider or ACP_RUNTIME_PROVIDER
-  -> claude-code
-```
-
-For Ask, `<step>` is `qa`, mapped to runtime step id `qa.ask`.
-
-В `--runtime fake` configured provider только валидируется как fallback config;
-live provider command не запускается, а runtime metadata записывает `fake`.
-
-Runtime permission mode хранится в `workspace.yaml`:
-
-```yaml
-runtime:
-  profile:
-    permissions:
-      mode: trusted_full_access # default; managed is opt-in
-      approval_channel: fail_fast # or ui
-```
-
-В UI это настраивается в `Readiness -> Advanced runtime settings -> Runtime Permissions`. В managed mode orchestrator
-auto-approves reads under `read_context_roots` и writes under `write_root`/`draft_final_root`.
-Shell/network/package-install/unknown requests не auto-approve-ятся; pending requests видны
-в `Analysis -> Pending permissions` с triage summary, policy rule, target/reason и next actions,
-а также в правом inspector hard blockers с step, rule, target и reason.
-
-## Артефакты и логи
-
-ACP хранит evidence анализа как обычные файлы внутри workspace:
-
-```text
-reports/taskruns/<run_id>/        # run staging, logs, indexes, raw diagnostics
-reports/as-is/                    # promoted as-is architecture docs
-reports/coverage/                 # coverage gaps and unknowns
-reports/findings/                 # findings from pipeline
-reports/diagrams/                 # generated Mermaid C4 views
-proposals/                        # proposed follow-up changes
-model/entities/, model/edges/     # derived entity-per-file model
-```
-
-UI показывает то же состояние через path-based console:
-
-- `/setup`: Guided Setup `Workspace → Sources → Analysis brief → Runner & readiness → Review & start`; brief сохраняется в существующий Step 0 contract, skip требует quality warning;
-- `/home`: четыре authoritative workflow axes и одна primary next action;
-- `/runs` и `/runs/<run_id>`: history/Run Studio, active/pending coordination, provider identity и retained recovery; shards/raw output/permissions остаются в локальном Diagnostics disclosure;
-- `/knowledge`: только current promoted workspace через `GET /api/knowledge`, включая Overview, validated Atlas с table fallback, searchable Entities и Artifacts; malformed files дают explicit partial state, filename-derived topology не используется;
-- `/changes`: historical Change Review с `Overview / Evidence / Findings / Proposals / Diff / Publish`, run-pinned snapshot source и честным `Unknown` publication status для отдельного run;
-- global `Ask`: modal/sheet `Current workspace · read-only` с async run history, citations и возвратом из Evidence Viewer; QA status не меняет Changes/Publish gate.
-
-Можно задавать вопросы по generated workspace artifacts. В UI целевой путь — async Q&A run: ACP собирает deterministic `context-pack.json`, запускает runtime step `qa.ask` через selected provider/fake baseline, валидирует `qa-answer.json` и сохраняет audit artifacts только в `reports/taskruns/<run_id>/qa/`.
-
-```bash
-acp qa \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --question "Who owns payments-service?"
-
-curl -fsS -X POST http://127.0.0.1:8080/api/qa/ask \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"Who owns payments-service?"}'
-```
-
-Current/compatibility split:
-
-- UI stage `Ask` uses async runtime-backed `POST /api/qa/runs` + polling `GET /api/qa/runs/<run_id>` and `GET /api/qa/runs?limit=20` history, with explicit failed-run recovery and same-question retry.
-- `acp qa` and public read-only `POST /api/qa/ask` remain deterministic workspace-backed compatibility surfaces.
-- Эти compatibility surfaces сохраняют response/behavior through v1 без runtime deprecation
-  headers; agent-backed consumers migrate via `POST /api/qa/runs` + polling.
-- QA runs do not mutate source repos or canonical `charter/`, `model/`, `reports/*`, or `proposals/*`; they write only taskrun/audit artifacts under `reports/taskruns/<run_id>/qa/`.
-
-Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-## Как работает ACP
-
-ACP использует docs-first pipeline. Runtime provider не становится source of truth просто
-потому, что напечатал JSON в stdout. Provider обязан записать artifact files в run-scoped
-staging directories. ACP валидирует эти artifacts и promoted-ит только approved files в
-stable workspace paths.
-
-Canonical init stages:
-
-```text
-step0 constitution -> step1 collect -> step2 as-is docs -> step3 findings -> step4 proposals
-```
-
-Refresh runs переиспользуют steps `1..4`.
-
-Ключевые правила:
-
-- `workspace.yaml` объявляет repositories, imported docs и runtime profile settings.
-- `charter/` и `skills/` хранят human-owned project context и editable baseline prompts.
-- Headless providers пишут staged shard/final artifacts, manifests и validator outputs.
-- Orchestrator валидирует manifests, строит indexes, выводит `model/*` и публикует reports.
-- Promotion в stable `reports/*` и `proposals/*` требует validator approval.
-- Validator `PASS/FAIL` ограничен staged artifact integrity и contract correctness. Наблюдения о
-  security/privacy/compliance/architecture risk в source repository остаются advisory
-  findings/questions и не превращают local-first MVP в enforcement engine.
-- Required CI использует deterministic fixtures и fake runtime, без live network/provider dependencies.
-
-Baseline bundle включает agents `domain-analyst`, `architect-aggregator`, `system-analyst-qa`; skills: `service-inventory`, `interface-extraction`, `integration-mapping`, `datastore-mapping`, `cicd-mapping`, `ownership-coverage`, `findings`, `proposals`, `qa`; prompt packs `constitution`, `collect-context`, `findings`, `proposals`, `qa`.
-
-Editable prompt pack layer подключается к `step0.constitution`, `step1.collect`,
-`step3.findings` и `step4.proposals`. `step2.asis_docs` использует enforced policy only и не имеет отдельного editable `as-is` prompt pack.
-
-Artifact ownership taxonomy:
-
-- provider-authored: normal runtime manifests, draft files, shard packs и validator outputs; collect manifest runtime recovery помечается отдельно и строится только из already-authored shard docs;
-- orchestrator-authored: run indexes, citation indexes, shard plans/summaries, logs/history;
-- compiler-derived: promoted reports, diagrams, normalized renderers и `model/*`.
-
-## Workspace model
-
-ACP хранит generated architecture state в central Git workspace:
+ProvenArch writes architecture state to a dedicated workspace, not to the analyzed repositories:
 
 ```text
 arch-workspace/
@@ -398,91 +201,125 @@ arch-workspace/
   charter/
   skills/
   docs/imports/
-  reports/
   model/
+    entities/
+    edges/
+  reports/
+    as-is/
+    coverage/
+    findings/
+    diagrams/
+    agent-outputs/
+    changelog/
+    taskruns/
   proposals/
 ```
 
-Repository sources могут быть local checkout paths или GitHub/GitLab-style `git_url`.
-Для `git_url` ACP использует local `git` command и auth context текущего пользователя
-или CI runner. Непривязанный `git_url` (`ref` не задан) перед каждым анализом fetch-ится
-в ACP-owned cache under `.acp/repos`, затем cache force-reset-ится на exact commit remote
-default `HEAD`; resolved commit SHA возвращается в fetch-backed resolver/run evidence. Если
-`ref` задан, он продолжает выбирать эту ветку/тег/SHA вместо remote default. ACP не хранит
-отдельные repository credentials и не изменяет пользовательские `path` checkout-ы.
+Repositories can be local checkout paths or GitHub/GitLab-style Git URLs. Optional imported
+documents are copied into the configured `docs.imports_path`; automatic Confluence, Jira, Notion,
+or similar connectors are outside the current MVP.
 
-Imported documents, например выгрузки из Confluence, живут под `docs.imports_path` by default.
-Optional `<docs.imports_path>/index.yaml` может хранить metadata импортированных файлов:
-required поля `id` и `path`, optional поля `source`, `checksum`, `imported_at`,
-`source_updated_at`, `status`. Отсутствие index допустимо, malformed/index semantic issues
-surfacing как warning-only diagnostics.
+## Runtime trust and data handling
 
-## Проверка установки и качества
+Source repositories are intended to be read-only inputs, and ACP's own outputs go to the separate
+architecture workspace. Live analysis nevertheless launches an external provider CLI on the same
+machine:
 
-Минимальная проверка установленного binary:
+- the default `trusted_full_access` mode passes that provider its full-access flags;
+- opt-in `managed` mode narrows automatic approvals to the runtime task envelope;
+- managed mode is a policy boundary, not a hard process sandbox;
+- the provider's network behavior and data handling follow that provider's CLI and configuration;
+- a runtime write audit fails an otherwise successful step when protected workspace surfaces or an
+  analyzed repository are unexpectedly changed.
+
+Use a disposable checkout or a clean branch for sensitive live runs, and review the workspace
+before committing it. Workspaces may contain repository context, prompts, findings, questions, and
+raw provider logs; treat them as project data.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting. Do not put secrets, private repository
+content, tokens, or raw provider logs in public issues.
+
+## Current scope and non-goals
+
+The beta supports:
+
+- local interactive use through the embedded UI;
+- local and CI batch execution through the same CLI;
+- one Git-versioned architecture workspace for one or more repositories;
+- deterministic fake execution and opt-in headless providers;
+- validator-gated reports, model files, diagrams, findings, proposals, refresh, audit, and Q&A
+  surfaces.
+
+The current MVP is not:
+
+- a hosted or multi-tenant architecture service;
+- a security or compliance enforcement engine;
+- a hard sandbox or credential store for provider and Git CLIs;
+- a diagram editor or a replacement for human architecture review;
+- a native GitHub/GitLab app or an automatic document-system integration.
+
+The [canonical stakeholder matrix](docs/STAKEHOLDER_DOC.md) tracks implemented versus planned
+capabilities.
+
+## Build from source
+
+Source builds require the exact toolchain versions pinned in `.go-version`, `.node-version`, and
+`.python-version`, plus npm 10.x, Git, and ShellCheck for linting.
 
 ```bash
-acp version
-
-acp doctor \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --repo-path "$HOME/src/my-service"
-
-acp serve \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --auto-init \
-  --repo-name my-service \
-  --repo-path "$HOME/src/my-service" \
-  --runtime fake \
-  --dry-run
-
-acp run \
-  --workspace "$HOME/acp-workspaces/my-service" \
-  --pipeline init \
-  --runtime fake \
-  --non-interactive
+git clone https://github.com/GrinRus/ProvenArch.git
+cd ProvenArch
+make bootstrap
+make build
+./bin/acp version
 ```
 
-После этого проверьте, что появились ключевые файлы:
+The complete Python test suite also requires its pinned YAML dependency:
 
 ```bash
-test -f "$HOME/acp-workspaces/my-service/reports/as-is/overview.md"
-test -f "$HOME/acp-workspaces/my-service/reports/coverage/summary.md"
-test -f "$HOME/acp-workspaces/my-service/reports/findings/findings.md"
+./scripts/run-python.sh -m pip install PyYAML==6.0.3
 ```
 
-Installer проверяет `checksums.txt` перед установкой binary. Для hardening-релизов GitHub
-Release artifacts также могут включать SBOM/provenance files; используйте их как
-дополнительный supply-chain evidence при внутренней политике вашей команды.
+Before submitting a change, run the project definition of done:
 
-## Пользовательские документы
+```bash
+make contracts
+make test
+make lint
+make build
+```
 
-- [docs/STAKEHOLDER_DOC.md](docs/STAKEHOLDER_DOC.md) - canonical implemented/planned status matrix.
-- [docs/INSTALL.md](docs/INSTALL.md) - install paths и source build prerequisites.
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - local diagnostics и common failures.
-- [SUPPORT.md](SUPPORT.md) - support scope и evidence expectations.
-- [SECURITY.md](SECURITY.md) - vulnerability reporting.
-- [CHANGELOG.md](CHANGELOG.md) - user-visible release notes.
-- [LICENSE](LICENSE) - Apache-2.0 license.
+Required CI uses deterministic fixtures and does not depend on live provider or network execution.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for review expectations and additional UI checks.
 
-## Known MVP limits
+## Documentation
 
-- No hosted or multi-tenant mode.
-- No security/compliance enforcement engine.
-- ACP не принимает public SCM webhooks сам: native webhook listener / external SCM app integration остаются вне MVP.
-- No automatic Confluence/Jira/Notion integrations.
-- No separate credential store для Git или provider CLIs.
-- No hard provider-process sandbox в MVP headless mode.
-- Docker/npm/PyPI/Maven/crates.io не являются primary distribution channels для ACP.
+`README.md` is the English project entrypoint. Detailed stakeholder and engineering documents are
+currently maintained primarily in Russian.
 
-## Security and support
+| Document | Purpose |
+| --- | --- |
+| [Installation](docs/INSTALL.md) | Release install, first run, live providers, source build |
+| [Architecture](docs/ARCHITECTURE.md) | Components, boundaries, runtime, workspace, and UI |
+| [Workspace specification](docs/spec/WORKSPACE_SPEC.md) | `workspace.yaml` and runtime profile contract |
+| [Pipeline specification](docs/spec/PIPELINE_SPEC.md) | Stages, artifacts, validation, and promotion |
+| [API specification](docs/spec/API_SPEC.md) | Local HTTP API contracts |
+| [Testing strategy](docs/TESTING_STRATEGY.md) | Deterministic CI and optional live gates |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common local, workspace, and provider failures |
+| [Stakeholder matrix](docs/STAKEHOLDER_DOC.md) | Canonical implemented/planned status |
+| [Changelog](CHANGELOG.md) | Published user-visible release history |
 
-Используйте [SECURITY.md](SECURITY.md) для vulnerability reporting. Не открывайте public issues
-с secrets, private repository content, raw provider logs или tokens.
+## Community
 
-Используйте [SUPPORT.md](SUPPORT.md) для support scope и evidence expectations. Release notes
-и user-visible changes tracked в [CHANGELOG.md](CHANGELOG.md).
+Contributions are welcome when they are focused, test-covered, and aligned with the local-first MVP
+boundaries.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Use [SUPPORT.md](SUPPORT.md) for support scope and useful diagnostic evidence.
+- Read [GOVERNANCE.md](GOVERNANCE.md) for project decisions and maintainer responsibilities.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0. См. [LICENSE](LICENSE).
+ProvenArch is licensed under the [Apache License 2.0](LICENSE).

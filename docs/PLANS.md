@@ -60,6 +60,60 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260729-open-source-readme
+
+### Context
+The repository entrypoint is a mixed Russian/English implementation digest that makes a new
+visitor reconstruct the product purpose, expected outputs, first-run path and trust boundary from
+release-engineering details. The repository owner requested an English-first open-source README.
+Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md`,
+`docs/STAKEHOLDER_DOC.md` and `docs/spec/*`.
+
+### Goals (must have)
+- [x] Make `README.md` an English product entrypoint explaining what ProvenArch is, who it is for,
+      why it exists and what files it produces.
+- [x] Provide a verified deterministic fake-first walkthrough before live provider configuration.
+- [x] State beta maturity, runtime trust boundaries and MVP non-goals without overstating provider
+      or release readiness.
+- [x] Route detailed contracts to canonical documentation instead of duplicating them.
+- [x] Align repository documentation policy and docs-sync tests with the English README exception.
+- [ ] Merge fully qualified PR #191 into the current release-candidate `main` after all required
+      CI checks are green.
+
+### Non-goals
+- Translating the full primarily Russian documentation set.
+- Changing runtime behavior, schemas, public APIs or release evidence.
+- Claiming canonical `RELEASE READY` status.
+
+### Validation
+- `git diff --check`
+- README local-link and language-policy tests
+- `make contracts`
+- `make test`
+- `make lint`
+- `make build`
+- `make offline-closure`
+
+### Risks
+- A shorter entrypoint can erase important caveats. Keep explicit beta, source/workspace and live
+  provider trust boundaries, and link exact behavior to canonical specifications.
+- README may describe `main` behavior newer than the latest published binary. Keep the explicit
+  release-notes boundary and prepare matching release metadata after merge.
+
+### Progress log
+- 2026-07-29: Drafted the English product entrypoint and synchronized documentation guardrails.
+- 2026-08-01: Published draft PR #191 after focused documentation and deterministic checks passed.
+- 2026-08-02: Rebased PR #191 onto qualification SHA `5cf7ba976191b1b732ad9b49fb1b1b761d997926`;
+  preserved the current R3 plans while retaining the product-led README replacement.
+- 2026-08-02: Exact-toolchain `make offline-closure` passed with race suites, 90 readable fixtures,
+  263 Python tests, 158 UI tests, 7 rendered mock scenarios, contracts, lint, build and embedded UI
+  parity. README local links and the focused docs-sync suite also passed; the PR is ready for CI.
+- 2026-08-02: Backend CI correctly rejected the active plan after every goal was marked complete
+  before merge. Restored the pending merge goal; this is tracker-state correction only.
+
+---
+
+### Plan ID
 EP-20260801-r3-collect-root-claims-repair
 
 ### Context
