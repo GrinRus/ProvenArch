@@ -181,6 +181,9 @@ func TestComposeArtifactOnlyPromptUsesBoundedQwenToolFirstCollectContract(t *tes
 		`step_id="refresh.step1.collect"`,
 		`path="root-overview.md"`,
 		`canonical_path="reports/as-is/bank-root-files/root-overview.md"`,
+		"Top-level keys are closed and may contain only",
+		"Never add top-level claims or claim_map",
+		"if the composed root object contains claims, remove that root field before either write_file call",
 		"Every citation object must contain all five keys",
 		`"document_ids":[documents[0].id]`,
 		"document_ids is mandatory and non-empty; never omit it",
@@ -426,6 +429,91 @@ func TestComposeCollectManifestRepairPromptIsManifestOnly(t *testing.T) {
 	}
 	if strings.Contains(prompt, artifactquality.CollectManifestCanonicalExample()) {
 		t.Fatalf("repair prompt should not include a second generic canonical JSON example after the task skeleton:\n%s", prompt)
+	}
+}
+
+func TestComposeCollectManifestRepairPromptUsesCompactQwenRootFieldRemoval(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		WriteRoot:    "/tmp/workspace/reports/taskruns/run-1/staging/shards/bank-src",
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-src",
+	}
+	err := fmt.Errorf("shard pack manifest is invalid: shard-pack-manifest.schema.json validation failed: jsonschema: '' does not validate with https://example.local/acp/schemas/shard-pack-manifest.schema.json#/additionalProperties: additionalProperties 'claims' not allowed")
+	prompt := ComposeCollectManifestRepairPrompt(acpruntime.ProviderQwenCode, task, err)
+	for _, token := range []string{
+		"exact collect manifest closed-shape repair mode",
+		"QWEN COLLECT MANIFEST — REMOVE ONE FORBIDDEN TOP-LEVEL FIELD:",
+		`validator found exactly one forbidden root field: "claims"`,
+		"exactly one read_file call",
+		"exactly one write_file call",
+		`with only top-level "claims" removed`,
+		"preserve every canonical key and nested value",
+		"Top-level claims, claim_map, validation, metadata, compatibility, schema",
+		"claim IDs remain only in citations[].claim_ids",
+		"Stop immediately after the single write_file call",
+	} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected compact root-field repair prompt to contain %q, got:\n%s", token, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"TASK-SPECIFIC MANIFEST JSON SKELETON:",
+		"SEMANTIC EXTRACTION REQUIREMENT:",
+		"Repository evidence candidates available for bounded repair:",
+		"FIRST COLLECT MANIFEST REPAIR COMMAND:",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("compact root-field repair prompt must not contain %q, got:\n%s", forbidden, prompt)
+		}
+	}
+	if len(prompt) > 2400 {
+		t.Fatalf("compact root-field repair prompt is too large: %d bytes", len(prompt))
+	}
+}
+
+func TestComposeCollectManifestRepairPromptKeepsOtherExtraFieldsOnFullRepairPath(t *testing.T) {
+	t.Parallel()
+
+	task := acpruntime.Task{
+		RunID:        "run-1",
+		StepID:       "init.step1.collect",
+		WriteRoot:    t.TempDir(),
+		ArtifactRoot: "reports/taskruns/run-1/staging/shards/bank-src",
+	}
+	cases := []struct {
+		name     string
+		provider acpruntime.Provider
+		err      error
+	}{
+		{
+			name:     "nested known field",
+			provider: acpruntime.ProviderQwenCode,
+			err:      fmt.Errorf("shard pack manifest is invalid: jsonschema: '/semantic/questions/0' does not validate with https://example.local/acp/schemas/shard-pack-manifest.schema.json#/properties/semantic/properties/questions/items/additionalProperties: additionalProperties 'citation_ids' not allowed"),
+		},
+		{
+			name:     "unknown root field",
+			provider: acpruntime.ProviderQwenCode,
+			err:      fmt.Errorf("shard pack manifest is invalid: jsonschema: '' does not validate with https://example.local/acp/schemas/shard-pack-manifest.schema.json#/additionalProperties: additionalProperties 'invented_wrapper' not allowed"),
+		},
+		{
+			name:     "non qwen root field",
+			provider: acpruntime.ProviderClaudeCode,
+			err:      fmt.Errorf("shard pack manifest is invalid: jsonschema: '' does not validate with https://example.local/acp/schemas/shard-pack-manifest.schema.json#/additionalProperties: additionalProperties 'claims' not allowed"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := ComposeCollectManifestRepairPrompt(tc.provider, task, tc.err)
+			if strings.Contains(prompt, "REMOVE ONE FORBIDDEN TOP-LEVEL FIELD") {
+				t.Fatalf("%s must not use compact root-field repair prompt:\n%s", tc.name, prompt)
+			}
+			if !strings.Contains(prompt, "TASK-SPECIFIC MANIFEST JSON SKELETON:") {
+				t.Fatalf("%s must keep full fail-closed repair path:\n%s", tc.name, prompt)
+			}
+		})
 	}
 }
 
