@@ -132,6 +132,7 @@ func TestNormalizeActivityPolicyIgnoresInvalidDiagnosticEnvOverrides(t *testing.
 func TestFocusedRepairActivityPolicyUsesPreArtifactWallClockCap(t *testing.T) {
 	t.Parallel()
 
+	before := time.Now().UTC().Add(-time.Second)
 	policy := focusedRepairActivityPolicy(ActivityPolicy{
 		MonitorArtifacts:           true,
 		MonitorPreArtifact:         true,
@@ -146,6 +147,9 @@ func TestFocusedRepairActivityPolicyUsesPreArtifactWallClockCap(t *testing.T) {
 	}
 	if !policy.MonitorPreArtifact {
 		t.Fatal("focused repair should monitor pre-artifact activity")
+	}
+	if policy.FreshArtifactMutationAfter.IsZero() || policy.FreshArtifactMutationAfter.Before(before) {
+		t.Fatalf("focused repair fresh mutation threshold = %s, want current invocation baseline", policy.FreshArtifactMutationAfter)
 	}
 }
 

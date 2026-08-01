@@ -60,6 +60,69 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260801-r3-focused-repair-fresh-mutation
+
+### Context
+Post-merge qualification SHA `9f02f259dfb99d2f78961ec61157845d3d959623` passed offline
+closure and fresh smoke `smoke-tiny-bank-20260801T121843Z`. The first `regres fast` attempt then
+hit a qwen pre-artifact collect stall. Its single fresh phase rerun
+`regres-fast-bank-openedx-20260801T141407Z` completed all ten collect shards, but normal
+`init.step2.asis_docs` left three valid-looking markdown files without the required manifest.
+The scheduled focused repair inherited those old artifact mtimes, so the shared monitor classified
+the new command as a post-artifact stall after two seconds and exhausted repair before it had its
+own bounded write window. R3 stopped before Open edX completed and none of these runs are evidence.
+
+### Goals (must have)
+- [x] Give every focused repair command an invocation-local fresh artifact mutation baseline.
+- [x] Keep preceding partial artifacts readable as repair input without counting them as current
+      command progress.
+- [x] Preserve fail-closed validation, bounded pre/post-artifact windows and controlled-stop rules.
+- [x] Add a provider-free regression and synchronize runtime documentation.
+- [ ] Pass full provider-free DoD/offline closure, merge, establish a new qualification SHA and
+      restart R3 from fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public API, provider commands/models, timeout durations, canonical
+      matrices, curated repositories or release acceptance thresholds.
+- [x] Do not accept or reuse either failed `regres fast` attempt as release evidence.
+- [x] Do not synthesize provider-authored artifacts or weaken strict draft validation.
+
+### Approach
+1. Set `FreshArtifactMutationAfter` when building the common focused-repair activity policy, as
+   already done for collect-pair repair and draft enrichment.
+2. Pin the invocation-local threshold in providercommon policy tests; retain the existing monitor
+   regression proving stale files are treated as pre-artifact state until fresh mutation.
+3. Run focused tests repeatedly, then the complete deterministic DoD and offline closure.
+
+### Files expected to change
+- `internal/runtime/providercommon/artifact_recovery.go`
+- `internal/runtime/providercommon/engine_test.go`
+- `docs/ARCHITECTURE.md`
+- `docs/spec/PIPELINE_SPEC.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] A focused repair never enters post-artifact state solely from files last mutated before that
+      repair invocation.
+- [x] A fresh repair mutation is still monitored and strict artifact validation remains unchanged.
+- [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
+
+### Risks
+- A threshold taken after a very fast provider write could hide genuine progress. The baseline is
+  therefore established while constructing the policy before process launch, with the existing
+  one-millisecond clock-tolerance used by the other repair modes.
+
+### Progress log
+- 2026-08-01: Stopped the dependent Open edX phase after the second Bank attempt reproduced
+  repair/stall pressure. Diagnostics showed the repair process ran for two seconds while its
+  `last_artifact_mutation_at` still pointed to markdown written 94 seconds before repair admission.
+- 2026-08-01: Added the common focused-repair fresh-mutation baseline and pinned it alongside the
+  stale-artifact monitor regression; focused tests passed 20 repetitions. Exact-toolchain
+  `make contracts test lint build` and `make offline-closure` passed, including race suites,
+  263 Python tests, 158 UI tests, 7 rendered mock scenarios, readable-fixture drift, embedded UI
+  drift and live/product boundary checks. All 12 pinned source repositories remained clean.
+
+### Plan ID
 EP-20260729-r3-validator-evidence-advisory-boundary
 
 ### Context
@@ -78,7 +141,8 @@ to staged artifact integrity and contract correctness. R3 stopped before regress
       artifact/document contract target; retain those issues as warnings.
 - [x] Keep technical staged artifact/index/reference/document failures blocking.
 - [x] Pin the live-observed Bank of Anthos verdict/citation combination in a provider-free fixture.
-- [ ] Pass full provider-free DoD/offline closure, merge, and restart R3 from a fresh smoke.
+- [x] Pass full provider-free DoD/offline closure, merge, and restart R3 from a fresh smoke.
+- [ ] Confirm the advisory boundary in the fresh R3 release constituents before archiving this plan.
 
 ### Non-goals
 - [x] Do not add security/compliance enforcement, change schemas/public API/workspace contracts, or
@@ -120,7 +184,7 @@ to staged artifact integrity and contract correctness. R3 stopped before regress
 - [x] A staged final document/index issue or mismatched citation identity remains `FAIL`.
 - [x] All provider prompt bodies carry the same technical-only validator boundary.
 - [x] `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass.
-- [ ] The merged `main` SHA becomes the only new R3 qualification input.
+- [x] The merged `main` SHA becomes the only new R3 qualification input.
 
 ### Risks
 - An overly broad downgrade could hide a genuine artifact defect. Reconciliation therefore runs
@@ -137,6 +201,10 @@ to staged artifact integrity and contract correctness. R3 stopped before regress
   passed, including race suites, 263 Python tests, 158 UI tests, 7 rendered mock scenarios,
   readable-fixture drift, contracts, lint, build and embedded-UI/source-repository drift checks.
   The slice is ready for review; R3 remains stopped until its merge commit is requalified.
+- 2026-08-01: PR #192 merged as `9f02f259`; a detached worktree on that exact SHA passed fresh
+  `make offline-closure`, source-repository and embedded-UI drift checks. Fresh qwen Bank smoke
+  `smoke-tiny-bank-20260801T121843Z` passed with strict zero failures and no runtime-quality
+  blockers, establishing the qualification input before the subsequent regression defect.
 
 ---
 
