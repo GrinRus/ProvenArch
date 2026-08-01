@@ -67,6 +67,9 @@ func TestValidatorVerdictContractLinesKeepSourceEvidenceAdvisory(t *testing.T) {
 
 	joined := strings.Join(ValidatorVerdictContractLines(), "\n")
 	for _, needle := range []string{
+		"questions[] items MUST include id and text",
+		"only id, text, priority, and related_ids",
+		"citation_ids and all other extra question fields are forbidden",
 		"PASS/FAIL is limited to staged artifact integrity and contract correctness",
 		"security, privacy, compliance, architecture-risk, or operational observations",
 		"MUST NOT produce verdict=FAIL or error-severity issues[]",

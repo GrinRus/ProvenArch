@@ -633,6 +633,8 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and"`,
 		`Architecture Home must never reference reports/taskruns/**, taskrun staging paths, write_root, draft_final_root, raw runtime artifacts, absolute runtime checkout paths, or .acp/repos paths`,
 		`Every repo:path reference in Architecture Home must name an existing file or directory under that repository's current read root`,
+		`scan every repo:path token in Architecture Home and reject any path containing *, ?, [, ], {, or }`,
+		`never compress multiple concrete paths into a wildcard reference`,
 		`Never publish repository-root shorthand such as repo:. or repo:./, and never use glob or wildcard syntax such as repo:src/*`,
 		`Architecture Home must not use current run/current-run, typed shard, shard pack/manifest, or planned/succeeded/failed/incomplete counter wording`,
 		`those execution details belong only in summary.md and architect-summary.md`,

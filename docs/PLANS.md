@@ -60,6 +60,77 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260801-r3-live-prompt-canonical-shapes
+
+### Context
+Qualification SHA `e458937756274c12131bc81d8ef407f52234c66a` passed detached post-merge
+offline closure. Fresh diagnostic smoke `smoke-tiny-bank-20260801T194033Z` then returned machine
+`PASS` with strict 1/1 success, but required three focused repairs: a collect citation omitted
+mandatory `document_ids`, Architecture Home compressed concrete repository paths into wildcard
+references, and a validator question added forbidden `citation_ids`. The deterministic validators
+rejected each first-pass artifact correctly. `runtime_quality.repair_heavy=1` makes the smoke
+unacceptable as R3 qualification, so regression and release phases were not started.
+
+### Goals (must have)
+- [x] Make the bounded Qwen collect prompt show mandatory non-empty citation `document_ids` as an
+      explicit object shape and require a pre-write five-field check.
+- [x] Require normal step2 prompts to reject wildcard-bearing `repo:path` tokens before the draft
+      manifest write instead of relying on focused repair.
+- [x] Close the validator-question prompt shape to `id`, `text`, optional `priority` and
+      `related_ids`, explicitly forbidding `citation_ids`.
+- [x] Add provider-free prompt regressions, synchronize runtime documentation and pass the full
+      deterministic DoD/offline closure.
+- [ ] Merge the isolated fix, establish a new qualification SHA and restart R3 from a fresh smoke.
+
+### Non-goals
+- [x] Do not change schemas, public APIs, validators, recovery routing, provider models/commands,
+      retry or timeout budgets, matrices, curated repositories or release acceptance thresholds.
+- [x] Do not accept the diagnostic smoke or its repaired artifacts as R3 evidence.
+- [x] Do not synthesize or normalize provider-authored semantic content.
+
+### Approach
+1. Replace compact prose around Qwen citations with one closed five-field object guide and a
+   mandatory pre-write object check while retaining the 6 KiB prompt budget.
+2. Add an Architecture Home pre-manifest scan rule for glob metacharacters without weakening the
+   existing server-side containment/reference validator.
+3. Reuse the schema-derived validator question allowlist in both normal and focused repair prompts.
+4. Pin all three live-observed shapes in shared policy, prompt-contract and adapter tests.
+
+### Files expected to change
+- `internal/artifactquality/policy.go`
+- `internal/runtime/promptcontract/collect_repair.go`
+- `internal/runtime/steppolicy/policy.go`
+- corresponding provider-free tests
+- runtime architecture/spec/testing/runbook documentation and this ExecPlan
+
+### Acceptance criteria
+- [x] Bounded Qwen collect prompt remains at most 6 KiB and names all mandatory citation fields.
+- [x] Normal and focused validator prompts forbid `questions[].citation_ids` without schema change.
+- [x] Normal step2 prompt requires concrete wildcard-free Architecture Home references before the
+      manifest write; strict backend validation remains authoritative.
+- [x] Focused tests pass 20 repetitions; `make contracts`, `make test`, `make lint`, `make build`
+      and `make offline-closure` pass with exact pinned toolchains.
+
+### Risks
+- The Qwen contract has a strict prompt-size budget. New wording replaces compact prose and tests
+  enforce the cap; no retry budget or provider-specific runtime behavior changes.
+
+### Progress log
+- 2026-08-01: Classified the fresh smoke as provider prompt-contract drift after strict validation
+  correctly rejected all three first-pass payloads. Wrote a bounded external operator report and
+  stopped R3 before regression/release matrices.
+- 2026-08-01: Replaced the bounded Qwen citation prose with an explicit mandatory five-field shape
+  and pre-write check, added the Architecture Home wildcard-token pre-manifest scan, and closed
+  validator questions to the schema allowlist. Shared policy, prompt-contract and qwen adapter
+  tests cover the three live-observed payloads without changing schemas or runtime validation.
+- 2026-08-01: Focused tests passed 20 repetitions. Exact Go 1.25.10 / Node 22.21.1 / npm 10.9.4
+  `make contracts`, `make test`, `make lint`, `make build` and separate `make offline-closure`
+  completed with exit code 0, including race suites, 263 Python tests, 158 UI tests, seven mock E2E
+  scenarios, 90 readable fixtures and embedded UI drift checks. The first DoD attempt reached the
+  UI test stage before reporting missing local `ui/node_modules`; after lockfile-pinned `npm ci`,
+  the complete gate was repeated successfully. All 12 pinned source repositories remain clean.
+
+### Plan ID
 EP-20260801-r3-proposal-nested-section-validation
 
 ### Context

@@ -199,6 +199,7 @@ func ValidatorVerdictContractLines() []string {
 		`- generated_at MUST be an RFC3339 UTC timestamp string (example: "2026-04-16T12:00:02Z").`,
 		`- checked_paths MUST enumerate the staged final artifacts inspected by the validator.`,
 		`- Optional fixed_paths/issues/findings/questions arrays are allowed, but they must keep canonical object shapes.`,
+		`- questions[] items MUST include id and text and may use only id, text, priority, and related_ids; citation_ids and all other extra question fields are forbidden.`,
 		`- issues[] items MUST use exactly the canonical validator issue shape: code, severity, message, and optional path/document_id/citation_id.`,
 		`- issues[].severity MUST be "error" or "warning" only; do NOT use high/medium/low/critical in issues[].`,
 		`- Do NOT put legacy finding-shaped fields inside issues[]: id, title, description, rule_id, related_paths, related_ids, provenance.`,
