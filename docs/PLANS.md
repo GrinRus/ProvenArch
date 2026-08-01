@@ -121,7 +121,68 @@ were not started; the smoke is diagnostic only.
   tests, 158 UI tests, 7 rendered mock scenarios, 90 readable fixture artifacts, embedded UI drift
   and live/product boundary checks. The worktree contains only the expected parser/tests/docs diff
   and all 12 pinned source repositories remain clean.
+- 2026-08-01: Two backend CI attempts exposed an unrelated shared API test-server shutdown race.
+  The parser PR remained open while the isolated test-only fix passed its own offline closure and
+  merged as PR #196 (`0d1e146435d61595becd82fd7f8b173467a508ea`); this branch now includes that
+  merge and will repeat the complete provider-free gate before CI restarts.
+- 2026-08-01: The post-integration exact-toolchain `make contracts`, `make test`, `make lint`,
+  `make build`, and separate `make offline-closure` all completed with exit code 0. The combined
+  tree passed API/provider race suites, 263 Python tests, 158 UI tests, all 7 mock E2E scenarios,
+  readable-fixture and embedded-UI drift checks; the 12 pinned source repositories remain clean.
+### Plan ID
+EP-20260801-api-test-server-shutdown
 
+### Context
+Parser fix PR #195 passed the complete local provider-free gate, but two independent backend CI
+attempts failed while Go test cleanup removed `reports/taskruns`: the assertions had completed, yet
+the shared test helper had left its orchestrator service alive after closing only the HTTP test
+server. A background terminal history write could therefore race with `t.TempDir` cleanup. This is
+a provider-free test lifecycle defect and is intentionally isolated from the parser change.
+
+### Goals (must have)
+- [x] Make every shared API test server stop its orchestrator before its temporary workspace is
+      removed.
+- [x] Repeat the affected parallel endpoint tests and complete the deterministic DoD/offline gate.
+- [ ] Merge the lifecycle fix, update PR #195 onto the new `main`, and restart its CI.
+
+### Non-goals
+- [x] Do not change production lifecycle behavior, API contracts, schemas, timeouts, canonical live
+      matrices or release evidence.
+- [x] Do not weaken TempDir cleanup or hide shutdown errors.
+
+### Approach
+1. Register one cleanup callback in the shared API test-server constructors.
+2. Rely on `testing.T.Cleanup` LIFO ordering so service shutdown runs before the already-registered
+   TempDir removal.
+3. Bound shutdown with the production service close budget and report any shutdown error as a test
+   failure.
+
+### Files expected to change
+- `internal/api/server_test.go`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] The two CI-failing cancellation endpoint tests pass repeatedly and without cleanup errors.
+- [x] The complete API package, provider-free DoD and offline closure pass.
+- [ ] PR #195 receives green backend CI after incorporating the merged fix.
+
+### Risks
+- Some tests already call `Shutdown` explicitly. Service shutdown is idempotent; the registered
+  cleanup still provides a uniform final lifecycle boundary for every helper user.
+
+### Progress log
+- 2026-08-01: Classified two different `unlinkat reports/taskruns: directory not empty` backend CI
+  failures as the same missing test-server shutdown boundary; the corresponding assertions and
+  focused local repetitions passed.
+- 2026-08-01: Both affected endpoint scenarios passed 20 repetitions; the complete API package
+  passed three race-enabled repetitions. Exact Go 1.25.10 / Node 22.21.1 / npm 10.9.4
+  `make contracts`, `make test`, `make lint`, `make build`, and a separate
+  `make offline-closure` completed with exit code 0. Embedded UI is deterministic, the fix
+  worktree contains only the two expected test/docs files, and all 12 pinned source repositories
+  remain clean at their curated revisions.
+- 2026-08-01: PR #196 passed all 11 CI checks and merged as
+  `0d1e146435d61595becd82fd7f8b173467a508ea`. Parser PR #195 incorporated the resulting `main`;
+  its post-integration deterministic gate and CI are pending.
 ### Plan ID
 EP-20260801-r3-collect-task-identity-recovery
 

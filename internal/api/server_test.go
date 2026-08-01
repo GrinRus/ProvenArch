@@ -4738,7 +4738,7 @@ repos:
 	}
 
 	service := newService(ws)
-	return NewServer(ws, service)
+	return registerTestServerShutdown(t, NewServer(ws, service))
 }
 
 func hasAPICitationPathPrefix(citations []qaAPICitation, prefix string) bool {
@@ -4808,7 +4808,7 @@ func newTestServerFromManifest(t *testing.T, manifest string) *Server {
 		t.Fatalf("open workspace: %v", err)
 	}
 
-	return NewServer(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws)))
+	return registerTestServerShutdown(t, NewServer(ws, orchestrator.NewService(orchestrator.WithHistoryWorkspace(ws))))
 }
 
 func newTestServerFromManifestWithRunner(t *testing.T, manifest string, runner acpruntime.Runner) *Server {
@@ -4824,7 +4824,7 @@ func newTestServerFromManifestWithRunner(t *testing.T, manifest string, runner a
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunner(runner),
 	)
-	return NewServer(ws, service)
+	return registerTestServerShutdown(t, NewServer(ws, service))
 }
 
 func newTestServerWithRunner(t *testing.T, runner acpruntime.Runner) *Server {
@@ -4850,7 +4850,23 @@ repos:
 		orchestrator.WithHistoryWorkspace(ws),
 		orchestrator.WithRunner(runner),
 	)
-	return NewServer(ws, service)
+	return registerTestServerShutdown(t, NewServer(ws, service))
+}
+
+func registerTestServerShutdown(t *testing.T, server *Server) *Server {
+	t.Helper()
+
+	// TempDir cleanup is registered before this helper is called. Since Cleanup
+	// callbacks run in LIFO order, shutdown finishes any background run and its
+	// history writes before the workspace directory is removed.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown test server: %v", err)
+		}
+	})
+	return server
 }
 
 func testServerRuntimeConfig() ServerRuntimeConfig {
