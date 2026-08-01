@@ -1964,6 +1964,7 @@ func focusedRepairActivityPolicy(base ActivityPolicy, monitorPreArtifact bool) A
 	repairPolicy := normalizeActivityPolicy(base)
 	repairPolicy.MonitorArtifacts = true
 	repairPolicy.MonitorPreArtifact = monitorPreArtifact
+	repairPolicy.FreshArtifactMutationAfter = time.Now().UTC().Add(-time.Millisecond)
 	if repairPolicy.PreArtifactStallWindow < defaultFocusedRepairWindow {
 		repairPolicy.PreArtifactStallWindow = defaultFocusedRepairWindow
 	}
