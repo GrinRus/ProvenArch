@@ -77,8 +77,8 @@ Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md
       or release readiness.
 - [x] Route detailed contracts to canonical documentation instead of duplicating them.
 - [x] Align repository documentation policy and docs-sync tests with the English README exception.
-- [ ] Merge fully qualified PR #191 into the current release-candidate `main` after all required
-      CI checks are green.
+- [ ] Complete fresh composite trusted-machine evidence for the exact candidate SHA, then create
+      and publish the `v0.1.10` prerelease tag through the fail-closed release workflow.
 
 ### Non-goals
 - Translating the full primarily Russian documentation set.
@@ -110,6 +110,15 @@ Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md
   parity. README local links and the focused docs-sync suite also passed; the PR is ready for CI.
 - 2026-08-02: Backend CI correctly rejected the active plan after every goal was marked complete
   before merge. Restored the pending merge goal; this is tracker-state correction only.
+- 2026-08-02: PR #191 passed all 11 checks and was rebase-merged into protected linear-history
+  `main` as `68217aaba9dbd1c81814e8f5c7d23608bea5b2e3`. Started post-merge offline qualification and
+  truthful `v0.1.10` candidate metadata; release tag creation remains blocked on fresh composite
+  trusted-machine evidence.
+- 2026-08-02: Fresh detached post-merge `make offline-closure` passed on `68217aaba9dbd1c81814e8f5c7d23608bea5b2e3`
+  with the exact Go/Node/npm toolchains, including race suites, 90 readable fixtures, 263 Python
+  tests, 158 UI tests, 7/7 rendered mock E2E, contracts, lint, build and embedded UI parity. The
+  qualification worktree remained clean; the canonical `/tmp/provenarch-live-e2e` source checkout
+  root is not currently present, so no source-repository state was mutated or available to audit.
 
 ---
 

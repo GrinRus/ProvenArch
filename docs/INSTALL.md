@@ -5,6 +5,8 @@
 ## Release status
 
 - Latest public release: `v0.1.9`
+- Next prepared candidate: `v0.1.10` (unpublished; the tag remains blocked on fresh trusted-machine
+  composite release evidence)
 - Supported platforms: macOS/Linux on `amd64` and `arm64`
 - License: Apache-2.0
 - Primary install command:
