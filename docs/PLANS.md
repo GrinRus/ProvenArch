@@ -119,6 +119,11 @@ Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md
   tests, 158 UI tests, 7/7 rendered mock E2E, contracts, lint, build and embedded UI parity. The
   qualification worktree remained clean; the canonical `/tmp/provenarch-live-e2e` source checkout
   root is not currently present, so no source-repository state was mutated or available to audit.
+- 2026-08-02: Owner explicitly authorized publishing `v0.1.10` without Qwen/Claude live runs.
+  Trusted-host preflight found all 12 pinned path repositories and exact toolchains ready, but Qwen
+  and the configured Claude-through-Kimi route both returned exhausted billing-cycle quota; native
+  Claude was unauthenticated and Codex artifact smoke passed. The release is therefore authorized
+  only as a tracked `UNQUALIFIED PRERELEASE`, never as canonical `RELEASE READY`.
 
 ---
 

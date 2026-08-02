@@ -2,7 +2,7 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
-## v0.1.10 - Unreleased
+## v0.1.10 - 2026-08-02
 
 Beta prerelease candidate for the local-first product shell, trustworthy artifact authorities,
 impact-aware refresh, and provider-free release hardening accumulated after `v0.1.9`.
@@ -42,9 +42,9 @@ Verification notes:
   is accepted as evidence.
 
 Known limitations:
-- `v0.1.10` is prepared as an unpublished beta candidate. Do not create the tag or claim canonical
-  `RELEASE READY` until the release workflow can verify three fresh constituent verdicts with
-  `PASS` and six accepted SWE UX/artifact-quality assessments for the exact tag SHA.
+- `v0.1.10` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim canonical
+  `RELEASE READY`: the tracked tag-scoped waiver records the missing Qwen/Claude live evidence and
+  composite verdict while preserving the normal fail-closed evidence path for releases without a waiver.
 - Qwen quota is currently unavailable, so the required qwen/claude/codex trusted-machine composite
   has not been completed. No `release_verdict_*.json` is attached to this candidate.
 - The successful Codex smoke does not replace regression, frontend init-inspect, cross-provider or
