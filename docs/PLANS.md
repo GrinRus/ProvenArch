@@ -77,8 +77,8 @@ Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md
       or release readiness.
 - [x] Route detailed contracts to canonical documentation instead of duplicating them.
 - [x] Align repository documentation policy and docs-sync tests with the English README exception.
-- [ ] Complete fresh composite trusted-machine evidence for the exact candidate SHA, then create
-      and publish the `v0.1.10` prerelease tag through the fail-closed release workflow.
+- [ ] Complete fresh composite trusted-machine evidence before claiming canonical `RELEASE READY`;
+      exact-tag owner waivers may publish only an explicit `UNQUALIFIED PRERELEASE`.
 
 ### Non-goals
 - Translating the full primarily Russian documentation set.
@@ -124,6 +124,10 @@ Canonical implementation and contract boundaries remain in `docs/ARCHITECTURE.md
   and the configured Claude-through-Kimi route both returned exhausted billing-cycle quota; native
   Claude was unauthenticated and Codex artifact smoke passed. The release is therefore authorized
   only as a tracked `UNQUALIFIED PRERELEASE`, never as canonical `RELEASE READY`.
+- 2026-08-02: The `v0.1.10` tag passed waiver verification but its release job stopped before
+  publication because `make test` lacked the pinned PyYAML dependency available in backend CI.
+  The immutable failed tag is retained; recovery moves to `v0.1.11` with the dependency fix,
+  regression coverage and a new exact-tag owner-waiver record.
 
 ---
 

@@ -108,10 +108,15 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertTrue(any(use.startswith("actions/attest-build-provenance@") for use in uses))
 
         runs = [step.get("run", "") for step in steps]
+        self.assertIn("python -m pip install PyYAML==6.0.3", runs)
         self.assertIn("npm ci --prefix ui", runs)
         self.assertIn("make contracts", runs)
         self.assertIn("make test", runs)
         self.assertIn("make lint", runs)
+        self.assertLess(
+            runs.index("python -m pip install PyYAML==6.0.3"),
+            runs.index("make test"),
+        )
 
         release_step = next(step for step in steps if step.get("uses", "").startswith("goreleaser/goreleaser-action@"))
         self.assertEqual("release --clean", release_step["with"]["args"])
