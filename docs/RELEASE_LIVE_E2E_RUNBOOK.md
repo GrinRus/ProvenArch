@@ -667,6 +667,14 @@ python3 scripts/verify-release-verdict.py \
 Скрипт проверяет один или несколько уже созданных release-mode verdict JSON: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Для каждого constituent он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Повторяющийся `matrix_id` блокирует composite check. Verifier не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
 GitHub tag release workflow применяет тот же verifier как отдельный read-only job до GoReleaser.
+По умолчанию этот evidence path остаётся обязательным. Исключение допускается только для явно
+неqualified prerelease по прямому решению owner: tracked файл
+`reports/release_owner_waiver_<tag>.json` должен совпадать с exact tag, иметь
+`release_state=UNQUALIFIED PRERELEASE`, перечислять waived Qwen/Claude/composite requirements и
+ссылаться на qualification SHA, являющийся ancestor tag SHA. Workflow проверяет такой файл через
+`scripts/verify-release-owner-waiver.py`; waiver разрешает публикацию, но никогда не создаёт
+`RELEASE READY` claim и не заменяет live evidence.
+
 Нужно настроить ровно один режим:
 
 - для composite `release full` задайте

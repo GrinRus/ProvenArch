@@ -72,10 +72,16 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertEqual("ubuntu-latest", verify_job["runs-on"])
         self.assertEqual("github-release", verify_job["environment"])
         self.assertEqual({"contents": "read"}, verify_job["permissions"])
+        verify_checkout = next(step for step in verify_job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+        self.assertEqual(0, verify_checkout["with"]["fetch-depth"])
         verify_runs = [step.get("run", "") for step in verify_job["steps"]]
         self.assertTrue(
             any("scripts/verify-release-verdict.py" in run for run in verify_runs),
             "release evidence verifier must run before publication",
+        )
+        self.assertTrue(
+            any("scripts/verify-release-owner-waiver.py" in run for run in verify_runs),
+            "tag-scoped owner waiver verifier must be explicit and tracked",
         )
         verify_step = next(
             step
