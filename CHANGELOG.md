@@ -2,6 +2,55 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.10 - Unreleased
+
+Beta prerelease candidate for the local-first product shell, trustworthy artifact authorities,
+impact-aware refresh, and provider-free release hardening accumulated after `v0.1.9`.
+
+Highlights:
+- Completed the evidence-oriented product shell across Architecture Home, Runs, Knowledge, Changes,
+  Ask, Proposals and explicit Git publication, including responsive/mobile and recovery-state QA.
+- Added server-owned run snapshot and evidence authority resolution so current, historical, QA and
+  audit artifacts cannot silently fall back across trust boundaries.
+- Added impact-aware refresh planning and immutable baseline preservation with source-revision,
+  shard-identity and digest checks before retained artifacts are reused.
+- Hardened workspace I/O against symlink escapes, made run persistence publish immutable snapshots,
+  and coordinated run, session and Git mutation admission around a shared lifecycle boundary.
+- Added typed validation/recovery routing, a read-only artifact integrity auditor, stronger
+  claim/citation identity checks, expanded workspace-health findings and bounded evidence viewing.
+- Added the explicit Ask-to-Proposal mutation and UI handoff while preserving the deterministic Q&A
+  compatibility surface.
+- Unified path-scope matching and tightened provider prompt/reconciliation behavior for artifact-only
+  execution, focused repair, Architecture Home and collect provenance.
+- Added the provider-free `make offline-closure` gate with race suites, readable fixture drift,
+  contract validation, Go/Python/UI tests, rendered mock E2E, lint, build and embedded UI parity.
+- Replaced the repository entrypoint with an English-first open-source README and a deterministic
+  fake-runtime walkthrough, while keeping exact contracts in the canonical specifications.
+
+Verification notes:
+- Product and hardening slices through PR #199 were merged into `main`; PR #191 then passed all 11
+  required/advisory checks and was rebase-merged as `68217aaba9dbd1c81814e8f5c7d23608bea5b2e3`.
+- Exact Go `1.25.10`, Node `22.21.1` and npm `10.9.4` provider-free `make offline-closure` passed on
+  that post-merge SHA: race suites, 90 readable fixtures, 263 Python tests, 158 UI tests, 7/7
+  rendered mock scenarios, contracts, lint, build and embedded UI parity all completed successfully.
+- Codex diagnostic smoke `smoke-tiny-bank-20260802T084522Z` on the preceding qualification SHA
+  `5cf7ba976191b1b732ad9b49fb1b1b761d997926` passed strict execution 1/1 from snapshot artifacts
+  with runtime contract and artifact quality passed, an `Excellent` verdict, and no failures,
+  repairs or stalls. It is diagnostic evidence only and is not a release verdict for this candidate.
+- The following Codex Bank/Open edX regression attempt was rejected as `infra_incomplete_cycle`
+  after its controlling terminal session closed; no matrix result was produced and no partial output
+  is accepted as evidence.
+
+Known limitations:
+- `v0.1.10` is prepared as an unpublished beta candidate. Do not create the tag or claim canonical
+  `RELEASE READY` until the release workflow can verify three fresh constituent verdicts with
+  `PASS` and six accepted SWE UX/artifact-quality assessments for the exact tag SHA.
+- Qwen quota is currently unavailable, so the required qwen/claude/codex trusted-machine composite
+  has not been completed. No `release_verdict_*.json` is attached to this candidate.
+- The successful Codex smoke does not replace regression, frontend init-inspect, cross-provider or
+  canonical `baseline` plus `parallel-default` release evidence.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.9 - 2026-07-09
 
 Beta patch release for Console V2 UX recovery polish and rendered recovery-state QA after `v0.1.8`.
