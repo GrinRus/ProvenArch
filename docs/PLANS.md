@@ -7596,3 +7596,51 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 - 2026-07-28: Full pinned offline closure passed: race suites, 90 readable fixtures, UI `158/158`,
   mock E2E `7/7`, full Go suite, Python `263/263`, contracts, lint/typecheck, build and deterministic
   embedded `ui_dist`.
+
+---
+
+## EP-20260802-r3-qwen-collect-process-provenance-contract
+
+### Context
+- Post-merge qualification SHA `a5d25b6ff20c5a9f461871abec4d092bc9dd4985` passed full offline
+  closure and fresh smoke `smoke-tiny-bank-20260801T225646Z` passed strict `1/1` with zero repairs,
+  retries, stalls or excellent blockers.
+- Standalone `regres-fast-bank-openedx-20260801T234621Z` stopped during Bank init. One normal compact
+  collect markdown used the validator-rejected phrase `in this bounded read`; its pair repair then
+  emitted two lexical `inferred` provenance kinds and required deterministic shape recovery.
+- The subsequent proposals call returned explicit Qwen/Kimi billing-cycle quota HTTP 403, and Open
+  edX readiness confirmed the same host/provider blocker. No regression or release evidence is
+  accepted; live qualification remains paused until provider readiness succeeds.
+
+### Goals
+- [x] Enumerate the live-observed process phrases in the compact Qwen collect contract.
+- [x] Restrict the minimal Qwen semantic subset to exact `provenance.kind: observation` and route
+  unsupported inference into an observed coverage gap.
+- [x] Pin both rules in prompt-contract and Qwen adapter regressions.
+- [x] Synchronize architecture, pipeline, testing and live-runbook documentation.
+- [x] Pass focused stress, full deterministic DoD and offline closure.
+- [ ] Merge the isolated fix, establish a new qualification SHA, and restart R3 from smoke only
+  after Qwen quota/readiness succeeds.
+
+### Non-goals
+- No validator relaxation, ACP-authored semantic rewrite, schema/API, retry/timeout, canonical
+  matrix, curated repository, provider alias or acceptance-threshold change.
+- No attempt to bypass, suppress or reclassify the explicit provider quota error.
+
+### Acceptance
+- Normal compact Qwen collect names every live-observed process phrase before atomic pair write.
+- Every compact semantic provenance object is instructed to use exact `observation`; aliases such as
+  `inferred` are explicitly forbidden.
+- Existing closed root/citation/task identity contracts and the 6 KiB prompt budget remain intact.
+- `make contracts`, `make test`, `make lint`, `make build`, and `make offline-closure` pass with
+  pinned toolchains.
+
+### Progress log
+- 2026-08-02: Recorded the stopped regression operator report at
+  `/tmp/provenarch-test_arch_project/reports/operator_step_regres-fast-bank-openedx-20260801T234621Z.md`.
+  Bank had independent `runtime_quality.repair_heavy` remediation evidence; Open edX never started
+  a backend run after the explicit provider readiness quota failure.
+- 2026-08-02: Focused promptcontract/qwencode suites passed once and with `-count=20`. Full pinned
+  DoD passed (`contracts`, Go, Python `263/263`, UI `158/158`, lint/typecheck and embedded build),
+  followed by independent offline closure: race suites, 90 readable fixtures, mock E2E `7/7`, full
+  deterministic DoD and byte-identical embedded `ui_dist` all passed.
