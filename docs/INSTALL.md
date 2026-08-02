@@ -4,7 +4,7 @@
 
 ## Release status
 
-- Latest public prerelease: `v0.1.10` (`UNQUALIFIED PRERELEASE`; Qwen/Claude live qualification was
+- Latest public prerelease: `v0.1.11` (`UNQUALIFIED PRERELEASE`; Qwen/Claude live qualification was
   explicitly waived by the repository owner and canonical `RELEASE READY` is not claimed)
 - Supported platforms: macOS/Linux on `amd64` and `arm64`
 - License: Apache-2.0
@@ -35,7 +35,7 @@ acp version
 Опциональные переменные:
 
 ```bash
-ACP_VERSION=v0.1.10 INSTALL_DIR=/usr/local/bin sh install.sh
+ACP_VERSION=v0.1.11 INSTALL_DIR=/usr/local/bin sh install.sh
 ```
 
 По умолчанию `ACP_VERSION=latest`: installer разрешает последний GitHub Release через Releases API, включая beta/prerelease releases, затем скачивает archive `acp_<os>_<arch>.tar.gz`, проверяет `checksums.txt` и устанавливает только бинарь `acp`.

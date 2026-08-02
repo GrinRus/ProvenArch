@@ -2,6 +2,21 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.11 - 2026-08-02
+
+Release-pipeline recovery patch for the unpublished `v0.1.10` candidate.
+
+Changes:
+- Install the pinned `PyYAML==6.0.3` script-test dependency in the release job before `make test`,
+  matching the required backend CI environment.
+- Add a distribution contract test that prevents the release workflow from running the Python
+  suite before its YAML parser dependency is available.
+
+Known limitations:
+- `v0.1.11` carries forward the repository owner's exact-tag authorization as an
+  `UNQUALIFIED PRERELEASE`; Qwen/Claude live evidence and the composite release verdict remain
+  waived, and canonical `RELEASE READY` is not claimed.
+
 ## v0.1.10 - 2026-08-02
 
 Beta prerelease candidate for the local-first product shell, trustworthy artifact authorities,
