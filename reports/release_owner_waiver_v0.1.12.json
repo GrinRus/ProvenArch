@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tag": "v0.1.12",
+  "decision": "owner_waived",
+  "release_state": "UNQUALIFIED PRERELEASE",
+  "base_qualification_sha": "d618c72d0ad0bb6fda4507b8147a7d93ed5a5026",
+  "approved_by": "GrinRus",
+  "reason": "Repository owner explicitly authorized publishing the UI and onboarding fixes as v0.1.12 without live provider matrix runs after Qwen readiness reported a quota or permission blocker.",
+  "waived_requirements": [
+    "qwen-code live evidence",
+    "claude-code live evidence",
+    "composite release verdict"
+  ]
+}
