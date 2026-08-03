@@ -808,6 +808,11 @@ active or failed.
   state. Added a real fake parent-to-Proposals-child promotion regression, public-shape
   example/fixture, and synchronized API/model/pipeline/docs contracts. Full DoD and seven mock
   Playwright scenarios were repeated; live-provider E2E remains outside this PR scope.
+- 2026-08-03: A third plan-by-plan audit found that retry confirmation received
+  `invalidated_steps` but did not present that closure separately, and mislabeled mixed
+  step/shard `estimated_units` as pipeline steps. The confirmation now explains why downstream
+  work is rebuilt and distinguishes validated reuse, child execution, invalidation, effective
+  scope and execution-unit estimate; component coverage protects the operator-facing contract.
 
 ### Plan ID
 EP-20260729-open-source-readme

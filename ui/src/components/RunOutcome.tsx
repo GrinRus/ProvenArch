@@ -71,7 +71,20 @@ export function RecoveryPanel({ runStatus, review, busy, onRetryStarted, onRevie
 }
 
 function RetryPlanPreview({ plan }: { plan: RetryPlanResponse }) {
-  return <div className="retry-plan" data-testid="retry-plan"><h3>Safe retry plan</h3>{plan.widened ? <p className="status warn">{plan.widen_reason}</p> : null}<div className="retry-plan-columns"><div><span>Reuse</span><strong>{plan.reused_inputs.length ? plan.reused_inputs.join(" → ") : "Nothing from this attempt"}</strong></div><div><span>Execute</span><strong>{plan.execute_steps.join(" → ")}</strong></div><div><span>Effective scope</span><strong>{plan.effective_scopes?.length ? plan.effective_scopes.join(", ") : "Whole configured workspace"}</strong></div></div><p>{plan.estimated_units} pipeline step(s) will run in a new auditable child run.</p></div>;
+  const requestedLabel = stepPurpose(plan.requested_step);
+  const effectiveLabel = stepPurpose(plan.effective_start_step);
+  return <div className="retry-plan" data-testid="retry-plan">
+    <h3>Safe retry plan</h3>
+    {plan.widened ? <p className="status warn">{plan.widen_reason}</p> : null}
+    <p className="retry-plan-reason">Requested <strong>{requestedLabel}</strong>. {plan.widened ? `Validated inputs require execution to restart at ${effectiveLabel}.` : "Every dependent downstream result must be rebuilt so the architecture stays internally consistent."}</p>
+    <div className="retry-plan-columns">
+      <div><span>Reuse after validation</span><strong>{plan.reused_inputs.length ? plan.reused_inputs.join(" → ") : "Nothing from this attempt"}</strong></div>
+      <div><span>Execute in child run</span><strong>{plan.execute_steps.join(" → ")}</strong></div>
+      <div><span>Invalidated dependency closure</span><strong>{plan.invalidated_steps.length ? plan.invalidated_steps.join(" → ") : "No downstream results"}</strong></div>
+      <div><span>Effective scope</span><strong>{plan.effective_scopes?.length ? plan.effective_scopes.join(", ") : "Whole configured workspace"}</strong></div>
+    </div>
+    <p><strong>{plan.estimated_units}</strong> estimated execution unit(s), including planned steps and any selected shard scopes, will run under a new auditable child run ID.</p>
+  </div>;
 }
 
 function outcomeTitle(state: NonNullable<RunReviewSummaryResponse["result"]>["state"]) { return state === "completed" ? "Architecture updated" : state === "completed_with_gaps" ? "Architecture updated with gaps" : state === "canceled" ? "Analysis canceled" : "Analysis needs recovery"; }

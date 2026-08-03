@@ -46,6 +46,9 @@ describe("Run outcome surfaces", () => {
     const plan = await screen.findByTestId("retry-plan");
     expect(plan).toHaveTextContent("validated_sibling_collect_scopes");
     expect(plan).toHaveTextContent("refresh.step4.proposals");
+    expect(plan).toHaveTextContent("Invalidated dependency closure");
+    expect(plan).toHaveTextContent("estimated execution unit(s)");
+    expect(plan).toHaveTextContent("Every dependent downstream result must be rebuilt");
     fireEvent.click(screen.getByRole("button", { name: "Start targeted retry" }));
     await waitFor(() => expect(onRetryStarted).toHaveBeenCalledWith("run-child"));
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -62,7 +65,10 @@ describe("Run outcome surfaces", () => {
     render(<TargetedRerunPanel runStatus={{ ...baseRun, status: "succeeded", error_code: null, error: null }} review={reviewWithResult("completed")} busy={false} onRetryStarted={onRetryStarted} />);
     fireEvent.change(screen.getByLabelText("Start from step"), { target: { value: "refresh.step3.findings" } });
     fireEvent.click(screen.getByRole("button", { name: "Review rerun plan" }));
-    expect(await screen.findByTestId("retry-plan")).toHaveTextContent("refresh.step3.findings → refresh.step4.proposals");
+    const plan = await screen.findByTestId("retry-plan");
+    expect(plan).toHaveTextContent("refresh.step3.findings → refresh.step4.proposals");
+    expect(plan).toHaveTextContent("Requested Validating findings and coverage");
+    expect(plan).toHaveTextContent("Invalidated dependency closure");
     fireEvent.click(screen.getByRole("button", { name: "Start targeted rerun" }));
     await waitFor(() => expect(onRetryStarted).toHaveBeenCalledWith("run-child"));
   });

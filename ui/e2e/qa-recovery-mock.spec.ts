@@ -357,6 +357,29 @@ async function installQARecoveryMock(page: Page): Promise<{ postedQuestions: str
       return;
     }
 
+    if (method === "POST" && url.pathname === "/api/pipeline/runs/run-analysis-succeeded/retry-plan") {
+      const payload = JSON.parse(request.postData() || "{}") as { step_id?: string };
+      const requestedStep = payload.step_id || "init.step4.proposals";
+      const executeSteps = requestedStep === "init.step3.findings"
+        ? ["init.step3.findings", "init.step4.proposals"]
+        : [requestedStep];
+      await route.fulfill({ ...json({
+        parent_run_id: "run-analysis-succeeded",
+        pipeline: "init",
+        requested_step: requestedStep,
+        effective_start_step: requestedStep,
+        requested_scopes: [],
+        effective_scopes: [],
+        reused_inputs: ["init.step0.constitution", "init.step1.collect", "init.step2.asis_docs"],
+        execute_steps: executeSteps,
+        invalidated_steps: executeSteps,
+        estimated_units: executeSteps.length,
+        widened: false,
+        plan_hash: "qa-recovery-plan",
+      }) });
+      return;
+    }
+
     await route.fulfill({ ...json({ ok: true, ignored: apiPath }) });
   });
 
@@ -502,6 +525,10 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
 	await expect(targetedRerun).toContainText("Repeat only the work you need");
 	await targetedRerun.getByLabel("Start from step").selectOption("init.step3.findings");
 	await expect(targetedRerun.getByLabel("Start from step")).toHaveValue("init.step3.findings");
+	await targetedRerun.getByRole("button", { name: "Review rerun plan" }).click();
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Invalidated dependency closure");
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Every dependent downstream result must be rebuilt");
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("2 estimated execution unit(s)");
 	await expectNoHorizontalOverflow(page);
 	await captureEvidenceScreenshot(page, "successful-targeted-rerun-desktop.png");
   await expectNoCriticalAxeViolations(page);

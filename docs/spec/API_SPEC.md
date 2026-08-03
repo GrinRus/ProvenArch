@@ -780,6 +780,10 @@ invalidations, estimated units, widening reason и `plan_hash`. Если parent 
 любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
 validation, либо агрегированные final/citation indexes и их staged documents не проходят strict
 parse, parent identity и containment validation, planner явно расширяет retry до первого pipeline step.
+`estimated_units` — execution units: для scoped Collect он включает выбранные shard scopes и
+downstream steps, поэтому UI не должен подписывать это поле как количество pipeline steps. UI
+обязан отдельно показать reuse, execute closure, `invalidated_steps`, effective scope и причину
+dependency closure до запуска child run.
 
 ### POST `/api/pipeline/runs/{run_id}/retry`
 Принимает исходные `step_id`, `scope_ids[]` и обязательный `plan_hash`. Backend повторно вычисляет

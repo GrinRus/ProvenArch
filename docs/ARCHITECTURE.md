@@ -466,7 +466,9 @@ Execution modes:
   raw diagnostics. After any terminal analysis run, targeted retry/rerun creates a new child run,
   validates every reused collect shard, hashes the complete parent staging tree and never edits
   parent taskrun history. Completed runs expose an explicit step selector; failed/canceled runs
-  default to the failed step and scopes.
+  default to the failed step and scopes. Before admission, the confirmation distinguishes reused
+  inputs, executed work, the invalidated dependency closure, effective scope and estimated
+  execution units; shard units are not mislabeled as pipeline steps.
 - Every successful promotion preserves a bounded immutable `promoted-snapshot`; `Changes` compares
   normalized entities/edges and finding/coverage file digests with the previous promoted snapshot
   before exposing publication Git detail. Git mutation is always explicit.
