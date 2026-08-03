@@ -388,6 +388,407 @@ Home / Runs / Knowledge / Changes
   --check` remains clean.
 
 ### Plan ID
+EP-20260803-outcome-architecture-recovery
+
+### Context
+The August UI hierarchy/onboarding slice made the shell more readable and removed several false or
+duplicated controls, but it did not solve the main product comprehension problem. ProvenArch
+promises evidence-backed architecture knowledge; the UI still foregrounds pipeline mechanics,
+run IDs and artifact files instead of answering what the system is, how it is structured, how
+trustworthy the result is, what changed and what the operator should do next.
+
+The operator feedback to address as one coherent product flow is:
+
+- the UI remains visually dense and does not make the primary result obvious;
+- the documentation describes Architecture Home, C4 diagrams, model entities/relationships,
+  coverage, findings, questions and proposals, but the UI does not compose these into one outcome;
+- C4 is buried under Changes -> selected run -> Artifact explorer -> Diagrams, while Knowledge
+  Atlas is a relationship table rather than an architecture map;
+- the generated C4 surfaces are static Mermaid previews without level navigation, drill-down,
+  evidence inspection, filtering, zoom/fit/fullscreen or useful large-graph behavior;
+- a terminal run says succeeded/failed but does not clearly summarize what was produced, what is
+  partial, what changed, whether the current architecture was updated or what action comes next;
+- runtime execution feels like a black box: `current_step` and inferred log telemetry do not show
+  durable progress, current scope, useful activity, elapsed time or impending stall/timeout;
+- errors expose technical codes/messages without consistently explaining impact, retained evidence,
+  the recommended fix or the safe retry scope;
+- the current Retry action starts a complete `init` or `refresh`; there is no public API for
+  dependency-aware retry of a failed step or collect shard;
+- onboarding, provider/repository selection, naming, navigation depth, typography, disabled reasons,
+  mobile discoverability and Home usefulness must remain fixed rather than regress during the next
+  redesign.
+
+Existing contracts remain authoritative: source repositories are read-only, generated knowledge is
+written only to the Git-versioned workspace, stable knowledge is validator-promoted, run snapshots
+are immutable review authority, and partial or failed work must not silently replace the last-good
+promoted architecture. Any retry is a new auditable run, never mutation of historical run identity.
+
+### Users and primary jobs
+- Architect / tech lead: understand the system, inspect C4 levels and important flows, find gaps and
+  make an evidence-backed architecture decision.
+- Maintainer: see whether analysis is making useful progress, understand failures and recover only
+  the invalidated work without paying for a full rerun.
+- Reviewer: compare proposed architecture knowledge with the last promoted state and trace every
+  important statement, node, edge or finding to evidence.
+- First-time evaluator: connect a workspace/repositories/provider, run a deterministic walkthrough
+  and understand exactly what fake versus live analysis produced.
+
+### Product outcome
+After a completed or partial analysis, the UI must answer these questions without requiring the
+operator to browse raw artifact paths:
+
+1. What is this system and what scope was analyzed?
+2. How is it structured at Context, Container and Component levels?
+3. What services, datastores, external systems, domains, teams and relationships were found?
+4. Which facts are evidence-backed, which areas are partial and which are unknown?
+5. What findings and open questions require attention?
+6. What changed from the previous promoted architecture?
+7. What should the operator review, retry or publish next?
+
+Raw files, logs, provider output, taskrun paths and run IDs remain available as secondary evidence
+and diagnostics, not as the primary product result.
+
+### Goals (must have)
+- [x] Make the terminal Run Result outcome-first: summary, produced knowledge, coverage/gaps,
+      changes, publication effect and one recommended next action.
+- [x] Introduce a first-class Architecture Explorer with C4 level navigation, map interaction,
+      catalog/flow/evidence inspection and truthful partial states.
+- [x] Promote current architecture, not a historical run artifact browser, as the default post-run
+      destination.
+- [x] Add structured runtime progress that distinguishes provider activity from durable artifact
+      progress and exposes step/unit counts, active scopes, elapsed time and stall pressure.
+- [x] Replace raw error presentation with a typed recovery model: plain-language cause, affected
+      result, retained evidence, recommended fix, retry capability and disclosed technical detail.
+- [x] Add dependency-aware step/shard retry that creates a child run, reuses only validated parent
+      inputs and automatically reruns all invalidated downstream steps.
+- [x] Make Changes a comparison/publication workflow over the current and prior architecture rather
+      than the main place to discover diagrams.
+- [x] Preserve the completed onboarding/readability/navigation/mobile/recovery improvements from
+      `EP-20260803-ui-ux-hierarchy-onboarding`.
+- [x] Keep all new progress, retry and result behavior deterministic, Git-friendly and auditable.
+
+### Non-goals
+- No hosted or multi-user control plane, source-repository writes, security/compliance enforcement
+  or additional providers.
+- No speculative topology: unavailable C4 levels, ownership, relationships or evidence remain
+  explicit gaps.
+- No arbitrary isolated downstream step execution that can leave findings/proposals inconsistent
+  with changed upstream evidence.
+- No mutation or continuation of a terminal historical run; retry always creates a new run ID.
+- No fake numeric percentage or ETA for opaque provider work. ETA may be shown only from sufficient
+  comparable historical evidence; otherwise show elapsed time, unit counts and last useful progress.
+- No big-bang replacement of the artifact model or validator-gated promotion contract.
+
+### Target information architecture
+
+```text
+Home / Architecture / Changes / Runs
+                         Setup remains contextual
+```
+
+- **Home:** current architecture freshness/trust, concise system summary, map preview, top
+  findings/questions, last run outcome, publication readiness and one next action.
+- **Architecture:** `Map`, `Overview`, `Catalog`, `Flows`, `Evidence`. This replaces the generic
+  Knowledge framing while retaining current promoted read-only authority.
+- **Changes:** comparison to the previous promoted state, findings/proposals/diff and explicit
+  full-workspace publication.
+- **Runs:** start/history and per-run operation, progress, result, failure recovery and diagnostics.
+- **Setup:** workspace, repositories, analysis brief, runner/provider and advanced configuration.
+
+Normal screens keep global navigation plus one local level. Evidence opens contextually in an
+inspector/drawer and does not introduce another persistent tab hierarchy.
+
+### Target user flow
+
+```text
+Configure workspace and read-only sources
+  -> choose fake/live provider and verify readiness
+  -> run analysis with visible durable progress
+  -> read a plain-language Run Result
+  -> explore current Architecture Map and overview
+  -> review gaps/findings and retry only invalidated work when necessary
+  -> inspect architecture changes
+  -> publish the Git-versioned workspace
+```
+
+### Run Result UX contract
+Every terminal run presents one of these operator states:
+
+- `Completed`: result is usable and the promoted architecture is current.
+- `Completed with gaps`: valid result is usable, but named scopes/evidence are partial.
+- `Failed`: the attempted result was not promoted; last-good architecture remains active.
+- `Canceled`: stopped by request; retained evidence and last-good architecture remain available.
+
+The result header must show:
+
+- a plain-language one-sentence outcome;
+- whether promoted current knowledge changed;
+- produced entities/edges/diagrams/findings/questions/proposals counts;
+- analyzed/partial/failed scope counts;
+- comparison with the previous successful/promoted baseline;
+- one recommended action such as `Explore architecture`, `Review findings`, `Retry failed scope`
+  or `Review changes for publication`.
+
+The backend should expose a structured result summary instead of making the UI infer semantic
+outcomes from artifact counts and arbitrary log text. Historical/legacy runs may use an explicitly
+labelled bounded derived summary.
+
+### Runtime progress UX contract
+Progress is presented at three levels:
+
+1. **Pipeline:** current step, completed/total steps, elapsed time and the result expected from the
+   active step.
+2. **Step units:** planned/running/succeeded/failed/pending shards or scopes, active repository/domain
+   identities and validation/repair phase.
+3. **Runtime health:** last provider activity, last useful artifact progress, artifact observed/valid
+   state, repair attempt, stall threshold/deadline and cancel/recovery action.
+
+The UI must distinguish:
+
+- `provider_working`: provider output/activity exists;
+- `artifact_observed`: durable output exists but is not validated;
+- `validating`: deterministic contract checks are running;
+- `repairing`: bounded repair attempt N/M is active;
+- `stalled`: useful artifact progress is outside the expected activity window;
+- `completed` / `failed` / `canceled`.
+
+Heartbeat or stdout alone is activity, not progress. No single continuous percentage is shown for
+opaque provider work. Determinate bars are limited to real units such as steps and planned shards.
+
+Candidate structured snapshot (exact schema to be finalized in the contract slice):
+
+```json
+{
+  "step_id": "init.step1.collect",
+  "phase": "provider_working",
+  "completed_units": 7,
+  "total_units": 12,
+  "active_units": 3,
+  "failed_units": 0,
+  "current_scopes": ["payments/backend", "identity/api"],
+  "elapsed_ms": 522000,
+  "last_activity_at": "2026-08-03T10:21:27Z",
+  "last_progress_at": "2026-08-03T10:21:14Z",
+  "artifact_state": "partial",
+  "repair_attempt": 0,
+  "repair_limit": 1,
+  "stall_deadline_at": "2026-08-03T10:26:14Z"
+}
+```
+
+### Error and recovery UX contract
+Every actionable error exposes structured fields:
+
+- category: `setup`, `provider`, `permission`, `evidence`, `contract`, `timeout`, `infrastructure`
+  or `canceled`;
+- plain-language title and explanation;
+- failed step and optional failed scopes/shards;
+- affected user-facing results;
+- retained/reusable evidence;
+- recommended fix and navigation target;
+- `can_retry`, recommended retry mode and calculated downstream invalidation;
+- technical `error_code`, trace/log/artifact refs under an expandable disclosure.
+
+Disabled retry/recovery controls always explain why they are unavailable. Provider setup, quota,
+permission and workspace validation failures route to the exact configuration/recovery surface.
+
+### Retry dependency policy
+Retry creates a child run with `parent_run_id`, retry reason, requested scope, actual start point,
+reused validated inputs and invalidated downstream steps. The backend, not the browser, calculates
+the safe execution closure.
+
+| Failure/request | Reuse | Execute |
+| --- | --- | --- |
+| Charter | none from current attempt | Step 0 through Step 4 |
+| One or more Collect shards | validated sibling shards | failed shards, aggregate Collect, Steps 2-4 |
+| Complete Collect | validated upstream Charter | Step 1 through Step 4 |
+| As-is docs/model/diagrams | validated Charter and Collect | Steps 2-4 |
+| Findings | validated Steps 0-2 | Steps 3-4 |
+| Proposals | validated Steps 0-3 | Step 4 |
+| Deterministic validation-only transient | immutable staged inputs when still valid | validation, then downstream only if bytes change |
+| Provider failure before artifact | validated upstream and siblings | blocked unit/step plus downstream closure |
+
+The first contract should support `failed_step` and `failed_scopes`; arbitrary operator-selected
+step ranges remain a later extension. A successful child run publishes atomically through the
+existing promotion boundary. Failed retry never replaces last-good promoted knowledge.
+
+Candidate endpoint:
+
+```http
+POST /api/pipeline/runs/{run_id}/retry
+```
+
+```json
+{
+  "mode": "failed_scopes",
+  "step_id": "init.step1.collect",
+  "scope_ids": ["payments/backend"]
+}
+```
+
+### Architecture Explorer UX contract
+- Default surface is the current promoted architecture, never an implicit historical snapshot.
+- `Map` offers `Context / Containers / Components / Code` level navigation with breadcrumbs.
+- Selecting a node or edge opens name/type/technology/owner/confidence/evidence and related findings.
+- Filters cover repository, domain, owner and entity type; controls include fit, zoom, fullscreen and
+  show/hide gaps/external systems/ownership.
+- Clicking a C4 node drills down when a validated lower-level view exists; otherwise it explains the
+  missing evidence required to create that level.
+- Large graphs use stable layout, bounded labels and progressive disclosure rather than a fixed
+  minimum-width SVG with unbounded horizontal scrolling.
+- `Overview`, `Catalog`, `Flows` and `Evidence` provide readable non-graph alternatives and share
+  selection/deep-link identity with the map.
+- Every view identifies current/snapshot authority, fake/live provenance, freshness and partial
+  state. The UI must not label an evidence-poor generic flowchart as complete C4.
+
+### Delivery slices
+
+#### Slice 1 - Outcome-first Run Result on existing contracts
+- Add a pure view model that derives a conservative summary from current run review, snapshot,
+  knowledge and Git diff responses.
+- Replace the terminal status-first hierarchy with outcome, produced surfaces, gaps and next action.
+- Preserve raw status and diagnostics under disclosure.
+- No backend/schema change in this slice.
+
+#### Slice 2 - Structured error/recovery presentation
+- Centralize error taxonomy and user-facing recovery actions.
+- Replace ad hoc `error_code` substring branches across Setup/Runs/Publish with typed presentation.
+- Keep unknown codes visible and safely non-retryable by default.
+
+#### Slice 3 - Structured runtime progress contract
+- Define schema/types and source-of-truth lifecycle aggregation in the orchestrator/API.
+- Persist enough progress state for page reload/restart without treating heartbeat as progress.
+- Render segmented step progress, shard/unit state, active scopes, elapsed/useful-progress timing and
+  stall warnings. Start with bounded polling; add SSE only if measured polling latency/load requires
+  it.
+
+#### Slice 4 - Dependency-aware retry contract
+- Add retry planning/validation and child-run lineage.
+- Implement failed-step closure first, then failed Collect shard/scope reuse.
+- Validate source revisions, parent artifacts, task identity and baseline integrity before reuse;
+  fall back to a clearly explained wider retry rather than unsafe reuse.
+- Add UI confirmation showing reused work, rerun work, downstream invalidation and expected cost.
+
+#### Slice 5 - Architecture Explorer foundation
+- Rename/reframe Knowledge to Architecture while keeping backward-compatible route handling.
+- Add Architecture Home and promoted C4 entrypoints directly to the default surface.
+- Implement the read-only interactive React Flow + ELK map immediately, including the level
+  switcher, node/edge inspector, filters, fit/zoom/fullscreen and partial-state explanation.
+- Keep deterministic Mermaid files as exports only; they are not the interaction source of truth.
+
+#### Slice 6 - Catalog, flows and evidence-linked drill-down
+- Add entity/relationship catalog filters, key-flow view and shared node/edge/artifact deep links.
+- Connect map selection to exact model YAML, repository evidence, findings and questions.
+- Add mobile list/inspector fallback instead of forcing a desktop graph canvas onto small screens.
+
+#### Slice 7 - Architecture comparison and publication handoff
+- Compare current/promoted architecture with the prior accepted baseline at entity, edge, diagram,
+  finding and question level.
+- Make Changes answer what changed and why before showing raw Git diff.
+- Carry accepted selection to the existing full-workspace Git publication confirmation.
+
+#### Slice 8 - Home consolidation and legacy removal
+- Make Home summarize current architecture outcome, freshness, trust and next action.
+- Remove duplicated legacy Review/Atlas/artifact-navigation paths only after deep links and E2E
+  coverage prove the replacement surfaces.
+- Complete typography, responsive, focus, empty/error/partial and 200% zoom polish across the final
+  information architecture.
+
+### Files/modules expected to change
+- Contracts/specs: `schemas/*` as required, `docs/spec/PIPELINE_SPEC.md`,
+  `docs/spec/MODEL_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`, API/UX documentation and fixtures.
+- Backend lifecycle/API: `internal/orchestrator/orchestrator.go`, `service_runs.go`, step/shard
+  execution/progress modules, `internal/api/server.go`, `internal/api/review_diff.go` and tests.
+- UI contracts/state: `ui/src/lib/appContracts.ts`, `runApi.ts`, `runState.ts`, `appRoutes.ts`,
+  workflow/recovery/progress view models and hooks.
+- UI surfaces: `ProductPages.tsx`, `KnowledgePage.tsx` or extracted Architecture pages,
+  `StagePanels.tsx` or extracted Run Result/Progress components, `MermaidPreview.tsx`,
+  `ChangesPage.tsx`, `ProductShell.tsx` and `styles.css`.
+- Test assets: Go API/orchestrator tests, schema fixtures/goldens, UI unit/component tests and
+  Playwright fake/snapshot scenarios.
+
+### State coverage
+Every new surface must cover loading, empty, partial, available, stale, running, stalled, failed,
+canceled, permission-blocked, provider-unavailable, retry-planning, retry-running, retry-failed and
+retry-succeeded states. Current promoted knowledge remains accessible when a new or retried run is
+active or failed.
+
+### Validation plan
+- Contract/schema validation for progress, result summary, retry request/plan and run lineage.
+- Orchestrator tests proving safe dependency closure, validated sibling reuse, source-revision drift
+  fallback, immutable parent history and atomic last-good preservation.
+- API tests for retry admission/conflict/idempotency, progress persistence, unknown errors and
+  legacy run compatibility.
+- UI view-model/component tests for every terminal outcome, step/unit progress phase, stall warning,
+  retry confirmation and disabled reason.
+- Fixture/golden updates for complete, partial, failed-shard, failed-step, retry-success and
+  retry-failure scenarios.
+- Playwright flows at `1440x980`, `1024x768` and `390x844`: first run, useful live progress fixture,
+  provider failure, failed-scope retry, terminal result, C4 drill-down, partial architecture and
+  publication handoff.
+- Keyboard/focus, reduced-motion, contrast, screen-reader labels and 200% zoom checks.
+- Per completed slice: `make contracts`, `make test`, `make lint`, `make build`; live provider gates
+  only when the changed contract/behavior requires the project release runbook.
+
+### Acceptance criteria
+- [x] A first-time user can explain what the last run produced without opening raw artifacts/logs.
+- [x] A completed run links directly to current Architecture Map and Architecture Home.
+- [x] A partial/failed run states whether last-good architecture changed and exactly what remains
+      usable.
+- [x] During Collect, planned/completed/active/failed scopes and last useful progress are visible.
+- [x] Provider output without artifact progress is never presented as completed percentage.
+- [x] Every supported error offers a specific recovery action; unknown errors remain inspectable and
+      do not expose an unsafe retry.
+- [x] Retrying a Step 3 failure creates a child run that reuses validated Steps 0-2 and executes
+      Steps 3-4; retrying failed Collect scopes reuses only validated siblings and executes all
+      invalidated downstream work.
+- [x] Parent run history and taskrun evidence remain immutable and navigable.
+- [x] Architecture supports Context/Container/Component navigation with evidence inspector and
+      truthful unavailable/partial states.
+- [x] Mobile users can inspect the same architecture facts through a list/inspector fallback with no
+      hidden horizontally-scrolled primary actions.
+- [x] Existing onboarding, source boundary, provider selection, publication authority and Git safety
+      behavior do not regress.
+
+### Risks and mitigations
+- **Unsafe retry reuse:** stale or foreign artifacts could contaminate a child run. Require exact
+  parent/run/task/source identity, baseline integrity and full validation; widen retry scope on any
+  uncertainty.
+- **Progress fiction:** provider activity can look like advancement. Keep activity/progress clocks
+  separate and derive determinate progress only from known units and validated state transitions.
+- **Schema blast radius:** progress/lineage/result contracts touch docs, validators and fixtures.
+  Land each contract separately and use `acp-schema-guardian` during implementation.
+- **Graph usability/performance:** validate the React Flow + ELK renderer with bounded large-graph
+  fixtures, deterministic read-only layout and a mobile catalog/inspector fallback.
+- **Navigation migration:** renaming Knowledge can break bookmarked URLs. Preserve redirects and
+  route parsing compatibility until legacy links have migration coverage.
+- **StagePanels growth:** do not add more modes to the monolith. Extract RunResult, RuntimeProgress,
+  RecoveryPanel and Architecture surfaces with pure view models.
+
+### Open questions
+- Resolved: successful retry uses the same automatic validator/atomic promotion gate; Git publish
+  remains explicit.
+- Resolved: Context/Container/Component are primary; Code is Advanced.
+- Resolved: previous promoted architecture is semantic baseline and Git HEAD is publication diff.
+- Resolved: retry is terminal-parent only and the interactive map is read-only with deterministic
+  layout; no model/layout persistence is introduced.
+- Resolved: delivery is one feature branch/PR with reviewable internal commits.
+
+### Progress log
+- 2026-08-03: Consolidated operator feedback, README/architecture promises and current UI/API/runtime
+  behavior into this outcome-first Architecture/Run/recovery plan. Confirmed that public UI retry
+  currently starts a full `init`/`refresh`, existing restart resume is not arbitrary user step retry,
+  and live diagnostics infer progress from logs rather than a structured progress contract. No
+  product code, schema or runtime behavior changed.
+- 2026-08-03: Implemented the vertical product slice: promoted Architecture API and interactive
+  explorer, outcome-first Home/Run Result, persisted structured progress, typed recovery, retry
+  planning/plan-hash admission, immutable child lineage and staging-only reuse. Updated docs,
+  contracts and deterministic tests.
+- 2026-08-03: Completed rendered desktop/mobile QA, the seven-scenario mock Playwright suite,
+  bounded 80-node ELK layout coverage and mandatory `make contracts`, `make test`, `make lint`,
+  `make build`. No live-provider E2E was run because release-gate behavior is unchanged.
+
+### Plan ID
 EP-20260729-open-source-readme
 
 ### Context

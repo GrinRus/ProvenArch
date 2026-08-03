@@ -453,6 +453,18 @@ Execution modes:
   contract without runtime deprecation headers. ProductShell remains on async start/poll; removal
   requires a separate approved breaking-change plan.
 
+## Outcome-first product surfaces
+
+- `Home` summarizes the promoted architecture, latest run and one next action.
+- `Architecture` reads `GET /api/architecture` and renders Context/Container/Component through a
+  read-only React Flow canvas with deterministic ELK layout; Code is an advanced level. Model YAML
+  remains authority and Mermaid remains a Git-friendly export.
+- `Runs` presents structured step/unit progress, result/promotion effect and typed recovery before
+  raw diagnostics. Targeted retry creates a new child run and never edits parent taskrun history.
+- Every successful promotion preserves a bounded immutable `promoted-snapshot`; `Changes` compares
+  normalized entities/edges and finding/coverage file digests with the previous promoted snapshot
+  before exposing publication Git detail. Git mutation is always explicit.
+
 ## Progress tracking
 - Каноническая матрица stakeholder-статусов: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
 - `docs/PLANS.md` содержит инженерный ExecPlan и синхронизированный operational mirror статусов.

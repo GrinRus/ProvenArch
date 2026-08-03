@@ -544,3 +544,26 @@ Publish policy:
 - deterministic promoter проверяет schema/semantic/validator gates;
 - обязательного human approve нет;
 - canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates and are represented in `final-run-index.json`.
+
+## Operator progress and child-run retry
+
+Analysis run history stores optional structured `progress` and `retry` lineage. Determinate progress
+comes only from canonical pipeline steps and planned units; provider output/heartbeat remains
+activity and cannot advance completion. Terminal state records whether artifacts were validated or
+retained partial. Presentation phases are `provider_working`, `artifact_observed`, `validating`,
+`repairing`, `stalled`, `completed`, `failed` and `canceled`; `last_activity_at` and
+`last_progress_at` remain separate clocks.
+
+Operator retry never mutates a terminal run. Planner chooses the requested failed step and all
+downstream dependencies; if reusable parent staging is missing it widens to the first pipeline step.
+The child copies only closure-approved upstream and validated sibling paths from
+`reports/taskruns/<parent>/staging/**` into its own staging root, rejects symlinks, and invalidates
+the requested/failed scope plus every downstream output. A plan hash includes parent artifact
+digests, manifest and current resolved source revisions. Child lineage records parent,
+requested/effective step, scopes and reused inputs before rerunning the normal validator and atomic
+promotion boundary. Failed child runs leave last-good promoted knowledge unchanged.
+
+Every successful promotion also writes an immutable run-scoped `promoted-snapshot` of canonical
+model, Architecture Home, diagrams, findings and coverage. This snapshot is audit/comparison
+authority for the semantic Changes surface; it never replaces canonical current knowledge and
+never includes raw taskrun history.
