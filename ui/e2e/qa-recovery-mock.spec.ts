@@ -460,7 +460,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   const relationship = { id: "edge.checkout-payment", from: checkout.id, to: external.id, type: "calls", name: "Authorizes payment", confidence: 0.89, provenance_kind: "observed", evidence, path: "model/edges/edge.checkout-payment.yaml", repositories: ["commerce"], related_findings: [], related_questions: [] };
   const architecturePayload = { version: 1, generated_at: "2026-08-03T12:00:00Z", authority: { mode: "promoted_current", source_run_id: "run-analysis-succeeded", freshness: "current" }, status: "available", counts: { entities: 3, edges: 1, evidence: 4, issues: 0 }, views: { context: { level: "context", available: true, nodes: [checkout, external], edges: [relationship] }, container: { level: "container", available: true, nodes: [checkout, external], edges: [relationship] }, component: { level: "component", available: true, nodes: [component], edges: [] }, code: { level: "code", available: true, nodes: [component], edges: [] } }, exports: { home_path: "reports/as-is/overview.md", c4_mermaid_paths: ["reports/diagrams/c4-context.mmd"] }, comparison: { available: false, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, review: { findings: [{ id: "finding.checkout-timeout", severity: "medium", title: "Checkout timeout is not bounded", related_ids: [checkout.id] }], questions: [{ id: "question.checkout-owner", text: "Who owns the public API?", related_ids: [component.id] }] }, coverage: { observed: ["checkout"], missing: ["timeout policy"] }, artifacts: [], issues: [] };
   await page.route("**/api/architecture", async (route) => route.fulfill({ ...json(architecturePayload) }));
-  await page.route("**/api/knowledge", async (route) => route.fulfill({ ...json({ version: 1, generated_at: architecturePayload.generated_at, source_mode: "promoted_current", status: "available", entities: [checkout, external, component].map((node) => ({ id: node.id, name: node.name, type: node.type, owner_team_id: node.owner_team_id, tags: [], provenance: { kind: node.provenance_kind, confidence: node.confidence, evidence: node.evidence }, path: node.path })), edges: [{ ...relationship, provenance: { kind: relationship.provenance_kind, confidence: relationship.confidence, evidence: relationship.evidence } }], artifacts: [], issues: [] }) }));
+	await page.route("**/api/knowledge", async (route) => route.fulfill({ ...json({ error: { code: "legacy_unavailable", message: "legacy Knowledge projection is unavailable" } }, 500) }));
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/architecture/map");
   await expect(page.getByTestId("architecture-canvas")).toBeVisible();
@@ -469,6 +469,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expect(page.getByTestId("knowledge-entity-detail")).toContainText("finding.checkout-timeout");
   await page.getByText("Advanced", { exact: true }).click();
   await page.getByRole("button", { name: "Code for selected service" }).click();
+	await expect(page.locator(".segmented-control details")).not.toHaveAttribute("open", "");
   await expect(page.getByText("Checkout API", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".architecture-breadcrumb")).toContainText("Checkout / Code");
   await page.getByRole("button", { name: "System context", exact: true }).click();
@@ -495,6 +496,14 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await page.getByTestId("destination-home").click();
   await expect(page.locator(".home-map-preview")).toContainText("Checkout");
   await captureEvidenceScreenshot(page, "home-architecture-desktop.png");
+	await page.goto("/runs/run-analysis-succeeded");
+	const targetedRerun = page.getByTestId("targeted-rerun-panel");
+	await expect(targetedRerun).toBeVisible();
+	await expect(targetedRerun).toContainText("Repeat only the work you need");
+	await targetedRerun.getByLabel("Start from step").selectOption("init.step3.findings");
+	await expect(targetedRerun.getByLabel("Start from step")).toHaveValue("init.step3.findings");
+	await expectNoHorizontalOverflow(page);
+	await captureEvidenceScreenshot(page, "successful-targeted-rerun-desktop.png");
   await expectNoCriticalAxeViolations(page);
-  expect(consoleErrors).toEqual([]);
+	expect(consoleErrors.filter((message) => !message.includes("Failed to load resource: the server responded with a status of 500"))).toEqual([]);
 });

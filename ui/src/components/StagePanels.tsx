@@ -7,7 +7,7 @@ import { ModalDialog } from "./ModalDialog";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
-import { RecoveryPanel, RunResultPanel, StructuredRunProgress } from "./RunOutcome";
+import { RecoveryPanel, RunResultPanel, StructuredRunProgress, TargetedRerunPanel } from "./RunOutcome";
 import { TabNav, tabPanelProps } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
@@ -1586,6 +1586,7 @@ export function AnalysisStagePanel({
       {detailMode ? (
         <div className="run-studio-body">
 		  <RunResultPanel review={runReviewSummary} onExploreArchitecture={onOpenArchitecture} />
+		  <TargetedRerunPanel runStatus={runStatus} review={runReviewSummary} busy={busy} onRetryStarted={onSelectRun} />
 		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} busy={busy} onRetryStarted={onSelectRun} onReviewDetails={handleReviewBlocker} />
           <AnalysisRunTimeline steps={stepTimeline} />
           <AnalysisStepReview
@@ -2425,7 +2426,7 @@ function AnalysisStepReview({
                 <code>{step.step_id}</code>
                 <span>{providerDisplayLabel(runtimeMode, step.provider)}</span>
                 <span>
-                  {step.artifact_count} artifacts · {step.warnings_count}/{step.errors_count} warn/error
+				  {step.artifact_count ?? step.artifact_paths?.length ?? 0} artifacts · {step.warnings_count ?? 0}/{step.errors_count ?? 0} warn/error
                 </span>
               </button>
             ))}
@@ -2448,9 +2449,9 @@ function AnalysisStepReview({
 
           <div className="step-review-body" {...tabPanelProps("analysis-step-tabs", view)}>
             {view === "artifacts" ? (
-              selectedStep && selectedStep.artifact_paths.length > 0 ? (
+			  selectedStep && (selectedStep.artifact_paths?.length ?? 0) > 0 ? (
                 <ul className="compact-list">
-                  {selectedStep.artifact_paths.map((path) => (
+				  {(selectedStep.artifact_paths ?? []).map((path) => (
                     <li key={path}>
                       <button type="button" className="link-button" onClick={() => onOpenArtifact(path)}>
                         {path}
@@ -2489,7 +2490,7 @@ function AnalysisStepReview({
                   </div>
                   <div>
                     <dt>Taskrun refs</dt>
-                    <dd>{selectedStep?.taskrun_paths.join(", ") || "No taskrun refs."}</dd>
+					<dd>{selectedStep?.taskrun_paths?.join(", ") || "No taskrun refs."}</dd>
                   </div>
                 </dl>
               </div>

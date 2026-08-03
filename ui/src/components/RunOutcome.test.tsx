@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
-import { RecoveryPanel, RunResultPanel, StructuredRunProgress } from "./RunOutcome";
+import { RecoveryPanel, RunResultPanel, StructuredRunProgress, TargetedRerunPanel } from "./RunOutcome";
 
 const baseRun: RunStatusResponse = { run_id: "run-parent", pipeline: "refresh", status: "failed", started_at: "2026-08-03T10:00:00Z", current_step: "refresh.step1.collect", error_code: "provider_failed", error: "provider stopped" };
 
@@ -49,6 +49,22 @@ describe("Run outcome surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start targeted retry" }));
     await waitFor(() => expect(onRetryStarted).toHaveBeenCalledWith("run-child"));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a completed run rerun a selected step through a child-run plan", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || "{}")) as { step_id?: string; plan_hash?: string };
+      if (body.plan_hash) return response({ run_id: "run-child", status: "started", parent_run_id: "run-parent" }, 202);
+      return response({ parent_run_id: "run-parent", pipeline: "refresh", requested_step: body.step_id, effective_start_step: body.step_id, requested_scopes: [], effective_scopes: [], reused_inputs: ["refresh.step1.collect", "refresh.step2.asis_docs"], execute_steps: ["refresh.step3.findings", "refresh.step4.proposals"], invalidated_steps: ["refresh.step3.findings", "refresh.step4.proposals"], estimated_units: 2, widened: false, plan_hash: "plan-success" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onRetryStarted = vi.fn();
+    render(<TargetedRerunPanel runStatus={{ ...baseRun, status: "succeeded", error_code: null, error: null }} review={reviewWithResult("completed")} busy={false} onRetryStarted={onRetryStarted} />);
+    fireEvent.change(screen.getByLabelText("Start from step"), { target: { value: "refresh.step3.findings" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review rerun plan" }));
+    expect(await screen.findByTestId("retry-plan")).toHaveTextContent("refresh.step3.findings → refresh.step4.proposals");
+    fireEvent.click(screen.getByRole("button", { name: "Start targeted rerun" }));
+    await waitFor(() => expect(onRetryStarted).toHaveBeenCalledWith("run-child"));
   });
 });
 

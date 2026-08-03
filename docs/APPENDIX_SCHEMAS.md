@@ -418,8 +418,9 @@ client execution invariants covered by deterministic UI tests.
   inventory/export, never a parsed source of truth.
 - Run-history additions are optional for backward compatibility. Progress uses known step/unit
   counters, persisted elapsed time and separate activity/useful-progress clocks. Retry lineage records
-  immutable parent ID, requested/effective start and reused inputs; retry planning validates reusable
-  shard contracts plus aggregated final/citation indexes and hashes every parent staging file.
+  immutable parent ID, requested/effective start and reused inputs; retry planning is admitted only
+  for terminal `succeeded|failed|canceled` analysis runs, validates reusable shard contracts plus
+  aggregated final/citation indexes and hashes every parent staging file.
   Architecture review and coverage are sourced from the immutable version-2 promoted snapshot
   manifest and retain explicit related IDs. The manifest version is an internal audit format, not a
   new canonical workspace model schema; `semantic_source_run_id` preserves no-op baseline lineage.

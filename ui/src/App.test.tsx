@@ -35,6 +35,9 @@ type FetchMockState = {
   workspaceHealthResponse?: MockJSON;
   workspaceHealthStatus?: number;
   knowledgeResponse?: MockJSON;
+	knowledgeStatus?: number;
+	architectureResponse?: MockJSON;
+	architectureStatus?: number;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -42,6 +45,12 @@ function jsonResponse(body: MockJSON, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function architecturePayload(): MockJSON {
+  const service = { id: "svc.payments", name: "Payments", type: "service", confidence: 0.94, provenance_kind: "observation", evidence: [{ repo: "payments", path: "src/main.go" }], path: "model/entities/svc.payments.yaml", available_levels: ["context", "container"], child_levels: [], repositories: ["payments"], related_findings: [], related_questions: [] };
+  const view = (level: string, nodes: MockJSON[]) => ({ level, available: nodes.length > 0, unavailable_reason: nodes.length > 0 ? undefined : "No validated detail is available.", nodes, edges: [] });
+  return { version: 1, generated_at: "2026-08-03T10:00:00Z", authority: { mode: "promoted_current", source_run_id: "run-1", freshness: "current" }, status: "available", counts: { entities: 1, edges: 0, evidence: 1, issues: 0 }, views: { context: view("context", [service]), container: view("container", [service]), component: view("component", []), code: view("code", []) }, exports: { home_path: "reports/as-is/overview.md", c4_mermaid_paths: [] }, comparison: { available: false, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, review: { findings: [], questions: [] }, coverage: { observed: ["payments"], missing: [], notes: [] }, artifacts: [{ path: "reports/as-is/overview.md", kind: "report", name: "Architecture Home" }], issues: [] };
 }
 
 function textResponse(body: string, status = 200): Response {
@@ -489,7 +498,11 @@ function createFetchMock(state: FetchMockState = {}) {
         edges: [],
         artifacts: [],
         issues: [],
-      });
+	  }, state.knowledgeStatus ?? 200);
+	}
+
+	if (method === "GET" && url === "/api/architecture" && state.architectureResponse) {
+	  return jsonResponse(state.architectureResponse, state.architectureStatus ?? 200);
     }
 
     if (method === "GET" && url === "/api/runtime/timeouts") {
@@ -1799,6 +1812,18 @@ describe("App", () => {
     expect(await screen.findByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
     expect(screen.queryByTestId("knowledge-entity-detail")).not.toBeInTheDocument();
   });
+
+	it("keeps Architecture available when the legacy Knowledge endpoint fails", async () => {
+	  vi.stubGlobal("fetch", createFetchMock({
+		knowledgeStatus: 500,
+		architectureResponse: architecturePayload(),
+	  }));
+	  await renderConsoleApp("/architecture?view=map&entity=svc.payments&source=current");
+	  expect(await screen.findByRole("heading", { name: /^Architecture$/ })).toBeInTheDocument();
+	  expect(await screen.findByTestId("architecture-canvas")).toBeInTheDocument();
+	  expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
+	  expect(window.location.search).toContain("entity=svc.payments");
+	});
 
   it("sanitizes a stale current artifact without falling back to selected-run evidence", async () => {
     vi.stubGlobal("fetch", createFetchMock({

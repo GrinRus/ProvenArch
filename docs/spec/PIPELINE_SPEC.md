@@ -554,8 +554,10 @@ retained partial. Presentation phases are `provider_working`, `artifact_observed
 `repairing`, `stalled`, `completed`, `failed` and `canceled`; `last_activity_at` and
 `last_progress_at` remain separate clocks.
 
-Operator retry never mutates a terminal run. Planner chooses the requested failed step and all
-downstream dependencies; if reusable parent staging is missing it widens to the first pipeline step.
+Operator retry never mutates a terminal run. Failed/canceled recovery chooses the requested failed
+step and scopes, while a succeeded parent may explicitly rerun a completed step; in both cases the
+planner includes all downstream dependencies. If reusable parent staging is missing it widens to
+the first pipeline step.
 The child copies only closure-approved upstream and validated sibling paths from
 `reports/taskruns/<parent>/staging/**` into its own staging root, rejects symlinks, and invalidates
 the requested/failed scope plus every downstream output. Reused Collect shards are parsed through

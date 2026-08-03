@@ -111,8 +111,8 @@ func buildRetryPlan(snapshot serverSessionSnapshot, parentRunID string, request 
 	if !ok || parent.Pipeline == string(orchestrator.PipelineQA) {
 		return retryPlan{}, http.StatusNotFound, "run_not_found", fmt.Errorf("run not found")
 	}
-	if parent.Status != orchestrator.RunStatusFailed && parent.Status != orchestrator.RunStatusCanceled {
-		return retryPlan{}, http.StatusConflict, "retry_parent_not_failed", fmt.Errorf("retry is available only for failed or canceled terminal runs")
+	if !retryParentTerminal(parent.Status) {
+		return retryPlan{}, http.StatusConflict, "retry_parent_not_terminal", fmt.Errorf("retry is available only after the parent run reaches a terminal state")
 	}
 	steps := pipelineSteps(parent.Pipeline)
 	requested := strings.TrimSpace(request.StepID)
@@ -148,6 +148,10 @@ func buildRetryPlan(snapshot serverSessionSnapshot, parentRunID string, request 
 	artifacts, _ := snapshot.Service.GetRunArtifacts(parent.RunID)
 	plan.PlanHash = retryPlanHash(snapshot, parent, artifacts, plan)
 	return plan, http.StatusOK, "", nil
+}
+
+func retryParentTerminal(status orchestrator.RunStatus) bool {
+	return status == orchestrator.RunStatusSucceeded || status == orchestrator.RunStatusFailed || status == orchestrator.RunStatusCanceled
 }
 
 func retryPlanHash(snapshot serverSessionSnapshot, parent orchestrator.RunInfo, artifacts []orchestrator.Artifact, plan retryPlan) string {

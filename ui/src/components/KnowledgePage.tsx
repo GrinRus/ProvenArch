@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
@@ -46,6 +46,7 @@ export function KnowledgePage({
   const [repositoryFilter, setRepositoryFilter] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const [codeScopeServiceID, setCodeScopeServiceID] = useState<string>();
+	const advancedLevelRef = useRef<HTMLDetailsElement>(null);
   const allNodes = useMemo(() => architecture ? uniqueNodes(Object.values(architecture.views).flatMap((item) => item.nodes)) : [], [architecture]);
   const allEdges = useMemo(() => architecture ? uniqueEdges(Object.values(architecture.views).flatMap((item) => item.edges)) : [], [architecture]);
   const selectedNode = allNodes.find((node) => node.id === selectedEntityID);
@@ -94,8 +95,8 @@ export function KnowledgePage({
         <div className="architecture-map-workspace">
           <div className="architecture-map-toolbar">
             <div className="segmented-control" aria-label="C4 level">
-              {(["context", "container", "component"] as ArchitectureLevel[]).map((item) => <button key={item} type="button" aria-pressed={level === item} onClick={() => { setLevel(item); onEntityChange(undefined); }}>{levelLabel(item)}</button>)}
-              <details><summary>Advanced</summary><button type="button" aria-pressed={level === "code"} disabled={!selectedNode || selectedNode.type !== "service" || !(selectedNode.child_levels ?? []).includes("code")} title={!selectedNode || selectedNode.type !== "service" ? "Select a service to inspect code-level interfaces." : !(selectedNode.child_levels ?? []).includes("code") ? selectedNode.detail_unavailable_reason || "No validated code detail is available for this service." : undefined} onClick={() => { if (!selectedNode) return; setCodeScopeServiceID(selectedNode.id); setLevel("code"); }}>Code for selected service</button></details>
+			  {(["context", "container", "component"] as ArchitectureLevel[]).map((item) => <button key={item} type="button" aria-pressed={level === item} onClick={() => { advancedLevelRef.current?.removeAttribute("open"); setLevel(item); onEntityChange(undefined); }}>{levelLabel(item)}</button>)}
+			  <details ref={advancedLevelRef}><summary>Advanced</summary><button type="button" aria-pressed={level === "code"} disabled={!selectedNode || selectedNode.type !== "service" || !(selectedNode.child_levels ?? []).includes("code")} title={!selectedNode || selectedNode.type !== "service" ? "Select a service to inspect code-level interfaces." : !(selectedNode.child_levels ?? []).includes("code") ? selectedNode.detail_unavailable_reason || "No validated code detail is available for this service." : undefined} onClick={() => { if (!selectedNode) return; advancedLevelRef.current?.removeAttribute("open"); setCodeScopeServiceID(selectedNode.id); setLevel("code"); }}>Code for selected service</button></details>
             </div>
             <div className="architecture-map-filters"><label className="architecture-search"><span className="sr-only">Search architecture</span><input type="search" value={query} placeholder="Search service, owner, type…" onChange={(event) => setQuery(event.target.value)} /></label><label><span className="sr-only">Filter by type</span><select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); onEntityChange(undefined); }}><option value="">All types</option>{typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label><span className="sr-only">Filter by repository</span><select value={repositoryFilter} onChange={(event) => { setRepositoryFilter(event.target.value); onEntityChange(undefined); }}><option value="">All repositories</option>{repositoryOptions.map((repository) => <option key={repository} value={repository}>{repository}</option>)}</select></label></div>
             <button type="button" aria-pressed={fullscreen} onClick={() => setFullscreen((value) => !value)}>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</button>

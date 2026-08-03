@@ -772,8 +772,10 @@ partial/failed scopes агрегируются из structured log domain IDs. U
 retry (`can_retry=false`) до безопасной классификации.
 
 ### POST `/api/pipeline/runs/{run_id}/retry-plan`
-Для failed/canceled terminal analysis run рассчитывает безопасную dependency closure. Optional
-request: `step_id`, `scope_ids[]`. Response содержит reused inputs, effective start step, downstream
+Для любого terminal analysis run (`succeeded|failed|canceled`) рассчитывает безопасную dependency
+closure. Для failed/canceled UI по умолчанию передаёт failed step/scopes; для succeeded оператор
+явно выбирает завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
+Response содержит reused inputs, effective start step, downstream
 invalidations, estimated units, widening reason и `plan_hash`. Если parent staging отсутствует или
 любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
 validation, либо агрегированные final/citation indexes и их staged documents не проходят strict

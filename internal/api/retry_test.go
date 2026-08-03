@@ -50,6 +50,19 @@ func TestRetryClosuresCoverEveryPipelineStep(t *testing.T) {
 	}
 }
 
+func TestRetryAcceptsEveryTerminalParentStatus(t *testing.T) {
+	for _, status := range []orchestrator.RunStatus{orchestrator.RunStatusSucceeded, orchestrator.RunStatusFailed, orchestrator.RunStatusCanceled} {
+		if !retryParentTerminal(status) {
+			t.Fatalf("terminal status %q was rejected", status)
+		}
+	}
+	for _, status := range []orchestrator.RunStatus{orchestrator.RunStatusQueued, orchestrator.RunStatusRunning} {
+		if retryParentTerminal(status) {
+			t.Fatalf("non-terminal status %q was accepted", status)
+		}
+	}
+}
+
 func TestRetryPlanHashChangesWithParentArtifactsAndSourceInput(t *testing.T) {
 	server := newTestServer(t)
 	snapshot := server.sessionSnapshot()

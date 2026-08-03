@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { RetryPlanResponse, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 import { calculateRetryPlan, startTargetedRetry } from "../lib/runApi";
@@ -31,6 +31,25 @@ export function RunResultPanel({ review, onExploreArchitecture }: { review: RunR
   </section>;
 }
 
+export function TargetedRerunPanel({ runStatus, review, busy, onRetryStarted }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; onRetryStarted: (runID: string) => void }) {
+  const steps = terminalRerunSteps(review?.pipeline || runStatus?.pipeline);
+  const [step, setStep] = useState(steps[steps.length - 1] ?? "");
+  const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
+  const [status, setStatus] = useState("");
+  const [working, setWorking] = useState(false);
+	useEffect(() => { setStep(steps[steps.length - 1] ?? ""); setPlan(null); setStatus(""); }, [review?.pipeline, runStatus?.run_id]);
+  if (!runStatus || runStatus.status !== "succeeded" || steps.length === 0) return null;
+  async function calculate() { setWorking(true); setStatus(""); try { setPlan(await calculateRetryPlan(runStatus!.run_id, step)); } catch (error) { setStatus(error instanceof Error ? error.message : "Rerun planning failed"); } finally { setWorking(false); } }
+  async function start() { if (!plan) return; setWorking(true); setStatus(""); try { const response = await startTargetedRetry(runStatus!.run_id, plan); onRetryStarted(response.run_id); } catch (error) { const message = error instanceof Error ? error.message : "Targeted rerun failed to start"; if (message.toLowerCase().includes("retry inputs changed")) { setPlan(null); setStatus("The rerun plan is stale because sources or parent artifacts changed. Calculate it again, or start a full run if you intended to change the source baseline."); } else { setStatus(message); } } finally { setWorking(false); } }
+  return <section className="targeted-rerun" data-testid="targeted-rerun-panel">
+    <div><p className="eyebrow">Selective rerun</p><h2>Repeat only the work you need</h2><p>Choose a completed pipeline step. ProvenArch will create an auditable child run and automatically include every invalidated downstream step.</p></div>
+    <label>Start from step<select value={step} onChange={(event) => { setStep(event.target.value); setPlan(null); setStatus(""); }}>{steps.map((item) => <option key={item} value={item}>{stepPurpose(item)}</option>)}</select></label>
+    {plan ? <RetryPlanPreview plan={plan} /> : null}
+    {status ? <p className="status err" role="status">{status}</p> : null}
+    <div className="actions"><button type="button" onClick={() => void (plan ? start() : calculate())} disabled={busy || working}>{working ? "Working…" : plan ? "Start targeted rerun" : "Review rerun plan"}</button></div>
+  </section>;
+}
+
 export function RecoveryPanel({ runStatus, review, busy, onRetryStarted, onReviewDetails }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; onRetryStarted: (runID: string) => void; onReviewDetails: () => void }) {
   const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
   const [status, setStatus] = useState("");
@@ -43,12 +62,16 @@ export function RecoveryPanel({ runStatus, review, busy, onRetryStarted, onRevie
     <div className="section-heading-row"><div><p className="eyebrow">Recovery</p><h2>{recovery.title}</h2></div><StatusBadge tone="error">{recovery.category}</StatusBadge></div>
     <p className="recovery-explanation">{recovery.explanation || "No additional provider explanation was recorded."}</p>
     <dl className="recovery-impact"><div><dt>Impact</dt><dd>{recovery.impact}</dd></div><div><dt>Evidence retained</dt><dd>{recovery.retained_evidence}</dd></div><div><dt>Recommended fix</dt><dd>{recovery.recommended_fix}</dd></div><div><dt>Failed step</dt><dd>{recovery.failed_step || "Not identified"}</dd></div></dl>
-    {plan ? <div className="retry-plan" data-testid="retry-plan"><h3>Safe retry plan</h3>{plan.widened ? <p className="status warn">{plan.widen_reason}</p> : null}<div className="retry-plan-columns"><div><span>Reuse</span><strong>{plan.reused_inputs.length ? plan.reused_inputs.join(" → ") : "Nothing from this attempt"}</strong></div><div><span>Execute</span><strong>{plan.execute_steps.join(" → ")}</strong></div><div><span>Effective scope</span><strong>{plan.effective_scopes?.length ? plan.effective_scopes.join(", ") : "Whole configured workspace"}</strong></div></div><p>{plan.estimated_units} pipeline step(s) will run in a new auditable child run.</p></div> : null}
+    {plan ? <RetryPlanPreview plan={plan} /> : null}
     {status ? <p className="status err" role="status">{status}</p> : null}
     <div className="actions"><button type="button" data-testid="analysis-retry-run-btn" onClick={() => void (plan ? start() : calculate())} disabled={busy || working || !recovery.can_retry}>{working ? "Working…" : plan ? "Start targeted retry" : "Calculate retry plan"}</button><button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewDetails}>Open technical details</button></div>
     {!recovery.can_retry ? <p className="disabled-reason">Retry is unavailable because the backend could not establish a safe dependency closure.</p> : null}
     <details><summary>Technical error</summary><code>{recovery.technical_code || runStatus.error_code || "unclassified"}</code></details>
   </section>;
+}
+
+function RetryPlanPreview({ plan }: { plan: RetryPlanResponse }) {
+  return <div className="retry-plan" data-testid="retry-plan"><h3>Safe retry plan</h3>{plan.widened ? <p className="status warn">{plan.widen_reason}</p> : null}<div className="retry-plan-columns"><div><span>Reuse</span><strong>{plan.reused_inputs.length ? plan.reused_inputs.join(" → ") : "Nothing from this attempt"}</strong></div><div><span>Execute</span><strong>{plan.execute_steps.join(" → ")}</strong></div><div><span>Effective scope</span><strong>{plan.effective_scopes?.length ? plan.effective_scopes.join(", ") : "Whole configured workspace"}</strong></div></div><p>{plan.estimated_units} pipeline step(s) will run in a new auditable child run.</p></div>;
 }
 
 function outcomeTitle(state: NonNullable<RunReviewSummaryResponse["result"]>["state"]) { return state === "completed" ? "Architecture updated" : state === "completed_with_gaps" ? "Architecture updated with gaps" : state === "canceled" ? "Analysis canceled" : "Analysis needs recovery"; }
@@ -59,6 +82,7 @@ function formatTime(value?: string) { if (!value) return "not reported"; const d
 function formatElapsed(start?: string, finish?: string | null) { const started = start ? new Date(start).getTime() : Number.NaN; const finished = finish ? new Date(finish).getTime() : Date.now(); if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return "not available"; const seconds = Math.floor((finished - started) / 1000); const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remainder = seconds % 60; return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`; }
 function formatDuration(milliseconds: number) { const seconds = Math.max(0, Math.floor(milliseconds / 1000)); const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remainder = seconds % 60; return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`; }
 function stepPurpose(step?: string) { if (!step) return "Waiting to start"; if (step.includes("collect")) return "Collecting repository evidence"; if (step.includes("asis")) return "Building architecture model and diagrams"; if (step.includes("findings")) return "Validating findings and coverage"; if (step.includes("proposals")) return "Preparing proposals and promotion"; return "Establishing architecture scope"; }
+function terminalRerunSteps(pipeline?: string) { return pipeline === "refresh" ? ["refresh.step1.collect", "refresh.step2.asis_docs", "refresh.step3.findings", "refresh.step4.proposals"] : pipeline === "init" ? ["init.step0.constitution", "init.step1.collect", "init.step2.asis_docs", "init.step3.findings", "init.step4.proposals"] : []; }
 
 function legacyPresentationPhase(runStatus: RunStatusResponse) {
   if (runStatus.error_code === "run_canceled") return "canceled";

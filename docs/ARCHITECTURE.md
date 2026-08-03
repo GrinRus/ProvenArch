@@ -54,8 +54,9 @@
    - UI first-run entrypoint использует Guided Setup `Workspace -> Sources -> Analysis brief -> Runner & readiness -> Review & start`; запуск без brief требует отдельного quality-warning confirmation
    - UI shell использует native History API и пять direct-load путей: `/setup`, `/home`, `/runs`, `/knowledge`, `/changes`. Deep context кодируется без router dependency: setup step, `/runs/<run_id>`, Knowledge view/entity и Changes run/source/view/artifact/viewer mode; explicit stale identity sanitizes with notice and never falls back to another run/source. Primary navigation: `Home / Runs / Knowledge / Changes`; Setup contextual, Ask global, Settings/Diagnostics expert utilities.
    - Один pure workflow selector интерпретирует workspace readiness, active/pending execution, run-pinned evidence snapshot и publication state; он возвращает ровно одну primary next action. Внутренняя taskrun telemetry не является product publication gate.
-   - Knowledge читает только `promoted_current` через read-only `GET /api/knowledge` и исключает
-     `reports/taskruns/**`: parsed entity/edge fields являются topology truth,
+   - Architecture читает `promoted_current` прежде всего через read-only `GET /api/architecture` и
+     исключает `reports/taskruns/**`; legacy `GET /api/knowledge` используется только как
+     backward-compatible fallback для старого backend: parsed entity/edge fields являются topology truth,
      malformed/broken-reference files дают typed partial state, а keyboard-accessible table остаётся
      fallback Atlas. Historical Changes, immutable QA answer/context and QA diagnostics use separate
      `run_snapshot`, `qa_snapshot` and `qa_audit` authorities without cross-authority fallback.
@@ -462,8 +463,10 @@ Execution modes:
   while missing lower-level evidence remains an explicit reason rather than an empty drill-down. Model YAML
   remains authority and Mermaid remains a Git-friendly export.
 - `Runs` presents structured step/unit progress, result/promotion effect and typed recovery before
-  raw diagnostics. Targeted retry creates a new child run, validates every reused collect shard,
-  hashes the complete parent staging tree and never edits parent taskrun history.
+  raw diagnostics. After any terminal analysis run, targeted retry/rerun creates a new child run,
+  validates every reused collect shard, hashes the complete parent staging tree and never edits
+  parent taskrun history. Completed runs expose an explicit step selector; failed/canceled runs
+  default to the failed step and scopes.
 - Every successful promotion preserves a bounded immutable `promoted-snapshot`; `Changes` compares
   normalized entities/edges and finding/coverage file digests with the previous promoted snapshot
   before exposing publication Git detail. Git mutation is always explicit.

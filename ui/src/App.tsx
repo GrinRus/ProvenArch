@@ -364,17 +364,28 @@ export default function App() {
   async function refreshKnowledge() {
     setKnowledgeStatus("loading");
     setKnowledgeError("");
+	let architectureError: unknown;
     try {
-	  const response = await loadKnowledgeAPI();
-      setKnowledge(response);
-	  try { setArchitecture(await loadArchitectureAPI()); } catch { setArchitecture(architectureFromKnowledge(response)); }
+	  const response = await loadArchitectureAPI();
+	  setArchitecture(response);
+	  try { setKnowledge(await loadKnowledgeAPI()); } catch { setKnowledge(null); }
       setKnowledgeStatus("loaded");
-      return response;
-    } catch (requestError) {
+	  return null;
+	} catch (requestError) {
+	  architectureError = requestError;
+	}
+	try {
+	  const response = await loadKnowledgeAPI();
+	  setKnowledge(response);
+	  setArchitecture(architectureFromKnowledge(response));
+	  setKnowledgeStatus("loaded");
+	  return response;
+	} catch (requestError) {
       setKnowledge(null);
 	  setArchitecture(null);
       setKnowledgeStatus("error");
-      setKnowledgeError(requestError instanceof Error ? requestError.message : "knowledge failed to load");
+	  const failure = architectureError ?? requestError;
+	  setKnowledgeError(failure instanceof Error ? failure.message : "architecture failed to load");
       return null;
     }
   }
@@ -735,11 +746,12 @@ export default function App() {
       void refreshKnowledge();
       return;
     }
-    if (route.entity && knowledgeStatus === "loaded" && !knowledge?.entities.some((entity) => entity.id === route.entity) && !knowledge?.edges.some((edge) => edge.id === route.entity)) {
+	const architectureHasEntity = Boolean(architecture && Object.values(architecture.views).some((view) => view.nodes.some((entity) => entity.id === route.entity) || view.edges.some((edge) => edge.id === route.entity)));
+    if (route.entity && knowledgeStatus === "loaded" && !architectureHasEntity && !knowledge?.entities.some((entity) => entity.id === route.entity) && !knowledge?.edges.some((edge) => edge.id === route.entity)) {
       setRouteNotice(`Entity ${route.entity} is unavailable in the current workspace.`);
       navigateRoute({ ...route, entity: undefined, invalid: [] }, true);
     }
-  }, [consoleReady, knowledge, knowledgeStatus, navigateRoute, route]);
+  }, [architecture, consoleReady, knowledge, knowledgeStatus, navigateRoute, route]);
 
   useEffect(() => {
     if (!consoleReady || route.destination !== "changes" || route.source !== "current" || !route.artifact || knowledgeStatus === "loading") return;
@@ -747,7 +759,7 @@ export default function App() {
       void refreshKnowledge();
       return;
     }
-    if (!knowledge?.artifacts.some((artifact) => artifact.path === route.artifact)) {
+	if (!architecture?.artifacts.some((artifact) => artifact.path === route.artifact) && !knowledge?.artifacts.some((artifact) => artifact.path === route.artifact)) {
       setRouteNotice(`Artifact ${route.artifact} is unavailable in the current workspace.`);
       setCurrentArtifactPath("");
       setCurrentArtifactContent("");
@@ -764,7 +776,7 @@ export default function App() {
         setCurrentArtifactContent(content);
       });
     }
-  }, [consoleReady, currentArtifactPath, knowledge, knowledgeStatus, navigateRoute, route]);
+  }, [architecture, consoleReady, currentArtifactPath, knowledge, knowledgeStatus, navigateRoute, route]);
 
   useEffect(() => {
     if (!route.artifact) restoredArtifactRef.current = null;

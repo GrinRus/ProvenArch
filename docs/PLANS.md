@@ -466,6 +466,11 @@ and diagnostics, not as the primary product result.
 - [x] Preserve the completed onboarding/readability/navigation/mobile/recovery improvements from
       `EP-20260803-ui-ux-hierarchy-onboarding`.
 - [x] Keep all new progress, retry and result behavior deterministic, Git-friendly and auditable.
+- [x] Post-audit: make `/api/architecture` the primary UI read path with `/api/knowledge` only as a
+      compatibility fallback, and expose dependency-planned step rerun after succeeded as well as
+      failed/canceled terminal parent runs. Rendered QA also made partial legacy run-step arrays
+      fail-soft and closes the Advanced C4 disclosure after navigation so it cannot cover the map
+      breadcrumb.
 - [ ] Merge the audited outcome-first implementation through its feature PR after required checks
       and review succeed.
 

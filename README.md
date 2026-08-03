@@ -98,7 +98,8 @@ The UI treats the validator-promoted architecture as the product outcome. `Archi
 an interactive read-only Context/Container/Component explorer, service-scoped advanced Code view,
 structured findings/questions and evidence drill-down, while
 `Runs` separates provider activity from durable step/shard progress and offers dependency-aware
-child-run retry after a terminal failure. Reused parent shards and aggregated indexes are
+child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
+runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
 revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain
 their validator-approved semantic payload, so Changes compares individual findings and gaps rather
 than Markdown files. Mermaid diagrams remain deterministic workspace exports.
