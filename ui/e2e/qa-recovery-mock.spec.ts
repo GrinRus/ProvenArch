@@ -106,6 +106,22 @@ async function installQARecoveryMock(page: Page): Promise<{ postedQuestions: str
       return;
     }
 
+    if (method === "GET" && url.pathname === "/api/knowledge") {
+      await route.fulfill({
+        ...json({
+          version: 1,
+          generated_at: "2026-08-03T00:00:00Z",
+          source_mode: "promoted_current",
+          status: "unavailable",
+          entities: [],
+          edges: [],
+          artifacts: [],
+          issues: [],
+        }),
+      });
+      return;
+    }
+
     if (method === "GET" && url.pathname === "/api/pipeline/runs") {
       await route.fulfill({
         ...json({
@@ -373,6 +389,28 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
   await expect(page.getByTestId("product-shell")).toBeVisible();
+  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "home-desktop.png");
+
+  await page.getByTestId("destination-knowledge").click();
+  await expect(page.getByTestId("knowledge-panel")).toBeVisible();
+  await expect(page.getByText("No promoted knowledge is available.")).toBeVisible();
+  await captureEvidenceScreenshot(page, "knowledge-empty-desktop.png");
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "knowledge-empty-tablet.png");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "knowledge-empty-mobile.png");
+
+  await page.getByTestId("destination-home").click();
+  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await captureEvidenceScreenshot(page, "home-mobile.png");
+
+  await page.setViewportSize({ width: 1440, height: 980 });
   await page.getByTestId("stage-ask").click();
   await expect(page.getByTestId("qa-panel")).toBeVisible();
 

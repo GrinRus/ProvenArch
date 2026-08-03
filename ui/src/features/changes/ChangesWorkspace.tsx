@@ -45,8 +45,9 @@ export function ChangesWorkspace({ view, source, page, review, proposals, publis
     <ChangesPage {...page} sourceMode={source} view={view}>
       <section className={`changes-route-view changes-route-${model.kind}`} data-testid={`changes-route-${model.kind}`}>
         <header className="changes-route-heading">
-          <h2>{model.title}</h2>
-          <p className="hint">{model.purpose}</p>
+          <div>
+            <p className="hint">{model.purpose}</p>
+          </div>
           <span className={`status git-state-${gitState}`} data-testid="changes-git-state">Git: {gitState}</span>
           {askReturnAvailable ? <button type="button" className="link-button" onClick={onReturnToAsk}>Return to Ask</button> : null}
         </header>

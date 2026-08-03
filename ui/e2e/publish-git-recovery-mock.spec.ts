@@ -420,6 +420,19 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
   await page.goto("/");
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByRole("link", { name: "Changes" }).click();
+  await expect(page.getByTestId("changes-route-overview")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "changes-overview-desktop.png");
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "changes-overview-tablet.png");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "changes-overview-mobile.png");
+
+  await page.setViewportSize({ width: 1440, height: 980 });
   await page.getByTestId("stage-publish").click();
   await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-panel")).toBeVisible();
@@ -439,6 +452,12 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
   await expect(page.getByTestId("publish-commit-selected-btn")).toBeEnabled();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "publish-git-recovery-desktop.png");
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(page.getByTestId("publish-panel")).toBeVisible();
+  await expect(recovery).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "publish-git-recovery-tablet.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("publish-panel")).toBeVisible();

@@ -107,9 +107,13 @@ export default function App() {
     navigateRoute(nextRoute);
   }, [navigateRoute, route]);
 
-  const handleDestinationChange = useCallback((nextDestination: WorkflowDestination) => {
+  function handleDestinationChange(nextDestination: WorkflowDestination) {
+    if (nextDestination === "changes" && runId) {
+      navigateRoute({ destination: "changes", runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
+      return;
+    }
     navigateDestination(nextDestination);
-  }, [navigateDestination]);
+  }
 
   const runtimeSettings = useRuntimeSettings({
     setBusy,
@@ -583,10 +587,18 @@ export default function App() {
 
   async function startFirstRun(nextStage: StageId = "analysis") {
     setFirstRunStatus("");
-    const started = await handleRunPipeline("init");
-    if (started) {
+    const startedRunID = await handleRunPipeline("init");
+    if (startedRunID) {
       setFirstRunStatus("First analysis started. Results will update as the run finishes.");
       setActiveStage(nextStage);
+      navigateRoute({ destination: "runs", runId: startedRunID, runRequested: true, invalid: [] });
+    }
+  }
+
+  async function handleRunPipelineFromRuns(pipeline: "init" | "refresh", intent: "start" | "queue" = "start") {
+    const startedRunID = await handleRunPipeline(pipeline, intent);
+    if (startedRunID && intent !== "queue") {
+      navigateRoute({ destination: "runs", runId: startedRunID, runRequested: true, invalid: [] });
     }
   }
 
@@ -595,7 +607,7 @@ export default function App() {
   }, [navigateRoute]);
 
   const handleOpenArtifactAndReview = useCallback(async (path: string) => {
-    await handleOpenArtifact(path, route.mode ?? "rendered");
+    const openArtifact = handleOpenArtifact(path, route.mode ?? "rendered");
     const artifactKey = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.path === path)?.id || path;
     navigateRoute({
       destination: "changes",
@@ -607,6 +619,7 @@ export default function App() {
       mode: route.mode ?? "rendered",
       invalid: [],
     });
+    await openArtifact;
   }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.changesView, route.destination, route.mode, runId]);
 
   const handleOpenCurrentArtifact = useCallback(async (path: string) => {
@@ -658,12 +671,14 @@ export default function App() {
   }, []);
 
   async function handleSelectRunAndRoute(id: string) {
+    restoredRouteRunRef.current = id;
     if (destination === "runs") navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
-    else navigateRoute({ ...route, destination: "changes", runId: id, runRequested: true, source: "snapshot", invalid: [] });
+    else navigateRoute({ ...route, destination: "changes", runId: id, runRequested: true, source: "snapshot", artifact: undefined, invalid: [] });
     await handleSelectRun(id);
   }
 
   async function handleSelectRunInRuns(id: string) {
+    restoredRouteRunRef.current = id;
     navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
     await handleSelectRun(id);
   }
@@ -894,6 +909,22 @@ export default function App() {
         doctorResult={setupDoctorResult}
         setupRuntime={setupRuntime}
         setupRuntimeProvider={setupRuntimeProvider}
+        briefReady={wizardContractReady}
+        briefPanel={
+          <WizardContractPanel
+            busy={busy}
+            wizardProjectName={wizardProjectName}
+            wizardScope={wizardScope}
+            wizardNfr={wizardNfr}
+            wizardRules={wizardRules}
+            wizardStatus={wizardStatus}
+            onProjectNameChange={setWizardProjectName}
+            onScopeChange={setWizardScope}
+            onNfrChange={setWizardNfr}
+            onRulesChange={setWizardRules}
+            onSave={() => void handleSaveStep0WizardContract()}
+          />
+        }
         firstRunStatus={firstRunStatus}
         onWorkspacePathChange={setOnboardingWorkspacePath}
         onCreateWorkspaceChange={setOnboardingCreateWorkspace}
@@ -988,12 +1019,14 @@ export default function App() {
 		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
 		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: "entities", source: "current", entity, invalid: [] })}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
+		  onOpenRuns={() => handleDestinationChange("runs")}
 		/>
 	  ) : null}
 
       {destination === "setup" ? <GuidedSetupPage step={setupStep} onStepChange={handleSetupStepChange}>
       {(setupStep === "workspace" || setupStep === "sources") ? (
         <SourceStagePanel
+          setupView={setupStep}
           busy={busy}
           guidedRepos={guidedRepos}
           guidedDocsImportsPath={guidedDocsImportsPath}
@@ -1086,8 +1119,9 @@ export default function App() {
       </GuidedSetupPage> : null}
 
       {destination === "runs" && activeStage === "analysis" ? (
-        <RunsPage coordination={coordination}>
+        <RunsPage coordination={coordination} selectedRunID={route.runId}>
         <AnalysisStagePanel
+          detailMode={Boolean(route.runId)}
           busy={busy}
           cancelBusy={cancelBusy}
           runId={runId}
@@ -1109,7 +1143,7 @@ export default function App() {
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
           focusBlockerSignal={analysisFocusSignal}
-          onRunPipeline={(pipeline, intent) => void handleRunPipeline(pipeline, intent)}
+          onRunPipeline={(pipeline, intent) => void handleRunPipelineFromRuns(pipeline, intent)}
           onCancelSelectedRun={() => void handleCancelSelectedRun()}
           onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRunInRuns(id)}

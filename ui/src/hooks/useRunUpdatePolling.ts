@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch } from "react";
 
 import type { RunListItem, RunStatusResponse } from "../lib/appContracts";
@@ -36,10 +36,13 @@ export function useRunUpdatePolling({
   setRunActionStatus,
   setRunID,
 }: UseRunUpdatePollingOptions) {
+  const currentRunIdRef = useRef(runId);
+  currentRunIdRef.current = runId;
+
   return useCallback(async () => {
     try {
       const latestRuns = await loadRunList(100);
-      if (!runId) {
+      if (!runId || currentRunIdRef.current !== runId) {
         return;
       }
       const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);

@@ -24,6 +24,7 @@ export function RunStatusPanel({ runStatus, warnings }: RunStatusPanelProps) {
     warnings,
   });
   const outcomeLabel = runOutcomeLabel(runStatus);
+  const hideCurrentStep = runStatus.status === "succeeded" || runStatus.status === "canceled";
 
   return (
     <div className="status-block" data-testid="run-status-panel">
@@ -36,7 +37,7 @@ export function RunStatusPanel({ runStatus, warnings }: RunStatusPanelProps) {
           Lifecycle: <strong data-testid="run-lifecycle-value">{lifecycleState}</strong>
         </p>
       ) : null}
-      {runStatus.current_step ? <p>Current step: {runStatus.current_step}</p> : null}
+      {!hideCurrentStep && runStatus.current_step ? <p>{runStatus.status === "failed" ? "Stopped at" : "Current step"}: {runStatus.current_step}</p> : null}
       {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
       {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
       {warnings.length > 0 ? (

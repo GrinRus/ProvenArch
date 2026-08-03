@@ -133,7 +133,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
   });
 
   useRunPolling({
-    shouldPollRunDetails,
+    shouldPollRunDetails: shouldPollRunDetails && evidenceSnapshot.status !== "loading",
     runId,
     runLogsCursor,
     runLogsEOF,

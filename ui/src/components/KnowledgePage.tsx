@@ -14,6 +14,7 @@ export function KnowledgePage({
   onViewChange,
   onEntityChange,
   onOpenArtifact,
+  onOpenRuns,
 }: {
   knowledge: KnowledgeResponse | null;
   loading: boolean;
@@ -24,6 +25,7 @@ export function KnowledgePage({
   onViewChange: (view: KnowledgeView) => void;
   onEntityChange: (id?: string) => void;
   onOpenArtifact: (path: string) => void;
+  onOpenRuns?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const model = buildKnowledgeViewModel(knowledge, loading, error, query, selectedEntityID);
@@ -47,7 +49,7 @@ export function KnowledgePage({
         ))}
       </nav>
       {error ? <p className="status err" role="status">{error}</p> : null}
-      {!loading && !error && knowledge?.status === "unavailable" ? <p className="empty-state">No promoted knowledge is available in the current workspace.</p> : null}
+      {!loading && !error && knowledge?.status === "unavailable" ? <div className="empty-state recovery-empty"><strong>No promoted knowledge is available.</strong><span>Run an analysis to create validated architecture knowledge for this workspace.</span>{onOpenRuns ? <button type="button" onClick={onOpenRuns}>Open Runs</button> : null}</div> : null}
       {knowledge?.status === "partial" ? (
         <aside className="status warn" role="status"><strong>Partial knowledge.</strong> Valid data remains visible; {knowledge.issues.length} issue(s) need attention.</aside>
       ) : null}
@@ -68,7 +70,7 @@ export function KnowledgePage({
         <div data-testid="knowledge-atlas">
           <h2>Validated relationship atlas</h2>
           <p className="hint">Topology is derived only from parsed entity and edge contents. File names are never interpreted as relationships.</p>
-          {edges.length === 0 ? <p className="empty-state">No validated relationships are available.</p> : (
+          {edges.length === 0 ? <div className="empty-state recovery-empty"><strong>No validated relationships are available.</strong><span>Relationships appear only when entity and edge artifacts pass validation; ProvenArch does not guess missing topology.</span>{onOpenRuns ? <button type="button" onClick={onOpenRuns}>Run or inspect analysis</button> : null}</div> : (
             <table className="responsive-card-table"><caption className="sr-only">Validated architecture relationships</caption><thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Source</th></tr></thead><tbody>
               {edges.map((edge) => <tr key={edge.id}><td data-label="From">{entityName(entities, edge.from)}</td><td data-label="Relationship">{edge.type}</td><td data-label="To">{entityName(entities, edge.to)}</td><td data-label="Source"><button type="button" onClick={() => onOpenArtifact(edge.path)}>{edge.path}</button></td></tr>)}
             </tbody></table>

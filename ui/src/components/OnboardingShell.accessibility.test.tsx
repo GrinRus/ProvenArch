@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { OnboardingShell } from "./OnboardingShell";
@@ -102,7 +102,9 @@ describe("OnboardingShell accessibility announcements", () => {
 
     expect(screen.getByText("Workspace open failed.").closest('[role="alert"]')).toHaveAttribute("aria-live", "assertive");
     expect(screen.getByText("Sources validated.").closest('[role="status"]')).toHaveAttribute("aria-live", "polite");
+    fireEvent.click(screen.getByRole("button", { name: /Runner/ }));
     expect(screen.getByText("Runner and local readiness passed.").closest('[role="status"]')).toHaveAttribute("aria-live", "polite");
+    fireEvent.click(screen.getByRole("button", { name: /Review & start/ }));
     expect(screen.getByText("First analysis is starting.").closest('[role="status"]')).toHaveAttribute("aria-live", "polite");
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
@@ -6,6 +6,8 @@ import { AsyncStatusMessage } from "./AccessibleStatus";
 import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
+
+type OnboardingStep = "workspace" | "sources" | "brief" | "runner" | "review";
 
 type OnboardingShellProps = {
   busy: boolean;
@@ -19,6 +21,8 @@ type OnboardingShellProps = {
   doctorResult: DoctorResponse | null;
   setupRuntime: string;
   setupRuntimeProvider: string;
+  briefReady?: boolean;
+  briefPanel?: ReactNode;
   firstRunStatus: string;
   onWorkspacePathChange: (value: string) => void;
   onCreateWorkspaceChange: (value: boolean) => void;
@@ -50,6 +54,8 @@ export function OnboardingShell({
   doctorResult,
   setupRuntime,
   setupRuntimeProvider,
+  briefReady = false,
+  briefPanel = null,
   firstRunStatus,
   onWorkspacePathChange,
   onCreateWorkspaceChange,
@@ -68,6 +74,7 @@ export function OnboardingShell({
   onEnterConsole,
   onRunFirstAnalysis,
 }: OnboardingShellProps) {
+  const [activeStep, setActiveStep] = useState<OnboardingStep>(() => initialOnboardingStep(status, validateResult, briefReady, doctorResult));
   const workspaceReady = status?.workspace_selected ?? false;
   const recentWorkspaces = status?.recent_workspaces ?? [];
   const repoDiagnosticsByID = buildRepoDiagnostics(guidedRepos, validateResult);
@@ -86,6 +93,7 @@ export function OnboardingShell({
     sourcesReady,
     runtimeReady,
     localReady,
+    briefReady,
     canEnterConsole,
     canRunFirstAnalysis,
     workspacePath: status?.workspace ?? "",
@@ -120,13 +128,14 @@ export function OnboardingShell({
       <section className="onboarding-panel">
         <div className="onboarding-header">
           <div>
-            <p className="eyebrow">ACP local console</p>
+            <p className="eyebrow">ProvenArch local console</p>
             <h1>Set up your architecture workspace</h1>
-            <p className="hint">Choose the Git-tracked ACP workspace first, then connect source repositories and select the runner.</p>
+            <p className="hint">Connect read-only repositories, describe the analysis, choose a runner and review everything before the first run.</p>
           </div>
           <div className="onboarding-status-stack" aria-label="onboarding status">
             <StatusPill label="Workspace" ready={workspaceReady} />
-            <StatusPill label="Sources" ready={sourcesReady} />
+            <StatusPill label="Repositories" ready={sourcesReady} />
+            <StatusPill label="Brief" ready={briefReady} />
             <StatusPill label="Runner" ready={runtimeReady} />
           </div>
         </div>
@@ -137,10 +146,10 @@ export function OnboardingShell({
           </AsyncStatusMessage>
         ) : null}
 
-        <OnboardingProgressSummaryPanel summary={progressSummary} />
+        <OnboardingProgressSummaryPanel summary={progressSummary} activeStep={activeStep} onStepChange={setActiveStep} />
 
         <div className="onboarding-grid">
-          <section className="onboarding-card" data-testid="onboarding-workspace-step">
+          <section className="onboarding-card" data-testid="onboarding-workspace-step" hidden={activeStep !== "workspace"}>
             <div className="card-heading">
               <span className="step-index">1</span>
               <div>
@@ -162,7 +171,7 @@ export function OnboardingShell({
               <span>Create path if missing</span>
             </label>
             <button type="button" onClick={onSelectWorkspace} disabled={busy || !workspacePath.trim()} data-testid="onboarding-workspace-save">
-              {createWorkspace ? "Create or open workspace" : "Open workspace"}
+              {createWorkspace ? "Create workspace" : "Open workspace"}
             </button>
             {status?.workspace_selected ? (
               <AsyncStatusMessage tone="success" className="status">
@@ -170,14 +179,15 @@ export function OnboardingShell({
               </AsyncStatusMessage>
             ) : null}
             <RecentWorkspacesList recentWorkspaces={recentWorkspaces} busy={busy} onOpen={onOpenRecentWorkspace} onForget={onForgetRecentWorkspace} />
+            {workspaceReady ? <button type="button" className="onboarding-continue" onClick={() => setActiveStep("sources")}>Continue to repositories</button> : null}
           </section>
 
-          <section className="onboarding-card onboarding-card-sources" data-testid="onboarding-sources-step">
+          <section className="onboarding-card onboarding-card-sources" data-testid="onboarding-sources-step" hidden={activeStep !== "sources"}>
             <div className="card-heading">
               <span className="step-index">2</span>
               <div>
-                <h2>Sources</h2>
-                <p className="hint">Add one or more repositories from Git URL or local checkout path.</p>
+                <h2>Repositories</h2>
+                <p className="hint">Add one or more read-only repositories. A local checkout is the fastest path; Git URLs use your local Git credentials.</p>
               </div>
             </div>
             {guidedRepos.map((repo, index) => {
@@ -245,18 +255,21 @@ export function OnboardingShell({
                         />
                       </div>
                     )}
+                  </div>
+                  <details className="onboarding-advanced" open={Boolean(repo.ref || repo.analysis_include || repo.analysis_exclude)}>
+                    <summary>Advanced scope</summary>
                     <div className="field">
-                      <label htmlFor={`onboardingRepoRef-${repo.id}`}>ref optional</label>
+                      <label htmlFor={`onboardingRepoRef-${repo.id}`}>Git ref (optional)</label>
                       <input id={`onboardingRepoRef-${repo.id}`} value={repo.ref} onChange={(event) => onRepoChange(repo.id, { ref: event.target.value })} />
                     </div>
-                  </div>
-                  <RepoAnalysisScopeFields
-                    repoId={`onboarding-${repo.id}`}
-                    include={repo.analysis_include}
-                    exclude={repo.analysis_exclude}
-                    onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
-                    onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
-                  />
+                    <RepoAnalysisScopeFields
+                      repoId={`onboarding-${repo.id}`}
+                      include={repo.analysis_include}
+                      exclude={repo.analysis_exclude}
+                      onIncludeChange={(value) => onRepoChange(repo.id, { analysis_include: value })}
+                      onExcludeChange={(value) => onRepoChange(repo.id, { analysis_exclude: value })}
+                    />
+                  </details>
                   <RepoDiagnostics id={diagnosticsID} diagnostics={diagnostics} />
                 </div>
               );
@@ -278,30 +291,45 @@ export function OnboardingShell({
                 {validateResult.ok ? "Sources validated." : "Sources need fixes."}
               </AsyncStatusMessage>
             ) : null}
+            {sourcesReady ? <button type="button" className="onboarding-continue" onClick={() => setActiveStep("brief")}>Continue to analysis brief</button> : null}
           </section>
 
-          <section className="onboarding-card" data-testid="onboarding-runner-step">
+          <section className="onboarding-card" data-testid="onboarding-brief-step" hidden={activeStep !== "brief"}>
             <div className="card-heading">
               <span className="step-index">3</span>
               <div>
+                <h2>Analysis brief</h2>
+                <p className="hint">Describe the system, scope and quality priorities so the result is useful for architectural decisions.</p>
+              </div>
+            </div>
+            {briefPanel}
+            {!briefReady ? <p className="status warn">You can continue without a brief, but the first result may be less decision-ready.</p> : <p className="status ok">Analysis brief saved.</p>}
+            <button type="button" className="onboarding-continue" onClick={() => setActiveStep("runner")}>{briefReady ? "Continue to runner" : "Continue without brief"}</button>
+          </section>
+
+          <section className="onboarding-card" data-testid="onboarding-runner-step" hidden={activeStep !== "runner"}>
+            <div className="card-heading">
+              <span className="step-index">4</span>
+              <div>
                 <h2>Runner</h2>
-                <p className="hint">Use fake for the first deterministic walkthrough; live providers are explicit opt-in.</p>
+                <p className="hint">Choose a deterministic walkthrough or explicitly opt in to live architecture analysis.</p>
               </div>
             </div>
             <div className="field">
               <label htmlFor="onboardingRuntime">Runtime</label>
               <select id="onboardingRuntime" value={setupRuntime} onChange={(event) => onRuntimeChange(event.target.value)}>
-                <option value="fake">fake baseline</option>
-                <option value="headless">headless provider</option>
+                <option value="fake">Deterministic walkthrough (recommended)</option>
+                <option value="headless">Live architecture analysis</option>
               </select>
             </div>
             <div className="field">
               <label htmlFor="onboardingRuntimeProvider">Provider</label>
               <select id="onboardingRuntimeProvider" value={setupRuntimeProvider} disabled={setupRuntime !== "headless"} onChange={(event) => onRuntimeProviderChange(event.target.value)}>
-                <option value="claude-code">claude-code</option>
-                <option value="qwen-code">qwen-code</option>
-                <option value="codex-code">codex-code</option>
+                <option value="claude-code">Claude Code (claude-code)</option>
+                <option value="qwen-code">Qwen Code (qwen-code)</option>
+                <option value="codex-code">Codex (codex-code)</option>
               </select>
+              {setupRuntime !== "headless" ? <p className="hint">No live provider is used during the deterministic walkthrough.</p> : null}
             </div>
             <div className="actions">
               <button type="button" onClick={onSaveRuntime} disabled={busy || !workspaceReady} data-testid="onboarding-runtime-save">
@@ -324,19 +352,21 @@ export function OnboardingShell({
               />
             ) : null}
             {doctorResult ? <OnboardingDoctorChecklist doctorResult={doctorResult} /> : null}
+            {runtimeReady ? <button type="button" className="onboarding-continue" onClick={() => setActiveStep("review")}>Review setup</button> : null}
           </section>
 
-          <section className="onboarding-card" data-testid="onboarding-ready-step">
+          <section className="onboarding-card onboarding-review-card" data-testid="onboarding-ready-step" hidden={activeStep !== "review"}>
             <div className="card-heading">
-              <span className="step-index">4</span>
+              <span className="step-index">5</span>
               <div>
-                <h2>Ready</h2>
-                <p className="hint">Enter the product shell when workspace, sources and runner are valid.</p>
+                <h2>Review & start</h2>
+                <p className="hint">Confirm what ProvenArch will read, where it will write and which runner is effective.</p>
               </div>
             </div>
             <ul className="checklist">
               <li className={workspaceReady ? "is-ready" : ""}>Workspace selected</li>
-              <li className={sourcesReady ? "is-ready" : ""}>Sources validated</li>
+              <li className={sourcesReady ? "is-ready" : ""}>Read-only repositories validated</li>
+              <li className={briefReady ? "is-ready" : ""}>{briefReady ? "Analysis brief saved" : "Analysis brief skipped — quality warning"}</li>
               <li className={runtimeReady ? "is-ready" : ""}>Runner selected</li>
               <li className={localReady ? "is-ready" : ""}>Local readiness checked</li>
             </ul>
@@ -348,7 +378,7 @@ export function OnboardingShell({
                 title={!canEnterConsole ? openConsoleDisabledReason : undefined}
                 data-testid="onboarding-enter-console"
               >
-                Open console
+                Open console without running
               </button>
               <button
                 type="button"
@@ -376,6 +406,7 @@ export function OnboardingShell({
                 {firstRunStatus}
               </AsyncStatusMessage>
             ) : null}
+            <div className="onboarding-boundary-note"><strong>Source boundary</strong><span>Repositories are read-only. ProvenArch writes generated knowledge only to the architecture workspace.</span></div>
           </section>
         </div>
       </section>
@@ -442,14 +473,24 @@ function formatRecentWorkspaceTimestamp(value: string): string {
   return `last opened ${new Date(parsed).toISOString().replace("T", " ").replace(".000Z", " UTC")}`;
 }
 
+function initialOnboardingStep(status: OnboardingStatusResponse | null, validateResult: ValidateResponse | null, briefReady: boolean, doctorResult: DoctorResponse | null): OnboardingStep {
+  if (!status?.workspace_selected) return "workspace";
+  if (validateResult?.ok !== true) return "sources";
+  if (!briefReady) return "brief";
+  if (status.runtime.selected !== true || doctorResult?.ok !== true) return "runner";
+  return "review";
+}
+
 function StatusPill({ label, ready }: { label: string; ready: boolean }) {
   return <span className={ready ? "status-pill is-ready" : "status-pill"}>{label}</span>;
 }
 
 type OnboardingProgressItem = {
+  id: OnboardingStep;
   label: string;
   detail: string;
   ready: boolean;
+  available: boolean;
 };
 
 type OnboardingProgressSummary = {
@@ -461,7 +502,7 @@ type OnboardingProgressSummary = {
   tone: "blocked" | "ready" | "waiting";
 };
 
-function OnboardingProgressSummaryPanel({ summary }: { summary: OnboardingProgressSummary }) {
+function OnboardingProgressSummaryPanel({ summary, activeStep, onStepChange }: { summary: OnboardingProgressSummary; activeStep: OnboardingStep; onStepChange: (step: OnboardingStep) => void }) {
   return (
     <section className={`onboarding-progress-summary is-${summary.tone}`} data-testid="onboarding-progress-summary" aria-label="Onboarding setup progress">
       <div className="onboarding-progress-primary">
@@ -475,12 +516,14 @@ function OnboardingProgressSummaryPanel({ summary }: { summary: OnboardingProgre
       </div>
       <ol className="onboarding-progress-steps">
         {summary.items.map((item, index) => (
-          <li className={item.ready ? "is-ready" : ""} key={item.label}>
-            <span>{index + 1}</span>
-            <div>
-              <strong>{item.label}</strong>
-              <p>{item.detail}</p>
-            </div>
+          <li className={`${item.ready ? "is-ready" : ""} ${activeStep === item.id ? "is-active" : ""}`.trim()} key={item.label}>
+            <button type="button" data-testid={`onboarding-progress-${item.id}`} aria-current={activeStep === item.id ? "step" : undefined} disabled={!item.available} onClick={() => onStepChange(item.id)}>
+              <span>{index + 1}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <p>{item.detail}</p>
+              </div>
+            </button>
           </li>
         ))}
       </ol>
@@ -701,6 +744,7 @@ function buildOnboardingProgressSummary({
   sourcesReady,
   runtimeReady,
   localReady,
+  briefReady,
   canEnterConsole,
   canRunFirstAnalysis,
   workspacePath,
@@ -715,6 +759,7 @@ function buildOnboardingProgressSummary({
   sourcesReady: boolean;
   runtimeReady: boolean;
   localReady: boolean;
+  briefReady: boolean;
   canEnterConsole: boolean;
   canRunFirstAnalysis: boolean;
   workspacePath: string;
@@ -728,13 +773,17 @@ function buildOnboardingProgressSummary({
   const firstDoctorFailure = doctorResult?.checks.find((check) => check.status === "fail") ?? null;
   const items: OnboardingProgressItem[] = [
     {
+      id: "workspace",
       label: "Workspace",
       ready: workspaceReady,
+      available: true,
       detail: workspaceReady ? compactPathLabel(workspacePath) : "Choose or create the Git-tracked ACP workspace.",
     },
     {
-      label: "Sources",
+      id: "sources",
+      label: "Repositories",
       ready: sourcesReady,
+      available: workspaceReady,
       detail: sourcesReady
         ? `${guidedRepoCount} ${guidedRepoCount === 1 ? "repo" : "repos"} validated`
         : sourceBlockingDiagnostic
@@ -744,13 +793,24 @@ function buildOnboardingProgressSummary({
             : "Available after workspace selection.",
     },
     {
+      id: "brief",
+      label: "Analysis brief",
+      ready: briefReady,
+      available: sourcesReady,
+      detail: briefReady ? "Saved for the first analysis" : sourcesReady ? "Recommended; may be skipped with a quality warning." : "Available after repository validation.",
+    },
+    {
+      id: "runner",
       label: "Runner",
       ready: runtimeReady,
+      available: sourcesReady,
       detail: runtimeReady ? runnerLabel(setupRuntime, setupRuntimeProvider) : "Select fake baseline or opt in to a headless provider.",
     },
     {
-      label: "Ready",
+      id: "review",
+      label: "Review & start",
       ready: localReady,
+      available: sourcesReady && runtimeReady,
       detail: localReady
         ? "Local readiness passed"
         : firstDoctorFailure
@@ -761,7 +821,7 @@ function buildOnboardingProgressSummary({
 
   if (!workspaceReady) {
     return {
-      step: "Step 1 of 4",
+      step: "Step 1 of 5",
       action: "Create or open a workspace",
       blocker: "Workspace path is not selected.",
       detail: "ACP needs a Git-tracked architecture workspace before it can save sources or runner settings.",
@@ -771,7 +831,7 @@ function buildOnboardingProgressSummary({
   }
   if (!sourcesReady) {
     return {
-      step: "Step 2 of 4",
+      step: "Step 2 of 5",
       action: sourceBlockingDiagnostic ? "Fix source fields" : "Save and validate sources",
       blocker: sourceBlockingDiagnostic ? `${sourceBlockingDiagnostic.code}: ${sourceBlockingDiagnostic.message}` : "Sources have not passed validation yet.",
       detail: "Connect at least one repository, then validate the manifest before selecting the final console action.",
@@ -781,7 +841,7 @@ function buildOnboardingProgressSummary({
   }
   if (!runtimeReady) {
     return {
-      step: "Step 3 of 4",
+      step: "Step 4 of 5",
       action: "Select the runner",
       blocker: "Runner is not selected.",
       detail: "Use fake for the first deterministic walkthrough. Headless providers remain explicit opt-in.",
@@ -791,7 +851,7 @@ function buildOnboardingProgressSummary({
   }
   if (doctorResult && !localReady) {
     return {
-      step: "Step 4 of 4",
+      step: "Step 5 of 5",
       action: "Fix local readiness blockers",
       blocker: firstDoctorFailure ? `${firstDoctorFailure.label}: ${firstDoctorFailure.message}` : "Readiness has warnings or failed checks.",
       detail: canEnterConsole ? "The console can open, but first analysis should wait until readiness passes." : "Readiness is blocking first analysis.",
@@ -801,7 +861,7 @@ function buildOnboardingProgressSummary({
   }
   if (!localReady) {
     return {
-      step: "Step 4 of 4",
+      step: "Step 5 of 5",
       action: "Check local readiness",
       blocker: "First analysis needs a passing readiness check.",
       detail: canEnterConsole ? "You can open the console now; run the readiness check before starting analysis." : "Run the doctor check before the first analysis.",
@@ -811,7 +871,7 @@ function buildOnboardingProgressSummary({
   }
   if (canRunFirstAnalysis) {
     return {
-      step: "Step 4 of 4",
+      step: "Step 5 of 5",
       action: firstRunStatus ? "First analysis is starting" : "Run first analysis",
       blocker: "No setup blockers.",
       detail: firstRunStatus || "Workspace, sources, runner and local readiness are ready.",
@@ -820,7 +880,7 @@ function buildOnboardingProgressSummary({
     };
   }
   return {
-    step: "Step 4 of 4",
+    step: "Step 5 of 5",
     action: "Open the console",
     blocker: "Setup is ready for the product shell.",
     detail: "Console review can start from the selected workspace.",
@@ -854,7 +914,7 @@ function getOpenConsoleDisabledReason({
   if (!runtimeReady) {
     return "select a runner";
   }
-  return "complete setup";
+  return "wait for server setup confirmation";
 }
 
 function getFirstAnalysisDisabledReason({
@@ -870,14 +930,14 @@ function getFirstAnalysisDisabledReason({
   doctorFailures: DoctorResponse["checks"];
   doctorResult: DoctorResponse | null;
 }): string {
-  if (!canEnterConsole) {
-    return openConsoleDisabledReason;
-  }
   if (!localReady) {
     if (doctorFailures.length > 0) {
       return `fix ${doctorFailures[0].label}: ${doctorFailures[0].message}`;
     }
     return doctorResult ? "fix readiness checks" : "run local readiness check";
+  }
+  if (!canEnterConsole) {
+    return openConsoleDisabledReason;
   }
   return "ready";
 }
