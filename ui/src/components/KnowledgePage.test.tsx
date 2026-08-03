@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
@@ -61,5 +61,26 @@ describe("KnowledgePage", () => {
       />,
     );
     expect(screen.getByText(/Workspace health: warn/)).toHaveTextContent("2 warnings");
+  });
+
+  it("filters the map and mobile fallback by canonical owner and domain tags", () => {
+    const filteredKnowledge: KnowledgeResponse = {
+      ...partialKnowledge,
+      entities: [
+        { ...partialKnowledge.entities[0], owner_team_id: "team-payments", tags: ["domain:commerce"] },
+        { ...partialKnowledge.entities[1], owner_team_id: "team-identity", tags: ["domain:identity"] },
+      ],
+    };
+    render(<KnowledgePage knowledge={filteredKnowledge} loading={false} error="" view="map" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
+    const mobileList = screen.getByLabelText("Architecture elements");
+
+    fireEvent.change(screen.getByLabelText("Filter by owner"), { target: { value: "team-payments" } });
+    expect(within(mobileList).getByRole("button", { name: /Payments/ })).toBeInTheDocument();
+    expect(within(mobileList).queryByRole("button", { name: /Users/ })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter by owner"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Filter by domain or tag"), { target: { value: "domain:identity" } });
+    expect(within(mobileList).getByRole("button", { name: /Users/ })).toBeInTheDocument();
+    expect(within(mobileList).queryByRole("button", { name: /Payments/ })).not.toBeInTheDocument();
   });
 });

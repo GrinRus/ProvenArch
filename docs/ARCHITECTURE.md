@@ -460,7 +460,8 @@ Execution modes:
 - `Architecture` reads `GET /api/architecture` and renders Context/Container/Component through a
   read-only React Flow canvas with deterministic ELK layout; Code is an advanced level scoped to a
   selected service. Structured semantic findings/questions/coverage enrich node and edge inspectors,
-  while missing lower-level evidence remains an explicit reason rather than an empty drill-down. Model YAML
+  while repository, type, canonical owner and model tag/domain filters apply identically to the
+  canvas and mobile list. Missing lower-level evidence remains an explicit reason rather than an empty drill-down. Model YAML
   remains authority and Mermaid remains a Git-friendly export.
 - `Runs` presents structured step/unit progress, result/promotion effect and typed recovery before
   raw diagnostics. After any terminal analysis run, targeted retry/rerun creates a new child run,

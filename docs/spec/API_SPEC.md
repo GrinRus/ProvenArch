@@ -346,6 +346,10 @@ ID/value, findings по finding ID/value и coverage gaps по детермин�
 относительно предыдущего promoted snapshot. Изменение одного Markdown файла не превращается в один
 synthetic finding/gap.
 
+UI filters use only canonical response fields: `repositories`, `type`, `owner_team_id` and exact
+`tags` values (including provider-authored domain tags when present). The UI does not infer a domain
+from filenames, names or repository paths when the model does not provide one.
+
 Пустой или partial model остаётся явно `unavailable`/`partial`; endpoint не выводит topology из
 имён файлов и не синтезирует отсутствующие C4 levels. Mermaid files остаются в promoted artifact
 inventory как экспорт, а не как source интерактивного графа.

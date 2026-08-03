@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -96,5 +99,62 @@ func TestRetryPlanHashChangesWithParentArtifactsAndSourceInput(t *testing.T) {
 	sourceChanged.Workspace.Manifest.Repos[0].Ref = "changed-source-ref"
 	if retrySourceFingerprint(sourceChanged) == retrySourceFingerprint(snapshot) {
 		t.Fatal("source input drift did not change retry fingerprint")
+	}
+}
+
+func TestRetryEndpointRejectsPlanAfterParentStagingDrifts(t *testing.T) {
+	server := newTestServer(t)
+	snapshot := server.sessionSnapshot()
+	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
+		Workspace: snapshot.Workspace, Pipeline: orchestrator.PipelineInit, NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		parent, ok := snapshot.Service.GetRun(runID)
+		if !ok {
+			t.Fatalf("parent run %q disappeared", runID)
+		}
+		if retryParentTerminal(parent.Status) {
+			if parent.Status != orchestrator.RunStatusSucceeded {
+				t.Fatalf("parent run status = %s, want succeeded: %s", parent.Status, parent.Error)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("parent run %q did not finish", runID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	planRecorder := httptest.NewRecorder()
+	planRequest := httptest.NewRequest(http.MethodPost, "/api/pipeline/runs/"+runID+"/retry-plan", strings.NewReader(`{"step_id":"init.step4.proposals"}`))
+	server.handlePipelineRetryPlan(planRecorder, planRequest, runID)
+	if planRecorder.Code != http.StatusOK {
+		t.Fatalf("retry-plan status = %d: %s", planRecorder.Code, planRecorder.Body.String())
+	}
+	var plan retryPlan
+	if err := json.NewDecoder(planRecorder.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.PlanHash == "" {
+		t.Fatal("retry plan hash is empty")
+	}
+
+	driftPath := filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "changed-after-plan.txt"))
+	if err := snapshot.Workspace.WriteFile(driftPath, []byte("parent staging changed after planning\n")); err != nil {
+		t.Fatal(err)
+	}
+	retryRaw, err := json.Marshal(retryRequest{StepID: plan.RequestedStep, PlanHash: plan.PlanHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryRecorder := httptest.NewRecorder()
+	retryRequestHTTP := httptest.NewRequest(http.MethodPost, "/api/pipeline/runs/"+runID+"/retry", strings.NewReader(string(retryRaw)))
+	server.handlePipelineRetry(retryRecorder, retryRequestHTTP, runID)
+	if retryRecorder.Code != http.StatusConflict || !strings.Contains(retryRecorder.Body.String(), "retry_plan_stale") {
+		t.Fatalf("stale retry status = %d, body=%s", retryRecorder.Code, retryRecorder.Body.String())
 	}
 }

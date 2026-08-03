@@ -57,3 +57,32 @@ func TestRunProgressTracksRepairAndStallPhases(t *testing.T) {
 		t.Fatalf("unexpected stalled progress: %#v", stalled)
 	}
 }
+
+func TestRunProgressSurvivesRunHistoryReload(t *testing.T) {
+	ws := createWorkspace(t)
+	started := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	service := NewService(WithHistoryWorkspace(ws))
+	want := &RunProgress{
+		Phase: "repairing", CompletedSteps: 1, TotalSteps: 5,
+		CurrentStep: "init.step1.collect", PlannedUnits: 4, RunningUnits: 1,
+		SucceededUnits: 2, FailedUnits: 1, CurrentScopes: []string{"payments"},
+		StartedAt: started.Format(time.RFC3339), ElapsedMS: 180000,
+		LastActivityAt: started.Add(3 * time.Minute).Format(time.RFC3339),
+		LastProgressAt: started.Add(2 * time.Minute).Format(time.RFC3339),
+		ArtifactState:  "observed", RepairAttempt: 1, RepairLimit: 2,
+		StallDeadlineAt: started.Add(5 * time.Minute).Format(time.RFC3339),
+	}
+	if err := service.storeRun(runRecord{info: RunInfo{RunID: "run-progress-reload", Pipeline: string(PipelineInit), Status: RunStatusRunning, StartedAt: started, CurrentStep: want.CurrentStep, Progress: want}}); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewService(WithHistoryWorkspace(ws))
+	info, ok := reloaded.GetRun("run-progress-reload")
+	if !ok || info.Progress == nil {
+		t.Fatalf("persisted progress was not reloaded: %#v", info)
+	}
+	got := info.Progress
+	if got.Phase != want.Phase || got.PlannedUnits != want.PlannedUnits || got.SucceededUnits != want.SucceededUnits || got.LastActivityAt != want.LastActivityAt || got.LastProgressAt != want.LastProgressAt || got.RepairAttempt != want.RepairAttempt || got.StallDeadlineAt != want.StallDeadlineAt {
+		t.Fatalf("reloaded progress = %#v, want %#v", got, want)
+	}
+}

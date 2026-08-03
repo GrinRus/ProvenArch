@@ -477,9 +477,9 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   expect(postedQuestions).toEqual(["Which service owns checkout and what evidence supports that ownership?"]);
 
   const evidence = [{ repo: "commerce", path: "services/checkout/main.go", lines: { start: 18, end: 42 } }];
-  const checkout = { id: "service.checkout", name: "Checkout", type: "service", owner_team_id: "team-commerce", confidence: 0.94, provenance_kind: "observed", evidence, path: "model/entities/service.checkout.yaml", available_levels: ["context", "container"], child_levels: ["container", "component", "code"], repositories: ["commerce"], related_findings: ["finding.checkout-timeout"], related_questions: [] };
-  const external = { id: "external.payment", name: "Payment provider", type: "external.system", confidence: 0.81, provenance_kind: "observed", evidence, path: "model/entities/external.payment.yaml", available_levels: ["context", "container"], repositories: ["commerce"], related_findings: [], related_questions: [] };
-  const component = { id: "api.checkout", name: "Checkout API", type: "api.http", owner_team_id: "team-commerce", confidence: 0.91, provenance_kind: "observed", evidence, path: "model/entities/api.checkout.yaml", available_levels: ["component", "code"], repositories: ["commerce"], related_findings: [], related_questions: ["question.checkout-owner"] };
+  const checkout = { id: "service.checkout", name: "Checkout", type: "service", owner_team_id: "team-commerce", tags: ["domain:commerce"], confidence: 0.94, provenance_kind: "observed", evidence, path: "model/entities/service.checkout.yaml", available_levels: ["context", "container"], child_levels: ["container", "component", "code"], repositories: ["commerce"], related_findings: ["finding.checkout-timeout"], related_questions: [] };
+  const external = { id: "external.payment", name: "Payment provider", type: "external.system", tags: ["domain:payments-external"], confidence: 0.81, provenance_kind: "observed", evidence, path: "model/entities/external.payment.yaml", available_levels: ["context", "container"], repositories: ["commerce"], related_findings: [], related_questions: [] };
+  const component = { id: "api.checkout", name: "Checkout API", type: "api.http", owner_team_id: "team-commerce", tags: ["domain:commerce"], confidence: 0.91, provenance_kind: "observed", evidence, path: "model/entities/api.checkout.yaml", available_levels: ["component", "code"], repositories: ["commerce"], related_findings: [], related_questions: ["question.checkout-owner"] };
   const relationship = { id: "edge.checkout-payment", from: checkout.id, to: external.id, type: "calls", name: "Authorizes payment", confidence: 0.89, provenance_kind: "observed", evidence, path: "model/edges/edge.checkout-payment.yaml", repositories: ["commerce"], related_findings: [], related_questions: [] };
   const architecturePayload = { version: 1, generated_at: "2026-08-03T12:00:00Z", authority: { mode: "promoted_current", source_run_id: "run-analysis-succeeded", freshness: "current" }, status: "available", counts: { entities: 3, edges: 1, evidence: 4, issues: 0 }, views: { context: { level: "context", available: true, nodes: [checkout, external], edges: [relationship] }, container: { level: "container", available: true, nodes: [checkout, external], edges: [relationship] }, component: { level: "component", available: true, nodes: [component], edges: [] }, code: { level: "code", available: true, nodes: [component], edges: [] } }, exports: { home_path: "reports/as-is/overview.md", c4_mermaid_paths: ["reports/diagrams/c4-context.mmd"] }, comparison: { available: false, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, review: { findings: [{ id: "finding.checkout-timeout", severity: "medium", title: "Checkout timeout is not bounded", related_ids: [checkout.id] }], questions: [{ id: "question.checkout-owner", text: "Who owns the public API?", related_ids: [component.id] }] }, coverage: { observed: ["checkout"], missing: ["timeout policy"] }, artifacts: [], issues: [] };
   await page.route("**/api/architecture", async (route) => route.fulfill({ ...json(architecturePayload) }));
@@ -496,6 +496,14 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expect(page.getByText("Checkout API", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".architecture-breadcrumb")).toContainText("Checkout / Code");
   await page.getByRole("button", { name: "System context", exact: true }).click();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await page.getByRole("combobox", { name: "Filter by owner" }).selectOption("team-commerce");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Filter by owner" }).selectOption("");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await page.getByRole("combobox", { name: "Filter by domain or tag" }).selectOption("domain:commerce");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Filter by domain or tag" }).selectOption("");
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
   const keyboardNode = page.locator(".react-flow__node .architecture-node-button").first();
   await expect(keyboardNode).toBeVisible();

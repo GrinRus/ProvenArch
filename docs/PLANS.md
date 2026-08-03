@@ -813,6 +813,11 @@ active or failed.
   step/shard `estimated_units` as pipeline steps. The confirmation now explains why downstream
   work is rebuilt and distinguishes validated reuse, child execution, invalidation, effective
   scope and execution-unit estimate; component coverage protects the operator-facing contract.
+- 2026-08-03: A fourth acceptance-level audit closed two coverage gaps hidden by earlier completed
+  checkboxes. Architecture now filters both canvas and mobile fallback by canonical owner and exact
+  model tag/domain values without filename inference. Retry staleness is verified through the real
+  HTTP admission path (`409 retry_plan_stale` after parent staging drift), and persisted progress is
+  verified after run-history reload with separate activity/useful-progress timestamps intact.
 
 ### Plan ID
 EP-20260729-open-source-readme

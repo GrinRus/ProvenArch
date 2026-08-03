@@ -30,6 +30,8 @@ export function ArchitectureMap({
   query,
   typeFilter,
   repositoryFilter,
+  ownerFilter,
+  tagFilter,
   onSelect,
 }: {
   view: ArchitectureView;
@@ -38,13 +40,20 @@ export function ArchitectureMap({
   query: string;
   typeFilter?: string;
   repositoryFilter?: string;
+  ownerFilter?: string;
+  tagFilter?: string;
   onSelect: (id?: string) => void;
 }) {
   const [layout, setLayout] = useState<{ nodes: FlowNode[]; edges: FlowEdge[] }>({ nodes: [], edges: [] });
   const [layoutError, setLayoutError] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
   const visible = useMemo(() => {
-    const candidates = view.nodes.filter((node) => (!typeFilter || node.type === typeFilter) && (!repositoryFilter || node.repositories?.includes(repositoryFilter)));
+    const candidates = view.nodes.filter((node) =>
+      (!typeFilter || node.type === typeFilter) &&
+      (!repositoryFilter || node.repositories?.includes(repositoryFilter)) &&
+      (!ownerFilter || node.owner_team_id === ownerFilter) &&
+      (!tagFilter || node.tags?.includes(tagFilter)),
+    );
     if (!normalizedQuery) {
       const included = new Set(candidates.map((node) => node.id));
       return { ...view, nodes: candidates, edges: view.edges.filter((edge) => included.has(edge.from) && included.has(edge.to)) };
@@ -52,7 +61,7 @@ export function ArchitectureMap({
     const matching = new Set(candidates.filter((node) => [node.name, node.id, node.type, node.owner_team_id ?? "", ...(node.tags ?? [])].join(" ").toLowerCase().includes(normalizedQuery)).map((node) => node.id));
     for (const edge of view.edges) if (matching.has(edge.from) || matching.has(edge.to)) { matching.add(edge.from); matching.add(edge.to); }
     return { ...view, nodes: view.nodes.filter((node) => matching.has(node.id)), edges: view.edges.filter((edge) => matching.has(edge.from) && matching.has(edge.to)) };
-  }, [normalizedQuery, repositoryFilter, typeFilter, view]);
+  }, [normalizedQuery, ownerFilter, repositoryFilter, tagFilter, typeFilter, view]);
 
   useEffect(() => {
     let active = true;
