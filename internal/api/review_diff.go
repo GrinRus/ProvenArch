@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,7 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		return
 	}
 	steps := buildRunReviewSteps(runInfo, artifacts, logs, snapshot.RuntimeConfig.Mode)
+	result, recovery := buildRunOutcome(snapshot.Workspace.Path, runInfo, artifacts, steps, logs, previousPromotedRunID(snapshot.Service, runInfo))
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":       runInfo.RunID,
 		"pipeline":     runInfo.Pipeline,
@@ -80,7 +82,221 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		"error_code":   formatOptionalString(runInfo.ErrorCode),
 		"error":        formatOptionalString(runInfo.Error),
 		"steps":        steps,
+		"result":       result,
+		"recovery":     recovery,
+		"progress":     runInfo.Progress,
+		"retry":        runInfo.Retry,
 	})
+}
+
+type runOutcomeSummary struct {
+	State             string            `json:"state"`
+	Summary           string            `json:"summary"`
+	Produced          map[string]int    `json:"produced"`
+	PartialScopes     int               `json:"partial_scopes"`
+	FailedScopes      int               `json:"failed_scopes"`
+	Promotion         runPromotionState `json:"promotion"`
+	RecommendedAction string            `json:"recommended_action"`
+	Coverage          runCoverageState  `json:"coverage"`
+}
+
+type runCoverageState struct {
+	Observed int    `json:"observed"`
+	Missing  int    `json:"missing"`
+	Status   string `json:"status"`
+}
+
+type runPromotionState struct {
+	Changed       bool   `json:"changed"`
+	CurrentUsable bool   `json:"current_usable"`
+	BaselineRunID string `json:"baseline_run_id,omitempty"`
+}
+
+type runRecoverySummary struct {
+	Category         string   `json:"category"`
+	Title            string   `json:"title"`
+	Explanation      string   `json:"explanation"`
+	Impact           string   `json:"impact"`
+	RetainedEvidence string   `json:"retained_evidence"`
+	RecommendedFix   string   `json:"recommended_fix"`
+	CanRetry         bool     `json:"can_retry"`
+	FailedStep       string   `json:"failed_step,omitempty"`
+	FailedScopes     []string `json:"failed_scopes,omitempty"`
+	TechnicalCode    string   `json:"technical_code,omitempty"`
+}
+
+func buildRunOutcome(root string, info orchestrator.RunInfo, artifacts []orchestrator.Artifact, steps []runReviewStepSummary, logs []orchestrator.RunLogEntry, previousBaseline string) (runOutcomeSummary, *runRecoverySummary) {
+	knowledgeRoot := root
+	if info.Status == orchestrator.RunStatusSucceeded && hasArchitectureSnapshot(artifacts) {
+		knowledgeRoot = filepath.Join(root, "reports", "taskruns", info.RunID, "promoted-snapshot")
+	}
+	knowledge := collectKnowledge(knowledgeRoot)
+	semantic := loadRunSemanticSnapshot(root, info.RunID)
+	if info.Status == orchestrator.RunStatusSucceeded && hasArchitectureSnapshot(artifacts) {
+		semantic = loadPromotedSemanticSnapshot(root, info.RunID)
+	}
+	produced := map[string]int{"entities": len(knowledge.Entities), "edges": len(knowledge.Edges), "diagrams": 0, "findings": 0, "questions": 0, "proposals": 0, "artifacts": len(artifacts)}
+	if info.Status != orchestrator.RunStatusSucceeded {
+		produced["entities"], produced["edges"] = 0, 0
+	}
+	for _, artifact := range artifacts {
+		path := strings.ToLower(artifact.Path)
+		switch {
+		case strings.Contains(path, "/diagrams/"):
+			produced["diagrams"]++
+		case strings.Contains(path, "/findings/"):
+			produced["findings"]++
+		case strings.Contains(path, "open-questions"):
+			produced["questions"]++
+		case strings.HasPrefix(path, "proposals/") || strings.Contains(path, "/proposals/"):
+			produced["proposals"]++
+		}
+	}
+	if len(semantic.Findings) > 0 {
+		produced["findings"] = len(semantic.Findings)
+	}
+	if len(semantic.Questions) > 0 {
+		produced["questions"] = len(semantic.Questions)
+	}
+	partial, failed := runScopeCounts(logs)
+	for _, step := range steps {
+		if partial == 0 && step.WarningsCount > 0 {
+			partial++
+		}
+		if failed == 0 && step.State == "failed" {
+			failed++
+		}
+	}
+	state := "failed"
+	summary := "Analysis did not replace the last validated architecture."
+	action := "Review failure"
+	promotionChanged := false
+	currentUsable := len(knowledge.Entities)+len(knowledge.Edges)+len(knowledge.Artifacts) > 0
+	switch info.Status {
+	case orchestrator.RunStatusSucceeded:
+		state, summary, action = "completed", "Validated architecture knowledge is ready to explore.", "explore_architecture"
+		if len(info.Warnings) > 0 || knowledge.Status == "partial" {
+			state, summary, action = "completed_with_gaps", "Architecture is usable, with named evidence gaps that need review.", "review_gaps"
+		}
+		promotionChanged = hasArchitectureSnapshot(artifacts) && (info.RefreshSummary == nil || info.RefreshSummary.Mode != "no_op")
+	case orchestrator.RunStatusCanceled:
+		state, summary, action = "canceled", "Analysis was canceled; retained evidence and the last validated architecture remain available.", "review_or_retry"
+	}
+	baseline := previousBaseline
+	if info.RefreshSummary != nil && strings.TrimSpace(info.RefreshSummary.BaselineRunID) != "" {
+		baseline = info.RefreshSummary.BaselineRunID
+	}
+	coverageStatus := "available"
+	if len(semantic.Coverage.Missing) > 0 {
+		coverageStatus = "partial"
+	} else if len(semantic.Coverage.Observed) == 0 {
+		coverageStatus = "unavailable"
+	}
+	outcome := runOutcomeSummary{State: state, Summary: summary, Produced: produced, PartialScopes: partial, FailedScopes: failed, Promotion: runPromotionState{Changed: promotionChanged, CurrentUsable: currentUsable, BaselineRunID: baseline}, RecommendedAction: action, Coverage: runCoverageState{Observed: len(semantic.Coverage.Observed), Missing: len(semantic.Coverage.Missing), Status: coverageStatus}}
+	if info.Status == orchestrator.RunStatusSucceeded {
+		return outcome, nil
+	}
+	category, title, fix, safeRetry := classifyRecovery(info.ErrorCode)
+	failedScopes := failedScopesFromLogs(logs)
+	if len(failedScopes) == 0 {
+		failedScopes = failedScopesFromError(info.Error)
+	}
+	recovery := &runRecoverySummary{Category: category, Title: title, Explanation: strings.TrimSpace(info.Error), Impact: "The attempted run was not promoted; current architecture remains on the last validator-approved generation.", RetainedEvidence: "Run-scoped artifacts remain available for audit. The retry planner revalidates every reused input before execution.", RecommendedFix: fix, CanRetry: safeRetry && (info.Status == orchestrator.RunStatusFailed || info.Status == orchestrator.RunStatusCanceled), FailedStep: info.CurrentStep, FailedScopes: failedScopes, TechnicalCode: info.ErrorCode}
+	return outcome, recovery
+}
+
+func previousPromotedRunID(service *orchestrator.Service, current orchestrator.RunInfo) string {
+	if service == nil {
+		return ""
+	}
+	candidates := []orchestrator.RunInfo{}
+	for _, run := range service.ListRuns(0) {
+		if run.RunID == current.RunID || run.Status != orchestrator.RunStatusSucceeded || !run.StartedAt.Before(current.StartedAt) {
+			continue
+		}
+		artifacts, _ := service.GetRunArtifacts(run.RunID)
+		if hasArchitectureSnapshot(artifacts) {
+			candidates = append(candidates, run)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].StartedAt.After(candidates[j].StartedAt) })
+	if len(candidates) > 0 {
+		return candidates[0].RunID
+	}
+	return ""
+}
+
+var failedShardPattern = regexp.MustCompile(`(?i)shard\s+"([^"]+)"`)
+
+func failedScopesFromError(message string) []string {
+	set := map[string]struct{}{}
+	for _, match := range failedShardPattern.FindAllStringSubmatch(message, -1) {
+		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+			set[strings.TrimSpace(match[1])] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(set))
+	for scope := range set {
+		result = append(result, scope)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func classifyRecovery(code string) (string, string, string, bool) {
+	lower := strings.ToLower(strings.TrimSpace(code))
+	switch {
+	case strings.Contains(lower, "permission"):
+		return "permission", "Runtime permission is required", "Review the blocked permission and runner policy, then calculate a retry plan.", true
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "stall"):
+		return "timeout", "Analysis stopped making useful progress", "Inspect the last useful artifact progress and provider health, then retry the affected step.", true
+	case strings.Contains(lower, "runner") || strings.Contains(lower, "provider"):
+		return "provider", "The selected provider could not complete the work", "Verify provider readiness or select another configured provider before retrying.", true
+	case strings.Contains(lower, "evidence") || strings.Contains(lower, "citation") || strings.Contains(lower, "artifact_quality"):
+		return "evidence", "Collected evidence is incomplete or unusable", "Inspect the named evidence gap, correct repository scope if needed, then calculate a retry plan.", true
+	case strings.Contains(lower, "contract") || strings.Contains(lower, "validation"):
+		return "contract", "Generated output failed validation", "Inspect the failed artifact contract and retry the affected step after correcting the cause.", true
+	case strings.Contains(lower, "workspace") || strings.Contains(lower, "source"):
+		return "setup", "Workspace or source configuration is not ready", "Open Setup and resolve the named workspace or repository blocker.", true
+	case strings.Contains(lower, "cancel"):
+		return "canceled", "Analysis was canceled", "Review retained work and calculate a retry plan when ready.", true
+	default:
+		return "infrastructure", "Analysis could not complete", "Inspect technical details and logs. Retry is disabled until the failure is classified safely.", false
+	}
+}
+
+func failedScopesFromLogs(logs []orchestrator.RunLogEntry) []string {
+	set := map[string]struct{}{}
+	for _, entry := range logs {
+		if strings.EqualFold(string(entry.Level), "error") || strings.Contains(strings.ToLower(entry.Message), "failed") {
+			if scope := strings.TrimSpace(entry.DomainID); scope != "" {
+				set[scope] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(set))
+	for scope := range set {
+		result = append(result, scope)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func runScopeCounts(logs []orchestrator.RunLogEntry) (int, int) {
+	partial, failed := map[string]struct{}{}, map[string]struct{}{}
+	for _, entry := range logs {
+		scope := strings.TrimSpace(entry.DomainID)
+		if scope == "" {
+			continue
+		}
+		if strings.EqualFold(string(entry.Level), "warning") || strings.EqualFold(string(entry.Level), "warn") {
+			partial[scope] = struct{}{}
+		}
+		if strings.EqualFold(string(entry.Level), "error") || strings.Contains(strings.ToLower(entry.Message), "failed") {
+			failed[scope] = struct{}{}
+		}
+	}
+	return len(partial), len(failed)
 }
 
 func readAllRunLogs(service *orchestrator.Service, runID string) ([]orchestrator.RunLogEntry, error) {

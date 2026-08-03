@@ -2,7 +2,7 @@ import type { StageId } from "./consoleTypes";
 import type { WorkflowDestination } from "./workflowState";
 
 export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
-export type KnowledgeView = "overview" | "atlas" | "entities" | "artifacts";
+export type KnowledgeView = "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
 export type RouteSource = "snapshot" | "current";
 export type ViewerMode = "rendered" | "raw" | "diff";
@@ -22,11 +22,11 @@ export type AppRoute = {
 };
 
 export const destinationPaths: Record<WorkflowDestination, string> = {
-  setup: "/setup", home: "/home", runs: "/runs", knowledge: "/knowledge", changes: "/changes",
+  setup: "/setup", home: "/home", runs: "/runs", knowledge: "/architecture", changes: "/changes",
 };
 
 const setupSteps = new Set<SetupStep>(["workspace", "sources", "brief", "runner", "review"]);
-const knowledgeViews = new Set<KnowledgeView>(["overview", "atlas", "entities", "artifacts"]);
+const knowledgeViews = new Set<KnowledgeView>(["map", "overview", "catalog", "flows", "evidence"]);
 const changesViews = new Set<ChangesView>(["overview", "evidence", "findings", "proposals", "diff", "publish"]);
 const sources = new Set<RouteSource>(["snapshot", "current"]);
 const viewerModes = new Set<ViewerMode>(["rendered", "raw", "diff"]);
@@ -35,7 +35,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
   if (!consoleReady) return { destination: "setup", setupStep: "workspace", invalid: [] };
   const params = new URLSearchParams(location.search);
   const segments = location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  const destination = segments[0] && Object.prototype.hasOwnProperty.call(destinationPaths, segments[0])
+  const destination = segments[0] === "architecture" || segments[0] === "knowledge" ? "knowledge" : segments[0] && Object.prototype.hasOwnProperty.call(destinationPaths, segments[0])
     ? segments[0] as WorkflowDestination
     : "home";
   const invalid: string[] = [];
@@ -50,7 +50,10 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
     else if (segments.length > 1) invalid.push("run");
   }
   if (destination === "knowledge") {
-    route.knowledgeView = enumParam(params, "view", knowledgeViews, "overview", invalid);
+	const legacy = params.get("view");
+	const migrated = legacy === "atlas" ? "map" : legacy === "entities" ? "catalog" : legacy === "artifacts" ? "evidence" : legacy;
+	if (migrated && knowledgeViews.has(migrated as KnowledgeView)) route.knowledgeView = migrated as KnowledgeView;
+	else { route.knowledgeView = "map"; if (legacy) invalid.push("view"); }
     route.source = enumParam(params, "source", new Set<RouteSource>(["current"]), "current", invalid);
     route.entity = textParam(params, "entity");
   }
@@ -71,7 +74,7 @@ export function formatAppRoute(route: AppRoute): string {
   const params = new URLSearchParams();
   if (route.destination === "setup") params.set("step", route.setupStep ?? "workspace");
   if (route.destination === "knowledge") {
-    params.set("view", route.knowledgeView ?? "overview");
+    params.set("view", route.knowledgeView ?? "map");
     params.set("source", "current");
     if (route.entity) params.set("entity", route.entity);
   }

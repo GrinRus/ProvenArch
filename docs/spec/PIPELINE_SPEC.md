@@ -544,3 +544,48 @@ Publish policy:
 - deterministic promoter проверяет schema/semantic/validator gates;
 - обязательного human approve нет;
 - canonical `proposals/*` и `reports/changelog/*` публикуются автоматически только после successful gates and are represented in `final-run-index.json`.
+
+## Operator progress and child-run retry
+
+Analysis run history stores optional structured `progress` and `retry` lineage. Determinate progress
+comes only from canonical pipeline steps and planned units; provider output/heartbeat remains
+activity and cannot advance completion. Terminal state records whether artifacts were validated or
+retained partial. Presentation phases are `provider_working`, `artifact_observed`, `validating`,
+`repairing`, `stalled`, `completed`, `failed` and `canceled`; `last_activity_at` and
+`last_progress_at` remain separate clocks.
+
+Operator retry never mutates a terminal run. Failed/canceled recovery chooses the requested failed
+step and scopes, while a succeeded parent may explicitly rerun a completed step; in both cases the
+planner includes all downstream dependencies. If reusable parent staging is missing it widens to
+the first pipeline step.
+The child copies only closure-approved upstream and validated sibling paths from
+`reports/taskruns/<parent>/staging/**` into its own staging root, rejects symlinks, and invalidates
+the requested/failed scope plus every downstream output. Reused Collect shards are parsed through
+the strict shard-pack contract and rebound to the parent run/shard identity. Findings/Proposals
+retry additionally reparses the aggregated final-run and citation indexes, verifies their parent
+run identity, and requires every indexed staged document to remain a regular file inside that
+parent final root. Planning widens to the first step when these checks fail; execution repeats the
+same checks before copying to close the plan/execution race. A plan hash includes parent artifact
+digests, manifest and current resolved source revisions. Child lineage records parent,
+requested/effective step, scopes and reused inputs before rerunning the normal validator and atomic
+promotion boundary. Copied manifests/indexes/verdict are rebound to child run/path identity and
+hydrated into child execution state; Findings retry removes downstream findings/coverage documents,
+while Proposals retry retains a matching parent `PASS` verdict. Failed child runs leave last-good
+promoted knowledge unchanged.
+
+Every successful promotion also writes an immutable run-scoped `promoted-snapshot` of canonical
+model, Architecture Home, diagrams, findings and coverage. Its version-2 manifest embeds the
+validator-approved semantic snapshot (entities, edges, findings, questions and coverage) plus its
+`semantic_source_run_id`; provider-free no-op refresh inherits baseline semantics without claiming
+new analysis bytes. The Architecture API and Changes comparison do not depend on mutable task
+staging. This snapshot is audit/comparison
+authority for the semantic Changes surface; it never replaces canonical current knowledge and
+never includes raw taskrun history.
+
+`GET /api/architecture` projects this promoted authority into Context/Container/Component/advanced
+Code views. Changes compares entities and edges by stable ID plus normalized value, findings by
+finding ID/value and evidence gaps by normalized gap identity; a changed findings Markdown file is
+not treated as one synthetic finding. Run review exposes terminal outcome, production/coverage
+counts, partial/failed scope counts, previous baseline and promotion decision. Persisted progress
+includes unit breakdown, repair attempt/limit and stall deadline; the UI never derives a percentage
+from stdout or heartbeat activity.

@@ -35,6 +35,9 @@ type FetchMockState = {
   workspaceHealthResponse?: MockJSON;
   workspaceHealthStatus?: number;
   knowledgeResponse?: MockJSON;
+	knowledgeStatus?: number;
+	architectureResponse?: MockJSON;
+	architectureStatus?: number;
 };
 
 function jsonResponse(body: MockJSON, status = 200): Response {
@@ -42,6 +45,12 @@ function jsonResponse(body: MockJSON, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function architecturePayload(): MockJSON {
+  const service = { id: "svc.payments", name: "Payments", type: "service", confidence: 0.94, provenance_kind: "observation", evidence: [{ repo: "payments", path: "src/main.go" }], path: "model/entities/svc.payments.yaml", available_levels: ["context", "container"], child_levels: [], repositories: ["payments"], related_findings: [], related_questions: [] };
+  const view = (level: string, nodes: MockJSON[]) => ({ level, available: nodes.length > 0, unavailable_reason: nodes.length > 0 ? undefined : "No validated detail is available.", nodes, edges: [] });
+  return { version: 1, generated_at: "2026-08-03T10:00:00Z", authority: { mode: "promoted_current", source_run_id: "run-1", freshness: "current" }, status: "available", counts: { entities: 1, edges: 0, evidence: 1, issues: 0 }, views: { context: view("context", [service]), container: view("container", [service]), component: view("component", []), code: view("code", []) }, exports: { home_path: "reports/as-is/overview.md", c4_mermaid_paths: [] }, comparison: { available: false, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, review: { findings: [], questions: [] }, coverage: { observed: ["payments"], missing: [], notes: [] }, artifacts: [{ path: "reports/as-is/overview.md", kind: "report", name: "Architecture Home" }], issues: [] };
 }
 
 function textResponse(body: string, status = 200): Response {
@@ -489,7 +498,11 @@ function createFetchMock(state: FetchMockState = {}) {
         edges: [],
         artifacts: [],
         issues: [],
-      });
+	  }, state.knowledgeStatus ?? 200);
+	}
+
+	if (method === "GET" && url === "/api/architecture" && state.architectureResponse) {
+	  return jsonResponse(state.architectureResponse, state.architectureStatus ?? 200);
     }
 
     if (method === "GET" && url === "/api/runtime/timeouts") {
@@ -1470,7 +1483,7 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    for (const destination of ["Home", "Runs", "Knowledge", "Changes", "Setup"]) {
+    for (const destination of ["Home", "Runs", "Architecture", "Changes", "Setup"]) {
       expect(screen.getByRole("link", { name: destination })).toBeInTheDocument();
     }
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
@@ -1796,9 +1809,21 @@ describe("App", () => {
     await renderConsoleApp("/knowledge?view=entities&entity=svc.missing&source=current");
     expect(await screen.findByTestId("route-notice")).toHaveTextContent("Entity svc.missing is unavailable");
     await waitFor(() => expect(window.location.search).not.toContain("entity="));
-    expect(screen.getByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
+    expect(await screen.findByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
     expect(screen.queryByTestId("knowledge-entity-detail")).not.toBeInTheDocument();
   });
+
+	it("keeps Architecture available when the legacy Knowledge endpoint fails", async () => {
+	  vi.stubGlobal("fetch", createFetchMock({
+		knowledgeStatus: 500,
+		architectureResponse: architecturePayload(),
+	  }));
+	  await renderConsoleApp("/architecture?view=map&entity=svc.payments&source=current");
+	  expect(await screen.findByRole("heading", { name: /^Architecture$/ })).toBeInTheDocument();
+	  expect(await screen.findByTestId("architecture-canvas")).toBeInTheDocument();
+	  expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
+	  expect(window.location.search).toContain("entity=svc.payments");
+	});
 
   it("sanitizes a stale current artifact without falling back to selected-run evidence", async () => {
     vi.stubGlobal("fetch", createFetchMock({
@@ -3835,9 +3860,9 @@ describe("App", () => {
       { timeout: 5_000 },
     );
     const progress = screen.getByTestId("analysis-run-progress");
-    expect(progress).toHaveTextContent("Unknown");
+    expect(progress).toHaveTextContent("failed");
     expect(progress).toHaveTextContent("init.step1.collect");
-    expect(progress).toHaveTextContent("1 / 1");
+    expect(progress).toHaveTextContent("4/5");
     expect(within(progress).getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
 
     const timeline = screen.getByTestId("analysis-run-timeline");
@@ -4811,8 +4836,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("Recovery path");
     expect(recovery).toHaveTextContent("run_partial_failed");
     expect(recovery).toHaveTextContent("refresh.step3.findings");
-    expect(recovery).toHaveTextContent("2");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Retry refresh");
+    expect(recovery).toHaveTextContent("This attempt did not replace the last-good promoted architecture");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
     expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
@@ -4880,7 +4905,8 @@ describe("App", () => {
     await screen.findByTestId("run-status-panel");
 
     const recovery = screen.getByTestId("analysis-failure-recovery");
-    expect(recovery).toHaveTextContent("Provider/tool availability blocked artifact creation");
+    expect(recovery).toHaveTextContent("provider");
+    expect(recovery).toHaveTextContent("provider quota exhausted");
     expect(recovery).toHaveTextContent("refresh.step1.collect");
     const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
     expect(liveDiagnostics).toHaveTextContent("provider check");
@@ -5031,12 +5057,12 @@ describe("App", () => {
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Canceled run");
     expect(recovery).toHaveTextContent("run_canceled");
-    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("Failed step");
     expect(recovery).toHaveTextContent("refresh.step2.asis_docs");
     expect(recovery).toHaveTextContent("The run stopped by request");
-    expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
     fireEvent.click(screen.getByTestId("destination-runs"));
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
@@ -5154,9 +5180,9 @@ describe("App", () => {
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Recovered after restart");
     expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
-    expect(recovery).toHaveTextContent("the reconciled run and its taskrun evidence stay in History");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
     fireEvent.click(screen.getByTestId("destination-runs"));
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");

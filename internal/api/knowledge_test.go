@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
 
 func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
@@ -27,6 +29,26 @@ func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
 	}
 	if len(response.Entities)+len(response.Edges)+len(response.Artifacts)+len(response.Issues) != 0 {
 		t.Fatalf("empty workspace must not invent knowledge: %#v", response)
+	}
+}
+
+func TestArchitectureReviewLinksAndChildDetailAreExplicit(t *testing.T) {
+	knowledge := knowledgeResponse{Status: "available", Entities: []knowledgeEntity{
+		{Entity: contracts.Entity{ID: "svc.payments", Type: "service", Name: "Payments", Provenance: contracts.Provenance{Kind: "observation", Confidence: .9, Evidence: []contracts.Evidence{{Repo: "payments", Path: "README.md"}}}}, Path: "model/entities/svc.payments.yaml"},
+		{Entity: contracts.Entity{ID: "api.payments", Type: "api.http", Name: "Payments API", Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: "payments", Path: "api/openapi.yaml"}}}}, Path: "model/entities/api.payments.yaml"},
+	}, Edges: []knowledgeEdge{{Edge: contracts.Edge{ID: "edge.payments.exposes.api", Type: "exposes", From: "svc.payments", To: "api.payments", Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: "payments", Path: "api/openapi.yaml"}}}}, Path: "model/edges/edge.payments.exposes.api.yaml"}}, Artifacts: []knowledgeArtifact{}, Issues: []knowledgeIssue{}}
+	response := buildArchitectureResponse(knowledge)
+	enrichArchitectureReview(&response, contracts.SemanticSnapshot{
+		Coverage:  contracts.Coverage{Observed: []string{"http api"}, Missing: []string{"owner"}},
+		Findings:  []contracts.Finding{{ID: "finding.owner", Severity: "medium", Title: "Owner missing", RelatedIDs: []string{"svc.payments"}}},
+		Questions: []contracts.Question{{ID: "question.owner", Text: "Who owns Payments?", RelatedIDs: []string{"svc.payments"}}},
+	})
+	node := response.Views["context"].Nodes[0]
+	if len(node.RelatedFindings) != 1 || len(node.RelatedQuestions) != 1 || !architectureContainsString(node.ChildLevels, "component") || !architectureContainsString(node.ChildLevels, "code") {
+		t.Fatalf("architecture review/detail was not linked: %#v", node)
+	}
+	if len(response.Review.Findings) != 1 || len(response.Coverage.Missing) != 1 {
+		t.Fatalf("top-level review/coverage missing: %#v", response)
 	}
 }
 
@@ -92,6 +114,52 @@ func TestKnowledgeRejectsMutatingMethods(t *testing.T) {
 	server.handleKnowledge(recorder, httptest.NewRequest(http.MethodPost, "/api/knowledge", nil))
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestArchitectureReturnsLevelViewsAndEvidenceAuthority(t *testing.T) {
+	server := newTestServer(t)
+	root := server.getWorkspace().Path
+	writeKnowledgeTestFile(t, root, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, root, "model/entities/ext.bank.yaml", "id: ext.bank\ntype: external.system\nname: Bank\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
+	writeKnowledgeTestFile(t, root, "model/edges/edge.payments.calls.bank.yaml", "id: edge.payments.calls.bank\ntype: calls\nfrom: svc.payments\nto: ext.bank\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
+	recorder := httptest.NewRecorder()
+	server.handleArchitecture(recorder, httptest.NewRequest(http.MethodGet, "/api/architecture", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var response architectureResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode architecture: %v", err)
+	}
+	if response.Authority.Mode != evidenceAuthorityPromotedCurrent || response.Status != "available" {
+		t.Fatalf("unexpected authority/status: %#v", response)
+	}
+	if !response.Views["context"].Available || len(response.Views["context"].Nodes) != 2 || len(response.Views["context"].Edges) != 1 {
+		t.Fatalf("unexpected context view: %#v", response.Views["context"])
+	}
+	if response.Counts.Entities != 2 || response.Counts.Edges != 1 {
+		t.Fatalf("unexpected counts: %#v", response.Counts)
+	}
+}
+
+func TestArchitectureComparisonClassifiesSemanticAndReviewChanges(t *testing.T) {
+	root := t.TempDir()
+	currentRoot := filepath.Join(root, "reports", "taskruns", "run-current", "promoted-snapshot")
+	baselineRoot := filepath.Join(root, "reports", "taskruns", "run-baseline", "promoted-snapshot")
+	writeKnowledgeTestFile(t, currentRoot, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments v2\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, currentRoot, "model/entities/svc.users.yaml", "id: svc.users\ntype: service\nname: Users\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
+	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.legacy.yaml", "id: svc.legacy\ntype: service\nname: Legacy\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
+	writeKnowledgeTestFile(t, currentRoot, "architecture-snapshot.json", `{"version":2,"run_id":"run-current","files":[],"semantic":{"coverage":{"missing":["owner"]},"questions":[],"entities":[],"edges":[],"findings":[{"id":"finding.owner","severity":"high","title":"Owner missing","provenance":{"kind":"inference","confidence":0.8}}]}}`)
+	writeKnowledgeTestFile(t, baselineRoot, "architecture-snapshot.json", `{"version":2,"run_id":"run-baseline","files":[],"semantic":{"coverage":{"missing":["owner"]},"questions":[],"entities":[],"edges":[],"findings":[{"id":"finding.owner","severity":"low","title":"Owner missing","provenance":{"kind":"inference","confidence":0.8}}]}}`)
+	comparison := comparePromotedArchitectures(root, "run-current", "run-baseline")
+	entities := comparison.Categories["entities"]
+	if !comparison.Available || len(entities.Added) != 1 || len(entities.Changed) != 1 || len(entities.Removed) != 1 {
+		t.Fatalf("unexpected entity comparison: %#v", comparison)
+	}
+	if len(comparison.Categories["findings"].Changed) != 1 || len(comparison.Categories["gaps"].Changed) != 0 {
+		t.Fatalf("unexpected review comparison: %#v", comparison.Categories)
 	}
 }
 

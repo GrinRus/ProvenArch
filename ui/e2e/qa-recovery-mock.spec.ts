@@ -357,6 +357,29 @@ async function installQARecoveryMock(page: Page): Promise<{ postedQuestions: str
       return;
     }
 
+    if (method === "POST" && url.pathname === "/api/pipeline/runs/run-analysis-succeeded/retry-plan") {
+      const payload = JSON.parse(request.postData() || "{}") as { step_id?: string };
+      const requestedStep = payload.step_id || "init.step4.proposals";
+      const executeSteps = requestedStep === "init.step3.findings"
+        ? ["init.step3.findings", "init.step4.proposals"]
+        : [requestedStep];
+      await route.fulfill({ ...json({
+        parent_run_id: "run-analysis-succeeded",
+        pipeline: "init",
+        requested_step: requestedStep,
+        effective_start_step: requestedStep,
+        requested_scopes: [],
+        effective_scopes: [],
+        reused_inputs: ["init.step0.constitution", "init.step1.collect", "init.step2.asis_docs"],
+        execute_steps: executeSteps,
+        invalidated_steps: executeSteps,
+        estimated_units: executeSteps.length,
+        widened: false,
+        plan_hash: "qa-recovery-plan",
+      }) });
+      return;
+    }
+
     await route.fulfill({ ...json({ ok: true, ignored: apiPath }) });
   });
 
@@ -452,6 +475,70 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await page.getByTestId("qa-retry-run-btn").click();
   await expect(page.getByTestId("qa-answer")).toContainText("checkout-service owns checkout orchestration");
   expect(postedQuestions).toEqual(["Which service owns checkout and what evidence supports that ownership?"]);
+
+  const evidence = [{ repo: "commerce", path: "services/checkout/main.go", lines: { start: 18, end: 42 } }];
+  const checkout = { id: "service.checkout", name: "Checkout", type: "service", owner_team_id: "team-commerce", tags: ["domain:commerce"], confidence: 0.94, provenance_kind: "observed", evidence, path: "model/entities/service.checkout.yaml", available_levels: ["context", "container"], child_levels: ["container", "component", "code"], repositories: ["commerce"], related_findings: ["finding.checkout-timeout"], related_questions: [] };
+  const external = { id: "external.payment", name: "Payment provider", type: "external.system", tags: ["domain:payments-external"], confidence: 0.81, provenance_kind: "observed", evidence, path: "model/entities/external.payment.yaml", available_levels: ["context", "container"], repositories: ["commerce"], related_findings: [], related_questions: [] };
+  const component = { id: "api.checkout", name: "Checkout API", type: "api.http", owner_team_id: "team-commerce", tags: ["domain:commerce"], confidence: 0.91, provenance_kind: "observed", evidence, path: "model/entities/api.checkout.yaml", available_levels: ["component", "code"], repositories: ["commerce"], related_findings: [], related_questions: ["question.checkout-owner"] };
+  const relationship = { id: "edge.checkout-payment", from: checkout.id, to: external.id, type: "calls", name: "Authorizes payment", confidence: 0.89, provenance_kind: "observed", evidence, path: "model/edges/edge.checkout-payment.yaml", repositories: ["commerce"], related_findings: [], related_questions: [] };
+  const architecturePayload = { version: 1, generated_at: "2026-08-03T12:00:00Z", authority: { mode: "promoted_current", source_run_id: "run-analysis-succeeded", freshness: "current" }, status: "available", counts: { entities: 3, edges: 1, evidence: 4, issues: 0 }, views: { context: { level: "context", available: true, nodes: [checkout, external], edges: [relationship] }, container: { level: "container", available: true, nodes: [checkout, external], edges: [relationship] }, component: { level: "component", available: true, nodes: [component], edges: [] }, code: { level: "code", available: true, nodes: [component], edges: [] } }, exports: { home_path: "reports/as-is/overview.md", c4_mermaid_paths: ["reports/diagrams/c4-context.mmd"] }, comparison: { available: false, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, review: { findings: [{ id: "finding.checkout-timeout", severity: "medium", title: "Checkout timeout is not bounded", related_ids: [checkout.id] }], questions: [{ id: "question.checkout-owner", text: "Who owns the public API?", related_ids: [component.id] }] }, coverage: { observed: ["checkout"], missing: ["timeout policy"] }, artifacts: [], issues: [] };
+  await page.route("**/api/architecture", async (route) => route.fulfill({ ...json(architecturePayload) }));
+	await page.route("**/api/knowledge", async (route) => route.fulfill({ ...json({ error: { code: "legacy_unavailable", message: "legacy Knowledge projection is unavailable" } }, 500) }));
+  await page.setViewportSize({ width: 1440, height: 980 });
+  await page.goto("/architecture/map");
+  await expect(page.getByTestId("architecture-canvas")).toBeVisible();
+  await page.getByText("Checkout", { exact: true }).first().click();
+  await expect(page.getByTestId("knowledge-entity-detail")).toContainText("team-commerce");
+  await expect(page.getByTestId("knowledge-entity-detail")).toContainText("finding.checkout-timeout");
+  await page.getByText("Advanced", { exact: true }).click();
+  await page.getByRole("button", { name: "Code for selected service" }).click();
+	await expect(page.locator(".segmented-control details")).not.toHaveAttribute("open", "");
+  await expect(page.getByText("Checkout API", { exact: true }).first()).toBeVisible();
+  await expect(page.locator(".architecture-breadcrumb")).toContainText("Checkout / Code");
+  await page.getByRole("button", { name: "System context", exact: true }).click();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await page.getByRole("combobox", { name: "Filter by owner" }).selectOption("team-commerce");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Filter by owner" }).selectOption("");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await page.getByRole("combobox", { name: "Filter by domain or tag" }).selectOption("domain:commerce");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Filter by domain or tag" }).selectOption("");
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  const keyboardNode = page.locator(".react-flow__node .architecture-node-button").first();
+  await expect(keyboardNode).toBeVisible();
+  await keyboardNode.press("Enter");
+  await expect(page.getByTestId("knowledge-entity-detail")).toBeVisible();
+  await page.getByRole("button", { name: "Component", exact: true }).click();
+  await expect(page.getByText("Checkout API", { exact: true }).first()).toBeVisible();
+  await page.getByRole("combobox", { name: "Filter by type" }).selectOption("api.http");
+  await captureEvidenceScreenshot(page, "architecture-map-desktop.png");
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+  await expect(page.getByRole("heading", { name: "Architecture", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.evaluate(() => { document.documentElement.style.zoom = ""; });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".architecture-mobile-list")).toBeVisible();
+  await expect(page.getByText("Checkout API", { exact: true }).last()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "architecture-map-mobile.png");
+  await page.setViewportSize({ width: 1440, height: 980 });
+  await page.getByTestId("destination-home").click();
+  await expect(page.locator(".home-map-preview")).toContainText("Checkout");
+  await captureEvidenceScreenshot(page, "home-architecture-desktop.png");
+	await page.goto("/runs/run-analysis-succeeded");
+	const targetedRerun = page.getByTestId("targeted-rerun-panel");
+	await expect(targetedRerun).toBeVisible();
+	await expect(targetedRerun).toContainText("Repeat only the work you need");
+	await targetedRerun.getByLabel("Start from step").selectOption("init.step3.findings");
+	await expect(targetedRerun.getByLabel("Start from step")).toHaveValue("init.step3.findings");
+	await targetedRerun.getByRole("button", { name: "Review rerun plan" }).click();
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Invalidated dependency closure");
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Every dependent downstream result must be rebuilt");
+	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("2 estimated execution unit(s)");
+	await expectNoHorizontalOverflow(page);
+	await captureEvidenceScreenshot(page, "successful-targeted-rerun-desktop.png");
   await expectNoCriticalAxeViolations(page);
-  expect(consoleErrors).toEqual([]);
+	expect(consoleErrors.filter((message) => !message.includes("Failed to load resource: the server responded with a status of 500"))).toEqual([]);
 });

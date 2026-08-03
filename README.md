@@ -91,8 +91,18 @@ The core pipeline is:
 3. Assemble the as-is Architecture Home, coverage report, and derived model.
 4. Validate citations, identities, findings, and the final artifact graph.
 5. Promote validator-approved artifacts and prepare proposal packages.
-6. Review the result in `Home`, `Runs`, `Knowledge`, and `Changes`, then publish through an explicit
+6. Review the result in `Home`, `Runs`, `Architecture`, and `Changes`, then publish through an explicit
    Git action.
+
+The UI treats the validator-promoted architecture as the product outcome. `Architecture` provides
+an interactive read-only Context/Container/Component explorer, service-scoped advanced Code view,
+structured findings/questions and evidence drill-down, while
+`Runs` separates provider activity from durable step/shard progress and offers dependency-aware
+child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
+runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
+revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain
+their validator-approved semantic payload, so Changes compares individual findings and gaps rather
+than Markdown files. Mermaid diagrams remain deterministic workspace exports.
 
 Runtime drafts stay in run-scoped staging directories. Stable workspace paths are updated only after
 their contract and validator gates pass. A later `refresh` records source revisions and explains

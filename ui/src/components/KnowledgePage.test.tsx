@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
@@ -21,21 +21,21 @@ const partialKnowledge: KnowledgeResponse = {
 };
 
 describe("KnowledgePage", () => {
-  it("renders partial validated atlas without deriving topology from artifact names", () => {
+  it("renders partial architecture flow without deriving topology from artifact names", () => {
     const onOpenArtifact = vi.fn();
-    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="atlas" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={onOpenArtifact} />);
-    expect(screen.getByText("Payments (svc.payments)")).toBeInTheDocument();
+    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="flows" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={onOpenArtifact} />);
+    expect(screen.getByText("Payments")).toBeInTheDocument();
     expect(screen.getByText("calls")).toBeInTheDocument();
-    expect(screen.getByText(/File names are never interpreted/)).toBeInTheDocument();
-    expect(screen.getByText(/Atlas is incomplete/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "model/edges/edge.payments.calls.users.yaml" }));
+    expect(screen.getByText(/Only model edges with valid endpoints/)).toBeInTheDocument();
+    expect(screen.getByText(/Architecture is usable with gaps/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Evidence" })[1]);
     expect(onOpenArtifact).toHaveBeenCalledWith("model/edges/edge.payments.calls.users.yaml");
   });
 
   it("provides a searchable keyboard-accessible entity table", () => {
     const onEntityChange = vi.fn();
-    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="entities" onViewChange={vi.fn()} onEntityChange={onEntityChange} onOpenArtifact={vi.fn()} />);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search entities" }), { target: { value: "users" } });
+    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="catalog" onViewChange={vi.fn()} onEntityChange={onEntityChange} onOpenArtifact={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "users" } });
     expect(screen.getByRole("button", { name: "Users" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Payments" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Users" }));
@@ -45,7 +45,6 @@ describe("KnowledgePage", () => {
   it("shows unavailable without inventing a current workspace graph", () => {
     render(<KnowledgePage knowledge={{ ...partialKnowledge, status: "unavailable", entities: [], edges: [], artifacts: [], issues: [] }} loading={false} error="" view="overview" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
     expect(screen.getByText(/No promoted knowledge is available/)).toBeInTheDocument();
-    expect(screen.getAllByText("0", { selector: "strong" })).toHaveLength(4);
   });
 
   it("shows advisory current-workspace health without presenting it as historical evidence", () => {
@@ -55,13 +54,33 @@ describe("KnowledgePage", () => {
         workspaceHealth={{ version: 1, generated_at: "2026-07-26T00:00:00Z", status: "warn", summary: { info: 1, warning: 2, error: 0 }, items: [] }}
         loading={false}
         error=""
-        view="overview"
+        view="evidence"
         onViewChange={vi.fn()}
         onEntityChange={vi.fn()}
         onOpenArtifact={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("knowledge-workspace-health")).toHaveTextContent("Workspace Health: warn");
-    expect(screen.getByTestId("knowledge-workspace-health")).toHaveTextContent("Advisory only");
+    expect(screen.getByText(/Workspace health: warn/)).toHaveTextContent("2 warnings");
+  });
+
+  it("filters the map and mobile fallback by canonical owner and domain tags", () => {
+    const filteredKnowledge: KnowledgeResponse = {
+      ...partialKnowledge,
+      entities: [
+        { ...partialKnowledge.entities[0], owner_team_id: "team-payments", tags: ["domain:commerce"] },
+        { ...partialKnowledge.entities[1], owner_team_id: "team-identity", tags: ["domain:identity"] },
+      ],
+    };
+    render(<KnowledgePage knowledge={filteredKnowledge} loading={false} error="" view="map" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
+    const mobileList = screen.getByLabelText("Architecture elements");
+
+    fireEvent.change(screen.getByLabelText("Filter by owner"), { target: { value: "team-payments" } });
+    expect(within(mobileList).getByRole("button", { name: /Payments/ })).toBeInTheDocument();
+    expect(within(mobileList).queryByRole("button", { name: /Users/ })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Filter by owner"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Filter by domain or tag"), { target: { value: "domain:identity" } });
+    expect(within(mobileList).getByRole("button", { name: /Users/ })).toBeInTheDocument();
+    expect(within(mobileList).queryByRole("button", { name: /Payments/ })).not.toBeInTheDocument();
   });
 });

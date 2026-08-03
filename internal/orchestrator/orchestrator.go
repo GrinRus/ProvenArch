@@ -130,6 +130,39 @@ type RunInfo struct {
 	Error              string                         `json:"error,omitempty"`
 	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
 	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
+	Progress           *RunProgress                   `json:"progress,omitempty"`
+	Retry              *RetryLineage                  `json:"retry,omitempty"`
+}
+
+type RunProgress struct {
+	Phase           string   `json:"phase"`
+	CompletedSteps  int      `json:"completed_steps"`
+	TotalSteps      int      `json:"total_steps"`
+	CurrentStep     string   `json:"current_step,omitempty"`
+	ExpectedResult  string   `json:"expected_result,omitempty"`
+	PlannedUnits    int      `json:"planned_units,omitempty"`
+	RunningUnits    int      `json:"running_units,omitempty"`
+	SucceededUnits  int      `json:"succeeded_units,omitempty"`
+	FailedUnits     int      `json:"failed_units,omitempty"`
+	CurrentScopes   []string `json:"current_scopes,omitempty"`
+	StartedAt       string   `json:"started_at"`
+	ElapsedMS       int64    `json:"elapsed_ms"`
+	LastActivityAt  string   `json:"last_activity_at,omitempty"`
+	LastProgressAt  string   `json:"last_progress_at,omitempty"`
+	ArtifactState   string   `json:"artifact_state,omitempty"`
+	RepairAttempt   int      `json:"repair_attempt,omitempty"`
+	RepairLimit     int      `json:"repair_limit,omitempty"`
+	StallDeadlineAt string   `json:"stall_deadline_at,omitempty"`
+}
+
+type RetryLineage struct {
+	ParentRunID        string   `json:"parent_run_id"`
+	Reason             string   `json:"reason"`
+	RequestedStep      string   `json:"requested_step"`
+	EffectiveStartStep string   `json:"effective_start_step"`
+	RequestedScopes    []string `json:"requested_scopes,omitempty"`
+	EffectiveScopes    []string `json:"effective_scopes,omitempty"`
+	ReusedInputs       []string `json:"reused_inputs,omitempty"`
 }
 
 type RefreshSummary struct {
@@ -151,11 +184,18 @@ type Artifact struct {
 }
 
 type RunRequest struct {
-	Workspace      workspace.Root
-	Pipeline       Pipeline
-	NonInteractive bool
-	Question       string
-	Intent         RunIntent
+	Workspace            workspace.Root
+	Pipeline             Pipeline
+	NonInteractive       bool
+	Question             string
+	Intent               RunIntent
+	ResumeFromStep       string
+	RetryParentRunID     string
+	RetryReason          string
+	RetryRequestedStep   string
+	RetryRequestedScopes []string
+	RetryScopes          []string
+	RetryReusedInputs    []string
 }
 
 type PendingRunInfo struct {
@@ -189,6 +229,8 @@ type runHistoryItem struct {
 	Error              string                         `json:"error,omitempty"`
 	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
 	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
+	Progress           *RunProgress                   `json:"progress,omitempty"`
+	Retry              *RetryLineage                  `json:"retry,omitempty"`
 	Artifacts          []Artifact                     `json:"artifacts,omitempty"`
 }
 
@@ -366,7 +408,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	startedAt := now
 	initialArtifacts := []Artifact{}
 	initialWarnings := []string{}
-	resumeFromStep := ""
+	resumeFromStep := strings.TrimSpace(request.ResumeFromStep)
 	resolvedStepProviders, resolvedStepProvidersErr := s.ResolveStepProviderProfile(request.Workspace.Manifest)
 	runLogMessage := "run started"
 	runLogFields := map[string]any{
@@ -376,7 +418,9 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		startedAt = resumedRecord.info.StartedAt.UTC()
 		initialArtifacts = append([]Artifact(nil), resumedRecord.artifacts...)
 		initialWarnings = append([]string(nil), resumedRecord.info.Warnings...)
-		resumeFromStep = resumeStepForCurrentStep(request.Pipeline, resumedRecord.info.CurrentStep)
+		if resumeFromStep == "" {
+			resumeFromStep = resumeStepForCurrentStep(request.Pipeline, resumedRecord.info.CurrentStep)
+		}
 		runLogMessage = "run resumed after restart"
 		runLogFields["previous_current_step"] = resumedRecord.info.CurrentStep
 		runLogFields["resume_from_step"] = resumeFromStep
@@ -391,6 +435,18 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		RuntimeMode:   s.runtimeMode,
 		StepProviders: map[string]string{},
 		Warnings:      append([]string(nil), initialWarnings...),
+	}
+	initialInfo.Progress = newRunProgress(request.Pipeline, startedAt, resumeFromStep)
+	if strings.TrimSpace(request.RetryParentRunID) != "" {
+		initialInfo.Retry = &RetryLineage{
+			ParentRunID:        strings.TrimSpace(request.RetryParentRunID),
+			Reason:             strings.TrimSpace(request.RetryReason),
+			RequestedStep:      retryRequestedStep(request),
+			EffectiveStartStep: resumeFromStep,
+			RequestedScopes:    retryRequestedScopes(request),
+			EffectiveScopes:    append([]string(nil), request.RetryScopes...),
+			ReusedInputs:       append([]string(nil), request.RetryReusedInputs...),
+		}
 	}
 	if resumed && strings.TrimSpace(resumedRecord.info.RuntimeMode) != "" {
 		initialInfo.RuntimeMode = resumedRecord.info.RuntimeMode
@@ -446,6 +502,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	if request.Pipeline == PipelineQA {
 		return s.runQAWithID(ctx, request, runID, initialInfo, initialArtifacts, resolvedStepProviders)
+	}
+	if strings.TrimSpace(request.RetryParentRunID) != "" && strings.TrimSpace(resumeFromStep) != "" {
+		if err := copyRetryStaging(request.Workspace, request.RetryParentRunID, runID, resumeFromStep, request.RetryScopes); err != nil {
+			return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("prepare retry inputs: %w", err), err, "run failed: retry input preparation", nil)
+		}
 	}
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)
@@ -543,6 +604,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		initialInfo.Status = RunStatusSucceeded
 		initialInfo.FinishedAt = &finishedAt
 		initialInfo.CurrentStep = ""
+		initialInfo.Progress = terminalRunProgress(initialInfo.Progress, RunStatusSucceeded, finishedAt)
+		semanticRunID := runID
+		if initialInfo.RefreshSummary != nil && strings.TrimSpace(initialInfo.RefreshSummary.BaselineRunID) != "" {
+			semanticRunID = initialInfo.RefreshSummary.BaselineRunID
+		}
+		if snapshotArtifact, snapshotErr := persistPromotedArchitectureSnapshotFrom(request.Workspace, runID, semanticRunID, finishedAt); snapshotErr != nil {
+			initialInfo.Warnings = append(initialInfo.Warnings, fmt.Sprintf("promoted architecture snapshot failed: %v", snapshotErr))
+		} else if snapshotArtifact != nil {
+			initialArtifacts = append(initialArtifacts, *snapshotArtifact)
+		}
 		if err := s.storeRun(runRecord{info: initialInfo, artifacts: append([]Artifact(nil), initialArtifacts...)}); err != nil {
 			return initialInfo, initialArtifacts, err
 		}
@@ -590,6 +661,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			resolvedRepoPaths: map[string]string{},
 			stepProviders:     resolvedStepProviders.Effective,
 			permissionProfile: resolvedPermissions.Effective,
+			retryScopes:       append([]string(nil), request.RetryScopes...),
 		},
 		pipelineQualityState: pipelineQualityState{
 			runtimeStepMetrics:      []runtimeStepQuality{},
@@ -610,6 +682,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			continue
 		}
 		execution.resolvedRepoPaths[name] = path
+	}
+	if strings.TrimSpace(request.RetryParentRunID) != "" {
+		if err := execution.hydrateRetryInputs(); err != nil {
+			return s.finishExecutionFailure(runID, initialInfo, &execution, fmt.Errorf("hydrate retry inputs: %w", err))
+		}
 	}
 	if refreshImpact != nil {
 		execution.refreshIntentContext = buildRefreshIntentContext(ctx, *refreshImpact, execution.resolvedRepoPaths)
@@ -644,11 +721,41 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			return initialInfo, initialArtifacts, err
 		}
 	}
+	progressTracker := newRunProgressTracker(request.Pipeline, startedAt, initialInfo.CurrentStep)
+	execution.progressTracker = progressTracker
+	var progressPersistMu sync.Mutex
+	var lastOutputProgressPersist time.Time
 	execution.onLog = func(entry RunLogEntry) {
 		if strings.TrimSpace(entry.StepID) == "" {
 			entry.StepID = execution.stepStatus.CurrentStep
 		}
 		s.appendRunLog(runID, entry)
+		progressSnapshot := progressTracker.observe(entry)
+		if !isPersistedRunProgressEvent(entry) {
+			return
+		}
+		if entry.Kind == RunLogKindRuntimeOutput {
+			progressPersistMu.Lock()
+			if !lastOutputProgressPersist.IsZero() && entry.Timestamp.Sub(lastOutputProgressPersist) < 5*time.Second {
+				progressPersistMu.Unlock()
+				return
+			}
+			lastOutputProgressPersist = entry.Timestamp
+			progressPersistMu.Unlock()
+		}
+		if current, ok := s.GetRun(runID); ok && current.Status != RunStatusQueued && current.Status != RunStatusRunning {
+			return
+		}
+		progress := initialInfo
+		progress.Status = RunStatusRunning
+		progress.CurrentStep = execution.stepStatus.CurrentStep
+		progress.StepProviders = execution.stepProviders.StringMap()
+		progress.Warnings = append([]string(nil), execution.warnings...)
+		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
+		progress.Progress = progressSnapshot
+		if err := s.storeRun(runRecord{info: progress, artifacts: append([]Artifact(nil), execution.artifacts...)}); err != nil {
+			execution.recordProgressPersistenceError(err)
+		}
 	}
 	execution.logInfo("", "", "runtime execution profile resolved", map[string]any{
 		"strategy":                     execution.executionProfile.Strategy,
@@ -670,6 +777,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
+		progress.Progress = progressTracker.beginStep(stepID, request.RetryScopes, s.clock().UTC())
 		if err := s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
@@ -685,6 +793,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		progress.StepProviders = execution.stepProviders.StringMap()
 		progress.Warnings = append([]string(nil), execution.warnings...)
 		progress.PendingPermissions = append([]acpruntime.PermissionRequest(nil), pending...)
+		progress.Progress = progressTracker.snapshot()
 		if err := s.storeRun(runRecord{
 			info:      progress,
 			artifacts: append([]Artifact(nil), execution.artifacts...),
@@ -760,6 +869,19 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	return s.finishExecutionSuccess(runID, initialInfo, &execution)
 }
 
+func retryRequestedStep(request RunRequest) string {
+	if value := strings.TrimSpace(request.RetryRequestedStep); value != "" {
+		return value
+	}
+	return strings.TrimSpace(request.ResumeFromStep)
+}
+func retryRequestedScopes(request RunRequest) []string {
+	if request.RetryRequestedScopes != nil {
+		return append([]string(nil), request.RetryRequestedScopes...)
+	}
+	return append([]string(nil), request.RetryScopes...)
+}
+
 type pipelineExecution struct {
 	runID                       string
 	pipeline                    Pipeline
@@ -784,6 +906,7 @@ type pipelineExecution struct {
 type pipelineRunProgressState struct {
 	startedAt              time.Time
 	stepStatus             RunInfo
+	progressTracker        *runProgressTracker
 	onStep                 func(stepID string)
 	onLog                  func(entry RunLogEntry)
 	onPermissions          func([]acpruntime.PermissionRequest)
@@ -814,6 +937,7 @@ type pipelineRuntimeState struct {
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
+	retryScopes              []string
 }
 
 type pipelineQualityState struct {

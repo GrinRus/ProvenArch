@@ -1,0 +1,28 @@
+{
+  "architecture": {
+    "version": 1,
+    "authority": {"mode": "promoted_current", "source_run_id": "run-124", "freshness": "current"},
+    "status": "partial",
+    "counts": {"entities": 2, "edges": 1, "evidence": 3, "issues": 1},
+    "review": {"findings": [{"id": "finding.owner", "severity": "medium", "title": "Owner is unknown"}], "questions": []},
+    "coverage": {"observed": ["payments"], "missing": ["owner"], "notes": []},
+    "comparison": {"available": true, "baseline_run_id": "run-123", "current_run_id": "run-124", "categories": {"entities": {"added": [], "changed": [], "removed": []}, "edges": {"added": [], "changed": [], "removed": []}, "findings": {"added": [{"id": "finding.owner", "name": "Owner is unknown", "path": "reports/findings/findings.md"}], "changed": [], "removed": []}, "gaps": {"added": [{"id": "gap.example", "name": "owner", "path": "reports/coverage/summary.md"}], "changed": [], "removed": []}}}
+  },
+  "progress": {
+    "phase": "repairing", "completed_steps": 1, "total_steps": 5,
+    "current_step": "init.step1.collect", "expected_result": "Validated evidence shards",
+    "planned_units": 4, "running_units": 1, "succeeded_units": 2, "failed_units": 1,
+    "current_scopes": ["payments"], "started_at": "2026-08-03T10:00:00Z", "elapsed_ms": 180000,
+    "last_activity_at": "2026-08-03T10:02:58Z", "last_progress_at": "2026-08-03T10:02:00Z",
+    "artifact_state": "artifact_observed", "repair_attempt": 1, "repair_limit": 2,
+    "stall_deadline_at": "2026-08-03T10:05:00Z"
+  },
+  "retry_plan": {
+    "parent_run_id": "run-124", "pipeline": "init", "requested_step": "init.step1.collect",
+    "effective_start_step": "init.step1.collect", "requested_scopes": ["payments"],
+    "effective_scopes": ["payments"], "reused_inputs": ["validated_sibling_collect_scopes"],
+    "execute_steps": ["init.step1.collect", "init.step2.asis_docs", "init.step3.findings", "init.step4.proposals"],
+    "invalidated_steps": ["init.step1.collect", "init.step2.asis_docs", "init.step3.findings", "init.step4.proposals"],
+    "estimated_units": 4, "widened": false, "plan_hash": "example-plan-hash"
+  }
+}

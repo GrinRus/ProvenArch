@@ -91,6 +91,34 @@ func TestDocFirstStageThenPromoteFlow(t *testing.T) {
 	}
 }
 
+func TestProposalRetryHydratesValidatedParentAndPromotesChild(t *testing.T) {
+	ws := createWorkspace(t)
+	service := NewService(WithRunner(docflowCustomProposalRunner{}), WithClock(func() time.Time { return time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC) }))
+	parent, _, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineInit, NonInteractive: true})
+	if err != nil || parent.Status != RunStatusSucceeded {
+		t.Fatalf("prepare parent: %#v, %v", parent, err)
+	}
+	child, artifacts, err := service.Run(context.Background(), RunRequest{Workspace: ws, Pipeline: PipelineInit, NonInteractive: true, ResumeFromStep: "init.step4.proposals", RetryParentRunID: parent.RunID, RetryReason: "test", RetryRequestedStep: "init.step4.proposals", RetryReusedInputs: []string{"init.step0.constitution", "init.step1.collect", "init.step2.asis_docs", "init.step3.findings"}})
+	if err != nil || child.Status != RunStatusSucceeded {
+		t.Fatalf("proposal retry: %#v, %v", child, err)
+	}
+	if child.Retry == nil || child.Retry.ParentRunID != parent.RunID || child.Retry.EffectiveStartStep != "init.step4.proposals" {
+		t.Fatalf("child lineage missing: %#v", child.Retry)
+	}
+	if index := readRunFinalRunIndex(t, ws.Path, child.RunID); index.RunID != child.RunID {
+		t.Fatalf("child final index was not rebound: %#v", index)
+	}
+	foundSnapshot := false
+	for _, artifact := range artifacts {
+		if artifact.Kind == architectureSnapshotKind {
+			foundSnapshot = true
+		}
+	}
+	if !foundSnapshot {
+		t.Fatal("successful retry did not pass the normal promotion snapshot boundary")
+	}
+}
+
 func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 	t.Parallel()
 

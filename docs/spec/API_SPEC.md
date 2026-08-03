@@ -329,6 +329,31 @@ Typed issue codes: `knowledge.entity_malformed`, `knowledge.entity_duplicate`,
 
 **405** — любой метод кроме `GET`.
 
+### GET `/api/architecture`
+Возвращает read-only projection текущей validator-promoted архитектуры для product UI. Authority
+всегда `promoted_current`; historical taskrun artifacts не подмешиваются. Response содержит
+`authority.source_run_id/promoted_at/freshness`, counts entities/edges/evidence/issues и
+`views.context|container|component|code` с normalized nodes/edges. Node включает provenance,
+confidence, repository/evidence refs, related findings/questions, source YAML и доступные уровни
+drill-down. `child_levels` перечисляет только validated lower levels, а
+`detail_unavailable_reason` объясняет отсутствие детализации. Top-level `review.findings[]`,
+`review.questions[]` и `coverage` берутся из semantic payload immutable promoted-snapshot manifest
+v2 (legacy snapshots могут read-only fallback-нуться на source-run index); их `related_ids`
+проецируются в `related_findings`/`related_questions` node и edge. `exports` даёт явные ссылки на
+Architecture Home и deterministic C4 Mermaid. После двух
+promoted generations `comparison` классифицирует added/changed/removed entities и edges по stable
+ID/value, findings по finding ID/value и coverage gaps по детерминированной normalized identity
+относительно предыдущего promoted snapshot. Изменение одного Markdown файла не превращается в один
+synthetic finding/gap.
+
+UI filters use only canonical response fields: `repositories`, `type`, `owner_team_id` and exact
+`tags` values (including provider-authored domain tags when present). The UI does not infer a domain
+from filenames, names or repository paths when the model does not provide one.
+
+Пустой или partial model остаётся явно `unavailable`/`partial`; endpoint не выводит topology из
+имён файлов и не синтезирует отсутствующие C4 levels. Mermaid files остаются в promoted artifact
+inventory как экспорт, а не как source интерактивного графа.
+
 ### GET `/api/workspace/manifest`
 Возвращает текущее содержимое `workspace.yaml`.
 
@@ -740,6 +765,41 @@ fallback rather than retrying an unbounded read.
 - `artifact_write_failed`
 
 ## 4) Pipeline endpoints
+
+Run detail и review-summary могут включать optional backward-compatible поля `progress`, `retry`,
+`result` и `recovery`. `progress` хранит determinate pipeline/unit state отдельно от provider
+activity; heartbeat/stdout не превращаются в completion percentage. `result` описывает operator
+outcome и promotion effect, а `recovery` — category, impact, retained evidence и safe retry action.
+Persisted `progress.elapsed_ms` вычисляется от durable `started_at`; terminal snapshot фиксирует
+окончательное значение. `result.coverage` содержит observed/missing counts и explicit status, а
+partial/failed scopes агрегируются из structured log domain IDs. Unknown error taxonomy запрещает
+retry (`can_retry=false`) до безопасной классификации.
+
+### POST `/api/pipeline/runs/{run_id}/retry-plan`
+Для любого terminal analysis run (`succeeded|failed|canceled`) рассчитывает безопасную dependency
+closure. Для failed/canceled UI по умолчанию передаёт failed step/scopes; для succeeded оператор
+явно выбирает завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
+Response содержит reused inputs, effective start step, downstream
+invalidations, estimated units, widening reason и `plan_hash`. Если parent staging отсутствует или
+любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
+validation, либо агрегированные final/citation indexes и их staged documents не проходят strict
+parse, parent identity и containment validation, planner явно расширяет retry до первого pipeline step.
+`estimated_units` — execution units: для scoped Collect он включает выбранные shard scopes и
+downstream steps, поэтому UI не должен подписывать это поле как количество pipeline steps. UI
+обязан отдельно показать reuse, execute closure, `invalidated_steps`, effective scope и причину
+dependency closure до запуска child run.
+
+### POST `/api/pipeline/runs/{run_id}/retry`
+Принимает исходные `step_id`, `scope_ids[]` и обязательный `plan_hash`. Backend повторно вычисляет
+plan; любое изменение source revisions, workspace manifest, любого файла parent staging,
+parent artifacts/status/session
+возвращает `409 retry_plan_stale`. Success
+создаёт новый child run с immutable parent lineage. Child копирует из parent `staging` только
+upstream/sibling inputs, разрешённые effective closure и повторно прошедшие validation непосредственно
+перед copy. Backend rebind-ит manifest/index/verdict identity к child run и гидратирует validated
+aggregate state до возобновления шага; requested/failed и downstream paths
+инвалидируются. Raw output/logs/history не копируются. После полного downstream closure действует
+обычный validator/atomic promotion gate. Active run возвращает `409 run_active`.
 
 ### POST `/api/pipeline/init`
 ### POST `/api/pipeline/refresh`

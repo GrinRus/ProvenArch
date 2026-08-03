@@ -407,3 +407,24 @@ client execution invariants covered by deterministic UI tests.
 - Только parsed fields задают topology; filename-derived IDs/edges запрещены.
 - Malformed/unreadable/broken-reference файл фиксируется в typed `issues[]` и переводит общий `status` в `partial`, не скрывая валидные записи.
 - Contract examples: `examples/knowledge-current-workspace.example.json` и `fixtures/api/knowledge-current-workspace.json`.
+
+## 15) Architecture, progress and retry read models
+
+- `GET /api/architecture`, run `progress/result/recovery/retry` and retry-plan responses are
+  transient API read models documented in `docs/spec/API_SPEC.md`; canonical `schemas/*` remain
+  unchanged.
+- Architecture topology is projected only from validated entity/edge contracts and includes source
+  paths/evidence, explicit export links and prior-promoted semantic comparison; Mermaid is
+  inventory/export, never a parsed source of truth.
+- Run-history additions are optional for backward compatibility. Progress uses known step/unit
+  counters, persisted elapsed time and separate activity/useful-progress clocks. Retry lineage records
+  immutable parent ID, requested/effective start and reused inputs; retry planning is admitted only
+  for terminal `succeeded|failed|canceled` analysis runs, validates reusable shard contracts plus
+  aggregated final/citation indexes and hashes every parent staging file.
+  Architecture review and coverage are sourced from the immutable version-2 promoted snapshot
+  manifest and retain explicit related IDs. The manifest version is an internal audit format, not a
+  new canonical workspace model schema; `semantic_source_run_id` preserves no-op baseline lineage.
+- Contract behavior is protected by Go API/orchestrator tests and TypeScript response types; unknown
+  legacy fields remain safely absent rather than inferred.
+- Combined public-shape example/fixture: `examples/outcome-workflow.example.json` and
+  `fixtures/api/outcome-workflow.json`.

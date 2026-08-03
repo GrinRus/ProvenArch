@@ -25,6 +25,7 @@ func (s *Service) failRunBeforeExecution(
 		failedInfo.Warnings = append([]string(nil), warnings...)
 	}
 	failedInfo.FinishedAt = &finishedAt
+	failedInfo.Progress = terminalRunProgress(failedInfo.Progress, failedInfo.Status, finishedAt)
 	if persistErr := s.storeRun(runRecord{
 		info:      failedInfo,
 		artifacts: append([]Artifact(nil), artifacts...),
@@ -58,6 +59,7 @@ func (s *Service) finishExecutionFailure(runID string, initialInfo RunInfo, exec
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
 	failedInfo.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	failedInfo.FinishedAt = &finishedAt
+	failedInfo.Progress = terminalRunProgress(execution.currentRunProgress(), failedInfo.Status, finishedAt)
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
 		RunStatusFailed,
 		failedInfo.ErrorCode,
@@ -96,6 +98,7 @@ func (s *Service) finishPartialExecutionFailure(runID string, initialInfo RunInf
 	failedInfo.Warnings = append([]string(nil), execution.warnings...)
 	failedInfo.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	failedInfo.FinishedAt = &finishedAt
+	failedInfo.Progress = terminalRunProgress(execution.currentRunProgress(), failedInfo.Status, finishedAt)
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(
 		RunStatusFailed,
 		failedInfo.ErrorCode,
@@ -129,10 +132,16 @@ func (s *Service) finishExecutionSuccess(runID string, initialInfo RunInfo, exec
 	finishedAt := s.clock().UTC()
 	succeeded := initialInfo
 	succeeded.Status = RunStatusSucceeded
-	succeeded.CurrentStep = execution.stepStatus.CurrentStep
+	succeeded.CurrentStep = ""
 	succeeded.Warnings = append([]string(nil), execution.warnings...)
 	succeeded.PendingPermissions = append([]acpruntime.PermissionRequest(nil), execution.pendingPermissions...)
 	succeeded.FinishedAt = &finishedAt
+	succeeded.Progress = terminalRunProgress(execution.currentRunProgress(), succeeded.Status, finishedAt)
+	if snapshotArtifact, snapshotErr := persistPromotedArchitectureSnapshot(execution.workspace, runID, finishedAt); snapshotErr != nil {
+		succeeded.Warnings = append(succeeded.Warnings, fmt.Sprintf("promoted architecture snapshot failed: %v", snapshotErr))
+	} else if snapshotArtifact != nil {
+		execution.addArtifacts(*snapshotArtifact)
+	}
 	if qualityArtifact, qualityErr := execution.writeRunQualitySummary(RunStatusSucceeded, "", "", runFailureClassification{}); qualityErr == nil {
 		execution.addArtifacts(qualityArtifact)
 	} else {
