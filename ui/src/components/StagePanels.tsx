@@ -7,6 +7,7 @@ import { ModalDialog } from "./ModalDialog";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
+import { RecoveryPanel, RunResultPanel, StructuredRunProgress } from "./RunOutcome";
 import { TabNav, tabPanelProps } from "./TabNav";
 import { ArtifactPathButton, StatusBadge } from "./ConsolePrimitives";
 import { analysisScopeSummary } from "../lib/analysisScope";
@@ -21,7 +22,6 @@ import {
   type QARunResponse,
 } from "../lib/qaApi";
 import { providerDisplayLabel, runtimeDisplayLabel } from "../lib/runtimeDisplay";
-import { runReviewErrorCount, runReviewWarningCount } from "../lib/runReviewMetrics";
 import { formatTimestamp, isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable, parseTimeOrMin, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 import type {
   Artifact,
@@ -1452,6 +1452,7 @@ export type AnalysisStageProps = {
   onCancelRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
   onOpenArtifact: (path: string) => void;
+	onOpenArchitecture: () => void;
 };
 
 export function AnalysisStagePanel({
@@ -1482,6 +1483,7 @@ export function AnalysisStagePanel({
   onCancelRun,
   onSelectRun,
   onOpenArtifact,
+	onOpenArchitecture,
 }: AnalysisStageProps) {
   const blockerDetailsRef = useRef<HTMLElement>(null);
   const [selectedStepID, setSelectedStepID] = useState("");
@@ -1500,12 +1502,7 @@ export function AnalysisStagePanel({
     null;
   const shardRows = buildAnalysisShardRows(runStatus, runLogs, artifacts, setupRuntime, setupRuntimeProvider);
   const issueRows = shardRows.filter((row) => row.status === "failed" || row.status === "warning");
-  const blockerRows = shardRows.filter((row) => row.status === "failed");
   const liveDiagnostics = buildAnalysisLiveDiagnostics(runStatus, runLogs, shardRows, artifacts, selectedRunWarnings);
-  const runtimeLabel = runtimeDisplayLabel(setupRuntime, setupRuntimeProvider, { compact: true });
-  const warningCount = runReviewWarningCount(runStatus, runReviewSummary);
-  const errorCount = runReviewErrorCount(runStatus, runReviewSummary);
-  const artifactCount = artifacts.length;
   const showActiveLiveDiagnostics = selectedRunIsActive && runStatus?.status !== "failed" && liveDiagnostics.hasTelemetry;
 
   const focusBlockerDetails = useCallback(() => {
@@ -1585,31 +1582,11 @@ export function AnalysisStagePanel({
         onConfirm={() => { setQueueConfirmationOpen(false); onRunPipeline("refresh", "queue"); }}
       />
 
-      <AnalysisRunProgress
-        runId={runId}
-        runStatus={runStatus}
-        runtimeLabel={runtimeLabel}
-        warningCount={warningCount}
-        errorCount={errorCount}
-        stepTimeline={stepTimeline}
-        blockerCount={blockerRows.length}
-        actionLabel={detailMode ? "Review blocker" : "Open run details"}
-        onReviewBlocker={detailMode ? handleReviewBlocker : () => { if (runId) onSelectRun(runId); }}
-      />
+	  <StructuredRunProgress runStatus={runStatus} review={runReviewSummary} onReviewDetails={handleReviewBlocker} />
       {detailMode ? (
         <div className="run-studio-body">
-          <AnalysisFailureRecovery
-            busy={busy}
-            runStatus={runStatus}
-            runtimeLabel={runtimeLabel}
-            warningCount={warningCount}
-            issueCount={issueRows.length}
-            artifactCount={artifactCount}
-            pendingPermissionCount={pendingPermissions.length}
-            liveDiagnostics={liveDiagnostics}
-            onRetry={onRunPipeline}
-            onReviewBlocker={handleReviewBlocker}
-          />
+		  <RunResultPanel review={runReviewSummary} onExploreArchitecture={onOpenArchitecture} />
+		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} busy={busy} onRetryStarted={onSelectRun} onReviewDetails={handleReviewBlocker} />
           <AnalysisRunTimeline steps={stepTimeline} />
           <AnalysisStepReview
             steps={reviewSteps}
@@ -1632,7 +1609,7 @@ export function AnalysisStagePanel({
           <details className="advanced-block runs-diagnostics-drawer" data-testid="runs-diagnostics-drawer" open={showActiveLiveDiagnostics || pendingPermissions.length > 0}>
             <summary>Technical diagnostics</summary>
             <p className="hint">Shards, raw runtime output, permissions and provider telemetry for this run.</p>
-            {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
+            {liveDiagnostics.hasTelemetry ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
             <AnalysisShardTable rows={shardRows} />
             <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
             <PendingPermissionsTable pendingPermissions={pendingPermissions} />
@@ -1723,7 +1700,7 @@ const canonicalAnalysisSteps = [
   { suffix: "step4.proposals", label: "Proposals" },
 ];
 
-function AnalysisRunProgress({
+export function AnalysisRunProgress({
   runId,
   runStatus,
   runtimeLabel,
@@ -1795,7 +1772,7 @@ function AnalysisRunProgress({
   );
 }
 
-function AnalysisFailureRecovery({
+export function AnalysisFailureRecovery({
   busy,
   runStatus,
   runtimeLabel,

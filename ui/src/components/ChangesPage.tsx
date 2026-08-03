@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { RunListItem } from "../lib/appContracts";
+import type { ArchitectureComparison, RunListItem } from "../lib/appContracts";
 import type { ChangesView } from "../lib/appRoutes";
 import { buildChangeReviewModel } from "../features/workbench/viewModels";
 import { Button, PageHeader, RouteTabs } from "./SemanticPrimitives";
@@ -14,6 +14,7 @@ export function ChangesPage({
   onViewChange,
   onSelectChangeReview,
   onOpenRunStudio,
+  architectureComparison,
   children,
 }: {
   runs: RunListItem[];
@@ -24,6 +25,7 @@ export function ChangesPage({
   onViewChange: (view: ChangesView) => void;
   onSelectChangeReview: (id: string) => void;
   onOpenRunStudio: (id: string) => void;
+  architectureComparison?: ArchitectureComparison;
   children: ReactNode;
 }) {
   const reviewCandidates = buildChangeReviewModel(runs, selectedRunID, selectedEvidenceStatus);
@@ -41,6 +43,7 @@ export function ChangesPage({
         items={(["overview", "findings", "proposals", "diff"] as ChangesView[]).map((id) => ({ id, label: label(id), testId: `stage-${id === "overview" ? "review" : id}` }))}
         onChange={onViewChange}
       />
+      {(view === "overview" || view === "findings") ? <SemanticArchitectureChanges comparison={architectureComparison} focus={view === "findings" ? "review" : "all"} /> : null}
       {view === "overview" ? (
         <aside className="panel review-packages" data-testid="review-packages">
           <h2>Review packages</h2>
@@ -52,6 +55,12 @@ export function ChangesPage({
       {children}
     </section>
   );
+}
+
+function SemanticArchitectureChanges({ comparison, focus }: { comparison?: ArchitectureComparison; focus: "all" | "review" }) {
+  if (!comparison?.available) return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Promoted baseline comparison</p><h2>Semantic comparison is not available yet</h2><p>{comparison?.reason || "Run and promote a second architecture generation to establish a baseline."}</p></div></section>;
+  const categories = focus === "review" ? (["findings", "gaps"] as const) : (["entities", "edges", "findings", "gaps"] as const);
+  return <section className="panel semantic-changes" data-testid="semantic-changes"><header><div><p className="eyebrow">Promoted baseline comparison</p><h2>What changed in the architecture</h2><p><code>{comparison.baseline_run_id}</code> → <code>{comparison.current_run_id}</code></p></div><span className="status ok">Semantic model</span></header><div className="semantic-change-grid">{categories.map((category) => { const changes = comparison.categories[category]; return <article key={category}><h3>{category}</h3><dl><div><dt>Added</dt><dd>{changes.added.length}</dd></div><div><dt>Changed</dt><dd>{changes.changed.length}</dd></div><div><dt>Removed</dt><dd>{changes.removed.length}</dd></div></dl>{[...changes.added.map((item) => ({ ...item, state: "added" })), ...changes.changed.map((item) => ({ ...item, state: "changed" })), ...changes.removed.map((item) => ({ ...item, state: "removed" }))].length > 0 ? <ul>{[...changes.added.map((item) => ({ ...item, state: "added" })), ...changes.changed.map((item) => ({ ...item, state: "changed" })), ...changes.removed.map((item) => ({ ...item, state: "removed" }))].slice(0, 6).map((item) => <li key={`${item.state}:${item.id}`}><span className={`change-state ${item.state}`}>{item.state}</span><strong>{item.name || item.id}</strong></li>)}</ul> : <p className="empty-state">No semantic changes.</p>}</article>; })}</div></section>;
 }
 
 function refreshLabel(run: RunListItem): string {

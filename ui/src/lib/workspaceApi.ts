@@ -1,5 +1,5 @@
 import { fetchJSON } from "./api";
-import type { BaselineBundleResponse, KnowledgeResponse, ValidateResponse, WorkspaceHealthResponse } from "./appContracts";
+import type { ArchitectureResponse, BaselineBundleResponse, KnowledgeResponse, ValidateResponse, WorkspaceHealthResponse } from "./appContracts";
 
 export async function loadWorkspaceManifest(): Promise<string> {
   const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
@@ -17,6 +17,38 @@ export async function loadWorkspaceHealthAPI(): Promise<WorkspaceHealthResponse>
 
 export async function loadKnowledgeAPI(): Promise<KnowledgeResponse> {
   return fetchJSON<KnowledgeResponse>("/api/knowledge");
+}
+
+export async function loadArchitectureAPI(): Promise<ArchitectureResponse> {
+  const payload = await fetchJSON<Partial<ArchitectureResponse>>("/api/architecture");
+  const levels = ["context", "container", "component", "code"] as const;
+  if (!payload.views || !levels.every((level) => {
+    const view = payload.views?.[level];
+    return view && Array.isArray(view.nodes) && Array.isArray(view.edges);
+  })) {
+    throw new Error("Architecture response is incomplete");
+  }
+  return payload as ArchitectureResponse;
+}
+
+export function architectureFromKnowledge(knowledge: KnowledgeResponse): ArchitectureResponse {
+  const levels: ArchitectureResponse["views"] = {} as ArchitectureResponse["views"];
+  const visible = (level: keyof ArchitectureResponse["views"], type: string) => level === "context" ? ["service", "external.system", "team"].includes(type) : level === "container" ? ["service", "datastore", "external.system", "repo", "event.topic"].includes(type) : level === "component" ? ["api.http", "api.grpc", "event.topic"].includes(type) : ["api.http", "api.grpc"].includes(type);
+  for (const level of ["context", "container", "component", "code"] as const) {
+    const included = new Set(knowledge.entities.filter((entity) => visible(level, entity.type)).map((entity) => entity.id));
+    const nodes = knowledge.entities.filter((entity) => included.has(entity.id)).map((entity) => ({ id: entity.id, name: entity.name, type: entity.type, owner_team_id: entity.owner_team_id, tags: entity.tags, confidence: entity.provenance.confidence, provenance_kind: entity.provenance.kind, evidence: Array.isArray(entity.provenance.evidence) ? entity.provenance.evidence as never : [], path: entity.path, available_levels: (["context", "container", "component", "code"] as const).filter((candidate) => visible(candidate, entity.type)), repositories: evidenceRepositories(entity.provenance.evidence), related_findings: [], related_questions: [] }));
+    const edges = knowledge.edges.filter((edge) => included.has(edge.from) && included.has(edge.to)).map((edge) => ({ id: edge.id, from: edge.from, to: edge.to, type: edge.type, name: edge.name, confidence: edge.provenance.confidence, provenance_kind: edge.provenance.kind, evidence: Array.isArray(edge.provenance.evidence) ? edge.provenance.evidence as never : [], path: edge.path, repositories: evidenceRepositories(edge.provenance.evidence), related_findings: [], related_questions: [] }));
+    levels[level] = { level, available: nodes.length > 0, unavailable_reason: nodes.length > 0 ? undefined : "No validated entities are available for this C4 level.", nodes, edges };
+  }
+  const evidence = knowledge.entities.reduce((sum, entity) => sum + (Array.isArray(entity.provenance.evidence) ? entity.provenance.evidence.length : 0), 0) + knowledge.edges.reduce((sum, edge) => sum + (Array.isArray(edge.provenance.evidence) ? edge.provenance.evidence.length : 0), 0);
+  const empty = () => ({ added: [], changed: [], removed: [] });
+  return { version: 1, generated_at: knowledge.generated_at, authority: { mode: "promoted_current", freshness: "unknown" }, status: knowledge.status, counts: { entities: knowledge.entities.length, edges: knowledge.edges.length, evidence, issues: knowledge.issues.length }, views: levels, exports: { home_path: knowledge.artifacts.some((item) => item.path === "reports/as-is/overview.md") ? "reports/as-is/overview.md" : undefined, c4_mermaid_paths: knowledge.artifacts.filter((item) => item.path.startsWith("reports/diagrams/") && item.path.endsWith(".mmd")).map((item) => item.path).sort() }, comparison: { available: false, reason: "A comparison will be available after two promoted architecture generations.", categories: { entities: empty(), edges: empty(), findings: empty(), gaps: empty() } }, artifacts: knowledge.artifacts, issues: knowledge.issues };
+}
+
+function evidenceRepositories(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const repos = value.map((item) => typeof item === "object" && item !== null && "repo" in item ? String((item as { repo?: unknown }).repo ?? "").trim() : "").filter(Boolean);
+  return Array.from(new Set(repos)).sort();
 }
 
 export async function loadArtifactText(path: string): Promise<string | null> {

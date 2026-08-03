@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
 import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
 import { GuidedSetupPage, GuidedSetupReview, HomePage, RunsPage } from "./components/ProductPages";
-import { KnowledgePage } from "./components/KnowledgePage";
 import { ModalDialog } from "./components/ModalDialog";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
@@ -15,6 +14,8 @@ import {
   SourceStagePanel,
 } from "./components/StagePanels";
 import { WizardContractPanel } from "./components/WizardContractPanel";
+
+const KnowledgePage = lazy(() => import("./components/KnowledgePage").then((module) => ({ default: module.KnowledgePage })));
 import {
   runtimeExecutionLabels,
   runtimePermissionLabels,
@@ -23,6 +24,7 @@ import {
   runtimeTimeoutKeys,
   runtimeTimeoutLabels,
   type GuidedRepo,
+	type ArchitectureResponse,
   type KnowledgeResponse,
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
@@ -43,7 +45,7 @@ import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
-import { loadArtifactText, loadKnowledgeAPI, loadWorkspaceHealthAPI } from "./lib/workspaceApi";
+import { architectureFromKnowledge, loadArchitectureAPI, loadArtifactText, loadKnowledgeAPI, loadWorkspaceHealthAPI } from "./lib/workspaceApi";
 import type { QAProposalDraftResponse } from "./lib/qaApi";
 
 export default function App() {
@@ -56,6 +58,7 @@ export default function App() {
   const [askReturnRoute, setAskReturnRoute] = useState<AppRoute | null>(null);
   const [createdQAProposal, setCreatedQAProposal] = useState<QAProposalDraftResponse | null>(null);
   const [knowledge, setKnowledge] = useState<KnowledgeResponse | null>(null);
+	const [architecture, setArchitecture] = useState<ArchitectureResponse | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [knowledgeError, setKnowledgeError] = useState("");
   const [currentArtifactPath, setCurrentArtifactPath] = useState("");
@@ -362,12 +365,14 @@ export default function App() {
     setKnowledgeStatus("loading");
     setKnowledgeError("");
     try {
-      const response = await loadKnowledgeAPI();
+	  const response = await loadKnowledgeAPI();
       setKnowledge(response);
+	  try { setArchitecture(await loadArchitectureAPI()); } catch { setArchitecture(architectureFromKnowledge(response)); }
       setKnowledgeStatus("loaded");
       return response;
     } catch (requestError) {
       setKnowledge(null);
+	  setArchitecture(null);
       setKnowledgeStatus("error");
       setKnowledgeError(requestError instanceof Error ? requestError.message : "knowledge failed to load");
       return null;
@@ -730,7 +735,7 @@ export default function App() {
       void refreshKnowledge();
       return;
     }
-    if (route.entity && knowledgeStatus === "loaded" && !knowledge?.entities.some((entity) => entity.id === route.entity)) {
+    if (route.entity && knowledgeStatus === "loaded" && !knowledge?.entities.some((entity) => entity.id === route.entity) && !knowledge?.edges.some((edge) => edge.id === route.entity)) {
       setRouteNotice(`Entity ${route.entity} is unavailable in the current workspace.`);
       navigateRoute({ ...route, entity: undefined, invalid: [] }, true);
     }
@@ -972,6 +977,7 @@ export default function App() {
 			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
 			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
 			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
+			architectureComparison: architecture?.comparison,
 		  }}
 		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, runLogs, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
 		  proposals={{
@@ -1006,21 +1012,22 @@ export default function App() {
 		/>
 	  ) : null}
 	  {destination === "home" ? (
-		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} />
+		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} architecture={architecture} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })} />
 	  ) : null}
 	  {destination === "knowledge" ? (
-		<KnowledgePage
+		<Suspense fallback={<section className="panel stage-panel"><p className="status info">Loading Architecture Explorer…</p></section>}><KnowledgePage
+		  architecture={architecture}
 		  knowledge={knowledge}
 		  workspaceHealth={workspaceHealthReport}
 		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
 		  error={knowledgeError}
-		  view={route.knowledgeView ?? "overview"}
+		  view={route.knowledgeView ?? "map"}
 		  selectedEntityID={route.entity}
 		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
-		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: "entities", source: "current", entity, invalid: [] })}
+		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "map", source: "current", entity, invalid: [] })}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
 		  onOpenRuns={() => handleDestinationChange("runs")}
-		/>
+		/></Suspense>
 	  ) : null}
 
       {destination === "setup" ? <GuidedSetupPage step={setupStep} onStepChange={handleSetupStepChange}>
@@ -1148,6 +1155,7 @@ export default function App() {
           onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRunInRuns(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
+		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })}
         />
         </RunsPage>
       ) : null}

@@ -1,5 +1,5 @@
 import { fetchJSON, getErrorMessage } from "./api";
-import type { RunListResponse, RunReviewSummaryResponse, RunSnapshotResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
+import type { RetryPlanResponse, RunListResponse, RunReviewSummaryResponse, RunSnapshotResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
 
 export async function listPipelineRuns(limit = 100, init?: RequestInit): Promise<RunListResponse> {
   return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`, init);
@@ -59,4 +59,20 @@ export async function requestRunCancel(runId: string): Promise<CancelRunResponse
     return { status: response.status, payload } as CancelRunResponse;
   }
   throw new Error(getErrorMessage(payload, "failed to cancel selected run"));
+}
+
+export async function calculateRetryPlan(runId: string, stepId?: string, scopeIds: string[] = []): Promise<RetryPlanResponse> {
+  return fetchJSON<RetryPlanResponse>(`/api/pipeline/runs/${encodeURIComponent(runId)}/retry-plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step_id: stepId, scope_ids: scopeIds }),
+  });
+}
+
+export async function startTargetedRetry(runId: string, plan: RetryPlanResponse): Promise<RunStartResponse & { parent_run_id: string }> {
+  return fetchJSON<RunStartResponse & { parent_run_id: string }>(`/api/pipeline/runs/${encodeURIComponent(runId)}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step_id: plan.requested_step, scope_ids: plan.requested_scopes, plan_hash: plan.plan_hash }),
+  });
 }

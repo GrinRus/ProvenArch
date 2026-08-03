@@ -1470,7 +1470,7 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    for (const destination of ["Home", "Runs", "Knowledge", "Changes", "Setup"]) {
+    for (const destination of ["Home", "Runs", "Architecture", "Changes", "Setup"]) {
       expect(screen.getByRole("link", { name: destination })).toBeInTheDocument();
     }
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
@@ -1796,7 +1796,7 @@ describe("App", () => {
     await renderConsoleApp("/knowledge?view=entities&entity=svc.missing&source=current");
     expect(await screen.findByTestId("route-notice")).toHaveTextContent("Entity svc.missing is unavailable");
     await waitFor(() => expect(window.location.search).not.toContain("entity="));
-    expect(screen.getByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
+    expect(await screen.findByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
     expect(screen.queryByTestId("knowledge-entity-detail")).not.toBeInTheDocument();
   });
 
@@ -3835,9 +3835,9 @@ describe("App", () => {
       { timeout: 5_000 },
     );
     const progress = screen.getByTestId("analysis-run-progress");
-    expect(progress).toHaveTextContent("Unknown");
+    expect(progress).toHaveTextContent("failed");
     expect(progress).toHaveTextContent("init.step1.collect");
-    expect(progress).toHaveTextContent("1 / 1");
+    expect(progress).toHaveTextContent("4/5");
     expect(within(progress).getByTestId("analysis-review-blocker-btn")).not.toBeDisabled();
 
     const timeline = screen.getByTestId("analysis-run-timeline");
@@ -4811,8 +4811,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("Recovery path");
     expect(recovery).toHaveTextContent("run_partial_failed");
     expect(recovery).toHaveTextContent("refresh.step3.findings");
-    expect(recovery).toHaveTextContent("2");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Retry refresh");
+    expect(recovery).toHaveTextContent("This attempt did not replace the last-good promoted architecture");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
     expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
@@ -4880,7 +4880,8 @@ describe("App", () => {
     await screen.findByTestId("run-status-panel");
 
     const recovery = screen.getByTestId("analysis-failure-recovery");
-    expect(recovery).toHaveTextContent("Provider/tool availability blocked artifact creation");
+    expect(recovery).toHaveTextContent("provider");
+    expect(recovery).toHaveTextContent("provider quota exhausted");
     expect(recovery).toHaveTextContent("refresh.step1.collect");
     const liveDiagnostics = screen.getByTestId("analysis-live-diagnostics");
     expect(liveDiagnostics).toHaveTextContent("provider check");
@@ -5031,12 +5032,12 @@ describe("App", () => {
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Canceled run");
     expect(recovery).toHaveTextContent("run_canceled");
-    expect(recovery).toHaveTextContent("Stopped step");
+    expect(recovery).toHaveTextContent("Failed step");
     expect(recovery).toHaveTextContent("refresh.step2.asis_docs");
     expect(recovery).toHaveTextContent("The run stopped by request");
-    expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
     fireEvent.click(screen.getByTestId("destination-runs"));
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
@@ -5154,9 +5155,9 @@ describe("App", () => {
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Recovered after restart");
     expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
-    expect(recovery).toHaveTextContent("the reconciled run and its taskrun evidence stay in History");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
+    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
+    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
     fireEvent.click(screen.getByTestId("destination-runs"));
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");

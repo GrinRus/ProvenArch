@@ -136,6 +136,86 @@ export type KnowledgeResponse = {
   issues: KnowledgeIssue[];
 };
 
+export type ArchitectureLevel = "context" | "container" | "component" | "code";
+
+export type ArchitectureNode = {
+  id: string;
+  name: string;
+  type: string;
+  owner_team_id?: string;
+  tags?: string[];
+  confidence: number;
+  provenance_kind: string;
+  evidence?: Array<{ repo: string; path: string; ref?: string; lines?: { start: number; end: number } }>;
+  path: string;
+  available_levels?: ArchitectureLevel[];
+  repositories?: string[];
+  related_findings?: string[];
+  related_questions?: string[];
+};
+
+export type ArchitectureEdge = {
+  id: string;
+  from: string;
+  to: string;
+  type: string;
+  name?: string;
+  confidence: number;
+  provenance_kind: string;
+  evidence?: ArchitectureNode["evidence"];
+  path: string;
+  repositories?: string[];
+  related_findings?: string[];
+  related_questions?: string[];
+};
+
+export type ArchitectureView = {
+  level: ArchitectureLevel;
+  available: boolean;
+  unavailable_reason?: string;
+  nodes: ArchitectureNode[];
+  edges: ArchitectureEdge[];
+};
+
+export type ArchitectureResponse = {
+  version: number;
+  generated_at: string;
+  authority: { mode: "promoted_current"; source_run_id?: string; promoted_at?: string; freshness: "current" | "recent" | "stale" | "unknown" };
+  status: "available" | "partial" | "unavailable";
+  counts: { entities: number; edges: number; evidence: number; issues: number };
+  views: Record<ArchitectureLevel, ArchitectureView>;
+  exports?: { home_path?: string; c4_mermaid_paths: string[] };
+  comparison?: ArchitectureComparison;
+  artifacts: KnowledgeArtifact[];
+  issues: KnowledgeIssue[];
+};
+
+export type ArchitectureChangeItem = { id: string; name: string; path?: string };
+export type ArchitectureChangeSet = { added: ArchitectureChangeItem[]; changed: ArchitectureChangeItem[]; removed: ArchitectureChangeItem[] };
+export type ArchitectureComparison = { available: boolean; baseline_run_id?: string; current_run_id?: string; reason?: string; categories: Record<"entities" | "edges" | "findings" | "gaps", ArchitectureChangeSet> };
+
+export type RunProgress = {
+  phase: "queued" | "provider_working" | "artifact_observed" | "validating" | "repairing" | "stalled" | "completed" | "succeeded" | "failed" | "canceled";
+  completed_steps: number;
+  total_steps: number;
+  current_step?: string;
+  expected_result?: string;
+  planned_units?: number;
+  running_units?: number;
+  succeeded_units?: number;
+  failed_units?: number;
+  current_scopes?: string[];
+  started_at: string;
+  last_activity_at?: string;
+  last_progress_at?: string;
+  artifact_state?: string;
+  repair_attempt?: number;
+  repair_limit?: number;
+  stall_deadline_at?: string;
+};
+
+export type RetryLineage = { parent_run_id: string; reason: string; requested_step: string; effective_start_step: string; requested_scopes?: string[]; reused_inputs?: string[] };
+
 export type RunStartResponse = {
   run_id: string;
   status: string;
@@ -156,6 +236,8 @@ export type RunStatusResponse = {
   error?: string | null;
   superseded_by_run_id?: string | null;
   refresh_summary?: RefreshSummary | null;
+  progress?: RunProgress | null;
+  retry?: RetryLineage | null;
 };
 
 export type RefreshSummary = {
@@ -186,6 +268,8 @@ export type RunListItem = {
   superseded_by_run_id?: string | null;
   refresh_summary?: RefreshSummary | null;
   authoritative_index?: boolean;
+  progress?: RunProgress | null;
+  retry?: RetryLineage | null;
 };
 
 export type RuntimePermissionRequest = {
@@ -291,7 +375,13 @@ export type RunReviewSummaryResponse = {
   error_code?: string | null;
   error?: string | null;
   steps: RunReviewStep[];
+  progress?: RunProgress | null;
+  retry?: RetryLineage | null;
+  result?: { state: "completed" | "completed_with_gaps" | "failed" | "canceled"; summary: string; produced: Record<string, number>; partial_scopes: number; failed_scopes: number; promotion: { changed: boolean; current_usable: boolean; baseline_run_id?: string }; recommended_action: string };
+  recovery?: { category: string; title: string; explanation: string; impact: string; retained_evidence: string; recommended_fix: string; can_retry: boolean; failed_step?: string; failed_scopes?: string[]; technical_code?: string } | null;
 };
+
+export type RetryPlanResponse = { parent_run_id: string; pipeline: string; requested_step: string; effective_start_step: string; requested_scopes: string[]; reused_inputs: string[]; execute_steps: string[]; invalidated_steps: string[]; estimated_units: number; widened: boolean; widen_reason?: string; plan_hash: string };
 
 export type GitDiffFile = {
   path: string;

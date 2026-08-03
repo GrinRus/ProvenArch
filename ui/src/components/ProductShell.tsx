@@ -22,7 +22,7 @@ type ProductShellProps = {
 const destinations: Array<{ id: WorkflowDestination; label: string }> = [
   { id: "home", label: "Home" },
   { id: "runs", label: "Runs" },
-  { id: "knowledge", label: "Knowledge" },
+  { id: "knowledge", label: "Architecture" },
   { id: "changes", label: "Changes" },
 ];
 
