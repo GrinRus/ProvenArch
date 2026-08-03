@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { RunListItem } from "../lib/appContracts";
 import type { ChangesView } from "../lib/appRoutes";
 import { buildChangeReviewModel } from "../features/workbench/viewModels";
-import { PageHeader, RouteTabs } from "./SemanticPrimitives";
+import { Button, PageHeader, RouteTabs } from "./SemanticPrimitives";
 
 export function ChangesPage({
   runs,
@@ -29,8 +29,18 @@ export function ChangesPage({
   const reviewCandidates = buildChangeReviewModel(runs, selectedRunID, selectedEvidenceStatus);
   return (
     <section className="changes-page" data-testid="changes-page">
-      <PageHeader title="Changes" purpose="Historical review packages stay bound to their run snapshot; publication state is evaluated from the current workspace." source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? `Run snapshot · ${selectedRunID}` : "Choose a review package"} />
-      <RouteTabs label="Change Review views" value={view} items={(["overview", "evidence", "findings", "proposals", "diff", "publish"] as ChangesView[]).map((id) => ({ id, label: label(id), testId: `stage-${id === "overview" ? "review" : id}` }))} onChange={onViewChange} />
+      <PageHeader
+        title="Architecture changes"
+        purpose="Understand what changed, inspect supporting evidence and prepare the workspace for publication."
+        source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? `Run snapshot · ${selectedRunID}` : "Choose a review package"}
+        action={<Button tone="primary" data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>{view === "publish" ? "Publication review" : "Continue to publish"}</Button>}
+      />
+      <RouteTabs
+        label="Change Review views"
+        value={view}
+        items={(["overview", "findings", "proposals", "diff"] as ChangesView[]).map((id) => ({ id, label: label(id), testId: `stage-${id === "overview" ? "review" : id}` }))}
+        onChange={onViewChange}
+      />
       {view === "overview" ? (
         <aside className="panel review-packages" data-testid="review-packages">
           <h2>Review packages</h2>

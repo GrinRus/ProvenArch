@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { Dispatch } from "react";
 
 import type { RunCoordination, RunListItem, RunStatusResponse } from "../lib/appContracts";
@@ -52,6 +52,7 @@ export function useRunActions({
   fetchArtifacts,
 }: RunActionsContext) {
   const runStatusRequest = useRequestGate("run-status");
+  const selectionSequenceRef = useRef(0);
 
   const loadRunList = useCallback(
     async (limit = 100): Promise<RunListItem[]> => {
@@ -65,7 +66,7 @@ export function useRunActions({
   );
 
   const fetchRunStatus = useCallback(
-    async (id: string, allowMissing = false): Promise<RunStatusResponse | null> => {
+    async (id: string, allowMissing = false, selectionIsCurrent?: () => boolean): Promise<RunStatusResponse | null> => {
       const token = runStatusRequest.begin(`${id}:${allowMissing ? "allow-missing" : "strict"}`);
       try {
         const typed = await getPipelineRunStatus(id, allowMissing, { signal: token.signal });
@@ -76,7 +77,7 @@ export function useRunActions({
           return null;
         }
         setRunStatus(typed);
-        if (finalStatuses.has(typed.status)) {
+        if (finalStatuses.has(typed.status) && (!selectionIsCurrent || selectionIsCurrent())) {
           await fetchArtifacts(id);
         }
         return typed;
@@ -99,15 +100,23 @@ export function useRunActions({
         silentErrors?: boolean;
       }
     ) => {
+      const selectionSequence = ++selectionSequenceRef.current;
+      const selectionIsCurrent = () => selectionSequenceRef.current === selectionSequence;
       try {
         setRunActionStatus("");
         setRunID(id);
         setRunStatus(null);
         resetRunLogs();
         clearArtifacts();
-        const status = await fetchRunStatus(id);
+        const status = await fetchRunStatus(id, false, selectionIsCurrent);
+        if (!selectionIsCurrent()) {
+          return;
+        }
         if (!status || !finalStatuses.has(status.status)) {
           await fetchArtifacts(id);
+        }
+        if (!selectionIsCurrent()) {
+          return;
         }
         await fetchRunLogs(id, true);
         if (status && finalStatuses.has(status.status)) {
@@ -166,7 +175,7 @@ export function useRunActions({
   });
 
   const handleRunPipeline = useCallback(
-    async (pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<boolean> => {
+    async (pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<string | null> => {
       setBusy(true);
       setError(null);
       setRunActionStatus("");
@@ -182,7 +191,7 @@ export function useRunActions({
         if (intent === "queue" && coordination.active_run_id) {
           await loadRunList(100);
           setRunActionStatus(`Refresh ${payload.run_id} queued; the selected evidence remains unchanged.`);
-          return true;
+          return payload.run_id;
         }
         clearArtifacts();
         resetRunLogs();
@@ -194,14 +203,14 @@ export function useRunActions({
         if (status && finalStatuses.has(status.status)) await fetchRunLogsUntilEOF(payload.run_id);
         await loadRunList(100);
         setRunActionStatus("");
-        return true;
+        return payload.run_id;
       } catch (requestError) {
         if (acceptedRunID) {
           setRunActionStatus(`Run ${acceptedRunID} accepted; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
-          return true;
+          return acceptedRunID;
         }
         setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
-        return false;
+        return null;
       } finally {
         setBusy(false);
       }

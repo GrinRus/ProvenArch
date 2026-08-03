@@ -60,6 +60,334 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260803-ui-ux-hierarchy-onboarding
+
+### Context
+The current React UI is technically stable at desktop `1440x980` and phone `390x844`, but the
+main product journey is still difficult to understand. The UI uses many local font sizes below a
+comfortable reading threshold, exposes too many simultaneous navigation levels, repeats or
+contradicts status counts, and lets Home, Runs, Setup and Changes mirror internal implementation
+surfaces instead of the operator journey.
+
+The first-run experience is the highest adoption risk. `OnboardingShell` currently renders
+Workspace, Sources, Runner and Ready as one multi-card page. It does not include the recommended
+Analysis brief step, asks users to distinguish `fake`, `headless`, provider ID, provider command
+and doctor readiness with limited explanation, and presents `Open console` beside
+`Run first analysis` as competing outcomes. A new user can select a workspace and repositories but
+still not understand what ProvenArch will read, where it will write, whether the chosen provider is
+actually effective, or what happens after the button is pressed.
+
+This plan refines the existing Epic 20 migration rather than replacing it. It follows
+`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and
+`docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`, especially `20I1`, `20J1`, `20J2`, `20K`,
+`20L` and `20N`. Existing schema, validator-gated promotion, read-only source repository boundary,
+single-workspace server session, process-scoped runtime/provider selection and full-workspace Git
+publication remain authoritative.
+
+### Users and primary jobs
+- First-time evaluator: start `acp serve`, complete a deterministic fake walkthrough without
+  learning pipeline internals, and understand that demo evidence is not live architecture analysis.
+- Architect / tech lead: connect one or more repositories, record useful analysis context, choose a
+  live provider when needed, understand results and publish the architecture workspace.
+- Operator / maintainer: verify effective runtime/provider readiness, diagnose a failed or partial
+  run, and recover without losing last-good knowledge.
+- Reviewer / stakeholder: read current knowledge and trace findings to evidence without seeing raw
+  provider/runtime detail by default.
+
+### Goals (must have)
+- [x] Establish a readable semantic type scale: default body `15-16px`, secondary `14px`, metadata
+      `12-13px`, with no interactive or explanatory text below `12px` at 100% zoom.
+- [x] Limit normal product screens to global navigation plus at most one local navigation level.
+- [x] Make Home an attention-first start surface with four independent state axes, one truthful
+      next action, latest run, top review risks and publication readiness.
+- [x] Split Runs into `/runs` history/launcher and `/runs/<run_id>` Run Studio detail/recovery.
+- [x] Make terminal runs visibly terminal; remove stale `Current step` wording and do not render an
+      empty disabled blocker control when no blocker exists.
+- [x] Replace the current Changes tab stack with one coherent Architecture Change Review where
+      evidence opens contextually, Findings/Proposals/Diff are distinct modes, and Publish is an
+      explicit handoff rather than a hidden mobile tab.
+- [x] Replace the all-at-once first-run page with a URL-restorable five-step onboarding flow:
+      `Workspace -> Repositories -> Analysis brief -> Runner -> Review & start`.
+- [x] Explain the source/workspace boundary, fake/live difference, desired/effective provider and
+      the result of the first analysis before mutation.
+- [x] Give every disabled, empty, partial and recovery state a visible reason and next action.
+- [x] Keep the UI free of document-level horizontal overflow and make all primary tasks completable
+      at `1440x980`, `1024px` and `390x844`.
+- [ ] Commit/merge the completed UI slice after owner review, then move this plan to the August
+      archive.
+
+### Non-goals
+- No hosted, multi-user, security/compliance enforcement or source-repository mutation UI.
+- No new headless providers beyond `claude-code`, `qwen-code` and `codex-code`.
+- No schema or provider/runtime precedence change merely to simplify UI wording.
+- No visual big-bang rewrite, new charting system, speculative topology or permanent pipeline
+  telemetry on Home.
+- No promise that `doctor` can prove provider authentication, quota or model availability beyond
+  the checks exposed by the authoritative backend response.
+- No per-file publication or human approval state; publication remains full-workspace Git mutation.
+
+### Target information architecture
+
+Primary navigation remains:
+
+```text
+Home / Runs / Knowledge / Changes
+```
+
+- Setup is a contextual first-run or workspace-settings flow, not a permanent primary destination.
+- Ask is a global `Current workspace · read-only` utility.
+- Settings and Diagnostics contain runtime profile, effective/desired values, version/build and raw
+  operational details.
+- A screen has one primary action. Recovery may replace it, but secondary actions do not compete
+  visually with it.
+- Evidence is a contextual viewer shared by Changes, Knowledge and Ask; normal review does not add
+  another permanent navigation bar.
+
+### Target first-run flow
+
+#### 0. Entry
+- `acp serve` opens a short local launcher introduction: what ProvenArch produces, what stays
+  read-only, and why a separate architecture workspace is required.
+- Primary action: `Set up a workspace`; existing workspace rows provide direct `Open` actions.
+- The launcher shows actual binary/server identity in a secondary menu, not in the main task area.
+
+#### 1. Workspace
+- Present mutually clear `Create workspace` and `Open existing workspace` modes.
+- Explain that this Git-tracked folder is the only normal write target and must not be a source repo.
+- Reuse recent workspaces and safe local path suggestions; show missing recent paths with `Forget`.
+- Primary action: `Create workspace` or `Open workspace`, matching the selected mode exactly.
+- Success summary persists above later steps: workspace name/path, Git state and write boundary.
+
+#### 2. Repositories
+- Start with one compact repository row; local checkout is the recommended fast path, Git URL is an
+  alternative resolved through local Git credentials.
+- Auto-fill the stable repo name from a selected local path when possible.
+- Keep `ref`, include/exclude globs and imports path under `Advanced scope` unless values are already
+  present or invalid.
+- Validate a row on save and show diagnostics beside that row. A workspace-wide summary must not
+  force the user to map an error back to a repository manually.
+- Always repeat `Repositories are read-only`; no copy implies source mutation.
+- Primary action: `Save and validate repositories`.
+
+#### 3. Analysis brief
+- Explain that the brief improves usefulness; it does not grant filesystem/provider permissions.
+- Reuse existing charter/workspace contracts for goal/scope, known domains or teams, NFRs and rules.
+- Do not invent a new persistence shape. If the launcher cannot persist the current brief contract,
+  land a contract-only slice before this UI.
+- Allow `Skip for now`, followed at Review by an explicit quality warning; do not silently block.
+- Primary action: `Save analysis brief`; secondary action: `Skip for now`.
+
+#### 4. Runner
+- First choice is task language, not implementation jargon:
+  `Deterministic walkthrough` (`fake`, recommended for first use) or `Live architecture analysis`
+  (`headless`, explicit opt-in).
+- Selecting walkthrough explains that outputs are synthetic demo evidence and no external AI CLI is
+  called.
+- Selecting live reveals provider choices with human labels and command IDs:
+  Claude Code (`claude-code`, default), Qwen Code (`qwen-code`), Codex (`codex-code`).
+- Show desired and effective mode/provider separately. The primary action is `Check readiness`, not
+  `Select runner`, once a choice is saved.
+- Readiness reports executable discovery, auth/quota guidance, write-surface/permission checks and
+  exact recovery. If process restart is required, show a copyable restart command and keep
+  `Pending restart` until server readback confirms the requested values.
+- Step-scoped provider overrides stay under Expert settings and never obscure the global fallback.
+
+#### 5. Review & start
+- Summarize architecture workspace path, read-only repositories and refs, brief/skip state,
+  deterministic demo or effective live provider, and readiness result.
+- Explain the next observable sequence without internal step IDs:
+  `collect evidence -> validate knowledge -> prepare architecture changes`.
+- Primary action: `Start first analysis`. It creates the run once and routes directly to
+  `/runs/<run_id>`; double-click cannot register a second ordinary run.
+- Secondary action: `Open console without running` as a text action.
+- Fake completion routes to the new review package with `Deterministic demo` and `Demo evidence`
+  labels; live completion routes to the same surface with persisted provider identity.
+
+### Onboarding state and recovery matrix
+
+| State | Explanation | Primary recovery |
+| --- | --- | --- |
+| Workspace path missing/invalid | Exact field or filesystem reason | Correct path and retry |
+| Existing workspace selected | Show persisted repos/runtime without overwriting drafts | Continue from first incomplete step |
+| Repo path is not a usable checkout | Row-level path/Git diagnostic | Choose another folder |
+| Git URL cannot resolve | Local Git/auth/ref diagnostic | Correct URL/ref or use local checkout |
+| Duplicate repo name | Name is stable evidence identity | Rename the conflicting row |
+| Brief skipped | Results may be less decision-ready | Add brief or acknowledge and continue |
+| Fake selected | Synthetic walkthrough, no live claim | Continue with demo |
+| Provider executable missing | Exact command/env override | Install/configure, restart if needed, recheck |
+| Provider auth/quota check fails | Provider account state, not artifact failure | Verify provider CLI, then recheck |
+| Desired/effective runtime differ | Current process still uses old values | Copy restart command and reconnect |
+| Doctor unavailable/failed | Last selected values remain visible | Retry readiness; preserve form state |
+| First run failed/partial | Retained evidence and last-good knowledge stay available | Open Run Studio recovery |
+| Backend reconnecting | Server-derived values labelled `Last known` | Retry automatically without losing route/drafts |
+
+### Delivery slices
+
+#### UX-0 — Baseline and shared language
+- Freeze fixture-driven screenshots/task scenarios for empty first run, fake success, live provider
+  unavailable, terminal success, partial run, dirty publication and mobile navigation.
+- Define product copy for `workspace`, `repositories`, `analysis brief`, `walkthrough`, `live
+  provider`, `snapshot`, `current knowledge` and `publish`.
+- Record the current <=`0.79rem` declaration count as a regression baseline.
+
+#### UX-1 — Semantic typography and shell foundations (`20K`, then `20I1`)
+- Add semantic type, spacing, surface, border, action, status and focus tokens to `styles.css`.
+- Migrate shell, headers, forms, tabs, buttons, status rows and metadata before feature-specific
+  polishing; remove local `0.68-0.78rem` overrides from touched surfaces.
+- Simplify `ProductShell`: workspace, effective runtime/status and Ask remain primary; build metadata
+  and context move to utilities.
+- Establish comfortable and compact density variants; no nested card without an independent action
+  or lifecycle.
+
+#### UX-2 — Sequential onboarding (`20J1`)
+- Refactor `OnboardingShell` from the four-card grid into a single-step session with progress,
+  persisted summaries and one primary action.
+- Reuse `LocalPathCombobox`, repo diagnostics, onboarding status/runtime endpoints and doctor checks.
+- Add/reuse Analysis brief persistence only through an existing authoritative contract; otherwise
+  precede UI work with a small contract slice and spec/tests.
+- Unify launcher onboarding and contextual Guided Setup so labels, validation and recovery do not
+  fork into two implementations.
+- After first run, Setup opens from workspace settings at the relevant step and advanced YAML/
+  diagnostics remain disclosed expert surfaces.
+
+#### UX-3 — Attention-first Home and truthful actions (`20E`, `20J1`)
+- Replace the four-metric placeholder with a compact four-axis line, ordered `Needs attention`,
+  latest run and current architecture summary.
+- `Start analysis` must call the start action and route to the created run. A navigation-only action
+  must be named `Open Runs` or `Review setup`.
+- Deduplicate global banner, page status and body copy through one typed workflow/attention selector.
+- Explain relationships between artifacts, findings, questions and publication risks instead of
+  presenting unrelated counts.
+
+#### UX-4 — Runs list and Run Studio (`20J1`)
+- `/runs`: compact launch control, active/pending identity, filters and history.
+- `/runs/<run_id>`: ordered pipeline progress, current useful activity, artifacts and one recovery
+  panel; diagnostics/logs live in a contextual drawer.
+- On success show `Completed` with finish time/outcome and next action; hide stale current-step copy.
+- Render blocker UI only for an actual blocker. Disabled actions have adjacent visible reasons.
+
+#### UX-5 — Architecture Change Review (`20J2`)
+- Keep one review route with a single local mode control: Overview, Findings, Proposals and Diff.
+- Preserve existing `view=evidence` URL compatibility by opening contextual Evidence Studio rather
+  than a permanent top tab. Preserve `view=publish` as an explicit final handoff, not a scroll-hidden
+  mobile tab.
+- Make each mode semantically distinct. Findings does not repeat the heading or generic Review Queue.
+- Overview uses a change list with inline impact, confidence and citations; summary/publication
+  readiness stays in one side rail on wide screens and follows content on mobile.
+- No `Approve selected evidence` or review-blocker affordance without a persisted approval/blocker
+  contract.
+
+#### UX-6 — Setup cleanup, recovery, responsive and accessibility closure (`20L`, `20N`)
+- Make tab, H1 and CTA naming consistent. `Workspace` never renders a page titled `Source`.
+- Move raw YAML, build metadata and broad diagnostics to Expert/Settings disclosures.
+- Atlas empty/partial states link to the missing source, analysis or evidence recovery action.
+- Replace unhinted horizontal mobile tabs with a select/menu, wrapped controls or separate routes;
+  Publish remains directly discoverable.
+- Verify keyboard-only onboarding, run recovery, evidence review and publication; focus returns from
+  dialogs/drawers and async completion is announced once.
+
+### Files expected to change
+- `ui/src/styles.css`
+- `ui/src/components/ProductShell.tsx`
+- `ui/src/components/SemanticPrimitives.tsx`
+- `ui/src/components/OnboardingShell.tsx`
+- `ui/src/components/ProductPages.tsx`
+- `ui/src/components/StagePanels.tsx` through smaller extracted containers
+- `ui/src/components/KnowledgePage.tsx`
+- `ui/src/features/changes/ChangesWorkspace.tsx`
+- `ui/src/lib/workflowState.ts`, `ui/src/lib/appRoutes.ts`, onboarding/runtime view models
+- focused component tests, `ui/src/App.test.tsx`, fixture-driven Playwright mock scenarios
+- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and migration-plan acceptance where the final
+  evidence/publish navigation decision is refined
+- `docs/spec/API_SPEC.md` and contract fixtures only if Analysis brief launcher persistence or
+  another required readback is genuinely absent
+
+### Acceptance criteria
+- [ ] A first-time user can start `acp serve`, create/open a workspace, attach one local repository,
+      choose fake, pass readiness and reach the first running Run Studio without using another CLI
+      command.
+- [ ] Before start, the UI clearly names every read-only repository, the sole architecture write
+      workspace, demo/live identity and effective provider.
+- [ ] The user can return Back/Forward/reload to the current onboarding step without losing already
+      persisted values; unsaved destructive navigation warns explicitly.
+- [ ] Every onboarding step has one H1/purpose, one primary action, completed previous-step summaries
+      and at most one dominant blocker.
+- [ ] Home primary CTA either performs the named action or truthfully names navigation.
+- [ ] `/runs` and `/runs/<run_id>` are distinct tasks; terminal success never shows an active current
+      step or an empty blocker control.
+- [ ] Changes has no duplicate Findings heading, no false mode affordance and no hidden mobile
+      publication path.
+- [ ] No explanatory or interactive text renders below `12px`; normal body copy is `15-16px` and
+      metadata is `12-13px`.
+- [ ] Normal screens have no more than two navigation levels and no document-level horizontal
+      overflow at `1440`, `1280`, `1024` and `390x844`.
+- [ ] Disabled actions expose a persistent adjacent reason; empty Atlas and unavailable evidence
+      provide a real next action.
+- [ ] Fake/demo can never be mistaken for live evidence; desired runtime/provider can never be
+      mistaken for effective server readback.
+- [ ] Source repositories remain read-only and Git mutations exist only in Publish.
+- [ ] Required CI is deterministic and provider-free; live provider checks remain optional trusted-
+      machine coverage.
+
+### Validation
+- Focused TypeScript/unit tests for workflow, route, onboarding state and terminal-run view models.
+- Component tests for labels, disabled reasons, keyboard/focus behavior and responsive navigation.
+- Fixture-driven Playwright at `1440x980`, `1024x768` and `390x844` for first-run fake, live provider
+  unavailable, terminal success, Changes review and Atlas recovery.
+- Automated accessibility checks with no critical violations and manual 200% zoom completion.
+- `git diff --check`
+- `make contracts`
+- `make test`
+- `make lint`
+- `make build`
+
+### Risks and mitigations
+- A large `StagePanels.tsx` rewrite could create a hidden second shell. Deliver vertical routes and
+  extract view models incrementally; remove legacy composition only after route-level acceptance.
+- Launcher and in-console Setup can drift. Share step definitions, copy, validation summaries and
+  view models rather than duplicating forms.
+- Runtime wording can overpromise live readiness. Always distinguish desired/effective values and
+  backend doctor scope; preserve typed provider recovery.
+- Larger typography can expose overflow previously hidden by tiny text. Verify the target viewport
+  matrix in each slice rather than postponing responsive work.
+- Simplifying Changes can erase source identity. Keep run snapshot/current/published context visible
+  even when navigation chrome is reduced.
+
+### Open questions
+- Confirm whether the existing charter/brief write API is safe before `enter-console`; if not, decide
+  whether Review & start enters Console before persisting the brief or whether a small launcher-safe
+  endpoint is required.
+- Confirm whether `Start first analysis` may atomically cross `enter-console` and start the run using
+  existing endpoints, or must perform two visible server-confirmed transitions.
+- Decide whether local checkout or Git URL is the default repository source for public onboarding;
+  this plan recommends local checkout for the local-first happy path while preserving Git URL.
+
+### Progress log
+- 2026-08-03: Audited the rendered UI findings, current launcher/onboarding implementation,
+  workflow/routes, provider/runtime boundaries and existing Epic 20 migration plan. Added this
+  execution plan; no product code or contracts changed.
+- 2026-08-03: Started the UI-only implementation slice without application, analysis, test or build
+  runs at owner request. Added semantic type floors, simplified ProductShell/Home/Changes, made
+  terminal run wording truthful, removed empty blocker/approval affordances and changed launcher
+  onboarding to one visible step at a time while reusing the existing brief/runtime/workspace APIs.
+- 2026-08-03: Completed the second UI-only hierarchy/craft pass. `/runs` is now launcher/history
+  while `/runs/<run_id>` owns timeline, retained evidence, recovery and disclosed diagnostics;
+  Workspace setup is a read/write-boundary overview while repository editing remains on Sources;
+  Home orders up to three real attention items; Changes uses a two-column review surface with
+  route-specific evidence and collapsed coverage/question detail. Added final desktop/mobile CSS
+  hierarchy overrides. Per owner instruction, validation remained static: `git diff --check` only;
+  no application, tests, lint, typecheck or build were run.
+- 2026-08-03: Completed rendered QA and the final consistency pass. Added truthful run-detail
+  routing, contextual Changes snapshot navigation, sequential onboarding recovery reasons, Home and
+  Knowledge recovery coverage, tablet screenshots and responsive repository cards. Fixed a
+  cross-run race so an in-flight historical selection cannot replace the latest selected snapshot.
+  Fresh Playwright evidence covers seven mock scenarios at desktop, tablet and phone sizes; all
+  seven pass. The complete UI unit suite, TypeScript check and production Vite build also pass.
+- 2026-08-03: Final pinned DoD passed with Node `22.21.1`: contracts, full Go suite, Python
+  `266/266`, UI `158/158`, shellcheck/typecheck and the embedded production build. `git diff
+  --check` remains clean.
+
+### Plan ID
 EP-20260729-open-source-readme
 
 ### Context

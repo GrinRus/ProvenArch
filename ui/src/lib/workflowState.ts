@@ -35,7 +35,7 @@ export function deriveWorkflowState(input: WorkflowStateInput): WorkflowState {
     return { status: "blocked", attention: "The selected run needs recovery.", nextAction: { destination: "runs", label: "Review run blocker" } };
   }
   if (input.evidence === "none" || input.evidence === "unavailable") {
-    return { status: "blocked", attention: "No trustworthy evidence snapshot is available.", nextAction: { destination: "runs", label: "Run analysis" } };
+    return { status: "blocked", attention: "No trustworthy evidence snapshot is available.", nextAction: { destination: "runs", label: "Open Runs" } };
   }
   if (input.evidence === "partial") {
     return { status: "needs_review", attention: "The selected evidence snapshot is partial.", nextAction: { destination: "knowledge", label: "Review partial evidence" } };

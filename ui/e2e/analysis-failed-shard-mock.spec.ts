@@ -473,6 +473,8 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByTestId("destination-runs").click();
   await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: runID }).click();
+  await expect(page).toHaveURL(`/runs/${runID}`);
 
   const recovery = page.getByTestId("analysis-failure-recovery");
   await expect(recovery).toBeVisible();
@@ -514,6 +516,11 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expect(drilldown).toBeInViewport();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "analysis-failed-shard-detail-desktop.png");
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(recovery).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "analysis-failed-shard-tablet.png");
 
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(recovery).toBeVisible();

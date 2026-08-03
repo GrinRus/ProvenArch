@@ -242,6 +242,7 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await page.getByTestId("onboarding-workspace-save").click();
   await expect(page.getByText(`Selected: ${workspacePath}`)).toBeVisible();
   await expect(page.getByTestId("onboarding-progress-summary")).toContainText("Select the runner");
+  await page.getByRole("button", { name: "Continue to repositories" }).click();
 
   await page.getByRole("button", { name: "Add repo" }).click();
   const nameInputs = page.getByLabel("Name");
@@ -251,7 +252,11 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await expect(page.getByTestId("onboarding-progress-summary")).toContainText("repo_name_duplicate");
   await expect(page.getByTestId("onboarding-repo-diagnostics").first()).toContainText("Repo names must be unique inside workspace.yaml");
   await expect(page.getByTestId("onboarding-repo-diagnostics")).toHaveCount(2);
-  await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("fix source diagnostic repo_name_duplicate");
+  await nameInputs.nth(1).fill(`${repoName}-secondary`);
+  const repoURLInputs = page.getByLabel("Repository URL");
+  await repoURLInputs.nth(1).fill("https://github.com/acme/payments-platform-secondary.git");
+  await page.getByTestId("onboarding-sources-save").click();
+  await page.getByTestId("onboarding-progress-runner").click();
 
   await page.getByLabel("Runtime").selectOption("headless");
   await page.getByLabel("Provider").selectOption("qwen-code");
@@ -267,16 +272,22 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await expect(runnerRecovery).toContainText("auth/quota latency");
   await expect(runnerRecovery).toContainText("Use fake baseline for a deterministic first walkthrough");
   await expect(page.getByTestId("onboarding-doctor-result")).toContainText("qwen headless_probe_timeout");
+  await page.getByTestId("onboarding-progress-review").click();
   await expect(page.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
   await expect(page.getByTestId("onboarding-enter-console")).toBeDisabled();
+  await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("Runtime provider");
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "onboarding-recovery-desktop.png");
 
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(page.getByTestId("onboarding-progress-summary")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "onboarding-recovery-tablet.png");
+
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(page.getByTestId("onboarding-progress-summary")).toBeVisible();
-  await expect(page.getByTestId("onboarding-progress-summary")).toContainText("repo_name_duplicate");
-  await expect(page.getByTestId("onboarding-runner-recovery")).toContainText("Headless probe timeout");
-  await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("fix source diagnostic repo_name_duplicate");
+  await expect(page.getByTestId("onboarding-progress-summary")).toContainText("Runtime provider");
+  await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("Runtime provider");
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "onboarding-recovery-mobile.png");
 

@@ -238,8 +238,8 @@ test("source recovery mock: validation blockers stay actionable and readable", a
   await page.goto("/");
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByRole("link", { name: "Setup" }).click();
-  await page.getByTestId("stage-source").click();
-  await expect(page.getByTestId("stage-source")).toHaveAttribute("aria-current", "page");
+  await page.getByTestId("setup-step-sources").click();
+  await expect(page.getByTestId("setup-step-sources")).toHaveAttribute("aria-current", "page");
 
   const recovery = page.getByTestId("source-validation-recovery");
   await expect(recovery).toBeVisible();
@@ -267,13 +267,18 @@ test("source recovery mock: validation blockers stay actionable and readable", a
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "source-recovery-desktop.png");
 
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(recovery).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await captureEvidenceScreenshot(page, "source-recovery-tablet.png");
+
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("setup-run-first-btn")).toBeDisabled();
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("Workspace");
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("blocked");
 
-  await page.getByTestId("stage-source").click();
+  await page.getByTestId("setup-step-sources").click();
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(recovery).toBeVisible();
   await expect(sourceTable).toBeVisible();

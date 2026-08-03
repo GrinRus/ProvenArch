@@ -879,7 +879,12 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
     return;
   }
   const destination = stage === "analysis" ? "Runs" : stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
-  fireEvent.click(screen.getByRole("link", { name: destination }));
+  const destinationLink = screen.getByRole("link", { name: destination });
+  if (destinationLink.getAttribute("aria-current") !== "page") fireEvent.click(destinationLink);
+  if (stage === "analysis") {
+    const selectedRun = screen.queryByTestId("runs-history-table")?.querySelector<HTMLButtonElement>("tbody button");
+    if (selectedRun) fireEvent.click(selectedRun);
+  }
   if (stage !== "analysis") {
     fireEvent.click(screen.getByTestId(`stage-${stage}`));
   }
@@ -908,7 +913,8 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    await waitFor(() => expect(screen.getByTestId("top-status-bar")).toHaveTextContent("v0.1.2"));
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    await waitFor(() => expect(screen.getByTestId("brand-version")).toHaveTextContent("v0.1.2"));
   }, 15_000);
 
   it("keeps the console recoverable when refresh API bootstrap fails and then recovers", async () => {
@@ -1027,22 +1033,22 @@ describe("App", () => {
     await screen.findByText("Selected: /tmp/onboarding-workspace");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Save and validate sources");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/bundle")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Continue to repositories" }));
     fireEvent.click(screen.getByTestId("onboarding-sources-save"));
 
     expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Select the runner");
+    fireEvent.click(screen.getByRole("button", { name: "Continue to analysis brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue without brief" }));
     fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
 
-    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
-    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Check local readiness");
-    expect(screen.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
-    expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Local readiness checked");
-    expect(screen.getByTestId("onboarding-ready-step")).toHaveTextContent("Check local readiness before first analysis.");
-    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("First analysis waits for: run local readiness check");
+    await waitFor(() => expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Check local readiness"));
 
     fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
     await screen.findByTestId("onboarding-doctor-result");
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Run first analysis");
+    fireEvent.click(screen.getByRole("button", { name: "Review setup" }));
+    await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
     expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("Ready to run the first analysis.");
     expect(screen.getByTestId("onboarding-run-first-analysis")).not.toBeDisabled();
 
@@ -1099,6 +1105,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("onboarding-workspace-save"));
     await screen.findByText("Selected: /tmp/suggested-workspace");
+    fireEvent.click(screen.getByRole("button", { name: "Continue to repositories" }));
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Source type"), { target: { value: "path" } });
@@ -1391,7 +1398,7 @@ describe("App", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/validate")).toBe(true));
     fireEvent.click(screen.getByRole("link", { name: "Setup" }));
     expect(await screen.findByTestId("source-repo-table")).toHaveTextContent("resolved");
-    expect(screen.getByTestId("top-status-bar")).toHaveTextContent("workspace valid");
+    expect(screen.getByTestId("top-status-bar")).toHaveTextContent("Workspace ready");
   });
 
   it("shows running build metadata instead of the latest public release label", async () => {
@@ -1408,6 +1415,7 @@ describe("App", () => {
     );
 
     await renderConsoleApp();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
 
     expect(screen.getByTestId("brand-version")).toHaveTextContent("dev-local");
     expect(screen.getByTestId("brand-version")).not.toHaveTextContent("v0.1.1 beta");
@@ -1550,7 +1558,7 @@ describe("App", () => {
 
     await renderConsoleApp("/home");
 
-    const action = screen.getByRole("button", { name: "Run analysis" });
+    const action = screen.getByRole("button", { name: "Open Runs" });
     expect(action).not.toBeDisabled();
     fireEvent.click(action);
     expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
@@ -1593,8 +1601,9 @@ describe("App", () => {
 
     await renderConsoleApp();
 
+    fireEvent.click(screen.getByTestId("setup-step-sources"));
     const sourceTable = await screen.findByTestId("source-repo-table");
-    expect(screen.getByTestId("source-next-action")).toHaveTextContent("repository inventory");
+    expect(screen.getByTestId("source-next-action")).toHaveTextContent("Next in Repositories");
     expect(screen.getByTestId("source-next-action")).toHaveTextContent("save and validate");
     expect(sourceTable).toHaveTextContent("Name");
     expect(sourceTable).toHaveTextContent("Source");
@@ -1605,7 +1614,7 @@ describe("App", () => {
     expect(sourceTable).toHaveTextContent("https://github.com/org/my-service.git");
   });
 
-  it("keeps one shared workflow attention state while navigating destinations", async () => {
+  it("keeps review attention contextual while navigating destinations", async () => {
     vi.stubGlobal(
       "fetch",
       createFetchMock({
@@ -1631,9 +1640,9 @@ describe("App", () => {
     await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
-    expect(screen.getByText(/open question\(s\) require review/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/open question.*require review/i)).toBeInTheDocument());
     navigateToStage("proposals");
-    expect(screen.getByText(/open question\(s\) require review/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("proposals-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("next-action-panel")).not.toBeInTheDocument();
   });
 
@@ -2009,7 +2018,7 @@ describe("App", () => {
     await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     const explorer = await screen.findByTestId("review-artifact-explorer");
-    expect(screen.getByTestId("review-section-jumps")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
     expect(screen.getByTestId("review-artifact-explorer-toggle")).toHaveTextContent("Secondary browser");
     expect(explorer).not.toHaveAttribute("open");
     fireEvent.click(screen.getByTestId("review-artifact-explorer-toggle"));
@@ -2042,7 +2051,7 @@ describe("App", () => {
     fireEvent.click(within(explorer).getByRole("button", { name: /reports\/as-is\/overview\.md/i }));
     await waitFor(() => expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("System overview"));
 
-    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    fireEvent.click(screen.getByTestId("review-domain-map-toggle"));
     const domainMap = screen.getByTestId("review-domain-map");
     expect(screen.getByTestId("review-domain-map-canvas")).toHaveTextContent("Domain/service map");
     expect(domainMap).toHaveTextContent("Payments domain");
@@ -2058,7 +2067,6 @@ describe("App", () => {
     fireEvent.click(within(domainMap).getByRole("button", { name: /open map entity: model\/entities\/svc\.payments\.yaml/i }));
     await waitFor(() => expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("id: svc.payments"));
 
-    fireEvent.click(screen.getByTestId("review-view-evidence-tab"));
     expect(screen.getByTestId("review-evidence-preview")).toHaveTextContent("Evidence preview");
   });
 
@@ -2179,7 +2187,7 @@ describe("App", () => {
     await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
-    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    fireEvent.click(screen.getByTestId("review-domain-map-toggle"));
 
     expect(screen.getByTestId("review-domain-map-empty")).toHaveTextContent("No derived model artifacts yet.");
     expect(screen.getByTestId("review-domain-map-inspector")).toHaveTextContent("partial");
@@ -2215,7 +2223,7 @@ describe("App", () => {
     await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
 
     await screen.findByTestId("review-panel");
-    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    fireEvent.click(screen.getByTestId("review-domain-map-toggle"));
 
     const edgeList = screen.getByTestId("review-domain-map-edge-list");
     const inspector = screen.getByTestId("review-domain-map-inspector");
@@ -2226,7 +2234,7 @@ describe("App", () => {
     fireEvent.click(within(edgeList).getByRole("button", { name: /model\/edges\/edge\.svc\.payments\.calls\.svc\.users\.yaml/i }));
     await waitFor(() => expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("type: calls"));
 
-    fireEvent.click(screen.getByTestId("review-view-domain-map-tab"));
+    fireEvent.click(screen.getByTestId("review-domain-map-toggle"));
     const refreshedInspector = screen.getByTestId("review-domain-map-inspector");
     fireEvent.click(within(refreshedInspector).getByRole("button", { name: /proposals\/proposal-payments\/proposal\.md/i }));
     await waitFor(() => expect(screen.getByTestId("evidence-viewer")).toHaveTextContent("Proposal"));
@@ -4475,10 +4483,16 @@ describe("App", () => {
     });
 
     navigateToStage("analysis");
+    fireEvent.click(screen.getByTestId("destination-runs"));
     fireEvent.click(screen.getByRole("button", { name: "run-new" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
+      expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/runs/run-new/snapshot", expect.anything());
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/artifacts?path=${encodeURIComponent(stagedOverviewPath("run-new"))}`,
+        expect.anything(),
+      );
     });
 
     navigateToStage("review");
@@ -4643,6 +4657,7 @@ describe("App", () => {
     });
 
     navigateToStage("analysis");
+    fireEvent.click(screen.getByTestId("destination-runs"));
     fireEvent.click(screen.getByRole("button", { name: "run-new" }));
 
     await waitFor(() => {
@@ -4739,7 +4754,7 @@ describe("App", () => {
     await waitFor(() => expect(oldDiffRequested).toBe(true));
 
     fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/new\.md/i }));
-    fireEvent.click(within(screen.getByTestId("evidence-preview-tabs")).getByRole("tab", { name: "Diff" }));
+    fireEvent.click(screen.getByTestId("stage-diff"));
 
     await waitFor(() => {
       expect(screen.getByTestId("git-diff-view").textContent ?? "").toContain("reports/as-is/new.md");
@@ -4786,7 +4801,7 @@ describe("App", () => {
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("terminal");
-    expect(screen.getByText("Current step: refresh.step3.findings")).toBeInTheDocument();
+    expect(screen.getByText("Stopped at: refresh.step3.findings")).toBeInTheDocument();
     expect(screen.getByText("Error code: run_partial_failed")).toBeInTheDocument();
     expect(screen.getByText("Error: runtime draft manifest invalid")).toBeInTheDocument();
     expect(screen.getByTestId("run-status-warnings").textContent ?? "").toContain("collect coverage incomplete");
@@ -5013,9 +5028,6 @@ describe("App", () => {
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("canceled");
     expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("canceled");
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
-    expect(screen.getByTestId("runs-history-table")).toHaveTextContent("canceled");
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Canceled run");
     expect(recovery).toHaveTextContent("run_canceled");
@@ -5025,6 +5037,10 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("the canceled run and its taskrun evidence stay in History");
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
     expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    fireEvent.click(screen.getByTestId("destination-runs"));
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
+    expect(screen.getByTestId("runs-history-table")).toHaveTextContent("canceled");
   });
 
   it("renders running run status for active live progress state", async () => {
@@ -5135,14 +5151,15 @@ describe("App", () => {
     expect(screen.getByTestId("run-status-value").textContent).toBe("recovered");
     expect(screen.getByTestId("run-lifecycle-value").textContent).toBe("recovered");
     expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent("recovered");
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
     const recovery = screen.getByTestId("analysis-failure-recovery");
     expect(recovery).toHaveTextContent("Recovered after restart");
     expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
     expect(recovery).toHaveTextContent("the reconciled run and its taskrun evidence stay in History");
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Run refresh again");
     expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Review retained evidence");
+    fireEvent.click(screen.getByTestId("destination-runs"));
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
   });
 
   it("switches to the next available run when the selected run disappears during refresh", async () => {
@@ -5189,7 +5206,7 @@ describe("App", () => {
 
       if (method === "GET" && url === "/api/pipeline/runs/run-stale") {
         staleRunStatusCalls += 1;
-        if (staleRunStatusCalls >= 2) {
+        if (staleRunStatusCalls >= 3) {
           return jsonResponse({
             error: {
               code: "not_found",

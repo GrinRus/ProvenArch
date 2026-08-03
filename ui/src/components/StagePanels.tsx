@@ -69,6 +69,7 @@ const PUBLISH_ARTIFACT_FILTERS: Array<{ id: PublishArtifactFilter; label: string
 ];
 
 export type SourceStageProps = {
+  setupView?: "workspace" | "sources";
   busy: boolean;
   guidedRepos: GuidedRepo[];
   guidedDocsImportsPath: string;
@@ -91,6 +92,7 @@ export type SourceStageProps = {
 };
 
 export function SourceStagePanel({
+  setupView = "sources",
   busy,
   guidedRepos,
   guidedDocsImportsPath,
@@ -115,11 +117,11 @@ export function SourceStagePanel({
   const suggestedWorkspace = `~/arch-workspaces/${slugify(firstRepo?.name || "my-service")}`;
   const sourceRecovery = buildSourceValidationRecovery(guidedRepos, validateResult, validationDiagnosticsByRepo);
   return (
-    <section className="panel stage-panel" data-testid="workspace-panel">
+    <section className={`panel stage-panel source-setup ${setupView === "workspace" ? "is-workspace-overview" : "is-source-editor"}`} data-testid="workspace-panel">
       <div className="stage-header">
         <div>
-          <h1>Source</h1>
-          <p className="hint">Connect repository sources and the architecture workspace before running analysis.</p>
+          <h1>{setupView === "workspace" ? "Workspace" : "Repositories"}</h1>
+          <p className="hint">{setupView === "workspace" ? "Review the selected architecture workspace and its validation state." : "Connect read-only repository sources before running analysis."}</p>
         </div>
         <StatusBadge tone={validateResult?.ok ? "ok" : "info"}>{validateResult?.ok ? "validated" : "draft"}</StatusBadge>
       </div>
@@ -140,9 +142,23 @@ export function SourceStagePanel({
       </div>
 
       <div className="stage-local-next-action" data-testid="source-next-action">
-        <strong>Next in Source</strong>
-        <span>Keep this screen focused on repository inventory, refs and imports; then save and validate before readiness gates.</span>
+        <strong>{setupView === "workspace" ? "Workspace status" : "Next in Repositories"}</strong>
+        <span>{setupView === "workspace" ? "This is the separate, Git-versioned destination where ProvenArch writes architecture knowledge." : "Add read-only inputs, choose their scope, then save and validate before continuing."}</span>
       </div>
+
+      {setupView === "workspace" ? (
+        <section className="workspace-purpose" aria-labelledby="workspace-purpose-title">
+          <div>
+            <span className="eyebrow">Output boundary</span>
+            <h2 id="workspace-purpose-title">Your source code stays untouched</h2>
+            <p>Repositories are evidence inputs. Reports, models, findings and proposals are written only to this architecture workspace.</p>
+          </div>
+          <dl className="compact-defs">
+            <div><dt>Versioning</dt><dd>Ordinary Git-reviewable files</dd></div>
+            <div><dt>Repository access</dt><dd>Read-only during analysis</dd></div>
+          </dl>
+        </section>
+      ) : null}
 
       {sourceRecovery ? <SourceValidationRecovery issue={sourceRecovery} /> : null}
 
@@ -734,7 +750,7 @@ function SourceRepoTable({
         <StatusBadge tone={validateResult?.ok ? "ok" : validateResult ? "error" : "info"}>{validateResult?.ok ? "resolved" : validateResult ? "blocked" : "draft"}</StatusBadge>
       </div>
       <div className="run-table-wrap">
-        <table className="run-table source-table">
+        <table className="run-table source-table responsive-card-table">
           <thead>
             <tr>
               <th>Name</th>
@@ -755,18 +771,18 @@ function SourceRepoTable({
               const sourceValue = repo.mode === "path" ? repo.path || "local path missing" : repo.git_url || "Git URL missing";
               return (
                 <tr key={`source-row-${repo.id}`}>
-                  <td>
+                  <td data-label="Name">
                     <strong>{repo.name || "unnamed repo"}</strong>
                   </td>
-                  <td>
+                  <td data-label="Source">
                     <span className="source-mode-label">{repo.mode === "path" ? "Local" : "Git URL"}</span>
                     <code>{sourceValue}</code>
                   </td>
-                  <td>{repo.ref || resolved?.ref || "current/default"}</td>
-                  <td>
+                  <td data-label="Ref">{repo.ref || resolved?.ref || "current/default"}</td>
+                  <td data-label="Scope">
                     <span className="status">{analysisScopeSummary(repo.analysis_include, repo.analysis_exclude)}</span>
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
                     {diagnostics.length > 0 ? <p className="hint">{diagnostics.length} diagnostic(s)</p> : null}
                   </td>
@@ -1409,6 +1425,7 @@ function splitSummaryList(value: string): string[] {
 }
 
 export type AnalysisStageProps = {
+  detailMode?: boolean;
   busy: boolean;
   cancelBusy: boolean;
   runId: string | null;
@@ -1438,6 +1455,7 @@ export type AnalysisStageProps = {
 };
 
 export function AnalysisStagePanel({
+  detailMode = false,
   busy,
   cancelBusy,
   runId,
@@ -1519,11 +1537,11 @@ export function AnalysisStagePanel({
   }
 
   return (
-    <section className="panel stage-panel" data-testid="runs-control-panel">
+    <section className={`panel stage-panel runs-surface ${detailMode ? "is-detail" : "is-index"}`} data-testid="runs-control-panel">
       <div className="stage-header">
         <div>
-          <h1>Analysis</h1>
-          <p className="hint">Run init or refresh, monitor active steps, inspect pending permissions, and select history.</p>
+          <h1>{detailMode ? "Execution detail" : "Start analysis"}</h1>
+          <p className="hint">{detailMode ? "Inspect the selected run, its retained evidence and recovery path." : "Create a new architecture snapshot or refresh the current one."}</p>
         </div>
         <StatusBadge tone={selectedRunIsActive ? "warn" : runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
@@ -1553,7 +1571,7 @@ export function AnalysisStagePanel({
         </section>
       ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
-      {runStatus?.pipeline === "refresh" ? <RefreshExecutionSummary runStatus={runStatus} /> : null}
+      {detailMode && runStatus?.pipeline === "refresh" ? <RefreshExecutionSummary runStatus={runStatus} /> : null}
 
       <ModalDialog
         open={queueConfirmationOpen}
@@ -1575,47 +1593,54 @@ export function AnalysisStagePanel({
         errorCount={errorCount}
         stepTimeline={stepTimeline}
         blockerCount={blockerRows.length}
-        onReviewBlocker={handleReviewBlocker}
+        actionLabel={detailMode ? "Review blocker" : "Open run details"}
+        onReviewBlocker={detailMode ? handleReviewBlocker : () => { if (runId) onSelectRun(runId); }}
       />
-      <AnalysisFailureRecovery
-        busy={busy}
-        runStatus={runStatus}
-        runtimeLabel={runtimeLabel}
-        warningCount={warningCount}
-        issueCount={issueRows.length}
-        artifactCount={artifactCount}
-        pendingPermissionCount={pendingPermissions.length}
-        liveDiagnostics={liveDiagnostics}
-        onRetry={onRunPipeline}
-        onReviewBlocker={handleReviewBlocker}
-      />
-      <AnalysisRunTimeline steps={stepTimeline} />
-      <AnalysisStepReview
-        steps={reviewSteps}
-        selectedStep={selectedReviewStep}
-        runtimeMode={setupRuntime}
-        runReviewStatus={runReviewStatus}
-        runLogs={runLogs}
-        gitDiff={gitDiff}
-        gitDiffStatus={gitDiffStatus}
-        view={stepReviewView}
-        onViewChange={setStepReviewView}
-        onSelectStep={(stepID) => {
-          setSelectedStepID(stepID);
-          setStepReviewView("artifacts");
-        }}
-        onOpenArtifact={onOpenArtifact}
-        onLoadGitDiff={onLoadGitDiff}
-      />
-      <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
-      <details className="advanced-block runs-diagnostics-drawer" data-testid="runs-diagnostics-drawer" open={showActiveLiveDiagnostics || pendingPermissions.length > 0}>
-        <summary>Diagnostics · shards, raw runtime output, permissions and telemetry</summary>
-        {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
-        <AnalysisShardTable rows={shardRows} />
-        <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
-        <PendingPermissionsTable pendingPermissions={pendingPermissions} />
-      </details>
-      <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
+      {detailMode ? (
+        <div className="run-studio-body">
+          <AnalysisFailureRecovery
+            busy={busy}
+            runStatus={runStatus}
+            runtimeLabel={runtimeLabel}
+            warningCount={warningCount}
+            issueCount={issueRows.length}
+            artifactCount={artifactCount}
+            pendingPermissionCount={pendingPermissions.length}
+            liveDiagnostics={liveDiagnostics}
+            onRetry={onRunPipeline}
+            onReviewBlocker={handleReviewBlocker}
+          />
+          <AnalysisRunTimeline steps={stepTimeline} />
+          <AnalysisStepReview
+            steps={reviewSteps}
+            selectedStep={selectedReviewStep}
+            runtimeMode={setupRuntime}
+            runReviewStatus={runReviewStatus}
+            runLogs={runLogs}
+            gitDiff={gitDiff}
+            gitDiffStatus={gitDiffStatus}
+            view={stepReviewView}
+            onViewChange={setStepReviewView}
+            onSelectStep={(stepID) => {
+              setSelectedStepID(stepID);
+              setStepReviewView("artifacts");
+            }}
+            onOpenArtifact={onOpenArtifact}
+            onLoadGitDiff={onLoadGitDiff}
+          />
+          <AnalysisFailedShardDetails rows={issueRows} detailsRef={blockerDetailsRef} />
+          <details className="advanced-block runs-diagnostics-drawer" data-testid="runs-diagnostics-drawer" open={showActiveLiveDiagnostics || pendingPermissions.length > 0}>
+            <summary>Technical diagnostics</summary>
+            <p className="hint">Shards, raw runtime output, permissions and provider telemetry for this run.</p>
+            {showActiveLiveDiagnostics ? <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} /> : null}
+            <AnalysisShardTable rows={shardRows} />
+            <RunStatusPanel runStatus={runStatus} warnings={selectedRunWarnings} />
+            <PendingPermissionsTable pendingPermissions={pendingPermissions} />
+          </details>
+        </div>
+      ) : (
+        <RunHistoryTable runId={runId} runList={runList} runCounters={runCounters} onSelectRun={onSelectRun} />
+      )}
     </section>
   );
 }
@@ -1706,6 +1731,7 @@ function AnalysisRunProgress({
   errorCount,
   stepTimeline,
   blockerCount,
+  actionLabel,
   onReviewBlocker,
 }: {
   runId: string | null;
@@ -1715,15 +1741,23 @@ function AnalysisRunProgress({
   errorCount: number;
   stepTimeline: AnalysisStep[];
   blockerCount: number;
+  actionLabel: string;
   onReviewBlocker: () => void;
 }) {
   const completedSteps = stepTimeline.filter((step) => step.state === "done").length;
   const activeOrFailed = stepTimeline.find((step) => step.state === "active" || step.state === "failed");
   const hasBlocker = blockerCount > 0 || runStatus?.status === "failed" || Boolean(runStatus?.error_code);
+  const terminal = runStatus?.status === "succeeded" || runStatus?.status === "failed" || runStatus?.status === "canceled";
+  const stepLabel = runStatus?.status === "failed" ? "Stopped at" : terminal ? "Outcome" : "Current step";
+  const stepValue = runStatus?.status === "succeeded"
+    ? "Completed"
+    : runStatus?.status === "canceled"
+      ? "Canceled"
+      : runStatus?.current_step ?? activeOrFailed?.id ?? "Not running";
   return (
     <section className="analysis-progress" data-testid="analysis-run-progress">
       <div className="section-heading-row">
-        <h2>Run mission control</h2>
+        <h2>Run status</h2>
         <StatusBadge tone={runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
       <div className="analysis-progress-grid">
@@ -1736,8 +1770,8 @@ function AnalysisRunProgress({
           <strong>{runtimeLabel}</strong>
         </div>
         <div>
-          <span className="metric-label">Current step</span>
-          <strong>{runStatus?.current_step ?? activeOrFailed?.id ?? "not running"}</strong>
+          <span className="metric-label">{stepLabel}</span>
+          <strong>{stepValue}</strong>
         </div>
         <div>
           <span className="metric-label">Progress</span>
@@ -1752,9 +1786,11 @@ function AnalysisRunProgress({
           </strong>
         </div>
       </div>
-      <button type="button" data-testid="analysis-review-blocker-btn" onClick={onReviewBlocker} disabled={!hasBlocker}>
-        Review blocker
-      </button>
+      {hasBlocker ? (
+        <button type="button" data-testid="analysis-review-blocker-btn" onClick={onReviewBlocker}>
+          {actionLabel}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -3266,17 +3302,17 @@ export function ReviewStagePanel({
   onSelectRun,
   onOpenArtifact,
 }: ReviewStageProps) {
-  const [reviewView, setReviewView] = useState<"evidence" | "domain-map">("evidence");
   const openReviewArtifactRef = useRef(onOpenArtifact);
   openReviewArtifactRef.current = onOpenArtifact;
   const overviewArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/as-is/overview.md");
   const coverageArtifact = nonDiagramArtifacts.find((artifact) => artifact.path === "reports/coverage/summary.md");
   const findingsArtifact = nonDiagramArtifacts.find((artifact) => artifact.path.startsWith("reports/findings/"));
   const allArtifacts = [...nonDiagramArtifacts, ...diagramArtifacts];
-  const preferredReviewArtifact =
-    overviewArtifact ??
-    coverageArtifact ??
-    allArtifacts[0];
+  const preferredReviewArtifact = routeView === "findings"
+    ? findingsArtifact ?? overviewArtifact ?? coverageArtifact ?? allArtifacts[0]
+    : routeView === "evidence"
+      ? coverageArtifact ?? overviewArtifact ?? allArtifacts[0]
+      : overviewArtifact ?? coverageArtifact ?? allArtifacts[0];
   const artifactGroups = groupArtifactsByFolder(allArtifacts);
   const reviewQueue = buildReviewQueue({
     artifacts: allArtifacts,
@@ -3299,14 +3335,14 @@ export function ReviewStagePanel({
   const lastSuccessfulRun = findLastSuccessfulRun(runList, runId);
   function handleOpenDomainMapArtifact(path: string) {
     onOpenArtifact(path);
-    setReviewView("evidence");
   }
 
   useEffect(() => {
-    if (reviewView === "evidence" && !selectedArtifact && preferredReviewArtifact) {
+    const routeRequiresPreferredArtifact = routeView === "findings" && selectedArtifact !== preferredReviewArtifact?.path;
+    if (preferredReviewArtifact && (!selectedArtifact || routeRequiresPreferredArtifact)) {
       openReviewArtifactRef.current(preferredReviewArtifact.path);
     }
-  }, [preferredReviewArtifact, reviewView, selectedArtifact]);
+  }, [preferredReviewArtifact, routeView, selectedArtifact]);
 
   return (
     <div className="stage-stack" data-testid="review-panel">
@@ -3334,48 +3370,34 @@ export function ReviewStagePanel({
             </button>
           </section>
         ) : null}
-        <TabNav
-          ariaLabel="Review views"
-          className="review-tabs"
-          idBase="review-tabs"
-          testId="review-tabs"
-          value={reviewView}
-          onChange={setReviewView}
-          options={[
-            { id: "evidence", label: "Evidence", testId: "review-view-evidence-tab" },
-            { id: "domain-map", label: "Domain map", testId: "review-view-domain-map-tab" },
-          ]}
+        <ReviewEvidenceWorkbench
+          routeView={routeView}
+          coverageSummary={coverageSummary}
+          openQuestions={openQuestions}
+          openQuestionCount={openQuestionCount}
+          trustStatus={trustStatus}
+          overviewArtifact={overviewArtifact}
+          findingsArtifact={findingsArtifact}
+          artifactGroups={artifactGroups}
+          diagramArtifacts={diagramArtifacts}
+          selectedArtifact={selectedArtifact}
+          selectedArtifactContent={selectedArtifactContent}
+          evidenceStatus={evidenceStatus}
+          evidenceIssues={evidenceIssues}
+          selectedArtifactIsLoading={selectedArtifactIsLoading}
+          runLogs={runLogs}
+          reviewSummary={reviewSummary}
+          demo={demo}
+          reviewQueue={reviewQueue}
+          gitDiff={gitDiff}
+          gitDiffStatus={gitDiffStatus}
+          onLoadGitDiff={onLoadGitDiff}
+          onOpenArtifact={onOpenArtifact}
         />
-        <div {...tabPanelProps("review-tabs", reviewView)}>
-          {reviewView === "domain-map" ? (
-            <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
-          ) : (
-            <ReviewEvidenceWorkbench
-              routeView={routeView}
-              coverageSummary={coverageSummary}
-              openQuestions={openQuestions}
-              openQuestionCount={openQuestionCount}
-              trustStatus={trustStatus}
-              overviewArtifact={overviewArtifact}
-              findingsArtifact={findingsArtifact}
-              artifactGroups={artifactGroups}
-              diagramArtifacts={diagramArtifacts}
-              selectedArtifact={selectedArtifact}
-              selectedArtifactContent={selectedArtifactContent}
-              evidenceStatus={evidenceStatus}
-              evidenceIssues={evidenceIssues}
-              selectedArtifactIsLoading={selectedArtifactIsLoading}
-              runLogs={runLogs}
-              reviewSummary={reviewSummary}
-              demo={demo}
-              reviewQueue={reviewQueue}
-              gitDiff={gitDiff}
-              gitDiffStatus={gitDiffStatus}
-              onLoadGitDiff={onLoadGitDiff}
-              onOpenArtifact={onOpenArtifact}
-            />
-          )}
-        </div>
+        <details className="review-domain-map-disclosure">
+          <summary data-testid="review-domain-map-toggle">Domain map preview</summary>
+          <ReviewDomainMap domainMap={domainMap} onOpenArtifact={handleOpenDomainMapArtifact} />
+        </details>
       </section>
     </div>
   );
@@ -3568,7 +3590,6 @@ function ReviewEvidenceWorkbench({
   evidenceStatus,
   evidenceIssues,
   selectedArtifactIsLoading,
-  runLogs,
   reviewSummary,
   demo,
   reviewQueue,
@@ -3600,9 +3621,7 @@ function ReviewEvidenceWorkbench({
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
   onOpenArtifact: (path: string) => void;
 }) {
-  const [evidenceView, setEvidenceView] = useState<"preview" | "diff" | "evidence" | "logs">(
-    routeView === "diff" ? "diff" : routeView === "findings" ? "evidence" : "preview",
-  );
+  const evidenceView: "preview" | "diff" = routeView === "diff" ? "diff" : "preview";
   const [artifactFilter, setArtifactFilter] = useState<ReviewArtifactFilter>("all");
   const [artifactExplorerOpen, setArtifactExplorerOpen] = useState(reviewQueue.length === 0);
   const visibleArtifactGroups = filterReviewArtifactGroups(artifactGroups, artifactFilter);
@@ -3615,10 +3634,6 @@ function ReviewEvidenceWorkbench({
   }, [evidenceView, onLoadGitDiff, selectedArtifact]);
 
   useEffect(() => {
-    setEvidenceView(routeView === "diff" ? "diff" : routeView === "findings" ? "evidence" : "preview");
-  }, [routeView]);
-
-  useEffect(() => {
     if (reviewQueue.length === 0) {
       setArtifactExplorerOpen(true);
     }
@@ -3626,13 +3641,6 @@ function ReviewEvidenceWorkbench({
 
   return (
     <div className="review-workbench">
-      <nav className="review-section-jumps" aria-label="Review sections" data-testid="review-section-jumps">
-        <a href="#review-evidence-preview">Preview</a>
-        <a href="#review-queue">Queue</a>
-        <a href="#review-artifacts">Artifacts</a>
-        <a href="#review-trust">Trust</a>
-      </nav>
-
       <aside className="review-task-lane" id="review-task-lane" aria-label="Review tasks and supporting artifacts">
         <ReviewQueuePanel queue={reviewQueue} selectedArtifact={selectedArtifact} onOpenArtifact={onOpenArtifact} />
         <details
@@ -3707,20 +3715,9 @@ function ReviewEvidenceWorkbench({
             <h2>Evidence preview</h2>
             <p className="hint">Select an artifact to inspect the reviewable evidence body.</p>
           </div>
-          <button type="button" disabled title="Evidence approval persistence is planned for a later publish gate slice.">
-            Approve selected evidence
-          </button>
+          <span className="status">Validator-approved snapshot · human review is recorded through publication</span>
         </div>
-        <TabNav
-          ariaLabel="Artifact workbench tabs"
-          className="evidence-preview-tabs"
-          idBase="evidence-preview-tabs"
-          testId="evidence-preview-tabs"
-          value={evidenceView}
-          onChange={setEvidenceView}
-          options={(["preview", "diff", "evidence", "logs"] as const).map((tab) => ({ id: tab, label: capitalize(tab) }))}
-        />
-        <div {...tabPanelProps("evidence-preview-tabs", evidenceView)}>
+        <div className="review-mode-content">
           {evidenceView === "preview" ? (
             selectedArtifactIsLoading ? <p className="hint">Loading evidence...</p> : (
               <EvidenceViewer
@@ -3736,45 +3733,6 @@ function ReviewEvidenceWorkbench({
             )
           ) : null}
           {evidenceView === "diff" ? <GitDiffView gitDiff={gitDiff} status={gitDiffStatus} onSelectFile={(path) => onLoadGitDiff({ path })} /> : null}
-          {evidenceView === "evidence" ? (
-            <div className="review-tab-summary">
-              <h3>Decision evidence</h3>
-              <dl className="compact-defs">
-                <div>
-                  <dt>Selected artifact</dt>
-                  <dd>{selectedArtifact || "none"}</dd>
-                </div>
-                <div>
-                  <dt>Current run</dt>
-                  <dd>{reviewSummary?.run_id || "none selected"}</dd>
-                </div>
-                <div>
-                  <dt>Review queue</dt>
-                  <dd>{reviewQueue.length} item(s)</dd>
-                </div>
-              </dl>
-              <p className="hint">{reviewDecisionSummary(trustStatus, openQuestionCount)}</p>
-            </div>
-          ) : null}
-          {evidenceView === "logs" ? (
-            <div className="review-tab-summary">
-              <h3>Related logs</h3>
-              {runLogs.length === 0 ? (
-                <p className="empty-state">No logs are loaded for the selected run.</p>
-              ) : (
-                <ul className="compact-list">
-                  {runLogs.slice(-8).map((entry) => (
-                    <li key={`review-log-${entry.cursor}`}>
-                      <span>
-                        {entry.level.toUpperCase()} · {entry.step_id || "run"}
-                      </span>
-                      <code>{entry.message}</code>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : null}
         </div>
       </section>
 
@@ -3811,14 +3769,14 @@ function ReviewEvidenceWorkbench({
           <span className="review-decision-summary" data-testid="review-decision-summary">{reviewDecisionSummary(trustStatus, openQuestionCount)}</span>
         </div>
         <div className="review-source-lists">
-          <div>
-            <h2>Coverage Summary</h2>
+          <details>
+            <summary>Coverage summary</summary>
             <pre data-testid="coverage-summary-content">{coverageSummary || "No coverage summary yet."}</pre>
-          </div>
-          <div>
-            <h2>Open Questions</h2>
+          </details>
+          <details>
+            <summary>Open questions · {openQuestionCount}</summary>
             <pre data-testid="open-questions-content">{openQuestions || "No open questions yet."}</pre>
-          </div>
+          </details>
         </div>
       </aside>
 

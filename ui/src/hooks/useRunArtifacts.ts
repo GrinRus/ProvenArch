@@ -15,6 +15,7 @@ export function useRunArtifacts() {
   const selectedArtifactRef = useRef(selectedArtifact);
   const [evidenceSnapshot, setEvidenceSnapshot] = useState<RunEvidenceSnapshot>(emptyEvidenceSnapshot());
   const evidenceSnapshotRef = useRef(evidenceSnapshot);
+  const committedSnapshotRunRef = useRef<string | null>(null);
   const artifactsRequest = useRequestGate("run-evidence-snapshot");
   const previewRequest = useRequestGate("run-artifact-preview");
   const contentByReadPath = useRef(new Map<string, string>());
@@ -76,7 +77,9 @@ export function useRunArtifacts() {
 
   async function fetchArtifacts(id: string) {
     const token = artifactsRequest.begin(id);
-    setEvidenceSnapshot({ ...emptyEvidenceSnapshot(), runId: id, status: "loading" });
+    const loadingSnapshot = { ...emptyEvidenceSnapshot(), runId: id, status: "loading" as const };
+    evidenceSnapshotRef.current = loadingSnapshot;
+    setEvidenceSnapshot(loadingSnapshot);
     contentByReadPath.current = new Map();
     try {
       const snapshot = await getPipelineRunSnapshot(id, { signal: token.signal });
@@ -146,6 +149,13 @@ export function useRunArtifacts() {
     const artifact = artifactsRef.current.find((item) => item.path === path);
     if (!artifact) {
       previewRequest.abort();
+      if (evidenceSnapshotRef.current.status === "loading") {
+        selectedArtifactRef.current = "";
+        setSelectedArtifact("");
+        setSelectedArtifactContent("");
+        return;
+      }
+      selectedArtifactRef.current = path;
       setSelectedArtifact(path);
       setSelectedArtifactContent("Artifact unavailable: the link is outside the selected run snapshot inventory.");
       return;
@@ -159,6 +169,7 @@ export function useRunArtifacts() {
       readPath,
       viewerMode,
     ].join("|"));
+    selectedArtifactRef.current = path;
     setSelectedArtifact(path);
     setSelectedArtifactContent("Loading...");
     try {
@@ -181,15 +192,28 @@ export function useRunArtifacts() {
     artifactsRequest.abort();
     previewRequest.abort();
     contentByReadPath.current = new Map();
+    artifactsRef.current = [];
+    selectedArtifactRef.current = "";
+    committedSnapshotRunRef.current = null;
     setArtifacts([]);
     setSelectedArtifact("");
     setSelectedArtifactContent("");
     setCoverageSummary("");
     setOpenQuestions("");
-    setEvidenceSnapshot(emptyEvidenceSnapshot());
+    const emptySnapshot = emptyEvidenceSnapshot();
+    evidenceSnapshotRef.current = emptySnapshot;
+    setEvidenceSnapshot(emptySnapshot);
   }
 
   function applyEvidenceSnapshot(snapshot: RunEvidenceSnapshot) {
+    if (committedSnapshotRunRef.current !== snapshot.runId) {
+      previewRequest.abort();
+      selectedArtifactRef.current = "";
+      setSelectedArtifact("");
+      setSelectedArtifactContent("");
+    }
+    committedSnapshotRunRef.current = snapshot.runId;
+    evidenceSnapshotRef.current = snapshot;
     setEvidenceSnapshot(snapshot);
     setCoverageSummary(snapshot.coverageSummary);
     setOpenQuestions(snapshot.openQuestions);
@@ -197,6 +221,7 @@ export function useRunArtifacts() {
   }
 
   function applyArtifacts(nextArtifacts: Artifact[]) {
+    artifactsRef.current = nextArtifacts;
     setArtifacts(nextArtifacts);
 
     const currentSelectedArtifact = selectedArtifactRef.current;
@@ -210,6 +235,7 @@ export function useRunArtifacts() {
     const selectedStillExists = nextArtifacts.some((artifact) => artifact.path === currentSelectedArtifact);
     if (!selectedStillExists) {
       previewRequest.abort();
+      selectedArtifactRef.current = "";
       setSelectedArtifact("");
       setSelectedArtifactContent("");
     }

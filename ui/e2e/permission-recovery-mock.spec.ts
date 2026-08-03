@@ -368,6 +368,8 @@ test("permission recovery mock: Analysis triage and Readiness settings remain re
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByTestId("destination-runs").click();
   await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: runID }).click();
+  await expect(page).toHaveURL(`/runs/${runID}`);
 
   const recovery = page.getByTestId("analysis-failure-recovery");
   await expect(recovery).toBeVisible();
@@ -408,6 +410,8 @@ test("permission recovery mock: Analysis triage and Readiness settings remain re
 
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByTestId("destination-runs").click();
+  await page.getByRole("button", { name: runID }).click();
+  await expect(page).toHaveURL(`/runs/${runID}`);
   await expect(permissionRecovery).toBeVisible();
   await expect(permissionCards).toBeVisible();
   await expect(permissionCards).toContainText("perm-install-generated-client");
