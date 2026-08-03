@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
 
 func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
@@ -27,6 +29,26 @@ func TestKnowledgeUnavailableWhenPromotedWorkspaceIsEmpty(t *testing.T) {
 	}
 	if len(response.Entities)+len(response.Edges)+len(response.Artifacts)+len(response.Issues) != 0 {
 		t.Fatalf("empty workspace must not invent knowledge: %#v", response)
+	}
+}
+
+func TestArchitectureReviewLinksAndChildDetailAreExplicit(t *testing.T) {
+	knowledge := knowledgeResponse{Status: "available", Entities: []knowledgeEntity{
+		{Entity: contracts.Entity{ID: "svc.payments", Type: "service", Name: "Payments", Provenance: contracts.Provenance{Kind: "observation", Confidence: .9, Evidence: []contracts.Evidence{{Repo: "payments", Path: "README.md"}}}}, Path: "model/entities/svc.payments.yaml"},
+		{Entity: contracts.Entity{ID: "api.payments", Type: "api.http", Name: "Payments API", Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: "payments", Path: "api/openapi.yaml"}}}}, Path: "model/entities/api.payments.yaml"},
+	}, Edges: []knowledgeEdge{}, Artifacts: []knowledgeArtifact{}, Issues: []knowledgeIssue{}}
+	response := buildArchitectureResponse(knowledge)
+	enrichArchitectureReview(&response, contracts.SemanticSnapshot{
+		Coverage:  contracts.Coverage{Observed: []string{"http api"}, Missing: []string{"owner"}},
+		Findings:  []contracts.Finding{{ID: "finding.owner", Severity: "medium", Title: "Owner missing", RelatedIDs: []string{"svc.payments"}}},
+		Questions: []contracts.Question{{ID: "question.owner", Text: "Who owns Payments?", RelatedIDs: []string{"svc.payments"}}},
+	})
+	node := response.Views["context"].Nodes[0]
+	if len(node.RelatedFindings) != 1 || len(node.RelatedQuestions) != 1 || !architectureContainsString(node.ChildLevels, "component") || !architectureContainsString(node.ChildLevels, "code") {
+		t.Fatalf("architecture review/detail was not linked: %#v", node)
+	}
+	if len(response.Review.Findings) != 1 || len(response.Coverage.Missing) != 1 {
+		t.Fatalf("top-level review/coverage missing: %#v", response)
 	}
 }
 

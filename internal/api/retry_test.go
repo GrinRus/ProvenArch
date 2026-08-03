@@ -67,6 +67,17 @@ func TestRetryPlanHashChangesWithParentArtifactsAndSourceInput(t *testing.T) {
 	if changed := retryPlanHash(snapshot, parent, artifacts, plan); changed == initial {
 		t.Fatal("parent artifact drift did not invalidate retry plan hash")
 	}
+	stagingOnly := filepath.Join(snapshot.Workspace.Path, "reports", "taskruns", "parent", "staging", "unlisted.md")
+	if err := os.MkdirAll(filepath.Dir(stagingOnly), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	beforeStaging := retryPlanHash(snapshot, parent, artifacts, plan)
+	if err := os.WriteFile(stagingOnly, []byte("new staged input"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if retryPlanHash(snapshot, parent, artifacts, plan) == beforeStaging {
+		t.Fatal("unlisted parent staging drift did not invalidate retry plan hash")
+	}
 	sourceChanged := snapshot
 	sourceChanged.Workspace.Manifest.Repos = append([]workspace.RepoSource(nil), snapshot.Workspace.Manifest.Repos...)
 	sourceChanged.Workspace.Manifest.Repos[0].Ref = "changed-source-ref"

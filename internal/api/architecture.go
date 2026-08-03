@@ -26,6 +26,13 @@ type architectureResponse struct {
 	Exports     architectureExports         `json:"exports"`
 	Issues      []knowledgeIssue            `json:"issues"`
 	Comparison  architectureComparison      `json:"comparison"`
+	Review      architectureReview          `json:"review"`
+	Coverage    contracts.Coverage          `json:"coverage"`
+}
+
+type architectureReview struct {
+	Findings  []contracts.Finding  `json:"findings"`
+	Questions []contracts.Question `json:"questions"`
 }
 
 type architectureComparison struct {
@@ -76,19 +83,21 @@ type architectureView struct {
 }
 
 type architectureNode struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	Type             string               `json:"type"`
-	OwnerTeamID      string               `json:"owner_team_id,omitempty"`
-	Tags             []string             `json:"tags,omitempty"`
-	Confidence       float64              `json:"confidence"`
-	ProvenanceKind   string               `json:"provenance_kind"`
-	Evidence         []contracts.Evidence `json:"evidence,omitempty"`
-	Path             string               `json:"path"`
-	AvailableLevels  []string             `json:"available_levels,omitempty"`
-	Repositories     []string             `json:"repositories,omitempty"`
-	RelatedFindings  []string             `json:"related_findings,omitempty"`
-	RelatedQuestions []string             `json:"related_questions,omitempty"`
+	ID                      string               `json:"id"`
+	Name                    string               `json:"name"`
+	Type                    string               `json:"type"`
+	OwnerTeamID             string               `json:"owner_team_id,omitempty"`
+	Tags                    []string             `json:"tags,omitempty"`
+	Confidence              float64              `json:"confidence"`
+	ProvenanceKind          string               `json:"provenance_kind"`
+	Evidence                []contracts.Evidence `json:"evidence,omitempty"`
+	Path                    string               `json:"path"`
+	AvailableLevels         []string             `json:"available_levels,omitempty"`
+	ChildLevels             []string             `json:"child_levels,omitempty"`
+	DetailUnavailableReason string               `json:"detail_unavailable_reason,omitempty"`
+	Repositories            []string             `json:"repositories,omitempty"`
+	RelatedFindings         []string             `json:"related_findings,omitempty"`
+	RelatedQuestions        []string             `json:"related_questions,omitempty"`
 }
 
 type architectureEdge struct {
@@ -132,6 +141,7 @@ func (s *Server) handleArchitecture(writer http.ResponseWriter, request *http.Re
 				response.Authority.PromotedAt = current.FinishedAt.UTC().Format(time.RFC3339)
 				response.Authority.Freshness = architectureFreshness(*current.FinishedAt)
 			}
+			enrichArchitectureReview(&response, loadRunSemanticSnapshot(snapshot.Workspace.Path, current.RunID))
 			if len(promotedRuns) > 1 {
 				response.Comparison = comparePromotedArchitectures(snapshot.Workspace.Path, promotedRuns[0].RunID, promotedRuns[1].RunID)
 			} else {
@@ -144,7 +154,7 @@ func (s *Server) handleArchitecture(writer http.ResponseWriter, request *http.Re
 }
 
 func buildArchitectureResponse(knowledge knowledgeResponse) architectureResponse {
-	response := architectureResponse{Version: 1, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Authority: architectureAuthority{Mode: evidenceAuthorityPromotedCurrent, Freshness: "unknown"}, Status: knowledge.Status, Artifacts: knowledge.Artifacts, Issues: knowledge.Issues, Views: map[string]architectureView{}, Exports: architectureExports{C4MermaidPaths: []string{}}, Comparison: emptyArchitectureComparison("A comparison will be available after two promoted architecture generations.")}
+	response := architectureResponse{Version: 1, GeneratedAt: time.Now().UTC().Format(time.RFC3339), Authority: architectureAuthority{Mode: evidenceAuthorityPromotedCurrent, Freshness: "unknown"}, Status: knowledge.Status, Artifacts: knowledge.Artifacts, Issues: knowledge.Issues, Views: map[string]architectureView{}, Exports: architectureExports{C4MermaidPaths: []string{}}, Comparison: emptyArchitectureComparison("A comparison will be available after two promoted architecture generations."), Review: architectureReview{Findings: []contracts.Finding{}, Questions: []contracts.Question{}}, Coverage: contracts.Coverage{Observed: []string{}, Missing: []string{}, Notes: []string{}}}
 	for _, artifact := range knowledge.Artifacts {
 		if artifact.Path == "reports/as-is/overview.md" {
 			response.Exports.HomePath = artifact.Path
@@ -300,7 +310,12 @@ func architectureViewFor(level string, entities []knowledgeEntity, edges []knowl
 		if !allowed[entity.ID] {
 			continue
 		}
-		nodes = append(nodes, architectureNode{ID: entity.ID, Name: entity.Name, Type: entity.Type, OwnerTeamID: entity.OwnerTeamID, Tags: append([]string(nil), entity.Tags...), Confidence: entity.Provenance.Confidence, ProvenanceKind: entity.Provenance.Kind, Evidence: append([]contracts.Evidence(nil), entity.Provenance.Evidence...), Path: entity.Path, AvailableLevels: architectureLevelsForType(entity.Type), Repositories: evidenceRepositories(entity.Provenance.Evidence), RelatedFindings: []string{}, RelatedQuestions: []string{}})
+		childLevels := architectureChildLevels(entity, entities)
+		reason := ""
+		if len(childLevels) == 0 {
+			reason = "No validated lower-level entities are linked to this element."
+		}
+		nodes = append(nodes, architectureNode{ID: entity.ID, Name: entity.Name, Type: entity.Type, OwnerTeamID: entity.OwnerTeamID, Tags: append([]string(nil), entity.Tags...), Confidence: entity.Provenance.Confidence, ProvenanceKind: entity.Provenance.Kind, Evidence: append([]contracts.Evidence(nil), entity.Provenance.Evidence...), Path: entity.Path, AvailableLevels: architectureLevelsForType(entity.Type), ChildLevels: childLevels, DetailUnavailableReason: reason, Repositories: evidenceRepositories(entity.Provenance.Evidence), RelatedFindings: []string{}, RelatedQuestions: []string{}})
 	}
 	viewEdges := []architectureEdge{}
 	for _, edge := range edges {
@@ -316,6 +331,91 @@ func architectureViewFor(level string, entities []knowledgeEntity, edges []knowl
 		view.UnavailableReason = "No validated entities are available for this C4 level."
 	}
 	return view
+}
+
+func loadRunSemanticSnapshot(root, runID string) contracts.SemanticSnapshot {
+	paths := []string{
+		filepath.Join(root, "reports", "taskruns", runID, "staging", "final", "final-run-index.json"),
+		filepath.Join(root, "reports", "taskruns", runID, "validator", "validator-verdict.json"),
+	}
+	if raw, err := os.ReadFile(paths[0]); err == nil {
+		if index, parseErr := contracts.ParseFinalRunIndex(raw); parseErr == nil {
+			return index.Semantic
+		}
+	}
+	if raw, err := os.ReadFile(paths[1]); err == nil {
+		if verdict, parseErr := contracts.ParseValidatorVerdict(raw); parseErr == nil {
+			return contracts.SemanticSnapshot{Coverage: contracts.Coverage{}, Findings: verdict.Findings, Questions: verdict.Questions}
+		}
+	}
+	return contracts.SemanticSnapshot{Coverage: contracts.Coverage{}, Findings: []contracts.Finding{}, Questions: []contracts.Question{}}
+}
+
+func enrichArchitectureReview(response *architectureResponse, semantic contracts.SemanticSnapshot) {
+	response.Review = architectureReview{Findings: append([]contracts.Finding(nil), semantic.Findings...), Questions: append([]contracts.Question(nil), semantic.Questions...)}
+	response.Coverage = semantic.Coverage
+	findings, questions := map[string][]string{}, map[string][]string{}
+	for _, item := range semantic.Findings {
+		for _, id := range item.RelatedIDs {
+			findings[id] = append(findings[id], item.ID)
+		}
+	}
+	for _, item := range semantic.Questions {
+		for _, id := range item.RelatedIDs {
+			questions[id] = append(questions[id], item.ID)
+		}
+	}
+	for level, view := range response.Views {
+		for index := range view.Nodes {
+			view.Nodes[index].RelatedFindings = append([]string(nil), findings[view.Nodes[index].ID]...)
+			view.Nodes[index].RelatedQuestions = append([]string(nil), questions[view.Nodes[index].ID]...)
+		}
+		for index := range view.Edges {
+			view.Edges[index].RelatedFindings = append([]string(nil), findings[view.Edges[index].ID]...)
+			view.Edges[index].RelatedQuestions = append([]string(nil), questions[view.Edges[index].ID]...)
+		}
+		response.Views[level] = view
+	}
+}
+
+func architectureChildLevels(entity knowledgeEntity, entities []knowledgeEntity) []string {
+	result := []string{}
+	if entity.Type == "service" {
+		result = append(result, "container")
+	}
+	repos := evidenceRepositories(entity.Provenance.Evidence)
+	for _, candidate := range entities {
+		if candidate.ID == entity.ID || !repositoriesOverlap(repos, evidenceRepositories(candidate.Provenance.Evidence)) {
+			continue
+		}
+		if architectureTypeVisible("component", candidate.Type) && !architectureContainsString(result, "component") {
+			result = append(result, "component")
+		}
+		if architectureTypeVisible("code", candidate.Type) && !architectureContainsString(result, "code") {
+			result = append(result, "code")
+		}
+	}
+	return result
+}
+
+func repositoriesOverlap(left, right []string) bool {
+	for _, a := range left {
+		for _, b := range right {
+			if a == b {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func architectureContainsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceRepositories(evidence []contracts.Evidence) []string {

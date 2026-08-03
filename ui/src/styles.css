@@ -5445,3 +5445,18 @@ body:has(.product-shell), html:has(.product-shell), #root:has(.product-shell) { 
   .review-intel-grid { grid-template-columns: 1fr; }
   .runs-surface > .actions > button { flex: 1 1 100%; }
 }
+.architecture-node-button {
+  width: 100%;
+  min-height: 80px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  text-align: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.architecture-node-button:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}

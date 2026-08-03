@@ -1,18 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ELK from "elkjs/lib/elk.bundled.js";
 import {
   Background,
   Controls,
+  Handle,
   MiniMap,
+  Position,
   ReactFlow,
   type Edge as FlowEdge,
   type Node as FlowNode,
+  type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureNode, ArchitectureView } from "../lib/appContracts";
 
 const elk = new ELK();
+const nodeTypes = { architecture: ArchitectureNodeControl };
+
+function ArchitectureNodeControl({ id, data }: NodeProps) {
+  const typed = data as { label: ReactNode; onSelect?: (id: string) => void };
+  return <><Handle type="target" position={Position.Left} isConnectable={false} /><button type="button" className="architecture-node-button" onClick={() => typed.onSelect?.(id)}>{typed.label}</button><Handle type="source" position={Position.Right} isConnectable={false} /></>;
+}
 
 export function ArchitectureMap({
   view,
@@ -59,7 +68,7 @@ export function ArchitectureMap({
   return (
     <div className="architecture-canvas" data-testid="architecture-canvas" aria-label={`${levelLabel(level)} architecture map`}>
       <ReactFlow
-        nodes={layout.nodes.map((node) => ({ ...node, selected: node.id === selectedID }))}
+        nodes={layout.nodes.map((node) => ({ ...node, selected: node.id === selectedID, data: { ...node.data, onSelect } }))}
         edges={layout.edges.map((edge) => ({ ...edge, selected: edge.id === selectedID }))}
         fitView
         fitViewOptions={{ padding: 0.18, maxZoom: 1.15 }}
@@ -68,11 +77,16 @@ export function ArchitectureMap({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
-        nodesFocusable
+        nodesFocusable={false}
         edgesFocusable
-        autoPanOnNodeFocus
+        autoPanOnNodeFocus={false}
+        nodeTypes={nodeTypes}
         onNodeClick={(_, node) => onSelect(node.id)}
         onEdgeClick={(_, edge) => onSelect(edge.id)}
+        onSelectionChange={({ nodes, edges }) => {
+          const selected = nodes[nodes.length - 1] ?? edges[edges.length - 1];
+          if (selected && selected.id !== selectedID) onSelect(selected.id);
+        }}
         onPaneClick={() => onSelect(undefined)}
         proOptions={{ hideAttribution: true }}
       >
@@ -106,6 +120,7 @@ export async function layoutArchitecture(nodes: ArchitectureNode[], edges: Archi
         position: { x: item.x ?? 0, y: item.y ?? 0 },
         data: { label: <div className="architecture-node-label"><span>{node.type}</span><strong>{node.name}</strong><small>{Math.round(node.confidence * 100)}% confidence{node.owner_team_id ? ` · ${node.owner_team_id}` : ""}</small></div> },
         className: `architecture-node type-${node.type.replace(/\./g, "-")}`,
+        type: "architecture",
         ariaLabel: `${node.name}, ${node.type}, ${Math.round(node.confidence * 100)} percent confidence`,
         style: { width: 224, minHeight: 84 },
       } satisfies FlowNode;

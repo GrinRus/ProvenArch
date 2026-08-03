@@ -30,6 +30,7 @@ type retryPlan struct {
 	RequestedStep      string   `json:"requested_step"`
 	EffectiveStartStep string   `json:"effective_start_step"`
 	RequestedScopes    []string `json:"requested_scopes"`
+	EffectiveScopes    []string `json:"effective_scopes"`
 	ReusedInputs       []string `json:"reused_inputs"`
 	ExecuteSteps       []string `json:"execute_steps"`
 	InvalidatedSteps   []string `json:"invalidated_steps"`
@@ -88,7 +89,8 @@ func (s *Server) handlePipelineRetry(writer http.ResponseWriter, request *http.R
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace: snapshot.Workspace, Pipeline: pipeline, NonInteractive: true,
 		ResumeFromStep: plan.EffectiveStartStep, RetryParentRunID: parentRunID,
-		RetryReason: "operator_retry", RetryScopes: plan.RequestedScopes, RetryReusedInputs: plan.ReusedInputs,
+		RetryReason: "operator_retry", RetryRequestedStep: plan.RequestedStep, RetryRequestedScopes: plan.RequestedScopes,
+		RetryScopes: plan.EffectiveScopes, RetryReusedInputs: plan.ReusedInputs,
 	})
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrRunActive) {
@@ -124,14 +126,15 @@ func buildRetryPlan(snapshot serverSessionSnapshot, parentRunID string, request 
 	}
 	effectiveIndex := index
 	widenReason := ""
-	if effectiveIndex > 0 {
-		staging, _ := snapshot.Workspace.Resolve(filepath.ToSlash(filepath.Join("reports", "taskruns", parent.RunID, "staging")))
-		if info, err := os.Stat(staging); err != nil || !info.IsDir() {
+	scopes := normalizeRetryScopes(request.ScopeIDs)
+	needsParentInputs := effectiveIndex > 0 || (strings.Contains(steps[effectiveIndex], "collect") && len(scopes) > 0)
+	if needsParentInputs {
+		if err := orchestrator.ValidateRetryStaging(snapshot.Workspace, parent.RunID, steps[effectiveIndex], scopes); err != nil {
 			effectiveIndex = 0
-			widenReason = "Validated parent staging is unavailable, so retry must restart from the first pipeline step."
+			scopes = nil
+			widenReason = "Validated parent inputs are unavailable or no longer pass validation, so retry must restart from the first pipeline step."
 		}
 	}
-	scopes := normalizeRetryScopes(request.ScopeIDs)
 	reused := append([]string(nil), steps[:effectiveIndex]...)
 	execute := append([]string(nil), steps[effectiveIndex:]...)
 	if strings.Contains(steps[effectiveIndex], "collect") && len(scopes) > 0 {
@@ -141,7 +144,7 @@ func buildRetryPlan(snapshot serverSessionSnapshot, parentRunID string, request 
 	if strings.Contains(steps[effectiveIndex], "collect") && len(scopes) > 0 {
 		estimatedUnits = len(scopes) + len(execute) - 1
 	}
-	plan := retryPlan{ParentRunID: parent.RunID, Pipeline: parent.Pipeline, RequestedStep: requested, EffectiveStartStep: steps[effectiveIndex], RequestedScopes: scopes, ReusedInputs: reused, ExecuteSteps: execute, InvalidatedSteps: execute, EstimatedUnits: estimatedUnits, Widened: effectiveIndex != index, WidenReason: widenReason}
+	plan := retryPlan{ParentRunID: parent.RunID, Pipeline: parent.Pipeline, RequestedStep: requested, EffectiveStartStep: steps[effectiveIndex], RequestedScopes: normalizeRetryScopes(request.ScopeIDs), EffectiveScopes: scopes, ReusedInputs: reused, ExecuteSteps: execute, InvalidatedSteps: execute, EstimatedUnits: estimatedUnits, Widened: effectiveIndex != index || widenReason != "", WidenReason: widenReason}
 	artifacts, _ := snapshot.Service.GetRunArtifacts(parent.RunID)
 	plan.PlanHash = retryPlanHash(snapshot, parent, artifacts, plan)
 	return plan, http.StatusOK, "", nil
@@ -163,12 +166,48 @@ func retryPlanHash(snapshot serverSessionSnapshot, parent orchestrator.RunInfo, 
 		Parent            orchestrator.RunInfo `json:"parent"`
 		Plan              retryPlan            `json:"plan"`
 		Digests           []string             `json:"digests"`
+		StagingDigests    []string             `json:"staging_digests"`
 		SourceFingerprint string               `json:"source_fingerprint"`
-	}{Parent: parent, Plan: plan, Digests: digests, SourceFingerprint: retrySourceFingerprint(snapshot)}
+	}{Parent: parent, Plan: plan, Digests: digests, StagingDigests: retryStagingDigests(snapshot.Workspace.Path, parent.RunID), SourceFingerprint: retrySourceFingerprint(snapshot)}
 	payload.Plan.PlanHash = ""
 	raw, _ := json.Marshal(payload)
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
+}
+
+func retryStagingDigests(root, runID string) []string {
+	staging := filepath.Join(root, "reports", "taskruns", runID, "staging")
+	result := []string{}
+	_ = filepath.WalkDir(staging, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			result = append(result, "unavailable:"+current)
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(staging, current)
+		if err != nil {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			result = append(result, filepath.ToSlash(rel)+":symlink")
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		raw, err := os.ReadFile(current)
+		if err != nil {
+			result = append(result, filepath.ToSlash(rel)+":unavailable")
+			return nil
+		}
+		digest := sha256.Sum256(raw)
+		result = append(result, filepath.ToSlash(rel)+":"+hex.EncodeToString(digest[:]))
+		return nil
+	})
+	sort.Strings(result)
+	return result
 }
 
 func retrySourceFingerprint(snapshot serverSessionSnapshot) string {

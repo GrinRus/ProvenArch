@@ -417,7 +417,9 @@ client execution invariants covered by deterministic UI tests.
   paths/evidence, explicit export links and prior-promoted semantic comparison; Mermaid is
   inventory/export, never a parsed source of truth.
 - Run-history additions are optional for backward compatibility. Progress uses known step/unit
-  counters and separate activity/useful-progress clocks. Retry lineage records immutable parent ID,
-  requested/effective start and reused inputs.
+  counters, persisted elapsed time and separate activity/useful-progress clocks. Retry lineage records
+  immutable parent ID, requested/effective start and reused inputs; retry planning validates reusable
+  shard contracts and hashes every parent staging file. Architecture review and coverage are sourced
+  from the promoted run semantic snapshot and retain explicit related IDs.
 - Contract behavior is protected by Go API/orchestrator tests and TypeScript response types; unknown
   legacy fields remain safely absent rather than inferred.

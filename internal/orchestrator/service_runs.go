@@ -50,7 +50,7 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		progress.Phase = "queued"
 		var retry *RetryLineage
 		if strings.TrimSpace(request.RetryParentRunID) != "" {
-			retry = &RetryLineage{ParentRunID: strings.TrimSpace(request.RetryParentRunID), Reason: strings.TrimSpace(request.RetryReason), RequestedStep: strings.TrimSpace(request.ResumeFromStep), EffectiveStartStep: strings.TrimSpace(request.ResumeFromStep), RequestedScopes: append([]string(nil), request.RetryScopes...), ReusedInputs: append([]string(nil), request.RetryReusedInputs...)}
+			retry = &RetryLineage{ParentRunID: strings.TrimSpace(request.RetryParentRunID), Reason: strings.TrimSpace(request.RetryReason), RequestedStep: retryRequestedStep(request), EffectiveStartStep: strings.TrimSpace(request.ResumeFromStep), RequestedScopes: retryRequestedScopes(request), EffectiveScopes: append([]string(nil), request.RetryScopes...), ReusedInputs: append([]string(nil), request.RetryReusedInputs...)}
 		}
 		return runRecord{
 			info: RunInfo{
@@ -795,6 +795,7 @@ func cloneRetryLineage(value *RetryLineage) *RetryLineage {
 	}
 	clone := *value
 	clone.RequestedScopes = append([]string(nil), value.RequestedScopes...)
+	clone.EffectiveScopes = append([]string(nil), value.EffectiveScopes...)
 	clone.ReusedInputs = append([]string(nil), value.ReusedInputs...)
 	return &clone
 }

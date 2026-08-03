@@ -45,11 +45,20 @@ export function KnowledgePage({
   const [typeFilter, setTypeFilter] = useState("");
   const [repositoryFilter, setRepositoryFilter] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
-  const activeView = architecture?.views[level];
+  const [codeScopeServiceID, setCodeScopeServiceID] = useState<string>();
   const allNodes = useMemo(() => architecture ? uniqueNodes(Object.values(architecture.views).flatMap((item) => item.nodes)) : [], [architecture]);
   const allEdges = useMemo(() => architecture ? uniqueEdges(Object.values(architecture.views).flatMap((item) => item.edges)) : [], [architecture]);
   const selectedNode = allNodes.find((node) => node.id === selectedEntityID);
   const selectedEdge = allEdges.find((edge) => edge.id === selectedEntityID);
+  const codeScopeService = allNodes.find((node) => node.id === codeScopeServiceID && node.type === "service");
+  const activeView = useMemo(() => {
+    const view = architecture?.views[level];
+    if (!view || level !== "code" || !codeScopeService) return view;
+    const repositories = new Set(codeScopeService.repositories ?? []);
+    const nodes = view.nodes.filter((node) => (node.repositories ?? []).some((repository) => repositories.has(repository)));
+    const ids = new Set(nodes.map((node) => node.id));
+    return { ...view, nodes, edges: view.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)), available: nodes.length > 0, unavailable_reason: nodes.length > 0 ? undefined : "No validated code-level interfaces are linked to the selected service repositories." };
+  }, [architecture, level, codeScopeService]);
   const typeOptions = useMemo(() => Array.from(new Set(activeView?.nodes.map((node) => node.type) ?? [])).sort(), [activeView]);
   const repositoryOptions = useMemo(() => Array.from(new Set(activeView?.nodes.flatMap((node) => node.repositories ?? []) ?? [])).sort(), [activeView]);
   const mobileNodes = (activeView?.nodes ?? []).filter((node) => (!typeFilter || node.type === typeFilter) && (!repositoryFilter || node.repositories?.includes(repositoryFilter)) && [node.name, node.id, node.type, node.owner_team_id ?? "", ...(node.tags ?? [])].join(" ").toLowerCase().includes(query.trim().toLowerCase()));
@@ -86,16 +95,16 @@ export function KnowledgePage({
           <div className="architecture-map-toolbar">
             <div className="segmented-control" aria-label="C4 level">
               {(["context", "container", "component"] as ArchitectureLevel[]).map((item) => <button key={item} type="button" aria-pressed={level === item} onClick={() => { setLevel(item); onEntityChange(undefined); }}>{levelLabel(item)}</button>)}
-              <details><summary>Advanced</summary><button type="button" aria-pressed={level === "code"} onClick={() => { setLevel("code"); onEntityChange(undefined); }}>Code</button></details>
+              <details><summary>Advanced</summary><button type="button" aria-pressed={level === "code"} disabled={!selectedNode || selectedNode.type !== "service" || !(selectedNode.child_levels ?? []).includes("code")} title={!selectedNode || selectedNode.type !== "service" ? "Select a service to inspect code-level interfaces." : !(selectedNode.child_levels ?? []).includes("code") ? selectedNode.detail_unavailable_reason || "No validated code detail is available for this service." : undefined} onClick={() => { if (!selectedNode) return; setCodeScopeServiceID(selectedNode.id); setLevel("code"); }}>Code for selected service</button></details>
             </div>
             <div className="architecture-map-filters"><label className="architecture-search"><span className="sr-only">Search architecture</span><input type="search" value={query} placeholder="Search service, owner, type…" onChange={(event) => setQuery(event.target.value)} /></label><label><span className="sr-only">Filter by type</span><select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); onEntityChange(undefined); }}><option value="">All types</option>{typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label><span className="sr-only">Filter by repository</span><select value={repositoryFilter} onChange={(event) => { setRepositoryFilter(event.target.value); onEntityChange(undefined); }}><option value="">All repositories</option>{repositoryOptions.map((repository) => <option key={repository} value={repository}>{repository}</option>)}</select></label></div>
             <button type="button" aria-pressed={fullscreen} onClick={() => setFullscreen((value) => !value)}>{fullscreen ? "Exit fullscreen" : "Fullscreen"}</button>
           </div>
-          <p className="architecture-breadcrumb">Architecture / {levelLabel(level)}{selectedNode ? ` / ${selectedNode.name}` : selectedEdge ? ` / ${selectedEdge.name || selectedEdge.type}` : ""}</p>
+          <p className="architecture-breadcrumb">Architecture / {level === "code" && codeScopeService ? `${codeScopeService.name} / ` : ""}{levelLabel(level)}{selectedNode && selectedNode.id !== codeScopeService?.id ? ` / ${selectedNode.name}` : selectedEdge ? ` / ${selectedEdge.name || selectedEdge.type}` : ""}</p>
           <div className="architecture-map-layout">
             <ArchitectureMap view={activeView} level={level} selectedID={selectedEntityID} query={query} typeFilter={typeFilter} repositoryFilter={repositoryFilter} onSelect={onEntityChange} />
             <aside className="architecture-inspector" aria-label="Architecture inspector">
-              {selectedNode ? <NodeInspector node={selectedNode} onOpenArtifact={onOpenArtifact} onDrillDown={(next) => setLevel(next)} /> : selectedEdge ? <EdgeInspector edge={selectedEdge} nodes={allNodes} onOpenArtifact={onOpenArtifact} /> : <div className="inspector-empty"><strong>Select a node or relationship</strong><p>Inspect ownership, confidence and exact repository evidence. Use Tab and Enter to navigate the map without a mouse.</p></div>}
+              {selectedNode ? <NodeInspector node={selectedNode} currentLevel={level} onOpenArtifact={onOpenArtifact} onDrillDown={(next) => setLevel(next)} /> : selectedEdge ? <EdgeInspector edge={selectedEdge} nodes={allNodes} onOpenArtifact={onOpenArtifact} /> : <div className="inspector-empty"><strong>Select a node or relationship</strong><p>Inspect ownership, confidence and exact repository evidence. Use Tab and Enter to navigate the map without a mouse.</p></div>}
             </aside>
           </div>
           <div className="architecture-mobile-list" aria-label="Architecture elements">
@@ -124,10 +133,11 @@ export function KnowledgePage({
   );
 }
 
-function NodeInspector({ node, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {
-  const levels = node.available_levels ?? [];
-  const next = (["container", "component", "code"] as ArchitectureLevel[]).find((level) => levels.includes(level));
-  return <div data-testid="knowledge-entity-detail"><p className="eyebrow">{node.type}</p><h2>{node.name}</h2><code>{node.id}</code><dl className="compact-defs"><div><dt>Confidence</dt><dd>{Math.round(node.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{node.provenance_kind}</dd></div><div><dt>Owner</dt><dd>{node.owner_team_id || "Not established"}</dd></div><div><dt>Repositories</dt><dd>{node.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(node.related_findings?.length ?? 0)} findings · {(node.related_questions?.length ?? 0)} questions</dd></div></dl><h3>Repository evidence</h3>{(node.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{node.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this node.</p>}<div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(node.path)}>Open model YAML</button>{next ? <button type="button" onClick={() => onDrillDown(next)}>Drill down to {levelLabel(next)}</button> : null}</div></div>;
+function NodeInspector({ node, currentLevel, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; currentLevel: ArchitectureLevel; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {
+  const levels = node.child_levels ?? [];
+  const order = ["context", "container", "component", "code"] as ArchitectureLevel[];
+  const next = order.find((level) => order.indexOf(level) > order.indexOf(currentLevel) && levels.includes(level));
+  return <div data-testid="knowledge-entity-detail"><p className="eyebrow">{node.type}</p><h2>{node.name}</h2><code>{node.id}</code><dl className="compact-defs"><div><dt>Confidence</dt><dd>{Math.round(node.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{node.provenance_kind}</dd></div><div><dt>Owner</dt><dd>{node.owner_team_id || "Not established"}</dd></div><div><dt>Repositories</dt><dd>{node.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(node.related_findings?.length ?? 0)} findings · {(node.related_questions?.length ?? 0)} questions</dd></div></dl>{(node.related_findings?.length ?? 0) + (node.related_questions?.length ?? 0) > 0 ? <ul className="compact-list">{node.related_findings?.map((id) => <li key={id}><strong>Finding</strong><code>{id}</code></li>)}{node.related_questions?.map((id) => <li key={id}><strong>Question</strong><code>{id}</code></li>)}</ul> : null}<h3>Repository evidence</h3>{(node.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{node.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this node.</p>}<div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(node.path)}>Open model YAML</button>{next ? <button type="button" onClick={() => onDrillDown(next)}>Drill down to {levelLabel(next)}</button> : <span className="disabled-reason">{node.detail_unavailable_reason || "No validated lower-level detail is available."}</span>}</div></div>;
 }
 
 function EdgeInspector({ edge, nodes, onOpenArtifact }: { edge: ArchitectureEdge; nodes: ReturnType<typeof uniqueNodes>; onOpenArtifact: (path: string) => void }) {

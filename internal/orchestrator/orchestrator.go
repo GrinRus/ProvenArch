@@ -146,6 +146,7 @@ type RunProgress struct {
 	FailedUnits     int      `json:"failed_units,omitempty"`
 	CurrentScopes   []string `json:"current_scopes,omitempty"`
 	StartedAt       string   `json:"started_at"`
+	ElapsedMS       int64    `json:"elapsed_ms"`
 	LastActivityAt  string   `json:"last_activity_at,omitempty"`
 	LastProgressAt  string   `json:"last_progress_at,omitempty"`
 	ArtifactState   string   `json:"artifact_state,omitempty"`
@@ -160,6 +161,7 @@ type RetryLineage struct {
 	RequestedStep      string   `json:"requested_step"`
 	EffectiveStartStep string   `json:"effective_start_step"`
 	RequestedScopes    []string `json:"requested_scopes,omitempty"`
+	EffectiveScopes    []string `json:"effective_scopes,omitempty"`
 	ReusedInputs       []string `json:"reused_inputs,omitempty"`
 }
 
@@ -182,16 +184,18 @@ type Artifact struct {
 }
 
 type RunRequest struct {
-	Workspace         workspace.Root
-	Pipeline          Pipeline
-	NonInteractive    bool
-	Question          string
-	Intent            RunIntent
-	ResumeFromStep    string
-	RetryParentRunID  string
-	RetryReason       string
-	RetryScopes       []string
-	RetryReusedInputs []string
+	Workspace            workspace.Root
+	Pipeline             Pipeline
+	NonInteractive       bool
+	Question             string
+	Intent               RunIntent
+	ResumeFromStep       string
+	RetryParentRunID     string
+	RetryReason          string
+	RetryRequestedStep   string
+	RetryRequestedScopes []string
+	RetryScopes          []string
+	RetryReusedInputs    []string
 }
 
 type PendingRunInfo struct {
@@ -437,9 +441,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		initialInfo.Retry = &RetryLineage{
 			ParentRunID:        strings.TrimSpace(request.RetryParentRunID),
 			Reason:             strings.TrimSpace(request.RetryReason),
-			RequestedStep:      strings.TrimSpace(request.ResumeFromStep),
+			RequestedStep:      retryRequestedStep(request),
 			EffectiveStartStep: resumeFromStep,
-			RequestedScopes:    append([]string(nil), request.RetryScopes...),
+			RequestedScopes:    retryRequestedScopes(request),
+			EffectiveScopes:    append([]string(nil), request.RetryScopes...),
 			ReusedInputs:       append([]string(nil), request.RetryReusedInputs...),
 		}
 	}
@@ -853,6 +858,19 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 
 	return s.finishExecutionSuccess(runID, initialInfo, &execution)
+}
+
+func retryRequestedStep(request RunRequest) string {
+	if value := strings.TrimSpace(request.RetryRequestedStep); value != "" {
+		return value
+	}
+	return strings.TrimSpace(request.ResumeFromStep)
+}
+func retryRequestedScopes(request RunRequest) []string {
+	if request.RetryRequestedScopes != nil {
+		return append([]string(nil), request.RetryRequestedScopes...)
+	}
+	return append([]string(nil), request.RetryScopes...)
 }
 
 type pipelineExecution struct {

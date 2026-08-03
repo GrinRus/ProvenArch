@@ -1,10 +1,12 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
@@ -38,26 +40,54 @@ func TestRetryStagingReuseInvalidatesRequestedAndDownstreamScopes(t *testing.T) 
 
 func TestCopyRetryStagingReusesSiblingWithoutMutatingParent(t *testing.T) {
 	ws := workspace.Root{Path: t.TempDir()}
-	parentPayment := "reports/taskruns/parent/staging/shards/payments/manifest.json"
-	parentUsers := "reports/taskruns/parent/staging/shards/users/manifest.json"
-	if err := ws.WriteFile(parentPayment, []byte("payments-parent")); err != nil {
-		t.Fatal(err)
-	}
-	if err := ws.WriteFile(parentUsers, []byte("users-parent")); err != nil {
-		t.Fatal(err)
-	}
+	writeRetryShardFixture(t, ws, "parent", "payments")
+	writeRetryShardFixture(t, ws, "parent", "users")
+	parentUsers := "reports/taskruns/parent/staging/shards/users/shard-pack-manifest.json"
 	if err := copyRetryStaging(ws, "parent", "child", "init.step1.collect", []string{"payments"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(ws.Path, "reports/taskruns/child/staging/shards/payments/manifest.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Path, "reports/taskruns/child/staging/shards/payments/shard-pack-manifest.json")); !os.IsNotExist(err) {
 		t.Fatalf("failed scope was reused: %v", err)
 	}
-	childUsers, err := os.ReadFile(filepath.Join(ws.Path, "reports/taskruns/child/staging/shards/users/manifest.json"))
-	if err != nil || string(childUsers) != "users-parent" {
+	childUsers, err := os.ReadFile(filepath.Join(ws.Path, "reports/taskruns/child/staging/shards/users/shard-pack-manifest.json"))
+	if err != nil || len(childUsers) == 0 {
 		t.Fatalf("validated sibling was not copied: %q, %v", childUsers, err)
 	}
 	parentUsersBytes, err := os.ReadFile(filepath.Join(ws.Path, filepath.FromSlash(parentUsers)))
-	if err != nil || string(parentUsersBytes) != "users-parent" {
+	if err != nil || string(parentUsersBytes) != string(childUsers) {
 		t.Fatalf("immutable parent changed: %q, %v", parentUsersBytes, err)
+	}
+}
+
+func TestCopyRetryStagingRejectsUnvalidatedSibling(t *testing.T) {
+	ws := workspace.Root{Path: t.TempDir()}
+	writeRetryShardFixture(t, ws, "parent", "users")
+	if err := ws.WriteFile("reports/taskruns/parent/staging/shards/users/shard-pack-manifest.json", []byte(`{"not":"valid"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyRetryStaging(ws, "parent", "child", "init.step2.asis_docs", nil); err == nil {
+		t.Fatal("expected invalid parent shard to be rejected")
+	}
+}
+
+func writeRetryShardFixture(t *testing.T, ws workspace.Root, runID, shardID string) {
+	t.Helper()
+	root := filepath.Join(ws.Path, "reports", "taskruns", runID, "staging", "shards", shardID)
+	manifest := contracts.ShardPackManifest{
+		Version: 1, RunID: runID, StepID: "init.step1.collect", ShardID: shardID, DomainID: shardID,
+		AgentRole: "shard-analyst", ArtifactRoot: root, RepoScopes: []string{shardID}, PathScopes: []string{"."},
+		Documents: []contracts.AuthoredDocument{{ID: "doc." + shardID, Kind: "report", Title: shardID + " overview", Path: "overview.md", CanonicalPath: "reports/as-is/" + shardID + "/overview.md", Topics: []string{shardID}, CitationIDs: []string{"cite." + shardID}}},
+		Citations: []contracts.DocumentCitation{{ID: "cite." + shardID, Repo: shardID, Path: "README.md", ClaimIDs: []string{"claim." + shardID}, DocumentIDs: []string{"doc." + shardID}}},
+		Semantic:  contracts.SemanticSnapshot{Coverage: contracts.Coverage{Observed: []string{"entrypoints"}, Missing: []string{"owner"}}, Questions: []contracts.Question{{ID: "q." + shardID, Text: "Who owns " + shardID + "?"}}, Entities: []contracts.Entity{{ID: "svc." + shardID, Type: "service", Name: shardID, Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: shardID, Path: "README.md"}}}}}, Edges: []contracts.Edge{}, Findings: []contracts.Finding{}},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "shards", shardID, "overview.md")), []byte("# Overview\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "shards", shardID, "shard-pack-manifest.json")), raw); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -41,6 +41,7 @@ func (t *runProgressTracker) beginStep(stepID string, scopes []string, now time.
 		}
 	}
 	t.applyCounts()
+	t.applyElapsed(now)
 	return cloneRunProgress(t.progress)
 }
 
@@ -116,6 +117,7 @@ func (t *runProgressTracker) observe(entry RunLogEntry) *RunProgress {
 		t.progress.LastProgressAt = now.Format(time.RFC3339)
 	}
 	t.applyCounts()
+	t.applyElapsed(now)
 	return cloneRunProgress(t.progress)
 }
 
@@ -125,7 +127,18 @@ func (t *runProgressTracker) snapshot() *RunProgress {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.applyElapsed(time.Now().UTC())
 	return cloneRunProgress(t.progress)
+}
+
+func (t *runProgressTracker) applyElapsed(now time.Time) {
+	if t == nil || t.progress == nil || t.startedAt.IsZero() {
+		return
+	}
+	if now.Before(t.startedAt) {
+		now = t.startedAt
+	}
+	t.progress.ElapsedMS = now.Sub(t.startedAt).Milliseconds()
 }
 
 func (e *pipelineExecution) currentRunProgress() *RunProgress {
@@ -239,6 +252,9 @@ func terminalRunProgress(value *RunProgress, status RunStatus, finishedAt time.T
 	}
 	value.Phase = string(status)
 	value.LastActivityAt = finishedAt.UTC().Format(time.RFC3339)
+	if startedAt, err := time.Parse(time.RFC3339, value.StartedAt); err == nil && !finishedAt.Before(startedAt) {
+		value.ElapsedMS = finishedAt.Sub(startedAt).Milliseconds()
+	}
 	if status == RunStatusSucceeded {
 		value.Phase = "completed"
 		value.CompletedSteps = value.TotalSteps

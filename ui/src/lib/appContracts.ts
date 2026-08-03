@@ -149,6 +149,8 @@ export type ArchitectureNode = {
   evidence?: Array<{ repo: string; path: string; ref?: string; lines?: { start: number; end: number } }>;
   path: string;
   available_levels?: ArchitectureLevel[];
+  child_levels?: ArchitectureLevel[];
+  detail_unavailable_reason?: string;
   repositories?: string[];
   related_findings?: string[];
   related_questions?: string[];
@@ -186,6 +188,11 @@ export type ArchitectureResponse = {
   views: Record<ArchitectureLevel, ArchitectureView>;
   exports?: { home_path?: string; c4_mermaid_paths: string[] };
   comparison?: ArchitectureComparison;
+  review?: {
+    findings: Array<{ id: string; severity: string; title: string; description?: string; related_ids?: string[] }>;
+    questions: Array<{ id: string; text: string; priority?: string; related_ids?: string[] }>;
+  };
+  coverage?: { observed?: string[]; missing?: string[]; notes?: string[] };
   artifacts: KnowledgeArtifact[];
   issues: KnowledgeIssue[];
 };
@@ -206,6 +213,7 @@ export type RunProgress = {
   failed_units?: number;
   current_scopes?: string[];
   started_at: string;
+  elapsed_ms?: number;
   last_activity_at?: string;
   last_progress_at?: string;
   artifact_state?: string;
@@ -214,7 +222,7 @@ export type RunProgress = {
   stall_deadline_at?: string;
 };
 
-export type RetryLineage = { parent_run_id: string; reason: string; requested_step: string; effective_start_step: string; requested_scopes?: string[]; reused_inputs?: string[] };
+export type RetryLineage = { parent_run_id: string; reason: string; requested_step: string; effective_start_step: string; requested_scopes?: string[]; effective_scopes?: string[]; reused_inputs?: string[] };
 
 export type RunStartResponse = {
   run_id: string;
@@ -377,11 +385,11 @@ export type RunReviewSummaryResponse = {
   steps: RunReviewStep[];
   progress?: RunProgress | null;
   retry?: RetryLineage | null;
-  result?: { state: "completed" | "completed_with_gaps" | "failed" | "canceled"; summary: string; produced: Record<string, number>; partial_scopes: number; failed_scopes: number; promotion: { changed: boolean; current_usable: boolean; baseline_run_id?: string }; recommended_action: string };
+  result?: { state: "completed" | "completed_with_gaps" | "failed" | "canceled"; summary: string; produced: Record<string, number>; partial_scopes: number; failed_scopes: number; promotion: { changed: boolean; current_usable: boolean; baseline_run_id?: string }; recommended_action: string; coverage?: { observed: number; missing: number; status: "available" | "partial" | "unavailable" } };
   recovery?: { category: string; title: string; explanation: string; impact: string; retained_evidence: string; recommended_fix: string; can_retry: boolean; failed_step?: string; failed_scopes?: string[]; technical_code?: string } | null;
 };
 
-export type RetryPlanResponse = { parent_run_id: string; pipeline: string; requested_step: string; effective_start_step: string; requested_scopes: string[]; reused_inputs: string[]; execute_steps: string[]; invalidated_steps: string[]; estimated_units: number; widened: boolean; widen_reason?: string; plan_hash: string };
+export type RetryPlanResponse = { parent_run_id: string; pipeline: string; requested_step: string; effective_start_step: string; requested_scopes: string[]; effective_scopes?: string[]; reused_inputs: string[]; execute_steps: string[]; invalidated_steps: string[]; estimated_units: number; widened: boolean; widen_reason?: string; plan_hash: string };
 
 export type GitDiffFile = {
   path: string;

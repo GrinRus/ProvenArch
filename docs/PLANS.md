@@ -466,6 +466,8 @@ and diagnostics, not as the primary product result.
 - [x] Preserve the completed onboarding/readability/navigation/mobile/recovery improvements from
       `EP-20260803-ui-ux-hierarchy-onboarding`.
 - [x] Keep all new progress, retry and result behavior deterministic, Git-friendly and auditable.
+- [ ] Merge the audited outcome-first implementation through its feature PR after required checks
+      and review succeed.
 
 ### Non-goals
 - No hosted or multi-user control plane, source-repository writes, security/compliance enforcement
@@ -787,6 +789,12 @@ active or failed.
 - 2026-08-03: Completed rendered desktop/mobile QA, the seven-scenario mock Playwright suite,
   bounded 80-node ELK layout coverage and mandatory `make contracts`, `make test`, `make lint`,
   `make build`. No live-provider E2E was run because release-gate behavior is unchanged.
+- 2026-08-03: Post-implementation gap audit closed unsafe retry reuse and staging drift, persisted
+  elapsed time, requested/effective retry lineage, historical run-scoped result counts/coverage,
+  conservative unknown-error recovery, semantic finding/question linkage, explicit lower-level
+  reasons, service-scoped Code and keyboard/200% zoom coverage. Repeated contracts, full Go/Python/UI
+  tests (`266` Python, `165` UI), lint/typecheck, embedded build and all seven mock Playwright
+  scenarios. Live-provider E2E remains intentionally out of scope for this UI/API contract PR.
 
 ### Plan ID
 EP-20260729-open-source-readme

@@ -18,6 +18,9 @@ func TestRunProgressUsesOnlyDeterministicPipelineSteps(t *testing.T) {
 	if terminal.CompletedSteps != terminal.TotalSteps || terminal.ArtifactState != "validated" || terminal.Phase != "completed" || terminal.CurrentStep != "" {
 		t.Fatalf("unexpected terminal progress: %#v", terminal)
 	}
+	if terminal.ElapsedMS != int64((2*time.Minute)/time.Millisecond) {
+		t.Fatalf("terminal elapsed time = %d", terminal.ElapsedMS)
+	}
 }
 
 func TestRunProgressSeparatesProviderActivityFromUsefulProgress(t *testing.T) {
