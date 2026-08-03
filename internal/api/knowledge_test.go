@@ -95,6 +95,52 @@ func TestKnowledgeRejectsMutatingMethods(t *testing.T) {
 	}
 }
 
+func TestArchitectureReturnsLevelViewsAndEvidenceAuthority(t *testing.T) {
+	server := newTestServer(t)
+	root := server.getWorkspace().Path
+	writeKnowledgeTestFile(t, root, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, root, "model/entities/ext.bank.yaml", "id: ext.bank\ntype: external.system\nname: Bank\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
+	writeKnowledgeTestFile(t, root, "model/edges/edge.payments.calls.bank.yaml", "id: edge.payments.calls.bank\ntype: calls\nfrom: svc.payments\nto: ext.bank\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
+	recorder := httptest.NewRecorder()
+	server.handleArchitecture(recorder, httptest.NewRequest(http.MethodGet, "/api/architecture", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var response architectureResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode architecture: %v", err)
+	}
+	if response.Authority.Mode != evidenceAuthorityPromotedCurrent || response.Status != "available" {
+		t.Fatalf("unexpected authority/status: %#v", response)
+	}
+	if !response.Views["context"].Available || len(response.Views["context"].Nodes) != 2 || len(response.Views["context"].Edges) != 1 {
+		t.Fatalf("unexpected context view: %#v", response.Views["context"])
+	}
+	if response.Counts.Entities != 2 || response.Counts.Edges != 1 {
+		t.Fatalf("unexpected counts: %#v", response.Counts)
+	}
+}
+
+func TestArchitectureComparisonClassifiesSemanticAndReviewChanges(t *testing.T) {
+	root := t.TempDir()
+	currentRoot := filepath.Join(root, "reports", "taskruns", "run-current", "promoted-snapshot")
+	baselineRoot := filepath.Join(root, "reports", "taskruns", "run-baseline", "promoted-snapshot")
+	writeKnowledgeTestFile(t, currentRoot, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments v2\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
+	writeKnowledgeTestFile(t, currentRoot, "model/entities/svc.users.yaml", "id: svc.users\ntype: service\nname: Users\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
+	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.legacy.yaml", "id: svc.legacy\ntype: service\nname: Legacy\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
+	writeKnowledgeTestFile(t, currentRoot, "architecture-snapshot.json", `{"files":[{"path":"reports/findings/findings.md","sha256":"new"},{"path":"reports/coverage/summary.md","sha256":"same"}]}`)
+	writeKnowledgeTestFile(t, baselineRoot, "architecture-snapshot.json", `{"files":[{"path":"reports/findings/findings.md","sha256":"old"},{"path":"reports/coverage/summary.md","sha256":"same"}]}`)
+	comparison := comparePromotedArchitectures(root, "run-current", "run-baseline")
+	entities := comparison.Categories["entities"]
+	if !comparison.Available || len(entities.Added) != 1 || len(entities.Changed) != 1 || len(entities.Removed) != 1 {
+		t.Fatalf("unexpected entity comparison: %#v", comparison)
+	}
+	if len(comparison.Categories["findings"].Changed) != 1 || len(comparison.Categories["gaps"].Changed) != 0 {
+		t.Fatalf("unexpected review comparison: %#v", comparison.Categories)
+	}
+}
+
 func TestKnowledgeFixtureMatchesWireContract(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "api", "knowledge-current-workspace.json"))
 	if err != nil {

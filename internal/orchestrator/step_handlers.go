@@ -115,6 +115,21 @@ func (e *pipelineExecution) runStepCollectByDomain(ctx context.Context, stepID s
 	if err != nil {
 		return err
 	}
+	if len(e.retryScopes) > 0 {
+		allowed := map[string]struct{}{}
+		for _, scope := range e.retryScopes {
+			allowed[strings.TrimSpace(scope)] = struct{}{}
+		}
+		filtered := make([]string, 0, len(domainIDs))
+		for _, domainID := range domainIDs {
+			if _, ok := allowed[domainID]; ok {
+				filtered = append(filtered, domainID)
+			}
+		}
+		if len(filtered) > 0 {
+			domainIDs = filtered
+		}
+	}
 	e.logInfo(stepID, "", "domain fan-out prepared", map[string]any{
 		"domains": len(domainIDs),
 	})

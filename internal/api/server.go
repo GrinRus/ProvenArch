@@ -141,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/knowledge", s.handleKnowledge)
+	mux.HandleFunc("/api/architecture", s.handleArchitecture)
 	mux.HandleFunc("/api/git/diff", s.handleGitDiff)
 	mux.HandleFunc("/api/git/commit", s.handleGitCommit)
 	mux.HandleFunc("/api/git/proposal-branch", s.handleGitProposalBranch)
@@ -1787,6 +1788,14 @@ func (s *Server) handlePipelineRunLogs(writer http.ResponseWriter, request *http
 func (s *Server) handlePipelineRunsPost(writer http.ResponseWriter, request *http.Request) {
 	rest := strings.TrimPrefix(request.URL.Path, "/api/pipeline/runs/")
 	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "retry-plan" {
+		s.handlePipelineRetryPlan(writer, request, strings.TrimSpace(parts[0]))
+		return
+	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "retry" {
+		s.handlePipelineRetry(writer, request, strings.TrimSpace(parts[0]))
+		return
+	}
 	if len(parts) != 2 || parts[0] == "" || parts[1] != "cancel" {
 		writeError(writer, http.StatusNotFound, "endpoint_not_found", "endpoint not found")
 		return
@@ -1928,6 +1937,8 @@ func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 		"error":                formatOptionalString(runInfo.Error),
 		"superseded_by_run_id": formatOptionalString(runInfo.SupersededByRunID),
 		"refresh_summary":      runInfo.RefreshSummary,
+		"progress":             runInfo.Progress,
+		"retry":                runInfo.Retry,
 	}
 }
 

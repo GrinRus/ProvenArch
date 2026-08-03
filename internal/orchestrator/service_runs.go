@@ -46,6 +46,12 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		return "", ErrServiceClosed
 	}
 	queuedRecord := func() runRecord {
+		progress := newRunProgress(request.Pipeline, now, strings.TrimSpace(request.ResumeFromStep))
+		progress.Phase = "queued"
+		var retry *RetryLineage
+		if strings.TrimSpace(request.RetryParentRunID) != "" {
+			retry = &RetryLineage{ParentRunID: strings.TrimSpace(request.RetryParentRunID), Reason: strings.TrimSpace(request.RetryReason), RequestedStep: strings.TrimSpace(request.ResumeFromStep), EffectiveStartStep: strings.TrimSpace(request.ResumeFromStep), RequestedScopes: append([]string(nil), request.RetryScopes...), ReusedInputs: append([]string(nil), request.RetryReusedInputs...)}
+		}
 		return runRecord{
 			info: RunInfo{
 				RunID:         runID,
@@ -55,6 +61,8 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 				Question:      strings.TrimSpace(request.Question),
 				RuntimeMode:   s.runtimeMode,
 				StepProviders: resolvedStepProviders.Effective.StringMap(),
+				Progress:      progress,
+				Retry:         retry,
 			},
 		}
 	}
@@ -715,6 +723,8 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		Error:              record.info.Error,
 		SupersededByRunID:  record.info.SupersededByRunID,
 		RefreshSummary:     cloneRefreshSummary(record.info.RefreshSummary),
+		Progress:           cloneRunProgress(record.info.Progress),
+		Retry:              cloneRetryLineage(record.info.Retry),
 		Artifacts:          append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
@@ -754,6 +764,8 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			Error:              item.Error,
 			SupersededByRunID:  item.SupersededByRunID,
 			RefreshSummary:     cloneRefreshSummary(item.RefreshSummary),
+			Progress:           cloneRunProgress(item.Progress),
+			Retry:              cloneRetryLineage(item.Retry),
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true
@@ -768,6 +780,25 @@ func cloneRefreshSummary(value *RefreshSummary) *RefreshSummary {
 	return &clone
 }
 
+func cloneRunProgress(value *RunProgress) *RunProgress {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.CurrentScopes = append([]string(nil), value.CurrentScopes...)
+	return &clone
+}
+
+func cloneRetryLineage(value *RetryLineage) *RetryLineage {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	clone.RequestedScopes = append([]string(nil), value.RequestedScopes...)
+	clone.ReusedInputs = append([]string(nil), value.ReusedInputs...)
+	return &clone
+}
+
 func cloneRunInfo(value RunInfo) RunInfo {
 	clone := value
 	clone.FinishedAt = cloneTimePointer(value.FinishedAt)
@@ -775,6 +806,8 @@ func cloneRunInfo(value RunInfo) RunInfo {
 	clone.Warnings = append([]string(nil), value.Warnings...)
 	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
 	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)
+	clone.Progress = cloneRunProgress(value.Progress)
+	clone.Retry = cloneRetryLineage(value.Retry)
 	return clone
 }
 

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,7 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		return
 	}
 	steps := buildRunReviewSteps(runInfo, artifacts, logs, snapshot.RuntimeConfig.Mode)
+	result, recovery := buildRunOutcome(snapshot.Workspace.Path, runInfo, artifacts, steps)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":       runInfo.RunID,
 		"pipeline":     runInfo.Pipeline,
@@ -80,7 +82,133 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		"error_code":   formatOptionalString(runInfo.ErrorCode),
 		"error":        formatOptionalString(runInfo.Error),
 		"steps":        steps,
+		"result":       result,
+		"recovery":     recovery,
+		"progress":     runInfo.Progress,
+		"retry":        runInfo.Retry,
 	})
+}
+
+type runOutcomeSummary struct {
+	State             string            `json:"state"`
+	Summary           string            `json:"summary"`
+	Produced          map[string]int    `json:"produced"`
+	PartialScopes     int               `json:"partial_scopes"`
+	FailedScopes      int               `json:"failed_scopes"`
+	Promotion         runPromotionState `json:"promotion"`
+	RecommendedAction string            `json:"recommended_action"`
+}
+
+type runPromotionState struct {
+	Changed       bool   `json:"changed"`
+	CurrentUsable bool   `json:"current_usable"`
+	BaselineRunID string `json:"baseline_run_id,omitempty"`
+}
+
+type runRecoverySummary struct {
+	Category         string   `json:"category"`
+	Title            string   `json:"title"`
+	Explanation      string   `json:"explanation"`
+	Impact           string   `json:"impact"`
+	RetainedEvidence string   `json:"retained_evidence"`
+	RecommendedFix   string   `json:"recommended_fix"`
+	CanRetry         bool     `json:"can_retry"`
+	FailedStep       string   `json:"failed_step,omitempty"`
+	FailedScopes     []string `json:"failed_scopes,omitempty"`
+	TechnicalCode    string   `json:"technical_code,omitempty"`
+}
+
+func buildRunOutcome(root string, info orchestrator.RunInfo, artifacts []orchestrator.Artifact, steps []runReviewStepSummary) (runOutcomeSummary, *runRecoverySummary) {
+	knowledge := collectKnowledge(root)
+	produced := map[string]int{"entities": len(knowledge.Entities), "edges": len(knowledge.Edges), "diagrams": 0, "findings": 0, "questions": 0, "proposals": 0, "artifacts": len(artifacts)}
+	if info.Status != orchestrator.RunStatusSucceeded {
+		produced["entities"], produced["edges"] = 0, 0
+	}
+	for _, artifact := range artifacts {
+		path := strings.ToLower(artifact.Path)
+		switch {
+		case strings.Contains(path, "/diagrams/"):
+			produced["diagrams"]++
+		case strings.Contains(path, "/findings/"):
+			produced["findings"]++
+		case strings.Contains(path, "open-questions"):
+			produced["questions"]++
+		case strings.HasPrefix(path, "proposals/") || strings.Contains(path, "/proposals/"):
+			produced["proposals"]++
+		}
+	}
+	partial, failed := 0, 0
+	for _, step := range steps {
+		if step.WarningsCount > 0 {
+			partial++
+		}
+		if step.State == "failed" {
+			failed++
+		}
+	}
+	state := "failed"
+	summary := "Analysis did not replace the last validated architecture."
+	action := "Review failure"
+	promotionChanged := false
+	currentUsable := len(knowledge.Entities)+len(knowledge.Edges)+len(knowledge.Artifacts) > 0
+	switch info.Status {
+	case orchestrator.RunStatusSucceeded:
+		state, summary, action = "completed", "Validated architecture knowledge is ready to explore.", "explore_architecture"
+		if len(info.Warnings) > 0 || knowledge.Status == "partial" {
+			state, summary, action = "completed_with_gaps", "Architecture is usable, with named evidence gaps that need review.", "review_gaps"
+		}
+		promotionChanged = info.RefreshSummary == nil || info.RefreshSummary.Mode != "no_op"
+	case orchestrator.RunStatusCanceled:
+		state, summary, action = "canceled", "Analysis was canceled; retained evidence and the last validated architecture remain available.", "review_or_retry"
+	}
+	baseline := ""
+	if info.RefreshSummary != nil {
+		baseline = info.RefreshSummary.BaselineRunID
+	}
+	outcome := runOutcomeSummary{State: state, Summary: summary, Produced: produced, PartialScopes: partial, FailedScopes: failed, Promotion: runPromotionState{Changed: promotionChanged, CurrentUsable: currentUsable, BaselineRunID: baseline}, RecommendedAction: action}
+	if info.Status == orchestrator.RunStatusSucceeded {
+		return outcome, nil
+	}
+	category, title, fix := classifyRecovery(info.ErrorCode)
+	recovery := &runRecoverySummary{Category: category, Title: title, Explanation: strings.TrimSpace(info.Error), Impact: "The attempted run was not promoted; current architecture remains on the last validator-approved generation.", RetainedEvidence: "Completed parent task artifacts remain available for audit and safe retry planning.", RecommendedFix: fix, CanRetry: info.Status == orchestrator.RunStatusFailed || info.Status == orchestrator.RunStatusCanceled, FailedStep: info.CurrentStep, FailedScopes: failedScopesFromError(info.Error), TechnicalCode: info.ErrorCode}
+	return outcome, recovery
+}
+
+var failedShardPattern = regexp.MustCompile(`(?i)shard\s+"([^"]+)"`)
+
+func failedScopesFromError(message string) []string {
+	set := map[string]struct{}{}
+	for _, match := range failedShardPattern.FindAllStringSubmatch(message, -1) {
+		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+			set[strings.TrimSpace(match[1])] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(set))
+	for scope := range set {
+		result = append(result, scope)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func classifyRecovery(code string) (string, string, string) {
+	lower := strings.ToLower(strings.TrimSpace(code))
+	switch {
+	case strings.Contains(lower, "permission"):
+		return "permission", "Runtime permission is required", "Review the blocked permission and runner policy, then calculate a retry plan."
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "stall"):
+		return "timeout", "Analysis stopped making useful progress", "Inspect the last useful artifact progress and provider health, then retry the affected step."
+	case strings.Contains(lower, "runner") || strings.Contains(lower, "provider"):
+		return "provider", "The selected provider could not complete the work", "Verify provider readiness or select another configured provider before retrying."
+	case strings.Contains(lower, "contract") || strings.Contains(lower, "validation"):
+		return "contract", "Generated output failed validation", "Inspect the failed artifact contract and retry the affected step after correcting the cause."
+	case strings.Contains(lower, "workspace") || strings.Contains(lower, "source"):
+		return "setup", "Workspace or source configuration is not ready", "Open Setup and resolve the named workspace or repository blocker."
+	case strings.Contains(lower, "cancel"):
+		return "canceled", "Analysis was canceled", "Review retained work and calculate a retry plan when ready."
+	default:
+		return "infrastructure", "Analysis could not complete", "Inspect technical details and logs, then calculate a safe retry plan."
+	}
 }
 
 func readAllRunLogs(service *orchestrator.Service, runID string) ([]orchestrator.RunLogEntry, error) {
