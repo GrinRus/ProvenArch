@@ -337,11 +337,14 @@ Typed issue codes: `knowledge.entity_malformed`, `knowledge.entity_duplicate`,
 confidence, repository/evidence refs, related findings/questions, source YAML и доступные уровни
 drill-down. `child_levels` перечисляет только validated lower levels, а
 `detail_unavailable_reason` объясняет отсутствие детализации. Top-level `review.findings[]`,
-`review.questions[]` и `coverage` берутся из semantic snapshot source run; их `related_ids`
+`review.questions[]` и `coverage` берутся из semantic payload immutable promoted-snapshot manifest
+v2 (legacy snapshots могут read-only fallback-нуться на source-run index); их `related_ids`
 проецируются в `related_findings`/`related_questions` node и edge. `exports` даёт явные ссылки на
 Architecture Home и deterministic C4 Mermaid. После двух
-promoted generations `comparison` классифицирует added/changed/removed entities, edges, findings и
-coverage gaps относительно предыдущего promoted snapshot.
+promoted generations `comparison` классифицирует added/changed/removed entities и edges по stable
+ID/value, findings по finding ID/value и coverage gaps по детерминированной normalized identity
+относительно предыдущего promoted snapshot. Изменение одного Markdown файла не превращается в один
+synthetic finding/gap.
 
 Пустой или partial model остаётся явно `unavailable`/`partial`; endpoint не выводит topology из
 имён файлов и не синтезирует отсутствующие C4 levels. Mermaid files остаются в promoted artifact
@@ -773,7 +776,8 @@ retry (`can_retry=false`) до безопасной классификации.
 request: `step_id`, `scope_ids[]`. Response содержит reused inputs, effective start step, downstream
 invalidations, estimated units, widening reason и `plan_hash`. Если parent staging отсутствует или
 любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
-validation, planner явно расширяет retry до первого pipeline step.
+validation, либо агрегированные final/citation indexes и их staged documents не проходят strict
+parse, parent identity и containment validation, planner явно расширяет retry до первого pipeline step.
 
 ### POST `/api/pipeline/runs/{run_id}/retry`
 Принимает исходные `step_id`, `scope_ids[]` и обязательный `plan_hash`. Backend повторно вычисляет
@@ -782,7 +786,8 @@ parent artifacts/status/session
 возвращает `409 retry_plan_stale`. Success
 создаёт новый child run с immutable parent lineage. Child копирует из parent `staging` только
 upstream/sibling inputs, разрешённые effective closure и повторно прошедшие validation непосредственно
-перед copy; requested/failed и downstream paths
+перед copy. Backend rebind-ит manifest/index/verdict identity к child run и гидратирует validated
+aggregate state до возобновления шага; requested/failed и downstream paths
 инвалидируются. Raw output/logs/history не копируются. После полного downstream closure действует
 обычный validator/atomic promotion gate. Active run возвращает `409 run_active`.
 

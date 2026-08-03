@@ -12,16 +12,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 const architectureSnapshotKind = "architecture-snapshot"
 
 type architectureSnapshotManifest struct {
-	Version     int                                `json:"version"`
-	RunID       string                             `json:"run_id"`
-	GeneratedAt string                             `json:"generated_at"`
-	Files       []architectureSnapshotManifestFile `json:"files"`
+	Version             int                                `json:"version"`
+	RunID               string                             `json:"run_id"`
+	SemanticSourceRunID string                             `json:"semantic_source_run_id"`
+	GeneratedAt         string                             `json:"generated_at"`
+	Files               []architectureSnapshotManifestFile `json:"files"`
+	Semantic            contracts.SemanticSnapshot         `json:"semantic"`
 }
 
 type architectureSnapshotManifestFile struct {
@@ -30,9 +33,17 @@ type architectureSnapshotManifestFile struct {
 }
 
 func persistPromotedArchitectureSnapshot(ws workspace.Root, runID string, now time.Time) (*Artifact, error) {
+	return persistPromotedArchitectureSnapshotFrom(ws, runID, runID, now)
+}
+
+func persistPromotedArchitectureSnapshotFrom(ws workspace.Root, runID, semanticRunID string, now time.Time) (*Artifact, error) {
 	runID = strings.TrimSpace(runID)
+	semanticRunID = strings.TrimSpace(semanticRunID)
 	if runID == "" {
 		return nil, fmt.Errorf("architecture snapshot run id is required")
+	}
+	if semanticRunID == "" {
+		semanticRunID = runID
 	}
 	files := []architectureSnapshotManifestFile{}
 	for _, prefix := range []string{"model", "reports/as-is", "reports/diagrams", "reports/findings", "reports/coverage"} {
@@ -81,7 +92,24 @@ func persistPromotedArchitectureSnapshot(ws workspace.Root, runID string, now ti
 		return nil, nil
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	manifest := architectureSnapshotManifest{Version: 1, RunID: runID, GeneratedAt: now.UTC().Format(time.RFC3339), Files: files}
+	semantic := contracts.SemanticSnapshot{Coverage: contracts.Coverage{Observed: []string{}, Missing: []string{}, Notes: []string{}}, Entities: []contracts.Entity{}, Edges: []contracts.Edge{}, Findings: []contracts.Finding{}, Questions: []contracts.Question{}}
+	if raw, readErr := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", semanticRunID, "promoted-snapshot", "architecture-snapshot.json"))); readErr == nil && semanticRunID != runID {
+		var baseline architectureSnapshotManifest
+		if json.Unmarshal(raw, &baseline) == nil && baseline.Version >= 2 && baseline.RunID == semanticRunID {
+			semantic = baseline.Semantic
+		}
+	}
+	if raw, readErr := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", semanticRunID, "staging", "final", "final-run-index.json"))); readErr == nil {
+		index, parseErr := contracts.ParseFinalRunIndex(raw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("promoted architecture semantic index is invalid: %w", parseErr)
+		}
+		if strings.TrimSpace(index.RunID) != semanticRunID {
+			return nil, fmt.Errorf("promoted architecture semantic index belongs to run %q", index.RunID)
+		}
+		semantic = index.Semantic
+	}
+	manifest := architectureSnapshotManifest{Version: 2, RunID: runID, SemanticSourceRunID: semanticRunID, GeneratedAt: now.UTC().Format(time.RFC3339), Files: files, Semantic: semantic}
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return nil, err

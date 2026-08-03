@@ -795,6 +795,14 @@ active or failed.
   reasons, service-scoped Code and keyboard/200% zoom coverage. Repeated contracts, full Go/Python/UI
   tests (`266` Python, `165` UI), lint/typecheck, embedded build and all seven mock Playwright
   scenarios. Live-provider E2E remains intentionally out of scope for this UI/API contract PR.
+- 2026-08-03: A second plan-by-plan audit found four remaining correctness gaps and closed them:
+  promoted Architecture semantics now live in immutable snapshot manifest v2 (including no-op
+  baseline lineage), Changes compares individual findings and normalized gaps, Run Result/Progress
+  exposes scope/baseline/unit/repair/stall detail with segmented real-step progress, and retry now
+  revalidates, rebinds and hydrates shard/aggregate/PASS-verdict inputs into the child execution
+  state. Added a real fake parent-to-Proposals-child promotion regression, public-shape
+  example/fixture, and synchronized API/model/pipeline/docs contracts. Full DoD and seven mock
+  Playwright scenarios were repeated; live-provider E2E remains outside this PR scope.
 
 ### Plan ID
 EP-20260729-open-source-readme

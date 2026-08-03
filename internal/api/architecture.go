@@ -141,7 +141,7 @@ func (s *Server) handleArchitecture(writer http.ResponseWriter, request *http.Re
 				response.Authority.PromotedAt = current.FinishedAt.UTC().Format(time.RFC3339)
 				response.Authority.Freshness = architectureFreshness(*current.FinishedAt)
 			}
-			enrichArchitectureReview(&response, loadRunSemanticSnapshot(snapshot.Workspace.Path, current.RunID))
+			enrichArchitectureReview(&response, loadPromotedSemanticSnapshot(snapshot.Workspace.Path, current.RunID))
 			if len(promotedRuns) > 1 {
 				response.Comparison = comparePromotedArchitectures(snapshot.Workspace.Path, promotedRuns[0].RunID, promotedRuns[1].RunID)
 			} else {
@@ -206,11 +206,31 @@ func comparePromotedArchitectures(workspaceRoot, currentRunID, baselineRunID str
 	comparison.BaselineRunID = baselineRunID
 	comparison.Categories["entities"] = compareArchitectureValues(current.Entities, baseline.Entities, func(item knowledgeEntity) (string, string, string) { return item.ID, item.Name, item.Path })
 	comparison.Categories["edges"] = compareArchitectureValues(current.Edges, baseline.Edges, func(item knowledgeEdge) (string, string, string) { return item.ID, item.Name, item.Path })
-	currentFiles := readArchitectureSnapshotFiles(currentRoot)
-	baselineFiles := readArchitectureSnapshotFiles(baselineRoot)
-	comparison.Categories["findings"] = compareArchitectureFiles(currentFiles, baselineFiles, "reports/findings/")
-	comparison.Categories["gaps"] = compareArchitectureFiles(currentFiles, baselineFiles, "reports/coverage/")
+	currentSemantic := loadPromotedSemanticSnapshot(workspaceRoot, currentRunID)
+	baselineSemantic := loadPromotedSemanticSnapshot(workspaceRoot, baselineRunID)
+	comparison.Categories["findings"] = compareArchitectureValues(currentSemantic.Findings, baselineSemantic.Findings, func(item contracts.Finding) (string, string, string) {
+		return item.ID, item.Title, "reports/findings/findings.md"
+	})
+	comparison.Categories["gaps"] = compareArchitectureStrings(currentSemantic.Coverage.Missing, baselineSemantic.Coverage.Missing, "reports/coverage/summary.md")
 	return comparison
+}
+
+func compareArchitectureStrings(current, baseline []string, path string) architectureChangeSet {
+	type item struct{ ID, Name, Path string }
+	toItems := func(values []string) []item {
+		result := make([]item, 0, len(values))
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			normalized := strings.Join(strings.Fields(strings.ToLower(value)), " ")
+			digest := sha256.Sum256([]byte(normalized))
+			result = append(result, item{ID: "gap." + hex.EncodeToString(digest[:8]), Name: value, Path: path})
+		}
+		return result
+	}
+	return compareArchitectureValues(toItems(current), toItems(baseline), func(value item) (string, string, string) { return value.ID, value.Name, value.Path })
 }
 
 func compareArchitectureValues[T any](current, baseline []T, identity func(T) (string, string, string)) architectureChangeSet {
@@ -310,7 +330,7 @@ func architectureViewFor(level string, entities []knowledgeEntity, edges []knowl
 		if !allowed[entity.ID] {
 			continue
 		}
-		childLevels := architectureChildLevels(entity, entities)
+		childLevels := architectureChildLevels(entity, entities, edges)
 		reason := ""
 		if len(childLevels) == 0 {
 			reason = "No validated lower-level entities are linked to this element."
@@ -351,6 +371,22 @@ func loadRunSemanticSnapshot(root, runID string) contracts.SemanticSnapshot {
 	return contracts.SemanticSnapshot{Coverage: contracts.Coverage{}, Findings: []contracts.Finding{}, Questions: []contracts.Question{}}
 }
 
+func loadPromotedSemanticSnapshot(root, runID string) contracts.SemanticSnapshot {
+	raw, err := os.ReadFile(filepath.Join(root, "reports", "taskruns", runID, "promoted-snapshot", "architecture-snapshot.json"))
+	if err == nil {
+		var manifest struct {
+			Version  int                        `json:"version"`
+			RunID    string                     `json:"run_id"`
+			Semantic contracts.SemanticSnapshot `json:"semantic"`
+		}
+		if json.Unmarshal(raw, &manifest) == nil && manifest.Version >= 2 && strings.TrimSpace(manifest.RunID) == strings.TrimSpace(runID) {
+			return manifest.Semantic
+		}
+	}
+	// Compatibility for snapshots promoted before semantic data became part of the immutable manifest.
+	return loadRunSemanticSnapshot(root, runID)
+}
+
 func enrichArchitectureReview(response *architectureResponse, semantic contracts.SemanticSnapshot) {
 	response.Review = architectureReview{Findings: append([]contracts.Finding(nil), semantic.Findings...), Questions: append([]contracts.Question(nil), semantic.Questions...)}
 	response.Coverage = semantic.Coverage
@@ -378,14 +414,13 @@ func enrichArchitectureReview(response *architectureResponse, semantic contracts
 	}
 }
 
-func architectureChildLevels(entity knowledgeEntity, entities []knowledgeEntity) []string {
+func architectureChildLevels(entity knowledgeEntity, entities []knowledgeEntity, edges []knowledgeEdge) []string {
 	result := []string{}
 	if entity.Type == "service" {
 		result = append(result, "container")
 	}
-	repos := evidenceRepositories(entity.Provenance.Evidence)
 	for _, candidate := range entities {
-		if candidate.ID == entity.ID || !repositoriesOverlap(repos, evidenceRepositories(candidate.Provenance.Evidence)) {
+		if candidate.ID == entity.ID || !architectureEntitiesLinked(entity.ID, candidate.ID, edges) {
 			continue
 		}
 		if architectureTypeVisible("component", candidate.Type) && !architectureContainsString(result, "component") {
@@ -398,12 +433,10 @@ func architectureChildLevels(entity knowledgeEntity, entities []knowledgeEntity)
 	return result
 }
 
-func repositoriesOverlap(left, right []string) bool {
-	for _, a := range left {
-		for _, b := range right {
-			if a == b {
-				return true
-			}
+func architectureEntitiesLinked(left, right string, edges []knowledgeEdge) bool {
+	for _, edge := range edges {
+		if (edge.From == left && edge.To == right) || (edge.From == right && edge.To == left) {
+			return true
 		}
 	}
 	return false

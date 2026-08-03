@@ -36,7 +36,7 @@ func TestArchitectureReviewLinksAndChildDetailAreExplicit(t *testing.T) {
 	knowledge := knowledgeResponse{Status: "available", Entities: []knowledgeEntity{
 		{Entity: contracts.Entity{ID: "svc.payments", Type: "service", Name: "Payments", Provenance: contracts.Provenance{Kind: "observation", Confidence: .9, Evidence: []contracts.Evidence{{Repo: "payments", Path: "README.md"}}}}, Path: "model/entities/svc.payments.yaml"},
 		{Entity: contracts.Entity{ID: "api.payments", Type: "api.http", Name: "Payments API", Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: "payments", Path: "api/openapi.yaml"}}}}, Path: "model/entities/api.payments.yaml"},
-	}, Edges: []knowledgeEdge{}, Artifacts: []knowledgeArtifact{}, Issues: []knowledgeIssue{}}
+	}, Edges: []knowledgeEdge{{Edge: contracts.Edge{ID: "edge.payments.exposes.api", Type: "exposes", From: "svc.payments", To: "api.payments", Provenance: contracts.Provenance{Kind: "observation", Confidence: .8, Evidence: []contracts.Evidence{{Repo: "payments", Path: "api/openapi.yaml"}}}}, Path: "model/edges/edge.payments.exposes.api.yaml"}}, Artifacts: []knowledgeArtifact{}, Issues: []knowledgeIssue{}}
 	response := buildArchitectureResponse(knowledge)
 	enrichArchitectureReview(&response, contracts.SemanticSnapshot{
 		Coverage:  contracts.Coverage{Observed: []string{"http api"}, Missing: []string{"owner"}},
@@ -151,8 +151,8 @@ func TestArchitectureComparisonClassifiesSemanticAndReviewChanges(t *testing.T) 
 	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.payments.yaml", "id: svc.payments\ntype: service\nname: Payments\nprovenance:\n  kind: inference\n  confidence: 0.9\n")
 	writeKnowledgeTestFile(t, currentRoot, "model/entities/svc.users.yaml", "id: svc.users\ntype: service\nname: Users\nprovenance:\n  kind: inference\n  confidence: 0.8\n")
 	writeKnowledgeTestFile(t, baselineRoot, "model/entities/svc.legacy.yaml", "id: svc.legacy\ntype: service\nname: Legacy\nprovenance:\n  kind: inference\n  confidence: 0.7\n")
-	writeKnowledgeTestFile(t, currentRoot, "architecture-snapshot.json", `{"files":[{"path":"reports/findings/findings.md","sha256":"new"},{"path":"reports/coverage/summary.md","sha256":"same"}]}`)
-	writeKnowledgeTestFile(t, baselineRoot, "architecture-snapshot.json", `{"files":[{"path":"reports/findings/findings.md","sha256":"old"},{"path":"reports/coverage/summary.md","sha256":"same"}]}`)
+	writeKnowledgeTestFile(t, currentRoot, "architecture-snapshot.json", `{"version":2,"run_id":"run-current","files":[],"semantic":{"coverage":{"missing":["owner"]},"questions":[],"entities":[],"edges":[],"findings":[{"id":"finding.owner","severity":"high","title":"Owner missing","provenance":{"kind":"inference","confidence":0.8}}]}}`)
+	writeKnowledgeTestFile(t, baselineRoot, "architecture-snapshot.json", `{"version":2,"run_id":"run-baseline","files":[],"semantic":{"coverage":{"missing":["owner"]},"questions":[],"entities":[],"edges":[],"findings":[{"id":"finding.owner","severity":"low","title":"Owner missing","provenance":{"kind":"inference","confidence":0.8}}]}}`)
 	comparison := comparePromotedArchitectures(root, "run-current", "run-baseline")
 	entities := comparison.Categories["entities"]
 	if !comparison.Available || len(entities.Added) != 1 || len(entities.Changed) != 1 || len(entities.Removed) != 1 {

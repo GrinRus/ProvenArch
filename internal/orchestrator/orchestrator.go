@@ -605,7 +605,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		initialInfo.FinishedAt = &finishedAt
 		initialInfo.CurrentStep = ""
 		initialInfo.Progress = terminalRunProgress(initialInfo.Progress, RunStatusSucceeded, finishedAt)
-		if snapshotArtifact, snapshotErr := persistPromotedArchitectureSnapshot(request.Workspace, runID, finishedAt); snapshotErr != nil {
+		semanticRunID := runID
+		if initialInfo.RefreshSummary != nil && strings.TrimSpace(initialInfo.RefreshSummary.BaselineRunID) != "" {
+			semanticRunID = initialInfo.RefreshSummary.BaselineRunID
+		}
+		if snapshotArtifact, snapshotErr := persistPromotedArchitectureSnapshotFrom(request.Workspace, runID, semanticRunID, finishedAt); snapshotErr != nil {
 			initialInfo.Warnings = append(initialInfo.Warnings, fmt.Sprintf("promoted architecture snapshot failed: %v", snapshotErr))
 		} else if snapshotArtifact != nil {
 			initialArtifacts = append(initialArtifacts, *snapshotArtifact)
@@ -678,6 +682,11 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			continue
 		}
 		execution.resolvedRepoPaths[name] = path
+	}
+	if strings.TrimSpace(request.RetryParentRunID) != "" {
+		if err := execution.hydrateRetryInputs(); err != nil {
+			return s.finishExecutionFailure(runID, initialInfo, &execution, fmt.Errorf("hydrate retry inputs: %w", err))
+		}
 	}
 	if refreshImpact != nil {
 		execution.refreshIntentContext = buildRefreshIntentContext(ctx, *refreshImpact, execution.resolvedRepoPaths)

@@ -22,11 +22,15 @@ describe("Run outcome surfaces", () => {
   });
 
   it("shows structured stalled progress without counting provider activity as a percentage", () => {
-    render(<StructuredRunProgress runStatus={{ ...baseRun, status: "running", progress: { phase: "stalled", completed_steps: 1, total_steps: 5, current_step: "refresh.step1.collect", expected_result: "Evidence-backed entities and relationships", started_at: baseRun.started_at, last_activity_at: "2026-08-03T10:04:00Z", last_progress_at: "2026-08-03T10:01:00Z", artifact_state: "observed", repair_attempt: 1 } }} review={null} />);
+    render(<StructuredRunProgress runStatus={{ ...baseRun, status: "running", progress: { phase: "stalled", completed_steps: 1, total_steps: 5, current_step: "refresh.step1.collect", expected_result: "Evidence-backed entities and relationships", planned_units: 5, running_units: 1, succeeded_units: 2, failed_units: 1, started_at: baseRun.started_at, last_activity_at: "2026-08-03T10:04:00Z", last_progress_at: "2026-08-03T10:01:00Z", artifact_state: "observed", repair_attempt: 1, repair_limit: 2, stall_deadline_at: "2026-08-03T10:06:00Z" } }} review={null} />);
     const progress = screen.getByTestId("analysis-run-progress");
     expect(progress).toHaveTextContent("stalled");
     expect(progress).toHaveTextContent("1/5");
-    expect(progress).toHaveTextContent("Opaque provider work has no artificial percentage");
+    expect(progress).toHaveTextContent("2 complete · 1 running · 1 pending · 1 failed");
+    expect(progress).toHaveTextContent("Repair attempt: 1/2");
+    expect(progress).toHaveTextContent("Stall deadline:");
+    expect(progress.querySelectorAll(".step-progress-track > span")).toHaveLength(5);
+    expect(progress.querySelectorAll(".step-progress-track > .is-complete")).toHaveLength(1);
   });
 
   it("previews reuse and execution closure before starting a targeted child run", async () => {
@@ -49,7 +53,7 @@ describe("Run outcome surfaces", () => {
 });
 
 function reviewWithResult(state: "completed" | "completed_with_gaps" | "failed" | "canceled"): RunReviewSummaryResponse {
-  return { run_id: "run-parent", pipeline: "refresh", status: state === "completed" || state === "completed_with_gaps" ? "succeeded" : state, started_at: "2026-08-03T10:00:00Z", steps: [], result: { state, summary: "Outcome summary", produced: { entities: 2 }, partial_scopes: state === "completed_with_gaps" ? 1 : 0, failed_scopes: state === "failed" ? 1 : 0, promotion: { changed: state === "completed" || state === "completed_with_gaps", current_usable: true }, recommended_action: "explore_architecture" } };
+  return { run_id: "run-parent", pipeline: "refresh", status: state === "completed" || state === "completed_with_gaps" ? "succeeded" : state, started_at: "2026-08-03T10:00:00Z", steps: [], result: { state, summary: "Outcome summary", produced: { entities: 2 }, partial_scopes: state === "completed_with_gaps" ? 1 : 0, failed_scopes: state === "failed" ? 1 : 0, promotion: { changed: state === "completed" || state === "completed_with_gaps", current_usable: true, baseline_run_id: "run-baseline" }, recommended_action: "explore_architecture", coverage: { observed: 3, missing: 1, status: "partial" } } };
 }
 
 function response(payload: unknown, status = 200): Response {

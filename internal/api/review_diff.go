@@ -132,6 +132,9 @@ func buildRunOutcome(root string, info orchestrator.RunInfo, artifacts []orchest
 	}
 	knowledge := collectKnowledge(knowledgeRoot)
 	semantic := loadRunSemanticSnapshot(root, info.RunID)
+	if info.Status == orchestrator.RunStatusSucceeded && hasArchitectureSnapshot(artifacts) {
+		semantic = loadPromotedSemanticSnapshot(root, info.RunID)
+	}
 	produced := map[string]int{"entities": len(knowledge.Entities), "edges": len(knowledge.Edges), "diagrams": 0, "findings": 0, "questions": 0, "proposals": 0, "artifacts": len(artifacts)}
 	if info.Status != orchestrator.RunStatusSucceeded {
 		produced["entities"], produced["edges"] = 0, 0
@@ -175,7 +178,7 @@ func buildRunOutcome(root string, info orchestrator.RunInfo, artifacts []orchest
 		if len(info.Warnings) > 0 || knowledge.Status == "partial" {
 			state, summary, action = "completed_with_gaps", "Architecture is usable, with named evidence gaps that need review.", "review_gaps"
 		}
-		promotionChanged = info.RefreshSummary == nil || info.RefreshSummary.Mode != "no_op"
+		promotionChanged = hasArchitectureSnapshot(artifacts) && (info.RefreshSummary == nil || info.RefreshSummary.Mode != "no_op")
 	case orchestrator.RunStatusCanceled:
 		state, summary, action = "canceled", "Analysis was canceled; retained evidence and the last validated architecture remain available.", "review_or_retry"
 	}

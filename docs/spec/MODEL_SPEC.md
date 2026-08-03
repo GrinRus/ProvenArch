@@ -68,6 +68,19 @@ MVP-практика:
 - `owner_team_id` должен ссылаться на существующий `team.<slug>`;
 - CI/CD topology пока фиксируется в `reports/as-is/ci-cd.md` и `reports/coverage/*`, а не как отдельный core type модели.
 
+### Read-only Architecture projection
+
+`GET /api/architecture` не вводит вторую модель. Он проецирует только validator-promoted
+entity-per-file YAML и immutable semantic snapshot source run в четыре read-only уровня:
+Context, Container, Component и Advanced Code. Последний является доступной детализацией
+существующих API entities, а не отдельным каноническим code graph. Узлы/связи сохраняют stable ID,
+owner, repository evidence, confidence и related finding/question IDs. Если валидированной
+детализации нет, API возвращает unavailable reason, а UI не синтезирует C4 элементы из имён файлов.
+
+Семантическое сравнение между promoted generations использует stable IDs сущностей, связей и
+findings. Coverage gaps получают детерминированную identity из нормализованного текста только для
+comparison presentation; это не новый persisted model ID и не изменяет `schemas/*`.
+
 ## 4) Формат evidence
 
 Каждый элемент `evidence[]`:

@@ -4999,8 +4999,10 @@ code {
   background: var(--surface);
 }
 .structured-run-progress h2, .run-result h2, .structured-recovery h2 { margin: var(--space-1) 0 0; font-size: var(--type-section); }
-.step-progress-track { height: 8px; margin: var(--space-5) 0 var(--space-4); overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-soft); }
-.step-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--duration-normal) var(--motion-easing); }
+.step-progress-track { display: grid; gap: 4px; height: 8px; margin: var(--space-5) 0 var(--space-4); }
+.step-progress-track span { display: block; min-width: 0; height: 100%; border-radius: var(--radius-pill); background: var(--surface-soft); transition: background-color var(--duration-normal) var(--motion-easing); }
+.step-progress-track .is-complete { background: var(--accent); }
+.step-progress-track .is-current { background: var(--warn); }
 .run-progress-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--line-soft); }
 .run-progress-facts div { min-width: 0; display: grid; gap: var(--space-1); padding: var(--space-3); border-right: 1px solid var(--line-soft); }
 .run-progress-facts div:last-child { border-right: 0; }
@@ -5092,10 +5094,10 @@ code {
 .architecture-canvas .react-flow__node { border: 1px solid var(--line-strong); border-radius: var(--radius-panel); background: var(--surface); color: var(--ink); box-shadow: 0 4px 14px rgb(15 23 42 / 7%); }
 .architecture-canvas .react-flow__node.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-line-soft), 0 8px 20px rgb(15 23 42 / 10%); }
 .architecture-canvas .react-flow__edge-path { stroke: #718096; }
-.architecture-canvas .react-flow__edge-text { font-size: 11px; fill: var(--ink-muted); }
+.architecture-canvas .react-flow__edge-text { font-size: 12px; fill: var(--ink-muted); }
 .architecture-canvas .react-flow__edge-textbg { fill: var(--surface); }
 .architecture-node-label { min-width: 0; display: grid; gap: 3px; padding: var(--space-3); text-align: left; }
-.architecture-node-label span { color: var(--accent-ink); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.architecture-node-label span { color: var(--accent-ink); font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .architecture-node-label strong { overflow: hidden; font-size: var(--type-body); line-height: 1.25; text-overflow: ellipsis; }
 .architecture-node-label small { color: var(--ink-muted); font-size: var(--type-caption); }
 .architecture-inspector { min-width: 0; padding: var(--space-5); border-left: 1px solid var(--line); background: var(--surface); overflow: auto; }
