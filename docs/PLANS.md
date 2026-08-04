@@ -84,8 +84,9 @@ Official OpenAI model guidance identifies Luna as the efficient high-volume GPT-
   UI, including an explicit `Provider default` state.
 - [x] Snapshot the resolved provider model profile when a run is accepted so queued and running
   work cannot change model because `workspace.yaml` or process env changes mid-run.
-- [x] Migrate the live E2E Codex pin from `gpt-5.5/xhigh` to `gpt-5.6-luna/high` and record it in
-  preflight/release evidence.
+- [ ] Complete the trusted-host live E2E Codex migration check for the `gpt-5.6-luna/high` pin and
+  accept the resulting preflight/release evidence; the canonical defaults and evidence fields are
+  already migrated in code.
 - [x] Keep required CI provider-free and deterministic; validate live compatibility only through
   the existing trusted-machine harness and runbook.
 
