@@ -72,7 +72,7 @@ func (a codexAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []
 	cwd := strings.TrimSpace(acpruntime.ResolveHeadlessWorkingDirectory(task))
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
-		commandArgs = buildCodexArgsWithPermissions(cwd, includeDirs, task.RuntimePermissions)
+		commandArgs = buildCodexArgsWithRuntime(cwd, includeDirs, task.RuntimePermissions, task.RuntimeModel, task.RuntimeEffort)
 	} else if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
 		commandArgs = stripCodexDangerFullAccessArgs(commandArgs)
 	}
@@ -181,12 +181,16 @@ func buildCodexArgsWithIncludeDirectories(cwd string, includeDirs []string) []st
 }
 
 func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions acpruntime.PermissionValues) []string {
+	return buildCodexArgsWithRuntime(cwd, includeDirs, permissions, "", "")
+}
+
+func buildCodexArgsWithRuntime(cwd string, includeDirs []string, permissions acpruntime.PermissionValues, model string, effort string) []string {
 	args := []string{
 		"exec",
 		"--json",
 		"--color", "never",
 	}
-	args = appendCodexModelArgs(args)
+	args = appendCodexModelArgs(args, model, effort)
 	args = append(args,
 		"--disable", "plugins",
 		"--disable", "remote_plugin",
@@ -217,11 +221,11 @@ func buildCodexArgsWithPermissions(cwd string, includeDirs []string, permissions
 	return args
 }
 
-func appendCodexModelArgs(args []string) []string {
-	if model := strings.TrimSpace(os.Getenv("ACP_CODEX_MODEL")); model != "" {
+func appendCodexModelArgs(args []string, model string, effort string) []string {
+	if model = strings.TrimSpace(model); model != "" {
 		args = append(args, "--model", model)
 	}
-	if effort := strings.TrimSpace(os.Getenv("ACP_CODEX_REASONING_EFFORT")); effort != "" {
+	if effort = strings.TrimSpace(effort); effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(effort))
 	}
 	return args

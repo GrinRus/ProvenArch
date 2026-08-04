@@ -63,7 +63,7 @@ func (a qwenAdapter) CommandSpec(task acpruntime.Task) (providercommon.CommandSp
 func (a qwenAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
 	commandArgs := qwenArgsWithPrompt(append([]string(nil), a.runner.Args...), prompt, task.RuntimePermissions)
 	if len(commandArgs) == 0 {
-		commandArgs = buildQwenArgsWithPermissions(includeDirs, prompt, task.RuntimePermissions)
+		commandArgs = buildQwenArgsWithRuntime(includeDirs, prompt, task.RuntimePermissions, task.RuntimeModel)
 	}
 	return providercommon.CommandSpec{
 		Provider:    acpruntime.ProviderQwenCode,

@@ -136,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/workspace/manifest", s.handleWorkspaceManifest)
 	mux.HandleFunc("/api/runtime/timeouts", s.handleRuntimeTimeouts)
 	mux.HandleFunc("/api/runtime/execution", s.handleRuntimeExecution)
+	mux.HandleFunc("/api/runtime/models", s.handleRuntimeModels)
 	mux.HandleFunc("/api/runtime/permissions", s.handleRuntimePermissions)
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
@@ -753,6 +754,62 @@ func (s *Server) handleRuntimeExecution(writer http.ResponseWriter, request *htt
 	}
 }
 
+func (s *Server) handleRuntimeModels(writer http.ResponseWriter, request *http.Request) {
+	snapshot := s.sessionSnapshot()
+	resolved, err := snapshot.Service.ResolveProviderModelProfile(snapshot.Workspace.Manifest)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "runtime_provider_models_invalid", err.Error())
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"providers": runtimeProviderModelsPayload(resolved),
+		})
+	case http.MethodPut:
+		var payload runtimeprofile.RuntimeProviderModelsPatch
+		if err := decodeStrictJSON(request, &payload); err != nil {
+			writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
+			return
+		}
+		if payload.IsZero() {
+			writeError(writer, http.StatusBadRequest, "runtime_provider_models_empty", "providers payload is required")
+			return
+		}
+		if err := runtimeprofile.ValidateRuntimeProviderModelsPatch(payload); err != nil {
+			writeError(writer, http.StatusBadRequest, "runtime_provider_models_invalid", err.Error())
+			return
+		}
+		reopened, err := s.mutateWorkspaceRoot(func(ws workspace.Root) (workspace.Root, error) {
+			return (runtimeprofile.RuntimeProfilePatchService{}).ApplyProviderModels(ws, payload)
+		})
+		if err != nil {
+			if errors.Is(err, errSessionMutationConflict) {
+				writeError(writer, http.StatusConflict, "runtime_profile_conflict", err.Error())
+				return
+			}
+			if typed := (runtimeprofile.PatchError{}); errors.As(err, &typed) {
+				writeError(writer, http.StatusInternalServerError, typed.Code, typed.Error())
+				return
+			}
+			writeError(writer, http.StatusInternalServerError, "runtime_provider_models_write_failed", err.Error())
+			return
+		}
+		resolved, err = snapshot.Service.ResolveProviderModelProfile(reopened.Manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "runtime_provider_models_reopen_failed", err.Error())
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok":        true,
+			"providers": runtimeProviderModelsPayload(resolved),
+		})
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPut)
+	}
+}
+
 func (s *Server) handleRuntimePermissions(writer http.ResponseWriter, request *http.Request) {
 	switch request.Method {
 	case http.MethodGet:
@@ -822,6 +879,11 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusInternalServerError, "runtime_step_provider_resolution_failed", err.Error())
 		return
 	}
+	providerModels, err := snapshot.Service.ResolveProviderModelProfile(snapshot.Workspace.Manifest)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "runtime_provider_models_resolution_failed", err.Error())
+		return
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"ok":               true,
 		"runtime_mode":     snapshot.RuntimeConfig.Mode,
@@ -847,6 +909,7 @@ func (s *Server) handleRuntimeProfile(writer http.ResponseWriter, request *http.
 			"effective": runtimeStepProvidersEffectivePayload(stepProviders.Effective),
 			"source":    runtimeStepProvidersSourcePayload(stepProviders.Source),
 		},
+		"provider_models": runtimeProviderModelsPayload(providerModels),
 	})
 }
 
@@ -905,6 +968,43 @@ func runtimePermissionsPersistedPayload(persisted workspace.RuntimePermissionsCo
 	}
 	if value := strings.TrimSpace(persisted.ApprovalChannel); value != "" {
 		payload["approval_channel"] = value
+	}
+	return payload
+}
+
+func runtimeProviderModelsPayload(resolved acpruntime.ProviderModelResolution) map[string]any {
+	payload := map[string]any{}
+	for _, provider := range acpruntime.SupportedProviders() {
+		persisted := map[string]any{}
+		if config := resolved.Persisted[string(provider)]; config != nil {
+			if strings.TrimSpace(config.Model) != "" {
+				persisted["model"] = strings.TrimSpace(config.Model)
+			}
+			if strings.TrimSpace(config.Effort) != "" {
+				persisted["effort"] = strings.TrimSpace(config.Effort)
+			}
+		}
+		effective := resolved.Effective[provider]
+		effectivePayload := map[string]any{}
+		if strings.TrimSpace(effective.Model) != "" {
+			effectivePayload["model"] = strings.TrimSpace(effective.Model)
+		}
+		if strings.TrimSpace(effective.Effort) != "" {
+			effectivePayload["effort"] = strings.TrimSpace(effective.Effort)
+		}
+		sources := resolved.Source[provider]
+		payload[string(provider)] = map[string]any{
+			"persisted": persisted,
+			"effective": effectivePayload,
+			"source": map[string]any{
+				"model":  sources.Model,
+				"effort": sources.Effort,
+			},
+			"capabilities": map[string]any{
+				"model":   true,
+				"efforts": acpruntime.SupportedEfforts(provider),
+			},
+		}
 	}
 	return payload
 }

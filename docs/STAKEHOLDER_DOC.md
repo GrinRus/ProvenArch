@@ -78,6 +78,9 @@ Epic matrix:
 **Техническое решение (принято):**
 - реализация продукта: **Go** (orchestrator/server) + UI (React/TypeScript, локально, с встраиванием в Go-бинарь);
 - рантайм анализа (MVP): **headless multi-provider** (`claude-code` default, `qwen-code` optional, `codex-code` release peer).
+- выбор model/effort доступен provider-scoped профилем `runtime.profile.providers`; если override не
+  задан, каждый CLI сохраняет native default, а effective source явно показывается как
+  `provider_default`. Live E2E Codex pin может задаваться отдельно через harness env.
 
 ---
 

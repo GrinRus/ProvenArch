@@ -31,6 +31,16 @@ type RuntimeExecutionPatch struct {
 	Steps              *RuntimeStepProvidersPatch `json:"steps"`
 }
 
+// RuntimeProviderModelsPatch replaces the persisted provider model profile.
+// An empty non-nil map clears all persisted model overrides.
+type RuntimeProviderModelsPatch struct {
+	Providers map[string]*workspace.RuntimeProviderConfig `json:"providers"`
+}
+
+func (patch RuntimeProviderModelsPatch) IsZero() bool {
+	return patch.Providers == nil
+}
+
 func (patch RuntimeExecutionPatch) IsZero() bool {
 	return patch.Strategy == nil &&
 		patch.MaxParallelTasks == nil &&
@@ -98,6 +108,29 @@ func (RuntimeProfilePatchService) ApplyExecution(ws workspace.Root, patch Runtim
 	}
 	pruneRuntimeProfile(&manifest)
 	return writeRuntimeProfileManifest(ws, manifest, "runtime_execution")
+}
+
+func (RuntimeProfilePatchService) ApplyProviderModels(ws workspace.Root, patch RuntimeProviderModelsPatch) (workspace.Root, error) {
+	if err := ValidateRuntimeProviderModelsPatch(patch); err != nil {
+		return workspace.Root{}, err
+	}
+	manifest := ws.Manifest
+	ensureRuntimeProfile(&manifest)
+	providers := workspace.RuntimeProvidersConfig{}
+	for provider, config := range patch.Providers {
+		if config == nil || config.IsZero() {
+			continue
+		}
+		copy := *config
+		providers[strings.TrimSpace(strings.ToLower(provider))] = &copy
+	}
+	if providers.IsZero() {
+		manifest.Runtime.Profile.Providers = nil
+	} else {
+		manifest.Runtime.Profile.Providers = &providers
+	}
+	pruneRuntimeProfile(&manifest)
+	return writeRuntimeProfileManifest(ws, manifest, "runtime_provider_models")
 }
 
 func (RuntimeProfilePatchService) ApplyPermissions(ws workspace.Root, patch RuntimePermissionsPatch) (workspace.Root, error) {
@@ -192,6 +225,22 @@ func ValidateRuntimeExecutionPatch(patch RuntimeExecutionPatch) error {
 				provider != string(acpruntime.ProviderCodexCode) {
 				return fmt.Errorf("%s must be one of: %s, %s, %s", label, acpruntime.ProviderClaudeCode, acpruntime.ProviderQwenCode, acpruntime.ProviderCodexCode)
 			}
+		}
+	}
+	return nil
+}
+
+func ValidateRuntimeProviderModelsPatch(patch RuntimeProviderModelsPatch) error {
+	for provider, config := range patch.Providers {
+		parsed, err := acpruntime.ParseProvider(provider)
+		if err != nil {
+			return err
+		}
+		if config == nil {
+			continue
+		}
+		if err := acpruntime.ValidateProviderModelConfig(parsed, acpruntime.ProviderModelConfig{Model: config.Model, Effort: config.Effort}); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -305,6 +354,9 @@ func pruneRuntimeProfile(manifest *workspace.Manifest) {
 	}
 	if manifest.Runtime.Profile.Execution != nil && manifest.Runtime.Profile.Execution.IsZero() {
 		manifest.Runtime.Profile.Execution = nil
+	}
+	if manifest.Runtime.Profile.Providers != nil && manifest.Runtime.Profile.Providers.IsZero() {
+		manifest.Runtime.Profile.Providers = nil
 	}
 	if manifest.Runtime.Profile.Steps != nil && manifest.Runtime.Profile.Steps.IsZero() {
 		manifest.Runtime.Profile.Steps = nil

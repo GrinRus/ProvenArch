@@ -126,6 +126,9 @@
         "execution": {
           "$ref": "#/$defs/runtimeExecution"
         },
+        "providers": {
+          "$ref": "#/$defs/runtimeProviders"
+        },
         "steps": {
           "$ref": "#/$defs/runtimeSteps"
         },
@@ -216,6 +219,43 @@
         },
         "shard_discovery": {
           "$ref": "#/$defs/runtimeShardDiscovery"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeProviders": {
+      "type": "object",
+      "properties": {
+        "claude-code": {
+          "$ref": "#/$defs/runtimeProvider"
+        },
+        "qwen-code": {
+          "$ref": "#/$defs/runtimeProvider"
+        },
+        "codex-code": {
+          "$ref": "#/$defs/runtimeProvider"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimeProvider": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
         }
       },
       "additionalProperties": false

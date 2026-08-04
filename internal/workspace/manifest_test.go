@@ -437,6 +437,53 @@ func TestEnsureLayoutCreatesRequiredDirectories(t *testing.T) {
 	}
 }
 
+func TestManifestRoundTripProviderModelProfile(t *testing.T) {
+	raw := []byte(`
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    providers:
+      codex-code:
+        model: gpt-5.6-luna
+        effort: HIGH
+`)
+	manifest, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("parse provider model profile: %v", err)
+	}
+	config := (*manifest.Runtime.Profile.Providers)["codex-code"]
+	if config == nil || config.Model != "gpt-5.6-luna" || config.Effort != "high" {
+		t.Fatalf("unexpected provider config: %+v", config)
+	}
+	rendered, err := RenderManifest(manifest)
+	if err != nil {
+		t.Fatalf("render provider model profile: %v", err)
+	}
+	if !strings.Contains(string(rendered), "model: gpt-5.6-luna") || !strings.Contains(string(rendered), "effort: high") {
+		t.Fatalf("rendered manifest lost provider model profile:\n%s", rendered)
+	}
+}
+
+func TestManifestRejectsQwenEffort(t *testing.T) {
+	_, err := ParseManifest([]byte(`
+version: 1
+repos:
+  - name: payments
+    path: /tmp/payments
+runtime:
+  profile:
+    providers:
+      qwen-code:
+        effort: high
+`))
+	if err == nil || !strings.Contains(err.Error(), "qwen-code") || !strings.Contains(err.Error(), "effort") {
+		t.Fatalf("expected qwen effort validation error, got %v", err)
+	}
+}
+
 func writeValidWorkspaceRoot(t *testing.T) string {
 	t.Helper()
 

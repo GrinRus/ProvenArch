@@ -76,13 +76,17 @@ func TestDefaultCodexArgsKeepNoninteractiveDiagnosticMode(t *testing.T) {
 }
 
 func TestCodexArgsUseConfiguredModelAndReasoningEffort(t *testing.T) {
-	t.Setenv("ACP_CODEX_MODEL", "gpt-5.5")
-	t.Setenv("ACP_CODEX_REASONING_EFFORT", "xhigh")
+	args := buildCodexArgsWithRuntime("/tmp/work", nil, acpruntime.DefaultPermissions(), "gpt-5.6-luna", "high")
 
+	assertCodexFlagValue(t, args, "--model", "gpt-5.6-luna")
+	assertCodexFlagValue(t, args, "-c", `model_reasoning_effort="high"`)
+}
+
+func TestCodexArgsOmitModelAndReasoningEffortByDefault(t *testing.T) {
 	args := buildCodexArgsWithIncludeDirectories("/tmp/work", nil)
-
-	assertCodexFlagValue(t, args, "--model", "gpt-5.5")
-	assertCodexFlagValue(t, args, "-c", `model_reasoning_effort="xhigh"`)
+	if codexSliceContains(args, "--model") || codexSliceContains(args, "model_reasoning_effort=") {
+		t.Fatalf("native default should not receive model overrides, got %v", args)
+	}
 }
 
 func TestManagedCodexArgsOmitDangerFullAccess(t *testing.T) {

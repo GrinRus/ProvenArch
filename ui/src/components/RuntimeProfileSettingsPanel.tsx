@@ -1,4 +1,5 @@
 import { RuntimeStepProvidersPanel } from "./RuntimeStepProvidersPanel";
+import { runtimeModelProviderOrder, type RuntimeProviderModelDraft, type RuntimeProviderModelEntry, type RuntimeProviderModels } from "../lib/appContracts";
 
 type RuntimeProfileSettingsPanelProps = {
   busy: boolean;
@@ -33,6 +34,12 @@ type RuntimeProfileSettingsPanelProps = {
   onSavePermissions: () => void;
   onResetPermissions: () => void;
   onPermissionChange: (key: string, value: string) => void;
+  runtimeProviderModels: RuntimeProviderModels;
+  runtimeProviderModelDraft: Record<string, RuntimeProviderModelDraft>;
+  runtimeProviderModelStatus: string;
+  onSaveProviderModels: () => void;
+  onResetProviderModels: () => void;
+  onProviderModelChange: (provider: string, field: keyof RuntimeProviderModelDraft, value: string) => void;
   stepProviderLabels: Record<string, string>;
   stepProviderOrder: string[];
   stepProviderPersisted: Partial<Record<string, string>>;
@@ -74,6 +81,12 @@ export function RuntimeProfileSettingsPanel({
   onSavePermissions,
   onResetPermissions,
   onPermissionChange,
+  runtimeProviderModels,
+  runtimeProviderModelDraft,
+  runtimeProviderModelStatus,
+  onSaveProviderModels,
+  onResetProviderModels,
+  onProviderModelChange,
   stepProviderLabels,
   stepProviderOrder,
   stepProviderPersisted,
@@ -83,6 +96,57 @@ export function RuntimeProfileSettingsPanel({
 }: RuntimeProfileSettingsPanelProps) {
   return (
     <>
+      <section className="panel" data-testid="runtime-provider-models-panel">
+        <h2>Settings: Provider Models</h2>
+        <p className="hint">
+          Optional provider-scoped overrides in <code>runtime.profile.providers</code>. Empty fields use the provider native default; process env overrides remain effective above workspace values.
+        </p>
+        <div className="actions">
+          <button type="button" onClick={onSaveProviderModels} disabled={busy} data-testid="runtime-provider-models-save-btn">
+            Save provider models
+          </button>
+          <button type="button" onClick={onResetProviderModels} disabled={busy}>
+            Reset to provider defaults
+          </button>
+        </div>
+        {runtimeModelProviderOrder.map((provider) => {
+          const entry: RuntimeProviderModelEntry = runtimeProviderModels[provider] ?? {};
+          const draft = runtimeProviderModelDraft[provider] ?? { model: "", effort: "" };
+          const efforts = entry.capabilities?.efforts ?? [];
+          return (
+            <div key={provider} className="panel-subsection" data-testid={`runtime-provider-model-${provider}`}>
+              <h3>{provider}</h3>
+              <label htmlFor={`runtime-provider-model-${provider}`}>Model</label>
+              <input
+                id={`runtime-provider-model-${provider}`}
+                data-testid={`runtime-provider-model-input-${provider}`}
+                value={draft.model}
+                placeholder="Provider default"
+                onChange={(event) => onProviderModelChange(provider, "model", event.target.value)}
+              />
+              {efforts.length > 0 ? (
+                <>
+                  <label htmlFor={`runtime-provider-effort-${provider}`}>Effort</label>
+                  <select
+                    id={`runtime-provider-effort-${provider}`}
+                    data-testid={`runtime-provider-effort-select-${provider}`}
+                    value={draft.effort}
+                    onChange={(event) => onProviderModelChange(provider, "effort", event.target.value)}
+                  >
+                    <option value="">Provider default</option>
+                    {efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
+                  </select>
+                </>
+              ) : <p className="hint">Effort is not supported by this provider.</p>}
+              <p className="hint">
+                effective model: {entry.effective?.model ?? "provider default"} ({entry.source?.model ?? "provider_default"}); effort: {entry.effective?.effort ?? "provider default"} ({entry.source?.effort ?? "provider_default"})
+              </p>
+            </div>
+          );
+        })}
+        {runtimeProviderModelStatus ? <p className="status ok">{runtimeProviderModelStatus}</p> : null}
+      </section>
+
       <section className="panel" data-testid="runtime-timeouts-panel">
         <h2>Settings: Runtime Timeouts</h2>
         <p className="hint">Persisted in `workspace.yaml` (`runtime.profile.timeouts`) with precedence `env &gt; workspace &gt; defaults`.</p>

@@ -60,6 +60,261 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260804-runtime-model-selection
+
+### Context
+At slice start, the runtime could select a provider per pipeline step, but model selection was not
+yet a product contract. Only `codex-code` read `ACP_CODEX_MODEL` and `ACP_CODEX_REASONING_EFFORT`
+directly in its adapter. Ordinary runs inherited Codex CLI defaults when these variables were absent,
+while the live E2E harness pinned `gpt-5.5` with `xhigh` in several scripts and tests.
+
+The desired behavior is provider-scoped and explicit: an unconfigured provider uses its own native
+default without ACP guessing or passing a model flag; an operator may persist a model and supported
+effort in `workspace.yaml`; trusted live E2E may override that profile for reproducible evidence.
+The first live Codex baseline requested for this contract is `gpt-5.6-luna` with effort `high`.
+Official OpenAI model guidance identifies Luna as the efficient high-volume GPT-5.6 tier and lists
+`high` among its supported efforts.
+
+### Goals (must have)
+- [x] Add optional model selection for all three existing headless providers without changing their
+  native defaults when no override is configured.
+- [x] Add optional effort selection where the provider CLI supports it, with fail-fast capability
+  validation and actionable errors.
+- [x] Make persisted, effective and source values visible and editable through the runtime API and
+  UI, including an explicit `Provider default` state.
+- [x] Snapshot the resolved provider model profile when a run is accepted so queued and running
+  work cannot change model because `workspace.yaml` or process env changes mid-run.
+- [x] Migrate the live E2E Codex pin from `gpt-5.5/xhigh` to `gpt-5.6-luna/high` and record it in
+  preflight/release evidence.
+- [x] Keep required CI provider-free and deterministic; validate live compatibility only through
+  the existing trusted-machine harness and runbook.
+
+### Non-goals
+- No new runtime providers, hosted model API, remote model catalog or automatic availability
+  discovery.
+- No per-step model overrides in the first slice. Steps continue to select a provider; all steps
+  using one provider share that provider's resolved model profile for the run.
+- No automatic latest-model migration, cost/quality router, fallback model, retry-on-another-model
+  or silent downgrade when a model is unavailable.
+- No hardcoded allowlist of model IDs. Model identifiers remain opaque provider-owned strings;
+  only provider capabilities and effort values are validated.
+- No GPT-5.6 Pro mode, persisted reasoning, explicit prompt caching, programmatic tool calling or
+  multi-agent behavior as part of model selection.
+- No claim that ACP knows the concrete model behind a provider native default. ACP reports
+  `provider_default` until the provider returns trustworthy observed-model metadata.
+
+### Proposed contract
+
+`workspace.yaml` gains an optional provider-scoped profile:
+
+```yaml
+runtime:
+  profile:
+    providers:
+      codex-code:
+        model: gpt-5.6-luna
+        effort: high
+      claude-code:
+        model: claude-sonnet-4-6
+        effort: high
+      qwen-code:
+        model: example-provider-model
+```
+
+The block is illustrative, not a default workspace template. A normal workspace may omit
+`runtime.profile.providers` entirely.
+
+Resolution is performed independently for `model` and `effort`:
+
+1. provider-specific process override;
+2. `workspace.yaml.runtime.profile.providers.<provider>.<field>`;
+3. provider native default, represented as `provider_default` and implemented by omitting the CLI
+   argument.
+
+Initial process overrides remain provider-specific so a global flag cannot leak across mixed
+step providers:
+
+- `ACP_CLAUDE_MODEL`, `ACP_CLAUDE_EFFORT`;
+- `ACP_QWEN_MODEL`;
+- existing `ACP_CODEX_MODEL`, `ACP_CODEX_REASONING_EFFORT`.
+
+An unset or whitespace-only value is not forwarded to the provider. In the persisted API patch, an
+empty string clears that field and prunes empty provider/profile objects, matching current runtime
+profile patch behavior. No generic `--runtime-model` CLI flag is added in the first slice; a future
+provider-qualified CLI syntax can be considered only if editing YAML and the API are insufficient.
+
+Initial adapter capability matrix:
+
+| Provider | Model argument | Effort argument | Accepted effort values |
+| --- | --- | --- | --- |
+| `claude-code` | `--model` | `--effort` | `low`, `medium`, `high`, `max` |
+| `qwen-code` | `--model` | unsupported | none |
+| `codex-code` | `--model` | `-c model_reasoning_effort=...` | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
+
+The workspace schema accepts a trimmed, non-control model string without enumerating model names.
+Effort without an explicit model is allowed and applies to the provider's native default; provider
+startup remains fail-fast if that concrete default rejects the requested effort.
+
+### Delivery slices
+
+#### Slice 1 — contract, resolver and adapters
+
+1. Add `runtime.profile.providers` structs, schema, rendering/pruning and semantic validation.
+2. Add a provider-model resolver returning `persisted`, `effective` and `source` per provider and
+   field. Resolve process env once when the run is accepted rather than reading env inside a runner.
+3. Carry the resolved model/effort as internal `runtime.Task` data and append arguments in each
+   adapter. Remove direct `os.Getenv` model reads from `codex-code`.
+4. Snapshot effective values into run state and structured runtime-start diagnostics. Do not expand
+   the versioned `RuntimeExecution` artifact in this slice unless audit requirements demonstrate
+   that run state and preflight evidence are insufficient.
+
+#### Slice 2 — API and UI
+
+1. Add `GET/PUT /api/runtime/models` with provider-keyed `persisted`, `effective`, `source` and
+   `capabilities` payloads; also expose the read model in aggregate `/api/runtime/profile` and run
+   envelopes.
+2. Add provider cards to runtime settings: free-text model, capability-aware effort selector,
+   effective value/source, clear action and `Provider default` placeholder.
+3. Disable effort editing for `qwen-code`; never offer a stale hardcoded model dropdown. A future
+   catalog may enhance the text input without becoming required for execution.
+4. Ensure an env override remains visibly effective even when a different persisted value exists,
+   and explain that clearing the env is required before the workspace value can take effect.
+
+#### Slice 3 — live E2E baseline migration
+
+1. Change the canonical Codex live defaults in `live-e2e-plan.py`, batch/matrix harnesses and
+   preflight writer to `gpt-5.6-luna` and `high`.
+2. Keep the pin Codex-only. Claude and Qwen continue to inherit their native defaults unless their
+   own explicit profile/env values are supplied.
+3. Make preflight evidence include requested model, effort and source, and fail before a matrix run
+   when the installed Codex CLI cannot accept the requested combination.
+4. Run a narrow non-release Codex smoke on a trusted host first. If it passes, run the canonical
+   release profiles through `scripts/full-run-batch-matrix.sh`; compare artifact-quality and SWE UX
+   assessments with the previous `gpt-5.5/xhigh` baseline before accepting the migration.
+5. Keep rollback operational and explicit: the same harness can be invoked with
+   `ACP_CODEX_MODEL=gpt-5.5` and `ACP_CODEX_REASONING_EFFORT=xhigh` without editing canonical
+   matrices or curated repository lists.
+
+### Files expected to change
+- Workspace contract: `internal/workspace/manifest.go`, `schemas/workspace.schema.json`,
+  `docs/spec/WORKSPACE_SPEC.md`, `examples/workspace.example.yaml`, workspace fixtures and tests.
+- Resolution/orchestration: new `internal/runtime/provider_models.go` and tests,
+  `internal/runtime/runtime.go`, `internal/orchestrator/service_runs.go`,
+  `internal/orchestrator/orchestrator.go`, `internal/orchestrator/runtime_task_executor.go`, run-state
+  persistence and API envelope tests.
+- Provider adapters: `internal/runtime/claudecode/*`, `internal/runtime/qwencode/*`,
+  `internal/runtime/codexcode/*`.
+- Runtime mutation/API: `internal/runtimeprofile/patch_service.go`, `internal/api/server.go` and
+  focused tests.
+- UI: `ui/src/lib/appContracts.ts`, `ui/src/hooks/useRuntimeSettings.ts`, runtime settings panels,
+  styles and component tests.
+- Live evidence: `scripts/live-e2e-plan.py`, `scripts/full-run-batch.sh`,
+  `scripts/full-run-batch-matrix.sh`, `scripts/write-batch-preflight.py` and their Python tests.
+- Docs/rationale: `docs/spec/API_SPEC.md`, `docs/spec/PIPELINE_SPEC.md`,
+  `docs/ARCHITECTURE.md`, `docs/APPENDIX_SCHEMAS.md`, `docs/TESTING_STRATEGY.md`,
+  `docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/STAKEHOLDER_DOC.md` and a focused ADR under
+  `docs/adr/`.
+
+### Mandatory tests and fixtures
+- Manifest/schema round trip for omitted profiles, each provider profile and cleared empty values.
+- Resolver table tests for env > workspace > provider default, independent model/effort sources,
+  invalid effort, unsupported Qwen effort and whitespace handling.
+- Adapter argv tests proving omitted config adds no model/effort arguments and explicit config adds
+  exactly one correctly quoted provider argument pair.
+- Run lifecycle test proving a queued run keeps the model snapshot captured at acceptance time.
+- API GET/PUT/clear/conflict/strict-JSON tests and aggregate/run-envelope serialization tests.
+- UI tests for provider default, workspace value, env override, unsupported effort and save/reset.
+- Live plan/preflight tests for `gpt-5.6-luna/high`, operator overrides and evidence serialization.
+- Full completed-slice DoD: `make contracts`, `make test`, `make lint`, `make build`.
+
+### Acceptance criteria
+- [ ] With no provider model profile and no provider model env, adapter argv contains no model or
+  effort override and the API/UI reports `provider_default`.
+- [ ] A persisted Codex `gpt-5.6-luna/high` profile reaches every Codex task in a run and does not
+  affect Claude or Qwen tasks.
+- [ ] Provider-specific env values override persisted fields, with source visible in API/UI and run
+  diagnostics.
+- [ ] Unsupported or malformed configuration fails before provider execution with a stable,
+  actionable error; no silent fallback occurs.
+- [ ] Required CI uses fake/unit fixtures only and performs no live provider or model-catalog call.
+- [ ] Trusted-host Codex smoke and canonical live gate capture `gpt-5.6-luna/high`; release readiness
+  still requires the existing strict machine verdict and accepted human assessments.
+- [ ] Schema/spec/examples/fixtures/validators/tests/ADR and behavior docs are synchronized, and the
+  full DoD passes.
+
+### Risks
+- Provider CLIs may change accepted effort values or model access independently. Capability errors
+  must be fail-fast and the runbook must keep an operator override/rollback path.
+- Provider native defaults are mutable and may not be observable. ACP must not invent a model name
+  for default-mode runs or compare them as if they were pinned.
+- A provider-level model may be too coarse for future cost-tiering by step. Per-step overrides are a
+  follow-up contract only after the simpler profile is evaluated in real runs.
+- Free-text model IDs can be mistyped. Preflight and clear errors are safer for MVP than a stale
+  built-in catalog.
+- Changing the release Codex baseline affects cost, latency and artifact quality. Acceptance depends
+  on measured live evidence, not only CLI compatibility.
+
+### Progress log
+- 2026-08-04: Inventoried workspace schema, runtime resolver, orchestration, API/UI and live E2E
+  surfaces. Confirmed model selection is currently Codex-env-only and the live pin is duplicated as
+  `gpt-5.5/xhigh`.
+- 2026-08-04: Verified installed provider CLI capabilities: Claude supports `--model/--effort`,
+  Qwen supports `--model`, and Codex supports `--model` plus config overrides.
+- 2026-08-04: Checked current official OpenAI model guidance: `gpt-5.6-luna` is a valid model ID,
+  supports `high`, and GPT-5.6 migration guidance recommends comparing the existing effort with one
+  level lower on representative workloads.
+- 2026-08-04: Implemented the workspace contract, resolver, adapter propagation, run/history snapshot,
+  API/UI settings surface, provider fixtures, and schema/docs/ADR synchronization.
+- 2026-08-04: Migrated canonical live Codex defaults and preflight evidence to `gpt-5.6-luna/high`;
+  rollback remains available through explicit `gpt-5.5/xhigh` environment overrides.
+- 2026-08-04: Contract validation, focused Python harness tests, and UI TypeScript checks pass.
+  Go validation remains blocked by the host's Go 1.20 toolchain while the repository uses `os.Root`.
+
+### Plan ID
+EP-20260804-agents-gpt-5-6
+
+### Context
+Root `AGENTS.md` should remain a compact repository guidance surface while taking advantage of
+current GPT-5.6 prompting behavior: outcome-oriented instructions, explicit autonomy boundaries,
+targeted context routing and evidence-backed completion. Provider model pins and release behavior
+remain separate runtime contracts.
+
+### Goals (must have)
+- [x] Replace full-corpus startup reading with task-specific source routing.
+- [x] Add concise autonomy, success, stop-condition and validation rules.
+- [x] Add model-aware guidance without pinning a model or enabling optional GPT-5.6 features.
+- [x] Keep ProvenArch MVP, contract, deterministic CI and live-gate invariants intact.
+- [ ] Archive this plan after repository-owner review.
+
+### Non-goals
+- No `codex-code` model/reasoning default migration.
+- No runtime, schema, product behavior, release matrix or provider-list changes.
+
+### Approach
+1) Compare repository guidance with current official Codex `AGENTS.md` and GPT-5.6 prompting docs.
+2) Deduplicate process rules and route detailed procedures to specs, skills and runbooks.
+3) Validate the resulting Markdown, diff and repository DoD.
+
+### Files expected to change
+- `AGENTS.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] `AGENTS.md` keeps durable repo rules and avoids duplicated release workflow detail.
+- [x] Model-specific runtime choices remain outside `AGENTS.md`.
+- [x] `make contracts`, `make test`, `make lint` and `make build` pass.
+
+### Risks
+- Over-compression could hide a release invariant; the live skill/runbook remain authoritative.
+- Model-version wording can age quickly; only durable behavior guidance belongs in `AGENTS.md`.
+
+### Progress log
+- 2026-08-04: Reviewed official Codex customization/AGENTS guidance and GPT-5.6 prompting guidance.
+- 2026-08-04: Reworked root guidance around source routing, scope, autonomy and validation.
+- 2026-08-04: Full provider-free DoD passed with pinned Node.js 22.21.1: contracts, Go/Python/UI
+  tests, lint/typecheck and production build.
+
+### Plan ID
 EP-20260803-v0.1.13-unqualified-prerelease
 
 ### Context
@@ -2543,6 +2798,9 @@ developer and operations consoles.
 
 ### Plan ID
 EP-20260713-live-e2e-codex-model-pin
+
+Status: superseded by `EP-20260804-runtime-model-selection`; retained as historical evidence of
+the earlier Codex-only environment pin.
 
 ### Context
 Live E2E/release runs should compare stable provider surfaces. The user asked to pin Codex runs to `gpt-5.5` with extra-high reasoning while leaving qwen and claude on their installed CLI defaults. Existing Codex runtime ignores user `config.toml` by design, so the pin must be explicit runtime/preflight argv, not ambient config.

@@ -174,6 +174,8 @@ type Task struct {
 	PathScopes           []string
 	StartedAtUTC         time.Time
 	RuntimePermissions   PermissionValues `json:"-"`
+	RuntimeModel         string           `json:"-"`
+	RuntimeEffort        string           `json:"-"`
 	// RuntimeTimeoutProfile is internal lifecycle diagnostics only. It should
 	// not become part of provider task stdin or the runtime artifact contract.
 	RuntimeTimeoutProfile map[string]any                             `json:"-"`

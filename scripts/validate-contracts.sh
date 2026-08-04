@@ -31,8 +31,10 @@ workspace_cases=(
   "fixtures/workspace/valid-git-url.yaml:valid"
   "fixtures/workspace/valid-with-runtime-timeouts.yaml:valid"
   "fixtures/workspace/valid-with-runtime-permissions.yaml:valid"
+  "fixtures/workspace/valid-with-runtime-provider-models.yaml:valid"
   "fixtures/workspace/invalid-both.yaml:invalid"
   "fixtures/workspace/invalid-neither.yaml:invalid"
+  "fixtures/workspace/invalid-runtime-provider-key.yaml:invalid"
 )
 
 for entry in "${workspace_cases[@]}"; do

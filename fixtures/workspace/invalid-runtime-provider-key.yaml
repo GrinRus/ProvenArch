@@ -1,0 +1,10 @@
+version: 1
+repos:
+  - name: payments-service
+    path: /absolute/path/to/payments-service
+runtime:
+  profile:
+    providers:
+      unknown-code:
+        model: example
+        effort: high

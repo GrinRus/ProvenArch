@@ -184,6 +184,37 @@ Precedence effective provider для конкретного шага:
 - per-step overrides в этом slice не вводят отдельные `max_parallel/failure_policy/shard_discovery` knobs;
 - canonical workspace outputs не пишутся runtime-шагом напрямую, даже если provider override задан.
 
+### 5.5) `runtime.profile.providers`
+
+Optional provider-scoped model profile:
+
+```yaml
+runtime:
+  profile:
+    providers:
+      codex-code:
+        model: gpt-5.6-luna
+        effort: high
+```
+
+`model` — opaque provider-owned identifier (ACP не поддерживает собственный model catalog).
+`effort` валидируется по capability конкретного CLI:
+
+- `claude-code`: `low|medium|high|max`;
+- `codex-code`: `none|low|medium|high|xhigh|max`;
+- `qwen-code`: effort не поддерживается.
+
+Model и effort разрешаются независимо. Effective precedence для каждого поля:
+
+1. provider-specific env (`ACP_CLAUDE_MODEL`, `ACP_CLAUDE_EFFORT`, `ACP_QWEN_MODEL`,
+   `ACP_CODEX_MODEL`, `ACP_CODEX_REASONING_EFFORT`);
+2. `runtime.profile.providers.<provider>.<field>`;
+3. provider native default.
+
+При native default ACP не передаёт model/effort аргумент и сообщает source `provider_default`,
+не пытаясь угадать фактический model ID. Resolved profile фиксируется в run state при принятии
+запуска, поэтому изменение env или manifest не меняет уже принятый queued/running run.
+
 ## 6) Пример
 
 ```yaml
@@ -218,6 +249,10 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    providers:
+      codex-code:
+        model: gpt-5.6-luna
+        effort: high
     permissions:
       mode: trusted_full_access
       approval_channel: fail_fast
@@ -254,6 +289,8 @@ Manifest считается невалидным, если:
 - `runtime.profile.permissions.mode` не в `trusted_full_access|managed`
 - `runtime.profile.permissions.approval_channel` не в `fail_fast|ui`
 - `runtime.profile.steps.*.provider` не в `claude-code|qwen-code|codex-code`
+- `runtime.profile.providers.*` содержит неизвестного provider, model длиннее 256 символов,
+  control character или effort, не поддерживаемый выбранным provider
 - manifest пытается использовать legacy path `runtime.timeouts` (breaking change, intentional)
 - manifest пытается конфигурировать workspace layout beyond supported fields
 

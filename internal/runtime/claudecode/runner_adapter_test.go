@@ -34,6 +34,14 @@ func TestClaudeManagedArgsOmitBypassPermissions(t *testing.T) {
 	}
 }
 
+func TestClaudeRuntimeArgsIncludeModelAndEffort(t *testing.T) {
+	args := buildClaudeArgsWithRuntime(nil, "prompt", acpruntime.DefaultPermissions(), "claude-sonnet-4-6", "high")
+	assertClaudeArg(t, args, "--model")
+	assertClaudeArg(t, args, "claude-sonnet-4-6")
+	assertClaudeArg(t, args, "--effort")
+	assertClaudeArg(t, args, "high")
+}
+
 func TestClaudeManagedCustomArgsStripBypassAliases(t *testing.T) {
 	t.Parallel()
 

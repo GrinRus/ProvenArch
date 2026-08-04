@@ -62,6 +62,7 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 			return runtimePreparedExecution{}, err
 		}
 	}
+	modelConfig := e.providerModels[resolvedProvider]
 	task := acpruntime.Task{
 		TaskID:               taskID,
 		RunID:                e.runID,
@@ -84,6 +85,8 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		PathScopes:           pathScopes,
 		StartedAtUTC:         e.clock().UTC(),
 		RuntimePermissions:   e.permissionProfile,
+		RuntimeModel:         modelConfig.Model,
+		RuntimeEffort:        modelConfig.Effort,
 		RuntimeTimeoutProfile: map[string]any{
 			"step_timeout_sec":      int(e.runtimeStepTimeout.Seconds()),
 			"heartbeat_timeout_sec": int(e.runtimeHeartbeatInterval.Seconds()),
@@ -109,6 +112,8 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 		"repo_scopes":        task.RepoScopes,
 		"path_scopes":        task.PathScopes,
 		"provider":           resolvedProvider,
+		"model":              modelConfig.Model,
+		"effort":             modelConfig.Effort,
 		"artifact_root":      task.ArtifactRoot,
 		"write_root":         task.WriteRoot,
 		"draft_final_root":   task.DraftFinalRoot,

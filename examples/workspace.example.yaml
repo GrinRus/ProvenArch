@@ -34,6 +34,11 @@ runtime:
       failure_policy: best_effort
       shard_discovery:
         mode: heuristics
+    # Optional provider-scoped model overrides. If omitted, each CLI keeps its native default.
+    # providers:
+    #   codex-code:
+    #     model: gpt-5.6-luna
+    #     effort: high
     permissions:
       # Default keeps provider full-access flags. Use `managed` to disable those
       # flags and let the orchestrator auto-approve only task-envelope operations.

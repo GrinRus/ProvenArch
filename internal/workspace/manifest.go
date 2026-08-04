@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	"github.com/GrinRus/ProvenArch/internal/validation"
@@ -46,8 +47,16 @@ type RuntimeConfig struct {
 type RuntimeProfileConfig struct {
 	Timeouts    *RuntimeTimeoutsConfig    `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
 	Execution   *RuntimeExecutionConfig   `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Providers   *RuntimeProvidersConfig   `yaml:"providers,omitempty" json:"providers,omitempty"`
 	Steps       *RuntimeStepsConfig       `yaml:"steps,omitempty" json:"steps,omitempty"`
 	Permissions *RuntimePermissionsConfig `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+}
+
+type RuntimeProvidersConfig map[string]*RuntimeProviderConfig
+
+type RuntimeProviderConfig struct {
+	Model  string `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 type RuntimeExecutionConfig struct {
@@ -118,6 +127,25 @@ func (cfg *RuntimeStepConfig) IsZero() bool {
 	return cfg == nil || strings.TrimSpace(cfg.Provider) == ""
 }
 
+func (cfg *RuntimeProviderConfig) IsZero() bool {
+	return cfg == nil || (strings.TrimSpace(cfg.Model) == "" && strings.TrimSpace(cfg.Effort) == "")
+}
+
+func (cfg RuntimeProvidersConfig) IsZero() bool {
+	if len(cfg) == 0 {
+		return true
+	}
+	for _, provider := range cfg {
+		if provider == nil {
+			return false
+		}
+		if !provider.IsZero() {
+			return false
+		}
+	}
+	return true
+}
+
 func (cfg *RuntimeStepsConfig) IsZero() bool {
 	if cfg == nil {
 		return true
@@ -144,6 +172,7 @@ func (cfg *RuntimeProfileConfig) IsZero() bool {
 	}
 	return (cfg.Timeouts == nil || cfg.Timeouts.IsZero()) &&
 		(cfg.Execution == nil || cfg.Execution.IsZero()) &&
+		(cfg.Providers == nil || cfg.Providers.IsZero()) &&
 		(cfg.Steps == nil || cfg.Steps.IsZero()) &&
 		(cfg.Permissions == nil || cfg.Permissions.IsZero())
 }
@@ -221,6 +250,27 @@ func applyManifestDefaults(manifest *Manifest) {
 				}
 				if manifest.Runtime.Profile.Execution.IsZero() {
 					manifest.Runtime.Profile.Execution = nil
+				}
+			}
+			if manifest.Runtime.Profile.Providers != nil {
+				normalizedProviders := RuntimeProvidersConfig{}
+				for rawProvider, provider := range *manifest.Runtime.Profile.Providers {
+					providerName := strings.TrimSpace(strings.ToLower(rawProvider))
+					if provider == nil {
+						normalizedProviders[providerName] = nil
+						continue
+					}
+					provider.Model = strings.TrimSpace(provider.Model)
+					provider.Effort = strings.TrimSpace(strings.ToLower(provider.Effort))
+					if provider.IsZero() {
+						continue
+					}
+					normalizedProviders[providerName] = provider
+				}
+				if normalizedProviders.IsZero() {
+					manifest.Runtime.Profile.Providers = nil
+				} else {
+					*manifest.Runtime.Profile.Providers = normalizedProviders
 				}
 			}
 			if manifest.Runtime.Profile.Steps != nil {
@@ -348,6 +398,45 @@ func validateManifest(manifest Manifest) error {
 				mode := strings.TrimSpace(execution.ShardDiscovery.Mode)
 				if mode != "" && mode != "heuristics" && mode != "semantic" {
 					problems = append(problems, "runtime.profile.execution.shard_discovery.mode must be one of: heuristics, semantic")
+				}
+			}
+		}
+		if manifest.Runtime.Profile.Providers != nil {
+			for provider, config := range *manifest.Runtime.Profile.Providers {
+				label := fmt.Sprintf("runtime.profile.providers.%s", provider)
+				if provider != "claude-code" && provider != "qwen-code" && provider != "codex-code" {
+					problems = append(problems, fmt.Sprintf("%s must be one of: claude-code, qwen-code, codex-code", label))
+					continue
+				}
+				if config == nil {
+					problems = append(problems, fmt.Sprintf("%s must be an object", label))
+					continue
+				}
+				model := strings.TrimSpace(config.Model)
+				if len(model) > 256 {
+					problems = append(problems, fmt.Sprintf("%s.model must be at most 256 characters", label))
+				}
+				for _, char := range model {
+					if unicode.IsControl(char) {
+						problems = append(problems, fmt.Sprintf("%s.model must not contain control characters", label))
+						break
+					}
+				}
+				effort := strings.TrimSpace(strings.ToLower(config.Effort))
+				if effort == "" {
+					continue
+				}
+				allowed := map[string]bool{}
+				switch provider {
+				case "claude-code":
+					allowed = map[string]bool{"low": true, "medium": true, "high": true, "max": true}
+				case "codex-code":
+					allowed = map[string]bool{"none": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+				case "qwen-code":
+					problems = append(problems, fmt.Sprintf("%s.effort is not supported by qwen-code", label))
+				}
+				if len(allowed) > 0 && !allowed[effort] {
+					problems = append(problems, fmt.Sprintf("%s.effort is invalid for %s", label, provider))
 				}
 			}
 		}

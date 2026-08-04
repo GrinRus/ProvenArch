@@ -115,23 +115,25 @@ type runRecord struct {
 }
 
 type RunInfo struct {
-	RunID              string                         `json:"run_id"`
-	Pipeline           string                         `json:"pipeline"`
-	Status             RunStatus                      `json:"status"`
-	StartedAt          time.Time                      `json:"started_at"`
-	FinishedAt         *time.Time                     `json:"finished_at,omitempty"`
-	Question           string                         `json:"question,omitempty"`
-	CurrentStep        string                         `json:"current_step,omitempty"`
-	RuntimeMode        string                         `json:"runtime_mode,omitempty"`
-	StepProviders      map[string]string              `json:"step_providers,omitempty"`
-	Warnings           []string                       `json:"warnings,omitempty"`
-	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
-	ErrorCode          string                         `json:"error_code,omitempty"`
-	Error              string                         `json:"error,omitempty"`
-	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
-	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
-	Progress           *RunProgress                   `json:"progress,omitempty"`
-	Retry              *RetryLineage                  `json:"retry,omitempty"`
+	RunID                string                          `json:"run_id"`
+	Pipeline             string                          `json:"pipeline"`
+	Status               RunStatus                       `json:"status"`
+	StartedAt            time.Time                       `json:"started_at"`
+	FinishedAt           *time.Time                      `json:"finished_at,omitempty"`
+	Question             string                          `json:"question,omitempty"`
+	CurrentStep          string                          `json:"current_step,omitempty"`
+	RuntimeMode          string                          `json:"runtime_mode,omitempty"`
+	StepProviders        map[string]string               `json:"step_providers,omitempty"`
+	ProviderModels       acpruntime.ProviderModelValues  `json:"provider_models,omitempty"`
+	ProviderModelSources acpruntime.ProviderModelSources `json:"provider_model_sources,omitempty"`
+	Warnings             []string                        `json:"warnings,omitempty"`
+	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
+	ErrorCode            string                          `json:"error_code,omitempty"`
+	Error                string                          `json:"error,omitempty"`
+	SupersededByRunID    string                          `json:"superseded_by_run_id,omitempty"`
+	RefreshSummary       *RefreshSummary                 `json:"refresh_summary,omitempty"`
+	Progress             *RunProgress                    `json:"progress,omitempty"`
+	Retry                *RetryLineage                   `json:"retry,omitempty"`
 }
 
 type RunProgress struct {
@@ -196,6 +198,7 @@ type RunRequest struct {
 	RetryRequestedScopes []string
 	RetryScopes          []string
 	RetryReusedInputs    []string
+	ProviderModels       *acpruntime.ProviderModelResolution
 }
 
 type PendingRunInfo struct {
@@ -214,24 +217,26 @@ type runHistorySnapshot struct {
 }
 
 type runHistoryItem struct {
-	RunID              string                         `json:"run_id"`
-	Pipeline           string                         `json:"pipeline"`
-	Status             RunStatus                      `json:"status"`
-	StartedAt          string                         `json:"started_at"`
-	FinishedAt         *string                        `json:"finished_at,omitempty"`
-	Question           string                         `json:"question,omitempty"`
-	CurrentStep        string                         `json:"current_step,omitempty"`
-	RuntimeMode        string                         `json:"runtime_mode,omitempty"`
-	StepProviders      map[string]string              `json:"step_providers,omitempty"`
-	Warnings           []string                       `json:"warnings,omitempty"`
-	PendingPermissions []acpruntime.PermissionRequest `json:"pending_permissions,omitempty"`
-	ErrorCode          string                         `json:"error_code,omitempty"`
-	Error              string                         `json:"error,omitempty"`
-	SupersededByRunID  string                         `json:"superseded_by_run_id,omitempty"`
-	RefreshSummary     *RefreshSummary                `json:"refresh_summary,omitempty"`
-	Progress           *RunProgress                   `json:"progress,omitempty"`
-	Retry              *RetryLineage                  `json:"retry,omitempty"`
-	Artifacts          []Artifact                     `json:"artifacts,omitempty"`
+	RunID                string                          `json:"run_id"`
+	Pipeline             string                          `json:"pipeline"`
+	Status               RunStatus                       `json:"status"`
+	StartedAt            string                          `json:"started_at"`
+	FinishedAt           *string                         `json:"finished_at,omitempty"`
+	Question             string                          `json:"question,omitempty"`
+	CurrentStep          string                          `json:"current_step,omitempty"`
+	RuntimeMode          string                          `json:"runtime_mode,omitempty"`
+	StepProviders        map[string]string               `json:"step_providers,omitempty"`
+	ProviderModels       acpruntime.ProviderModelValues  `json:"provider_models,omitempty"`
+	ProviderModelSources acpruntime.ProviderModelSources `json:"provider_model_sources,omitempty"`
+	Warnings             []string                        `json:"warnings,omitempty"`
+	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
+	ErrorCode            string                          `json:"error_code,omitempty"`
+	Error                string                          `json:"error,omitempty"`
+	SupersededByRunID    string                          `json:"superseded_by_run_id,omitempty"`
+	RefreshSummary       *RefreshSummary                 `json:"refresh_summary,omitempty"`
+	Progress             *RunProgress                    `json:"progress,omitempty"`
+	Retry                *RetryLineage                   `json:"retry,omitempty"`
+	Artifacts            []Artifact                      `json:"artifacts,omitempty"`
 }
 
 type stepRunnerFactory interface {
@@ -383,6 +388,17 @@ func (s *Service) ResolveStepProviderProfile(manifest workspace.Manifest) (acpru
 	return acpruntime.ResolveStepProviders(manifest, s.providerFallback, s.providerSource)
 }
 
+func (s *Service) ResolveProviderModelProfile(manifest workspace.Manifest) (acpruntime.ProviderModelResolution, error) {
+	return acpruntime.ResolveProviderModels(manifest)
+}
+
+func (s *Service) resolveRunProviderModels(request RunRequest) (acpruntime.ProviderModelResolution, error) {
+	if request.ProviderModels != nil {
+		return *request.ProviderModels, nil
+	}
+	return s.ResolveProviderModelProfile(request.Workspace.Manifest)
+}
+
 func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artifact, error) {
 	runID := s.nextRunID()
 	return s.runWithID(ctx, request, runID)
@@ -410,11 +426,19 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	initialWarnings := []string{}
 	resumeFromStep := strings.TrimSpace(request.ResumeFromStep)
 	resolvedStepProviders, resolvedStepProvidersErr := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	resolvedProviderModels, resolvedProviderModelsErr := s.resolveRunProviderModels(request)
 	runLogMessage := "run started"
 	runLogFields := map[string]any{
 		"pipeline": string(request.Pipeline),
 	}
 	if resumed {
+		// A restart must continue with the model snapshot accepted by the original run,
+		// even if provider environment variables changed while the service was down.
+		if len(resumedRecord.info.ProviderModels) > 0 {
+			resolvedProviderModels.Effective = cloneProviderModelValues(resumedRecord.info.ProviderModels)
+			resolvedProviderModels.Source = cloneProviderModelSources(resumedRecord.info.ProviderModelSources)
+			resolvedProviderModelsErr = nil
+		}
 		startedAt = resumedRecord.info.StartedAt.UTC()
 		initialArtifacts = append([]Artifact(nil), resumedRecord.artifacts...)
 		initialWarnings = append([]string(nil), resumedRecord.info.Warnings...)
@@ -454,6 +478,10 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	if resolvedStepProvidersErr == nil {
 		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
 	}
+	if resolvedProviderModelsErr == nil {
+		initialInfo.ProviderModels = resolvedProviderModels.Effective
+		initialInfo.ProviderModelSources = resolvedProviderModels.Source
+	}
 	if err := s.storeRun(runRecord{
 		info:      initialInfo,
 		artifacts: append([]Artifact(nil), initialArtifacts...),
@@ -489,6 +517,17 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			nil,
 		)
 	}
+	if resolvedProviderModelsErr != nil {
+		return s.failRunBeforeExecution(
+			runID,
+			initialInfo,
+			initialArtifacts,
+			resolvedProviderModelsErr,
+			resolvedProviderModelsErr,
+			"run failed: runtime model resolution",
+			nil,
+		)
+	}
 	if err := request.Workspace.EnsureLayout(); err != nil {
 		return s.failRunBeforeExecution(
 			runID,
@@ -501,7 +540,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		)
 	}
 	if request.Pipeline == PipelineQA {
-		return s.runQAWithID(ctx, request, runID, initialInfo, initialArtifacts, resolvedStepProviders)
+		return s.runQAWithID(ctx, request, runID, initialInfo, initialArtifacts, resolvedStepProviders, resolvedProviderModels)
 	}
 	if strings.TrimSpace(request.RetryParentRunID) != "" && strings.TrimSpace(resumeFromStep) != "" {
 		if err := copyRetryStaging(request.Workspace, request.RetryParentRunID, runID, resumeFromStep, request.RetryScopes); err != nil {
@@ -660,6 +699,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			runtimeVersions:   map[string]struct{}{},
 			resolvedRepoPaths: map[string]string{},
 			stepProviders:     resolvedStepProviders.Effective,
+			providerModels:    resolvedProviderModels.Effective,
 			permissionProfile: resolvedPermissions.Effective,
 			retryScopes:       append([]string(nil), request.RetryScopes...),
 		},
@@ -934,6 +974,7 @@ type pipelineRuntimeState struct {
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string
 	stepProviders            acpruntime.StepProviderValues
+	providerModels           acpruntime.ProviderModelValues
 	collectOutcome           runtimeShardOutcome
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
@@ -1081,6 +1122,28 @@ func cloneStringMap(values map[string]string) map[string]string {
 	cloned := make(map[string]string, len(values))
 	for key, value := range values {
 		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneProviderModelValues(values acpruntime.ProviderModelValues) acpruntime.ProviderModelValues {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(acpruntime.ProviderModelValues, len(values))
+	for provider, value := range values {
+		cloned[provider] = value
+	}
+	return cloned
+}
+
+func cloneProviderModelSources(values acpruntime.ProviderModelSources) acpruntime.ProviderModelSources {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(acpruntime.ProviderModelSources, len(values))
+	for provider, value := range values {
+		cloned[provider] = value
 	}
 	return cloned
 }

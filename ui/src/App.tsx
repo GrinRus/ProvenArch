@@ -152,6 +152,9 @@ export default function App() {
     runtimeStepProviderPersisted,
     runtimeStepProviderEffective,
     runtimeStepProviderSource,
+    runtimeProviderModels,
+    runtimeProviderModelDraft,
+    runtimeProviderModelStatus,
     loadRuntimeTimeouts,
     loadRuntimeExecution,
     loadRuntimePermissions,
@@ -159,12 +162,15 @@ export default function App() {
     updateRuntimeTimeoutDraft,
     updateRuntimeExecutionDraft,
     updateRuntimePermissionDraft,
+    updateRuntimeProviderModelDraft,
     handleSaveRuntimeTimeouts,
     handleResetRuntimeTimeouts,
     handleSaveRuntimeExecution,
     handleResetRuntimeExecution,
     handleSaveRuntimePermissions,
     handleResetRuntimePermissions,
+    handleSaveRuntimeProviderModels,
+    handleResetRuntimeProviderModels,
   } = runtimeSettings;
 
   const {
@@ -903,6 +909,12 @@ export default function App() {
       onSavePermissions={() => void handleSaveRuntimePermissions()}
       onResetPermissions={() => void handleResetRuntimePermissions()}
       onPermissionChange={(key, value) => updateRuntimePermissionDraft(key as RuntimePermissionKey, value)}
+      runtimeProviderModels={runtimeProviderModels}
+      runtimeProviderModelDraft={runtimeProviderModelDraft}
+      runtimeProviderModelStatus={runtimeProviderModelStatus}
+      onSaveProviderModels={() => void handleSaveRuntimeProviderModels()}
+      onResetProviderModels={() => void handleResetRuntimeProviderModels()}
+      onProviderModelChange={(provider, field, value) => updateRuntimeProviderModelDraft(provider, field, value)}
       stepProviderLabels={runtimeStepProviderLabels}
       stepProviderOrder={[...runtimeStepProviderOrder]}
       stepProviderPersisted={runtimeStepProviderPersisted}
