@@ -514,6 +514,38 @@ export type RuntimeExecutionDraft = Record<RuntimeExecutionKey, string>;
 
 export type RuntimeStepProviderValues = Record<string, string>;
 
+export type RuntimeProviderModelConfig = {
+  model?: string;
+  effort?: string;
+};
+
+export type RuntimeProviderModelDraft = {
+  model: string;
+  effort: string;
+};
+
+export type RuntimeProviderModelCapability = {
+  model: boolean;
+  efforts: string[];
+};
+
+export type RuntimeProviderModelEntry = {
+  persisted?: RuntimeProviderModelConfig;
+  effective?: RuntimeProviderModelConfig;
+  source?: {
+    model?: string;
+    effort?: string;
+  };
+  capabilities?: RuntimeProviderModelCapability;
+};
+
+export type RuntimeProviderModels = Record<string, RuntimeProviderModelEntry>;
+
+export type RuntimeProviderModelsResponse = {
+  ok: boolean;
+  providers?: RuntimeProviderModels;
+};
+
 export type RuntimePermissionKey = "mode" | "approval_channel";
 export type RuntimePermissionValues = Record<RuntimePermissionKey, string>;
 export type RuntimePermissionSources = Record<RuntimePermissionKey, string>;
@@ -582,7 +614,10 @@ export type RuntimeProfileResponse = {
     effective?: Partial<RuntimeStepProviderValues>;
     source?: Partial<RuntimeStepProviderValues>;
   };
+  provider_models?: RuntimeProviderModels;
 };
+
+export const runtimeModelProviderOrder = ["claude-code", "qwen-code", "codex-code"] as const;
 
 export type EditableArtifactOption = {
   path: string;

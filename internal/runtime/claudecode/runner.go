@@ -67,7 +67,7 @@ func (a claudeAdapter) CommandSpec(task acpruntime.Task) (providercommon.Command
 func (a claudeAdapter) commandSpecWithPrompt(task acpruntime.Task, includeDirs []string, prompt string) (providercommon.CommandSpec, error) {
 	commandArgs := append([]string(nil), a.runner.Args...)
 	if len(commandArgs) == 0 {
-		commandArgs = buildClaudeArgsWithPermissions(includeDirs, prompt, task.RuntimePermissions)
+		commandArgs = buildClaudeArgsWithRuntime(includeDirs, prompt, task.RuntimePermissions, task.RuntimeModel, task.RuntimeEffort)
 	} else if strings.TrimSpace(task.RuntimePermissions.Mode) == acpruntime.PermissionModeManaged {
 		commandArgs = stripClaudeBypassPermissionArgs(commandArgs)
 	}
@@ -172,7 +172,17 @@ func buildClaudeArgsWithIncludeDirectories(includeDirs []string, prompt string) 
 }
 
 func buildClaudeArgsWithPermissions(includeDirs []string, prompt string, permissions acpruntime.PermissionValues) []string {
+	return buildClaudeArgsWithRuntime(includeDirs, prompt, permissions, "", "")
+}
+
+func buildClaudeArgsWithRuntime(includeDirs []string, prompt string, permissions acpruntime.PermissionValues, model string, effort string) []string {
 	args := []string{"--output-format", "json"}
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "--model", strings.TrimSpace(model))
+	}
+	if strings.TrimSpace(effort) != "" {
+		args = append(args, "--effort", strings.TrimSpace(effort))
+	}
 	if strings.TrimSpace(permissions.Mode) != acpruntime.PermissionModeManaged {
 		args = append(args, "--permission-mode", "bypassPermissions")
 	}

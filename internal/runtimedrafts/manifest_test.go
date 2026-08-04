@@ -3119,6 +3119,7 @@ Evidence used:
 - Citation index: reports/taskruns/run_20260620_184900_001/staging/final/citation-index.json (92 citation entries)
 `,
 	} {
+		proposalText := proposalText
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 

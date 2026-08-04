@@ -171,6 +171,9 @@ provider CLI as well.
 
 Provider selection can also be configured per pipeline step in `workspace.yaml`. See the
 [workspace specification](docs/spec/WORKSPACE_SPEC.md) for precedence and runtime profile options.
+Optional provider-scoped model and effort overrides live under
+`runtime.profile.providers.<provider>`. If omitted, ACP passes no model override and the provider
+uses its native default; the runtime settings API/UI show this as `provider_default`.
 
 ## CLI and CI usage
 

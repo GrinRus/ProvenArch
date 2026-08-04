@@ -35,6 +35,13 @@ func TestBuildQwenManagedArgsOmitYolo(t *testing.T) {
 	}
 }
 
+func TestBuildQwenRuntimeArgsIncludeModel(t *testing.T) {
+	args := buildQwenArgsWithRuntime(nil, "prompt", acpruntime.DefaultPermissions(), "qwen-model")
+	if !containsArg(args, "--model") || !containsArg(args, "qwen-model") {
+		t.Fatalf("expected qwen model override, got %v", args)
+	}
+}
+
 func TestQwenAdapterUsesSharedUnavailableMarkers(t *testing.T) {
 	t.Parallel()
 

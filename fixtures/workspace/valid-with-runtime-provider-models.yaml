@@ -1,0 +1,15 @@
+version: 1
+repos:
+  - name: payments-service
+    path: /absolute/path/to/payments-service
+runtime:
+  profile:
+    providers:
+      codex-code:
+        model: gpt-5.6-luna
+        effort: high
+      claude-code:
+        model: claude-sonnet-4-6
+        effort: high
+      qwen-code:
+        model: qwen3-coder

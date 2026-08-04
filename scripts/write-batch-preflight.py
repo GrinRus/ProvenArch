@@ -28,8 +28,8 @@ PROVIDER_UNAVAILABLE_MARKERS = (
 )
 
 ARTIFACT_SMOKE_SENTINEL_TEXT = "ACP_ARTIFACT_SMOKE_READY"
-DEFAULT_CODEX_MODEL = "gpt-5.5"
-DEFAULT_CODEX_REASONING_EFFORT = "xhigh"
+DEFAULT_CODEX_MODEL = "gpt-5.6-luna"
+DEFAULT_CODEX_REASONING_EFFORT = "high"
 CODEX_RUNTIME_DISABLE_ARGS = (
     "--disable", "plugins",
     "--disable", "remote_plugin",
@@ -109,7 +109,7 @@ def parse_semver_tuple(version_line: str) -> tuple[int, int, int] | None:
 def codex_model_version_blocker(version_line: str, config_text: str | None = None) -> str:
     _ = config_text
     model = live_codex_model()
-    if not model.startswith("gpt-5.5"):
+    if not model.startswith("gpt-5.6"):
         return ""
     parsed = parse_semver_tuple(version_line)
     if parsed is None:
@@ -586,6 +586,8 @@ def main() -> int:
                 "version_line": args.codex_version_line,
                 "model": live_codex_model(),
                 "reasoning_effort": live_codex_reasoning_effort(),
+                "model_source": "env" if live_codex_model() else "provider_default",
+                "effort_source": "env" if live_codex_reasoning_effort() else "provider_default",
             },
         },
     }

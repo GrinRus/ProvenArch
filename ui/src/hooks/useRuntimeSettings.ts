@@ -25,6 +25,9 @@ import {
   type RuntimePermissionSources,
   type RuntimePermissionValues,
   type RuntimeProfileResponse,
+  type RuntimeProviderModelDraft,
+  type RuntimeProviderModels,
+  type RuntimeProviderModelsResponse,
   type RuntimeStepProviderValues,
   type RuntimeTimeoutKey,
   type RuntimeTimeoutsResponse,
@@ -68,6 +71,9 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
   const [runtimeStepProviderPersisted, setRuntimeStepProviderPersisted] = useState<Partial<RuntimeStepProviderValues>>({});
   const [runtimeStepProviderEffective, setRuntimeStepProviderEffective] = useState<Partial<RuntimeStepProviderValues>>({});
   const [runtimeStepProviderSource, setRuntimeStepProviderSource] = useState<Partial<RuntimeStepProviderValues>>({});
+  const [runtimeProviderModels, setRuntimeProviderModels] = useState<RuntimeProviderModels>({});
+  const [runtimeProviderModelDraft, setRuntimeProviderModelDraft] = useState<Record<string, RuntimeProviderModelDraft>>({});
+  const [runtimeProviderModelStatus, setRuntimeProviderModelStatus] = useState("");
 
   async function loadRuntimeTimeouts() {
     try {
@@ -115,6 +121,8 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
       setRuntimeStepProviderPersisted(payload.step_providers?.persisted ?? {});
       setRuntimeStepProviderEffective(payload.step_providers?.effective ?? {});
       setRuntimeStepProviderSource(payload.step_providers?.source ?? {});
+      setRuntimeProviderModels(payload.provider_models ?? {});
+      setRuntimeProviderModelDraft(runtimeProviderModelDraftFromPayload(payload.provider_models ?? {}));
     } catch {
       setEffectiveRuntimeMode("unknown");
       setEffectiveRuntimeProvider("unknown");
@@ -126,6 +134,8 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
       setRuntimeStepProviderPersisted({});
       setRuntimeStepProviderEffective({});
       setRuntimeStepProviderSource({});
+      setRuntimeProviderModels({});
+      setRuntimeProviderModelDraft({});
     }
   }
 
@@ -155,6 +165,56 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
 
   function updateRuntimePermissionDraft(key: RuntimePermissionKey, value: string) {
     setRuntimePermissionDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function updateRuntimeProviderModelDraft(provider: string, field: keyof RuntimeProviderModelDraft, value: string) {
+    setRuntimeProviderModelDraft((previous) => ({
+      ...previous,
+      [provider]: { ...(previous[provider] ?? { model: "", effort: "" }), [field]: value },
+    }));
+  }
+
+  async function handleSaveRuntimeProviderModels() {
+    setBusy(true);
+    setError(null);
+    setRuntimeProviderModelStatus("");
+    try {
+      const providers = Object.fromEntries(
+        Object.entries(runtimeProviderModelDraft).map(([provider, config]) => [provider, { model: config.model, effort: config.effort }])
+      );
+      const payload = await fetchJSON<RuntimeProviderModelsResponse>("/api/runtime/models", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providers }),
+      });
+      setRuntimeProviderModels(payload.providers ?? {});
+      setRuntimeProviderModelDraft(runtimeProviderModelDraftFromPayload(payload.providers ?? {}));
+      setRuntimeProviderModelStatus("Runtime model settings saved");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to save runtime model settings");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetRuntimeProviderModels() {
+    setBusy(true);
+    setError(null);
+    setRuntimeProviderModelStatus("");
+    try {
+      const payload = await fetchJSON<RuntimeProviderModelsResponse>("/api/runtime/models", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providers: {} }),
+      });
+      setRuntimeProviderModels(payload.providers ?? {});
+      setRuntimeProviderModelDraft(runtimeProviderModelDraftFromPayload(payload.providers ?? {}));
+      setRuntimeProviderModelStatus("Runtime model settings reset to provider defaults");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "failed to reset runtime model settings");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleSaveRuntimeTimeouts() {
@@ -296,6 +356,9 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
     runtimeStepProviderPersisted,
     runtimeStepProviderEffective,
     runtimeStepProviderSource,
+    runtimeProviderModels,
+    runtimeProviderModelDraft,
+    runtimeProviderModelStatus,
     loadRuntimeTimeouts,
     loadRuntimeExecution,
     loadRuntimePermissions,
@@ -303,11 +366,25 @@ export function useRuntimeSettings({ setBusy, setError }: UseRuntimeSettingsOpti
     updateRuntimeTimeoutDraft,
     updateRuntimeExecutionDraft,
     updateRuntimePermissionDraft,
+    updateRuntimeProviderModelDraft,
     handleSaveRuntimeTimeouts,
     handleResetRuntimeTimeouts,
     handleSaveRuntimeExecution,
     handleResetRuntimeExecution,
     handleSaveRuntimePermissions,
     handleResetRuntimePermissions,
+    handleSaveRuntimeProviderModels,
+    handleResetRuntimeProviderModels,
   };
+}
+
+function runtimeProviderModelDraftFromPayload(payload: RuntimeProviderModels): Record<string, RuntimeProviderModelDraft> {
+  const draft: Record<string, RuntimeProviderModelDraft> = {};
+  for (const [provider, entry] of Object.entries(payload)) {
+    draft[provider] = {
+      model: entry.persisted?.model ?? "",
+      effort: entry.persisted?.effort ?? "",
+    };
+  }
+  return draft;
 }

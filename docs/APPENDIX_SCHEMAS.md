@@ -50,6 +50,11 @@
   - execution: `CLI > env > workspace.yaml(runtime.profile.execution) > defaults`
   - permissions: `workspace.yaml(runtime.profile.permissions) > defaults`
 - step providers: `workspace step override > CLI/env global provider > claude-code`
+- `runtime.profile.providers.<provider>` optionally persists provider-scoped `model` and
+  `effort` for `claude-code`, `qwen-code`, or `codex-code`.
+- each field resolves independently as `provider environment > workspace.yaml > provider-native default`;
+  omitted values are not forwarded as CLI arguments. Runtime history snapshots effective
+  values and their source (`env`, `workspace`, or `provider_default`) at run acceptance.
 - `analysis.role` удалён из active workspace contract; manifests с этим legacy полем reject-ятся schema validation-ом
 
 Sharding policy в MVP:

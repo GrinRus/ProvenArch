@@ -27,6 +27,7 @@ func (s *Service) runQAWithID(
 	initialInfo RunInfo,
 	initialArtifacts []Artifact,
 	resolvedStepProviders acpruntime.StepProviderResolution,
+	resolvedProviderModels acpruntime.ProviderModelResolution,
 ) (RunInfo, []Artifact, error) {
 	startedAt := initialInfo.StartedAt
 	if startedAt.IsZero() {
@@ -82,13 +83,15 @@ func (s *Service) runQAWithID(
 		pipelineRunProgressState: pipelineRunProgressState{
 			startedAt: startedAt,
 			stepStatus: RunInfo{
-				RunID:         runID,
-				Pipeline:      string(PipelineQA),
-				Status:        RunStatusRunning,
-				StartedAt:     startedAt,
-				Question:      question,
-				CurrentStep:   stepID,
-				StepProviders: resolvedStepProviders.Effective.StringMap(),
+				RunID:                runID,
+				Pipeline:             string(PipelineQA),
+				Status:               RunStatusRunning,
+				StartedAt:            startedAt,
+				Question:             question,
+				CurrentStep:          stepID,
+				StepProviders:        resolvedStepProviders.Effective.StringMap(),
+				ProviderModels:       resolvedProviderModels.Effective,
+				ProviderModelSources: resolvedProviderModels.Source,
 			},
 			warnings: []string{},
 		},
@@ -101,6 +104,7 @@ func (s *Service) runQAWithID(
 			runtimeVersions:   map[string]struct{}{},
 			resolvedRepoPaths: map[string]string{},
 			stepProviders:     resolvedStepProviders.Effective,
+			providerModels:    resolvedProviderModels.Effective,
 			permissionProfile: resolvedPermissions.Effective,
 			executionProfile:  resolvedExecution.Effective,
 		},

@@ -37,6 +37,11 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	if err != nil {
 		return "", err
 	}
+	resolvedProviderModels, err := s.ResolveProviderModelProfile(request.Workspace.Manifest)
+	if err != nil {
+		return "", err
+	}
+	request.ProviderModels = &resolvedProviderModels
 	runID := s.nextRunID()
 	now := s.clock().UTC()
 
@@ -54,15 +59,17 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		}
 		return runRecord{
 			info: RunInfo{
-				RunID:         runID,
-				Pipeline:      string(request.Pipeline),
-				Status:        RunStatusQueued,
-				StartedAt:     now,
-				Question:      strings.TrimSpace(request.Question),
-				RuntimeMode:   s.runtimeMode,
-				StepProviders: resolvedStepProviders.Effective.StringMap(),
-				Progress:      progress,
-				Retry:         retry,
+				RunID:                runID,
+				Pipeline:             string(request.Pipeline),
+				Status:               RunStatusQueued,
+				StartedAt:            now,
+				Question:             strings.TrimSpace(request.Question),
+				RuntimeMode:          s.runtimeMode,
+				StepProviders:        resolvedStepProviders.Effective.StringMap(),
+				ProviderModels:       resolvedProviderModels.Effective,
+				ProviderModelSources: resolvedProviderModels.Source,
+				Progress:             progress,
+				Retry:                retry,
 			},
 		}
 	}
@@ -709,23 +716,25 @@ func (s *Service) addHistoryDiagnosticLocked(message string) {
 
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
 	item := runHistoryItem{
-		RunID:              record.info.RunID,
-		Pipeline:           record.info.Pipeline,
-		Status:             record.info.Status,
-		StartedAt:          record.info.StartedAt.UTC().Format(time.RFC3339),
-		CurrentStep:        record.info.CurrentStep,
-		RuntimeMode:        record.info.RuntimeMode,
-		Question:           record.info.Question,
-		StepProviders:      cloneStringMap(record.info.StepProviders),
-		Warnings:           append([]string(nil), record.info.Warnings...),
-		PendingPermissions: clonePermissionRequests(record.info.PendingPermissions),
-		ErrorCode:          record.info.ErrorCode,
-		Error:              record.info.Error,
-		SupersededByRunID:  record.info.SupersededByRunID,
-		RefreshSummary:     cloneRefreshSummary(record.info.RefreshSummary),
-		Progress:           cloneRunProgress(record.info.Progress),
-		Retry:              cloneRetryLineage(record.info.Retry),
-		Artifacts:          append([]Artifact(nil), record.artifacts...),
+		RunID:                record.info.RunID,
+		Pipeline:             record.info.Pipeline,
+		Status:               record.info.Status,
+		StartedAt:            record.info.StartedAt.UTC().Format(time.RFC3339),
+		CurrentStep:          record.info.CurrentStep,
+		RuntimeMode:          record.info.RuntimeMode,
+		Question:             record.info.Question,
+		StepProviders:        cloneStringMap(record.info.StepProviders),
+		ProviderModels:       cloneProviderModelValues(record.info.ProviderModels),
+		ProviderModelSources: cloneProviderModelSources(record.info.ProviderModelSources),
+		Warnings:             append([]string(nil), record.info.Warnings...),
+		PendingPermissions:   clonePermissionRequests(record.info.PendingPermissions),
+		ErrorCode:            record.info.ErrorCode,
+		Error:                record.info.Error,
+		SupersededByRunID:    record.info.SupersededByRunID,
+		RefreshSummary:       cloneRefreshSummary(record.info.RefreshSummary),
+		Progress:             cloneRunProgress(record.info.Progress),
+		Retry:                cloneRetryLineage(record.info.Retry),
+		Artifacts:            append([]Artifact(nil), record.artifacts...),
 	}
 	if record.info.FinishedAt != nil {
 		finished := record.info.FinishedAt.UTC().Format(time.RFC3339)
@@ -749,23 +758,25 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 	}
 	return runRecord{
 		info: RunInfo{
-			RunID:              item.RunID,
-			Pipeline:           item.Pipeline,
-			Status:             item.Status,
-			StartedAt:          startedAt.UTC(),
-			FinishedAt:         finishedAt,
-			Question:           item.Question,
-			CurrentStep:        item.CurrentStep,
-			RuntimeMode:        item.RuntimeMode,
-			StepProviders:      cloneStringMap(item.StepProviders),
-			Warnings:           append([]string(nil), item.Warnings...),
-			PendingPermissions: clonePermissionRequests(item.PendingPermissions),
-			ErrorCode:          item.ErrorCode,
-			Error:              item.Error,
-			SupersededByRunID:  item.SupersededByRunID,
-			RefreshSummary:     cloneRefreshSummary(item.RefreshSummary),
-			Progress:           cloneRunProgress(item.Progress),
-			Retry:              cloneRetryLineage(item.Retry),
+			RunID:                item.RunID,
+			Pipeline:             item.Pipeline,
+			Status:               item.Status,
+			StartedAt:            startedAt.UTC(),
+			FinishedAt:           finishedAt,
+			Question:             item.Question,
+			CurrentStep:          item.CurrentStep,
+			RuntimeMode:          item.RuntimeMode,
+			StepProviders:        cloneStringMap(item.StepProviders),
+			ProviderModels:       cloneProviderModelValues(item.ProviderModels),
+			ProviderModelSources: cloneProviderModelSources(item.ProviderModelSources),
+			Warnings:             append([]string(nil), item.Warnings...),
+			PendingPermissions:   clonePermissionRequests(item.PendingPermissions),
+			ErrorCode:            item.ErrorCode,
+			Error:                item.Error,
+			SupersededByRunID:    item.SupersededByRunID,
+			RefreshSummary:       cloneRefreshSummary(item.RefreshSummary),
+			Progress:             cloneRunProgress(item.Progress),
+			Retry:                cloneRetryLineage(item.Retry),
 		},
 		artifacts: append([]Artifact(nil), item.Artifacts...),
 	}, true
@@ -804,6 +815,8 @@ func cloneRunInfo(value RunInfo) RunInfo {
 	clone := value
 	clone.FinishedAt = cloneTimePointer(value.FinishedAt)
 	clone.StepProviders = cloneStringMap(value.StepProviders)
+	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
+	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
 	clone.Warnings = append([]string(nil), value.Warnings...)
 	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
 	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)

@@ -128,9 +128,9 @@ class WriteBatchPreflightTest(unittest.TestCase):
         self.assertIn("--ignore-user-config", args)
         self.assertIn("--ignore-rules", args)
         self.assertIn("--model", args)
-        self.assertIn("gpt-5.5", args)
+        self.assertIn("gpt-5.6-luna", args)
         self.assertIn("-c", args)
-        self.assertIn('model_reasoning_effort="xhigh"', args)
+        self.assertIn('model_reasoning_effort="high"', args)
         self.assertIn("--ephemeral", args)
         self.assertEqual("-", args[-1])
         self.assertIn("ACP_READY", stdin_text)
@@ -149,7 +149,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
         args, _ = self.module.headless_probe_invocation("codex")
 
         self.assertNotIn("--model", args)
-        self.assertNotIn("gpt-5.5", args)
+        self.assertNotIn("gpt-5.6-luna", args)
         self.assertNotIn("-c", args)
 
     def test_qwen_artifact_smoke_uses_runtime_write_args(self) -> None:
@@ -486,7 +486,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
         source_home.mkdir()
         (source_home / "auth.json").write_text("{\"token\":\"redacted\"}\n", encoding="utf-8")
         (source_home / "installation_id").write_text("install-123\n", encoding="utf-8")
-        (source_home / "config.toml").write_text("model = \"gpt-5.5\"\n", encoding="utf-8")
+        (source_home / "config.toml").write_text("model = \"gpt-5.6-luna\"\n", encoding="utf-8")
         (source_home / ".tmp").mkdir()
         (source_home / ".tmp" / "plugins").mkdir()
 
@@ -502,8 +502,8 @@ class WriteBatchPreflightTest(unittest.TestCase):
             "prev=''\n"
             "for arg in \"$@\"; do\n"
             "  if [ \"$prev\" = \"--disable\" ] && [ \"$arg\" = \"plugins\" ]; then has_plugins_disable=1; fi\n"
-            "  if [ \"$prev\" = \"--model\" ] && [ \"$arg\" = \"gpt-5.5\" ]; then has_model=1; fi\n"
-            "  if [ \"$prev\" = \"-c\" ] && [ \"$arg\" = 'model_reasoning_effort=\"xhigh\"' ]; then has_reasoning=1; fi\n"
+            "  if [ \"$prev\" = \"--model\" ] && [ \"$arg\" = \"gpt-5.6-luna\" ]; then has_model=1; fi\n"
+            "  if [ \"$prev\" = \"-c\" ] && [ \"$arg\" = 'model_reasoning_effort=\"high\"' ]; then has_reasoning=1; fi\n"
             "  if [ \"$arg\" = \"--ignore-user-config\" ]; then has_ignore_config=1; fi\n"
             "  if [ \"$arg\" = \"--ignore-rules\" ]; then has_ignore_rules=1; fi\n"
             "  prev=\"$arg\"\n"
@@ -539,7 +539,7 @@ class WriteBatchPreflightTest(unittest.TestCase):
                 command,
                 str(REPO_ROOT),
                 "codex-cli 0.140.0",
-                'model = "gpt-5.5"\n',
+                'model = "gpt-5.6-luna"\n',
             )
         finally:
             if old_home is None:

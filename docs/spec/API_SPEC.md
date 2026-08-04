@@ -560,6 +560,33 @@ Partial update persisted execution-полей в `workspace.yaml`.
 - `runtime_execution_write_failed`
 - `runtime_execution_reopen_failed`
 
+### GET/PUT `/api/runtime/models`
+
+Возвращает и заменяет provider-scoped model profile. Для каждого provider API сообщает
+`persisted`, `effective`, отдельный `source` для `model` и `effort`, а также `capabilities`.
+Пустой `model`/`effort` очищает persisted override; пустой объект `providers` сбрасывает весь
+профиль. При отсутствии override effective payload остаётся пустым, а source равен
+`provider_default`: ACP не угадывает фактическую native model и не передаёт model/effort аргументы.
+
+```json
+{
+  "ok": true,
+  "providers": {
+    "codex-code": {
+      "persisted": {"model": "gpt-5.6-luna", "effort": "high"},
+      "effective": {"model": "gpt-5.6-luna", "effort": "high"},
+      "source": {"model": "workspace", "effort": "workspace"},
+      "capabilities": {"model": true, "efforts": ["none", "low", "medium", "high", "xhigh", "max"]}
+    }
+  }
+}
+```
+
+`PUT` принимает `{ "providers": { "codex-code": { "model": "gpt-5.6-luna", "effort": "high" } } }`.
+Приоритет effective values: provider-specific env > workspace profile > provider native default.
+В run envelope дополнительно сохраняются resolved `provider_models` и `provider_model_sources`,
+зафиксированные при принятии запуска.
+
 ### GET `/api/runtime/permissions`
 Возвращает permission-профиль для текущего workspace:
 - `persisted` — значения из `workspace.yaml` (`runtime.profile.permissions`);

@@ -12,6 +12,10 @@ func buildQwenArgsWithIncludeDirectories(includeDirs []string, prompt string) []
 }
 
 func buildQwenArgsWithPermissions(includeDirs []string, prompt string, permissions acpruntime.PermissionValues) []string {
+	return buildQwenArgsWithRuntime(includeDirs, prompt, permissions, "")
+}
+
+func buildQwenArgsWithRuntime(includeDirs []string, prompt string, permissions acpruntime.PermissionValues, model string) []string {
 	args := []string{
 		"--chat-recording",
 		"false",
@@ -20,6 +24,9 @@ func buildQwenArgsWithPermissions(includeDirs []string, prompt string, permissio
 		"--output-format",
 		"stream-json",
 		"--include-partial-messages",
+	}
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "--model", strings.TrimSpace(model))
 	}
 	if strings.TrimSpace(permissions.Mode) != acpruntime.PermissionModeManaged {
 		args = append(args, "--yolo")

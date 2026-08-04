@@ -33,6 +33,14 @@ class RunGoTest(unittest.TestCase):
         go_path.chmod(go_path.stat().st_mode | stat.S_IXUSR)
         return go_path
 
+    def _runner_env(self, **overrides: str) -> dict[str, str]:
+        """Keep runner-selection tests independent of the invoking shell."""
+        env = os.environ.copy()
+        for key in ("ACP_GO_BIN", "ACP_GO_VERSION", "ACP_GO_TOOL_CANDIDATES"):
+            env.pop(key, None)
+        env.update(overrides)
+        return env
+
     def test_uses_candidate_matching_required_go_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)
@@ -41,12 +49,11 @@ class RunGoTest(unittest.TestCase):
             result = subprocess.run(
                 [str(self.runner), "version"],
                 cwd=self.repo_root,
-                env={
-                    **os.environ,
-                    "HOME": str(tmp_root / "home"),
-                    "ACP_GO_TOOL_CANDIDATES": str(good_dir),
-                    "PATH": "/usr/bin:/bin",
-                },
+                env=self._runner_env(
+                    HOME=str(tmp_root / "home"),
+                    ACP_GO_TOOL_CANDIDATES=str(good_dir),
+                    PATH="/usr/bin:/bin",
+                ),
                 capture_output=True,
                 text=True,
                 check=True,
@@ -61,12 +68,11 @@ class RunGoTest(unittest.TestCase):
             result = subprocess.run(
                 [str(self.runner), "version"],
                 cwd=self.repo_root,
-                env={
-                    **os.environ,
-                    "HOME": str(tmp_root / "home"),
-                    "ACP_GO_TOOL_CANDIDATES": str(old_dir),
-                    "PATH": "/usr/bin:/bin",
-                },
+                env=self._runner_env(
+                    HOME=str(tmp_root / "home"),
+                    ACP_GO_TOOL_CANDIDATES=str(old_dir),
+                    PATH="/usr/bin:/bin",
+                ),
                 capture_output=True,
                 text=True,
             )
