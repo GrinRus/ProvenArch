@@ -448,7 +448,7 @@ runtime:
     providers:
       codex-code:
         model: gpt-5.6-luna
-        effort: HIGH
+        effort: high
 `)
 	manifest, err := ParseManifest(raw)
 	if err != nil {
