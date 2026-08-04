@@ -60,6 +60,39 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260803-v0.1.13-unqualified-prerelease
+
+### Context
+PR #207 is merged into `main` and packages the outcome-first product flow, Architecture Explorer,
+structured progress and dependency-aware retry. The repository owner previously directed releases
+to proceed without live-provider matrix runs. This release therefore needs an exact-tag waiver and
+must remain explicitly unqualified instead of claiming canonical `RELEASE READY`.
+
+### Goals (must have)
+- [x] Select the next SemVer prerelease tag `v0.1.13` from the published `v0.1.12` line.
+- [x] Record user-visible release notes and verification evidence in `CHANGELOG.md`.
+- [x] Add a verifier-compatible exact-tag owner waiver for `v0.1.13`.
+- [x] Pass provider-free DoD and exact-tag waiver verification.
+- [ ] Merge release metadata through PR before creating the tag.
+
+### Non-goals
+- No canonical live-provider matrix or `RELEASE READY` claim.
+- No product, schema, provider, matrix or release-workflow behavior changes.
+- No tag or GitHub Release before the preparation PR is merged.
+
+### Acceptance
+- `scripts/verify-release-owner-waiver.py` accepts the tracked waiver for the release commit.
+- `make contracts`, `make test`, `make lint` and `make build` pass with pinned toolchains.
+- Release PR is clean and mergeable, and its notes identify the unqualified status.
+
+### Progress log
+- 2026-08-03: Confirmed `v0.1.12` as the latest published tag and selected `v0.1.13`.
+- 2026-08-03: Reused the existing fail-closed waiver contract; no live evidence was synthesized or
+  represented as qualification evidence.
+- 2026-08-03: Exact-tag waiver verification passed. Full provider-free DoD passed with contracts,
+  Go suites, Python `266/266`, UI `168/168`, lint/typecheck, production build and embedded UI parity.
+
+### Plan ID
 EP-20260803-ui-ux-hierarchy-onboarding
 
 ### Context

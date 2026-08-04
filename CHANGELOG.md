@@ -2,6 +2,59 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.13 - 2026-08-03
+
+Outcome-first beta prerelease for architecture exploration, understandable run results, structured
+runtime progress, and dependency-aware retry.
+
+Highlights:
+- Reframed the product flow around the promoted evidence-backed architecture:
+  `Setup -> Run with progress -> Run Result -> Architecture -> Changes -> Publish`.
+- Added `GET /api/architecture`, promoted architecture snapshots and semantic comparison with the
+  previous promoted baseline.
+- Replaced Knowledge with a read-only interactive Architecture Explorer for C4 Context, Container,
+  Component and advanced Code views, including ELK layout, evidence inspectors, canonical filters,
+  drill-down and a mobile catalog fallback.
+- Added structured step and shard progress with separate activity/useful-progress timestamps,
+  terminal outcome summaries, retained last-good architecture and actionable recovery guidance.
+- Added dependency-aware targeted retry with immutable child-run lineage, validated input reuse,
+  downstream invalidation, confirmation plans and stale-plan rejection.
+- Improved onboarding, Architecture-first Home, semantic Changes, disabled-action explanations and
+  partial/error states across desktop and mobile.
+
+Verification notes:
+- PR #207 passed all 11 GitHub checks and was squash-merged into `main` as `4c446344`.
+- Provider-free validation passed with contracts, Go suites, Python `266/266`, UI `168/168`, lint,
+  production build, embedded UI parity and rendered mock E2E `7/7`.
+
+Known limitations:
+- `v0.1.13` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim canonical
+  `RELEASE READY`; Qwen/Claude live evidence and the composite release verdict are waived for this
+  exact tag.
+- No fresh trusted-machine live-provider release matrix is attached to this candidate.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
+## v0.1.12 - 2026-08-03
+
+UI hierarchy and onboarding polish for the local-first product console.
+
+Highlights:
+- Established a readable semantic type scale and simplified the shell/navigation hierarchy.
+- Reworked onboarding into a sequential Workspace, Repositories, Analysis brief, Provider, and
+  Review & run flow with explicit readiness and recovery guidance.
+- Split run history from run details, made terminal states truthful, and improved attention-first
+  Home, Knowledge empty states and distinct Changes review modes.
+- Fixed stale cross-run artifact selection and route races across desktop, tablet and mobile.
+
+Verification notes:
+- PR #205 passed the repository checks and was squash-merged into `main` as `f8175dac`.
+- Provider-free validation passed with contracts, Go suites, Python `266/266`, UI `158/158`, lint,
+  production build and rendered mock E2E `7/7`.
+
+Known limitations:
+- `v0.1.12` was published as an owner-authorized `UNQUALIFIED PRERELEASE`; it did not claim
+  canonical `RELEASE READY` without Qwen/Claude live evidence and a composite release verdict.
+
 ## v0.1.11 - 2026-08-02
 
 Release-pipeline recovery patch for the unpublished `v0.1.10` candidate.
