@@ -696,10 +696,11 @@ func TestNormalizeOnboardingWorkspacePath(t *testing.T) {
 	}{
 		{name: "empty", path: " ", code: "workspace_path_required"},
 		{name: "relative", path: "workspace", code: "workspace_path_not_absolute"},
-		{name: "traversal", path: filepath.Join(os.TempDir(), "..", "acp"), code: "workspace_path_traversal"},
+		{name: "traversal", path: filepath.Join(os.TempDir(), "nested") + string(filepath.Separator) + ".." + string(filepath.Separator) + "acp", code: "workspace_path_traversal"},
 		{name: "root", path: string(filepath.Separator), code: "workspace_path_invalid"},
 	}
 	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := normalizeOnboardingWorkspacePath(tc.path)
