@@ -16,7 +16,7 @@ class UIMockE2EContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.repo_root = REPO_ROOT
 
-    def test_runner_lists_exactly_seven_existing_mock_scenarios(self) -> None:
+    def test_runner_lists_exactly_eight_existing_mock_scenarios(self) -> None:
         result = subprocess.run(
             ["bash", "scripts/ui-mock-e2e.sh"],
             cwd=self.repo_root,
@@ -31,6 +31,7 @@ class UIMockE2EContractTest(unittest.TestCase):
         self.assertEqual(
             [
                 "analysis-failed-shard-mock",
+                "happy-path-mock",
                 "onboarding-recovery-mock",
                 "permission-recovery-mock",
                 "provider-stream-mock",

@@ -1248,6 +1248,12 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 					emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "completed_after_controlled_stop", runtimeArtifactSnapshot(task))
 					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", enrichmentStalled.Diagnostic.StallPhase)
 					return true, enrichmentResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverDraftManifestShapeDeterministically(task, adapter, enrichmentResult, beforeWriteRoot, beforeDraftRoot, err, stage); recovered {
+					if recoveredErr != nil {
+						return true, acpruntime.Result{}, recoveredErr
+					}
+					emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_manifest_shape_recovery", enrichmentStalled.Diagnostic.StallPhase)
+					return true, recoveredResult, nil
 				} else if shouldRetryDraftManifestShapeEnrichment(stage, err) {
 					return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
 				} else if shouldRetryDraftShardStatusCleanupEnrichment(stage, err) {
@@ -1294,6 +1300,13 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	}
 	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), validationErr, stage); err != nil {
 		emitDraftArtifactEnrichmentSnapshotDiagnostic(task, adapter.Provider(), "invalid", runtimeArtifactSnapshot(task))
+		if recovered, recoveredResult, recoveredErr := recoverDraftManifestShapeDeterministically(task, adapter, enrichmentResult, beforeWriteRoot, beforeDraftRoot, err, stage); recovered {
+			if recoveredErr != nil {
+				return true, acpruntime.Result{}, recoveredErr
+			}
+			emitFocusedArtifactRepairCompletedDiagnostic(task, adapter.Provider(), "draft_artifact_manifest_shape_recovery", "")
+			return true, recoveredResult, nil
+		}
 		if shouldRetryDraftManifestShapeEnrichment(stage, err) {
 			return recoverDraftArtifactEnrichment(ctx, task, adapter, enrichmentResult, err, "draft_artifact_enrichment_manifest_shape")
 		}

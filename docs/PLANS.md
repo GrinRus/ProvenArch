@@ -60,6 +60,533 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260805-live-runtime-safety-fixes
+
+### Context
+Trusted live Codex runs can still mutate protected workspace files even though the runtime task
+contract forbids those writes. The audit correctly fails the step, but leaving the mutation in place
+can contaminate the next run and makes a failed refresh destructive.
+
+### Goals (must have)
+- [x] Restore protected workspace files after an unexpected provider mutation when the post-run
+  fingerprint is unchanged.
+- [x] Never overwrite an edit made after the provider exits; surface restore conflicts explicitly.
+- [x] Serialize audited provider calls inside a run so rollback cannot reintroduce another task's
+  transient protected mutation.
+- [x] Add regression coverage and synchronize runtime behavior documentation.
+- [x] Re-run the trusted-machine Codex live refresh matrix after the host has at least 5 GiB free.
+- [x] Reduce provider-authored proposal repair exhaustion in a follow-up live run without weakening
+  strict draft validation or hiding the existing quality telemetry.
+- [ ] Run the full release-provider matrix for Claude/Qwen/Codex after the Open edX/OpenStack curated
+  checkouts and provider prerequisites are available on a trusted host.
+
+### Non-goals
+- Do not turn managed permissions into a claimed hard process sandbox.
+- Do not allow runtime writes outside task-local staging roots or add a new provider.
+- Do not change Git publication semantics or remove existing recovery paths.
+
+### Acceptance criteria
+- [x] Protected mutations fail the runtime contract and are restored when safe.
+- [x] Post-run conflicts remain untouched and produce a dedicated audit warning/log.
+- [x] Live refresh completes without `runtime_write_audit_unexpected_mutation` on the curated fixtures.
+
+### Progress log
+- 2026-08-05: Live Codex diagnostic identified refresh shard mutations under `charter/cards/*`;
+  implemented serialized audited execution, fingerprint-safe rollback, conflict reporting, UI deep-link
+  selection restoration, mobile Publish navigation fix and Playwright/Vitest harness isolation.
+- 2026-08-05: Exact Go 1.25.10 targeted/full Go tests, contracts, vet, lint, Node 22 typecheck, 180 UI
+  tests, 8 mock E2E scenarios and snapshot-backed Codex UI flow passed. Canonical refresh matrix remains
+  pending on a trusted host with its required free-space budget.
+- 2026-08-05: Completion audit rechecked the host: `/tmp` has 1.3 GiB free, below the canonical 5 GiB
+  guard, so the release matrix was not rerun with an invalid override; the goal remains active for a
+  trusted-host rerun.
+- 2026-08-05: Direct Codex `regres-long` rerun passed host preflight and full deterministic precheck;
+  baseline reached live `gpt-5.6-luna`/high execution. A real harness defect was found while diagnosing
+  the earlier interruption: matrix signals marked the profile failed but left child batch/provider
+  descendants running. The driver now tracks the active child process tree, terminates it on signals,
+  and has a regression test for cleanup; targeted signal test passes.
+- 2026-08-05: The live `single-git_url` baseline completed with backend hard-pass 1/1 and Codex
+  snapshot-backed frontend live E2E passed. The canonical `single-path` profile stopped before a
+  run because its required pinned checkout at `/tmp/provenarch-live-e2e/posthog/posthog` is absent;
+  the matrix is therefore an honest `FAIL` for an operational host prerequisite, not a product
+  runtime failure. Fresh shell syntax, targeted signal cleanup tests and exact Node 22 lint pass;
+  the trusted refresh acceptance remains open until the curated checkout is provisioned.
+- 2026-08-05: Durable profile records and reports were re-synthesized after the driver source was
+  edited during the in-flight run (which caused a parser error only in the late report phase); the
+  backend/frontend terminal artifacts remained intact, and no matrix/provider descendants remain.
+- 2026-08-05: Canonical non-release `regres-long` matrix `matrix-20260805T113030Z` passed both
+  selected profiles (curated PostHog path and FTGO git URL) with Codex pinned to `gpt-5.6-luna`/`high`:
+  backend hard-pass `2/2`, init→refresh summaries present, and snapshot-backed frontend live E2E `2/2`
+  with nine screenshots plus Ask coverage per run. Refresh runs had zero repairs/stalls; init proposal
+  generation emitted visible non-blocking repair telemetry (the git-URL init exhausted its proposal
+  repair budget once), so the quality warning remains recorded rather than hidden or used to weaken
+  the validator.
+- 2026-08-05: Hardened normal and focused proposals prompts against the live-observed failure modes:
+  validation diagnostics/staging paths are input-only, evidence files must pass an explicit `test -f`
+  check, and shell variables must resolve to literal IDs/paths before markdown writes. Added prompt
+  contract coverage; the strict validator and recovery budget remain unchanged.
+- 2026-08-05: Final host preflight confirms all three provider CLIs are installed and the pinned
+  PostHog checkout is now present, but the canonical release matrix still cannot run from this dirty
+  worktree: the Open edX/OpenStack curated checkouts are absent. The disk guard itself passes (about
+  10.6 GiB free versus the 5 GiB minimum), so no release matrix override or destructive cleanup was
+  used; the Codex `regres-long` evidence remains the latest trusted live result.
+- 2026-08-05: A full-provider diagnostic attempt classified both Claude and Qwen as
+  `operational_host_preflight_failed` (`quota_or_permission`) before provider execution. A Codex-only
+  rerun then exposed a precheck-only scheduler timeout in `TestRetryEndpointRejectsPlanAfterParentStagingDrifts`;
+  its test deadline was widened from 8s to 20s without changing runtime behavior, and the targeted test
+  passes 3/3. The interrupted rerun's Python precheck was reproduced verbosely as 267/267 passing in
+  399.950s; a fresh Codex live rerun remains required after this precheck evidence.
+- 2026-08-05: Fresh Codex `gpt-5.6-luna`/high `regres-long` matrix `matrix-20260805T174919Z` completed
+  the curated path profile with backend hard-pass `1/1` and snapshot-backed frontend E2E `1/1` (nine
+  screenshots plus Ask). Its quality report still exposes provider-authored repair telemetry rather
+  than hiding it: `repair_attempts=5`, `repair_exhausted=1`, `stall_count=4`, with step-level findings
+  on Architecture Home shape, collect manifest references and proposal actionability/linkage. The
+  FTGO git-URL profile reached proposal generation but failed with `runtime_contract_failed` after a
+  Codex repair wrote malformed JSON (`invalid character '\\'`); the run also recorded transient Codex
+  WebSocket `403` reconnects. This is an honest matrix `FAIL`, not a validator relaxation.
+- 2026-08-05: Added deterministic draft-manifest shape recovery: when a provider writes malformed JSON
+  or unknown manifest fields, runtime atomically restores only the normative step skeleton and reruns
+  the unchanged strict validators against provider-authored markdown. Added a regression test and
+  focused/full `internal/runtime/providercommon` tests pass; no semantic content is synthesized. The
+  post-fix deterministic DoD is green: `make contracts test lint build`, 183 UI tests, mock E2E `8/8`,
+  Python `267/267`, docs-sync, embedded dist equality and `git diff --check`.
+- 2026-08-06: A direct Codex `regres-long` diagnostic with the same pinned
+  `gpt-5.6-luna`/`high` settings passed host and deterministic preflight, reached headless init and
+  produced five collect shard surfaces before the trusted host disk fell below the 5 GiB guard. The
+  matrix driver was terminated through its signal-safe process-tree cleanup; durable profile status is
+  `infra_signal_terminated` with no provider verdict. The earlier `matrix-20260805T174919Z` failure
+  and its malformed-manifest evidence remain the latest completed provider result; no validator
+  relaxation or matrix-file edit was used.
+- 2026-08-06: Continued the behavior-preserving UI maintenance slice by extracting the live diagnostics
+  panel and run history table into `AnalysisDiagnosticsPanel.tsx` and `RunHistoryTable.tsx`. Existing
+  rendering, callbacks, accessibility labels and test IDs remain unchanged; UI typecheck, 183 Vitest
+  tests and all 8 deterministic mock E2E scenarios pass. The larger `StagePanels.tsx`/`styles.css`
+  decomposition remains open and is not being hidden behind a visual rewrite.
+- 2026-08-06: Extracted the selected-run domain map renderer and its model types into
+  `ReviewDomainMap.tsx`; `StagePanels.tsx` now retains only review orchestration and pure map derivation.
+  The extraction is behavior-preserving (same test IDs, labels, artifact navigation and empty/partial
+  states). Direct UI typecheck and 183 Vitest tests pass, and the 8-scenario mock E2E suite remains green.
+  The production bundle was regenerated and embedded dist equality holds; the local Go 1.20 toolchain
+  cannot complete the final Go build because this repository requires `os.Root` from Go 1.24+.
+- 2026-08-06: Tightened the proposal first-pass prompt without changing validation semantics: visible
+  high/medium finding previews now include exact related IDs and evidence paths alongside the finding ID
+  and severity. This gives the provider the fields needed for same-line actionable bullets before any
+  repair is scheduled. Added a focused steppolicy regression test; it passes on Go 1.25.10.
+- 2026-08-06: Re-ran the deterministic DoD with the repository-compatible temporary Go 1.25.10 toolchain:
+  `make contracts test lint build` passed, alongside embedded UI equality, docs-sync, `git diff --check`,
+  and mock E2E `8/8`. The canonical live gate is still intentionally not reported as passed because the
+  trusted-machine disk guard has only ~3.7 GiB free while the retained canonical live checkout is
+  ~6.3 GiB and the current matrix workspace is ~474 MiB.
+- 2026-08-06: Direct Codex-only `regres-long` matrix
+  `regres-long-posthog-ftgo-20260805T225634Z` completed both selected profiles with
+  `ACP_CODEX_MODEL=gpt-5.6-luna` and `ACP_CODEX_REASONING_EFFORT=high`, but both ended as
+  `runtime_contract_failed`. PostHog failed at `init.step4.proposals` after one focused repair and
+  two stall signals; FTGO failed at `init.step2.asis_docs` after two focused repairs and three stall
+  signals. Raw provider stdout shows malformed nested `python3 -c` shell quoting ending in
+  `zsh: unmatched \"`, which explains the artifact stalls; Codex WebSocket 403s were followed by
+  HTTPS fallback and are recorded as an operational provider signal, not a validator failure.
+  Reports are retained under `/tmp/provenarch-test_arch_project/reports/` (matrix JSON/Markdown,
+  profile TSV and per-profile execution reports).
+- 2026-08-06: Hardened normal and focused `step2.asis_docs` and `step4.proposals` prompts with an
+  explicit mechanical-write contract: before the complete artifact set exists, no Python/Node/awk/
+  jq/eval, generated source strings or nested quote tricks; use direct literal single-quoted
+  heredocs and write markdown before the manifest. Strict validators and repair budgets are
+  unchanged. Focused steppolicy/providercommon/promptcontract/docsync tests pass; a live rerun is
+  still required before marking the proposal-repair goal complete, and is deferred while the host
+  remains below the canonical 5 GiB free-space gate.
+- 2026-08-10: The follow-up trusted-machine Codex run isolated the remaining FTGO failure to shell
+  interpolation in the as-is first-write sequence: the provider reported a manifest but did not
+  materialize the referenced markdown under `draft_final_root`, so the unchanged validator correctly
+  failed closed. The prompt now emits absolute single-quoted targets and forbids `write_root`/
+  `draft_root` shell-variable interpolation for the first as-is write; strict manifest validation and
+  recovery budgets are unchanged. Narrow steppolicy/promptcontract tests pass.
+- 2026-08-10: Canonical `scripts/full-run-batch-matrix.sh` rerun `regres-long-ftgo-asis-fix-20260810T090004Z`
+  (non-release diagnostic matrix with the curated FTGO `single-git_url` profile, exact Node 22.21.1,
+  Go 1.25.10 and `gpt-5.6-luna`/`high`) passed backend hard-gates `1/1` and Codex frontend live smoke
+  `1/1` through init → refresh. Init and refresh both had `warnings_count=0`, `repair_attempts=0`,
+  `repair_exhausted=0`, `stall_count=0`, `partial_failure_count=0`, and `quality_alerts=0`; the matrix
+  result is strict `PASS` with no blocking items. The earlier two-profile matrix remains retained as
+  historical evidence (PostHog passed; FTGO exposed the now-fixed as-is quoting defect); release mode
+  was not run because Open edX/OpenStack curated checkouts are unavailable on this host.
+- 2026-08-10: Provisioned and SHA-verified all 11 curated Open edX/OpenStack repositories under
+  `/tmp/provenarch-live-e2e`, created a clean validation snapshot, and ran the canonical direct
+  `release-fast` matrix `release-fast-20260810T114248Z` without diagnostic overrides. All four
+  profile/sweep combinations reached terminal classification but failed provider readiness before
+  backend execution because Qwen reported `quota_or_permission: 0.19.11`; the retained verdict is
+  `RELEASE BLOCKED` with `strict_pass_runs=0`, not a product runtime failure. The full release-provider
+  goal remains open until Qwen quota/permission is restored on the trusted host.
+- 2026-08-10: Rechecked Qwen readiness directly with the canonical artifact-smoke invocation; Qwen
+  `0.19.11` returned API `403 permission_error`/usage-limit text and did not create the sentinel.
+  This confirms the release blocker is still provider-side and must not be bypassed by running a
+  Codex-only release matrix.
+
+### Plan ID
+EP-20260805-visual-alignment-pass
+
+### Context
+The approved visual references are stored in the Codex visualization bundle from the design review:
+`final-home.png`, `final-analyze-initial.png`, `final-analyze.png`, `final-architecture.png`,
+`final-architecture-diagrams.png`, `final-changes.png`, `final-publish.png`, `final-settings.png`,
+`final-init.png` and `final-mobile-architecture.png`. Current mock E2E captures show that the
+implemented truth/shell slice still differs materially from those references in shared shell craft,
+screen hierarchy, density and mobile behavior.
+
+### Goals (must have)
+- [x] Match the shared visual language: 64px top bar, 224px dark navigation, teal action system,
+  compact status pills, restrained cards, and consistent typography/spacing.
+- [x] Make Home, Analyze, Architecture, Changes and Publish read like the target task flows rather
+  than internal pipeline dashboards.
+- [x] Bring Init/Setup and Settings to the target form layouts without dropping existing validation
+  or recovery behavior.
+- [x] Verify desktop and mobile screenshots plus keyboard/focus and reduced-motion behavior.
+- [x] Add deterministic happy-path visual coverage from initialization through refresh and full-workspace
+  publication.
+- [ ] Decompose the remaining `App.tsx`/`StagePanels.tsx`/`styles.css` monoliths as a follow-up
+  maintenance slice without changing the validated visual behavior.
+
+### Non-goals
+- [ ] Do not change backend contracts, Git safety, run authority or recovery semantics.
+- [ ] Do not remove legacy URLs, test IDs or deterministic mock scenarios.
+
+### Screen deltas recorded
+- [x] Shell: current utility buttons and initial-based nav differ from the target logo/Ask/icon
+  header and grouped dark sidebar.
+- [x] Home: current sparse status/attention layout lacks the target outcome hero, four-state strip,
+  architecture mini-map and activity feed.
+- [x] Analyze: current technical run detail dominates the viewport; target leads with initial/refresh
+  outcome, metrics, pipeline and compact run history.
+- [x] Architecture: current legacy model capture opens by default in mock flow; target is a three-pane
+  Documents reader with sibling Diagrams/Model/Findings modes.
+- [x] Changes: current review embeds a large artifact workbench; target leads with delta metrics,
+  meaningful change list and a decision aside.
+- [x] Publish: current recovery view is tall and implementation-heavy; target has an authoritative
+  scope notice, grouped inventory and one commit card.
+- [x] Init/Settings: current onboarding/readiness surfaces are technically correct but do not match
+  the target step rail, form sections and settings shell.
+- [x] Mobile: current pages expose filter/tool internals before the main document/task; target keeps a
+  compact header, bottom nav and content-first reader.
+
+### Progress log
+- 2026-08-05: Target and current screenshots inspected; visual delta inventory recorded. Shared
+  shell/token alignment is the first implementation slice.
+- 2026-08-05: Implemented shared shell, Home outcome, Analyze launcher/outcome fallback, Documents-first
+  Architecture reader/context, Changes delta/decision view, authoritative Publish inventory/commit card,
+  Settings shell and Setup step rail. Added responsive bottom navigation, focus-safe controls and reduced
+  motion defaults without changing backend/recovery semantics.
+- 2026-08-05: Render QA: Home desktop/mobile, Analyze success/failure, Publish desktop/tablet/mobile,
+  Setup recovery, Architecture model/mobile and recovery surfaces checked through deterministic mock E2E;
+  all 8 mock scenarios passed. Typecheck, lint and production build passed; repository Python unittest
+  discovery was started but the pre-existing install-test subprocess hung after the live contract tests,
+  so it was interrupted and recorded as an environment validation blocker.
+- 2026-08-05: Added `happy-path-mock`: one browser flow now starts initial analysis, waits for the
+  authoritative result, refreshes the architecture, opens Documents and Diagrams, reviews a run-pinned
+  semantic delta, and completes the full-workspace Git commit confirmation. The complete mock suite is
+  now 8/8 scenarios with no browser console errors, critical axe violations or horizontal overflow.
+- 2026-08-05: Extracted the global Ask, Git confirmation and brief-skip dialogs into `AppOverlays` so
+  route rendering no longer owns cross-cutting modal composition. Behavior, accessibility labels and
+  test IDs are unchanged; the remaining `App.tsx`/`StagePanels.tsx`/`styles.css` decomposition stays
+  an explicit maintenance follow-up.
+- 2026-08-06: Extracted the analysis live-diagnostics panel and run-history table into typed feature
+  components, preserving the existing render contracts and test IDs. UI typecheck, 183 Vitest tests
+  and deterministic mock E2E `8/8` pass; the remaining work is the larger StagePanels/styles split.
+- 2026-08-06: Extracted pending-permission triage/table rendering into `PendingPermissionsTable.tsx`
+  as the next mechanical seam. The permission recovery surface keeps its existing labels, test IDs,
+  and retry guidance; typecheck remains green and the full mock suite is the next verification gate.
+- 2026-08-06: Extracted pure analysis log/format selectors into
+  `ui/src/features/analysis/analysisUtils.ts`; `StagePanels.tsx` keeps the same analysis render path
+  while shedding another utility cluster. Node 22 typecheck, 183 Vitest tests, full mock E2E `8/8`
+  and `git diff --check` pass. The remaining broad CSS and route-component split is still intentionally
+  separate from this behavior-preserving maintenance slice.
+- 2026-08-06: Re-ran `make contracts test lint build` on the final maintenance tree with Go 1.25.10
+  and Node 22.21.1: contracts, full Go suite, Python `267/267`, UI `183/183`, shellcheck/typecheck,
+  production build and embedded UI equality all pass. Vite retains only the existing large-chunk warning.
+- 2026-08-10: Extracted the pure publication and workflow-state selectors from `App.tsx` into
+  `ui/src/lib/appDerived.ts`, with regression coverage for unknown Git state, active-run routing and
+  question counting. The render path and recovery semantics are unchanged; Node 22 typecheck, Vitest
+  `186/186`, production build and deterministic mock E2E `8/8` pass. The broader App/StagePanels/CSS
+  decomposition remains intentionally open.
+- 2026-08-10: Extracted proposal review derivation, package grouping, blocker guidance and tab labels
+  from `StagePanels.tsx` into `ui/src/features/proposals/proposalUtils.ts`, with focused tests for
+  package completeness and stable labels. This is a pure mechanical split: the proposal UI, test IDs
+  and publish handoff are unchanged. Node 22 typecheck, Vitest `189/189`, production build and mock
+  E2E `8/8` pass; the remaining monolith/CSS split is still open.
+- 2026-08-10: Extracted Ask/QA provisional-run, history merge, provider label and failure-guidance
+  selectors into `ui/src/features/qa/qaUtils.ts`, with focused tests for status normalization, capped
+  history and actionable recovery copy. The Ask panel and recovery DOM remain unchanged. Node 22
+  typecheck, Vitest `192/192` and mock E2E `8/8` pass; the remaining monolith/CSS split is still open.
+- 2026-08-10: Extracted Review queue/trust selectors and Publish inventory/gate selectors into
+  `ui/src/features/review/reviewUtils.ts` and `ui/src/features/publish/publishUtils.ts`. These pure
+  seams preserve selected-run authority, full-workspace Git gating, labels and test IDs while reducing
+  `StagePanels.tsx` to 4,868 lines. Node 22 typecheck, Vitest `198/198`, production build and mock
+  E2E `8/8` pass; the remaining component/CSS decomposition is still open.
+- 2026-08-10: Extracted the analysis timeline, shard grouping, artifact-pair classification and
+  visual tone selectors into `ui/src/features/analysis/analysisViewModels.ts`, with focused tests for
+  terminal/active timelines, provider and warning semantics, artifact completeness and diff tones.
+  The existing Analysis DOM, test IDs and recovery behavior are unchanged; `StagePanels.tsx` is now
+  4,595 lines. Node 22 typecheck, Vitest `202/202`, production build and mock E2E `8/8` pass.
+- 2026-08-10: Extracted provider stream summarization, shard counter parsing and artifact-handoff
+  stall detection into `ui/src/features/analysis/providerStreamUtils.ts`. The live diagnostics panel
+  keeps the same telemetry wording and actions while `StagePanels.tsx` drops to 4,481 lines; focused
+  provider-stream tests pass (`7/7` across the two analysis selector suites).
+- 2026-08-10: Extracted the Setup/Init lifecycle route into `ui/src/components/SetupRoute.tsx`,
+  keeping source, readiness, charter, review and runtime-profile callbacks typed at the route boundary.
+  The setup runtime distinction between effective source settings and persisted runner settings is
+  preserved explicitly. `App.tsx` is now 1,222 lines; full UI Vitest `205/205` and mock E2E `8/8`
+  pass after the slice.
+- 2026-08-10: Split the shared design tokens into `ui/src/styles/tokens.css` and loaded them from
+  `styles.css` without changing the two-stage palette cascade. Token contract tests now inspect the
+  canonical token source plus feature CSS; full UI Vitest `205/205`, mock E2E `8/8` and production
+  build pass with embedded dist equality.
+- 2026-08-10: Extracted selected-run model/domain map derivation into
+  `ui/src/features/review/reviewDomainMapUtils.ts`, including explicit partial/blocker states and
+  edge parsing. The Review DOM and artifact navigation remain unchanged; focused map tests pass and
+  `StagePanels.tsx` drops to 4,301 lines.
+- 2026-08-10: Extracted Source validation/recovery selectors and draft diagnostics into
+  `ui/src/features/setup/sourceUtils.ts`, with focused coverage for server diagnostics, incomplete
+  drafts and workspace-manifest fallbacks. The Source recovery DOM, labels and validation callbacks
+  remain unchanged; `StagePanels.tsx` drops to 4,172 lines. Focused verification after this slice
+  is green: typecheck, source-utils tests `3/3`, UI Vitest `32 files / 210 tests`, mock E2E `8/8`,
+  `make lint`, `make build`, embedded UI equality and `git diff --check`; the immediately preceding
+  full deterministic DoD also passed `make test`.
+- 2026-08-10: Extracted charter baseline diagnostic selection and prompt-usage/fallback copy into
+  `ui/src/features/setup/charterUtils.ts`, preserving the Charter recovery DOM and artifact
+  selection semantics. `StagePanels.tsx` drops to 4,079 lines; focused charter tests `3/3`, full UI
+  Vitest `33 files / 213 tests`, mock E2E `8/8`, `make lint`, `make build`, embedded UI equality and
+  `git diff --check` all pass.
+- 2026-08-10: Re-ran the complete deterministic closure on the final setup decomposition: contracts,
+  full Go suite, Python `267/267`, UI Vitest `33 files / 213 tests`, lint/typecheck, production build,
+  embedded UI equality and `git diff --check` all pass. The only unclosed qualification item is the
+  trusted release provider matrix, which remains externally blocked by Qwen quota/permission.
+- 2026-08-10: Extracted analysis failure guidance and retained-evidence summaries into
+  `ui/src/features/analysis/analysisRecoveryUtils.ts`, preserving all timeout, contract, provider,
+  permission and restart-reconciliation branches. `StagePanels.tsx` drops to 4,045 lines; focused
+  tests `2/2`, full UI Vitest `34 files / 215 tests`, mock E2E `8/8`, lint, build, embedded equality
+  and `git diff --check` pass.
+- 2026-08-10: Direct Qwen artifact-smoke was repeated after the new slice. Qwen `0.19.11` still
+  returns API `403 permission_error` for billing-cycle usage limit and does not create the sentinel;
+  release qualification remains provider-blocked and no Codex-only release override was used.
+- 2026-08-10: Extracted readiness workspace-health tone/label mapping into
+  `ui/src/features/setup/readinessUtils.ts`, keeping loading, error, absent and report-severity
+  states explicit. `StagePanels.tsx` drops to 4,017 lines; focused tests `2/2`, full UI Vitest
+  `35 files / 217 tests`, mock E2E `8/8`, lint, build, embedded equality and `git diff --check` pass.
+- 2026-08-10: Final exact-tree `make test` after the analysis/readiness seams passed contracts, the
+  full Go suite, Python `267/267` and UI `35 files / 217 tests`; no deterministic regression is
+  present. Release qualification remains the sole missing gate because Qwen readiness is external.
+- 2026-08-10: Extracted the publish gate checklist renderer into
+  `ui/src/features/publish/PublishGateSection.tsx`, preserving gate item tones, labels, test IDs and
+  empty states. `StagePanels.tsx` drops to 3,985 lines; focused gate tests `2/2`, full UI Vitest
+  `36 files / 219 tests`, mock E2E `8/8`, lint, build, embedded equality and `git diff --check` pass.
+- 2026-08-10: Final exact-tree `make test` after the publish gate extraction passed contracts, full
+  Go, Python `267/267` and UI `36 files / 219 tests`. No deterministic regression is present;
+  release qualification is still blocked only by external Qwen usage quota.
+- 2026-08-10: Extracted the shared `GitDiffView` renderer into
+  `ui/src/components/GitDiffView.tsx` and moved `countMarkdownItems` into review selectors. The
+  same server-authoritative diff UI is now reused by Analysis, Review and Publish; `StagePanels.tsx`
+  drops to 3,893 lines. Focused GitDiff tests `2/2`, full UI `37 files / 221 tests`, mock E2E `8/8`,
+  lint, build, embedded equality and `git diff --check` pass.
+- 2026-08-10: Final exact-tree `make test` after the shared diff extraction passed contracts, full
+  Go suite, Python `267/267` and UI `37 files / 221 tests`.
+- 2026-08-10: Extracted the Review Queue renderer into
+  `ui/src/features/review/ReviewQueuePanel.tsx`, preserving selected-item semantics, aria-current,
+  bounded list rendering and empty-state copy. `StagePanels.tsx` drops to 3,854 lines; focused queue
+  tests `2/2`, full UI `38 files / 223 tests`, mock E2E `8/8`, lint, build, embedded equality and
+  `git diff --check` pass.
+- 2026-08-10: Extracted the Ask failure recovery surface into
+  `ui/src/features/qa/QAFailureRecovery.tsx`, preserving canceled/reconciled labels, retry gating,
+  audit links and warning copy. `StagePanels.tsx` drops to 3,781 lines; focused QA tests `2/2`, full
+  UI `39 files / 225 tests`, mock E2E `8/8`, lint, build, embedded equality and `git diff --check`
+  pass. Stabilized the historical Architecture navigation assertion with an explicit 5s async
+  bootstrap timeout; the full UI suite now completes deterministically.
+- 2026-08-10: Final exact-tree `make test` after Q&A recovery extraction and navigation-test
+  stabilization passed contracts, full Go suite, Python `267/267` and UI `39 files / 225 tests`.
+- 2026-08-10: Extracted the full Review evidence workbench into
+  `ui/src/features/review/ReviewEvidenceWorkbench.tsx`, keeping artifact explorer, evidence
+  preview, server-authoritative diff mode, citation coverage and trust summary behavior intact.
+  `StagePanels.tsx` drops to 3,564 lines; the focused workbench test and typecheck pass. Full UI
+  Vitest is now `40 files / 226 tests`, and the deterministic mock E2E gate remains `8/8`.
+- 2026-08-10: Final exact-tree `make test` after the workbench extraction passed contracts, the
+  full Go suite, Python `267/267` and UI `40 files / 226 tests`; `make lint`, `make build`, embedded
+  UI equality and `git diff --check` are also green. The only remaining qualification gap is the
+  external Qwen-gated release provider matrix.
+- 2026-08-10: Removed the isolated `ProposalPackageRecoveryPanel` from `StagePanels.tsx` into
+  `ui/src/features/proposals/ProposalPackageRecoveryPanel.tsx`, preserving blocker copy, artifact
+  handoff and Publish recovery actions with a focused regression. `StagePanels.tsx` is now 3,473
+  lines; typecheck, focused test, full UI `41 files / 227 tests`, mock E2E `8/8`, lint, build,
+  embedded equality and `git diff --check` pass.
+- 2026-08-10: Final exact-tree `make test` on the current decomposition passed contracts, the full
+  Go suite, Python `267/267` and UI `41 files / 227 tests`. No deterministic regression remains;
+  release qualification is still externally blocked only by Qwen's billing-cycle quota/permission.
+- 2026-08-10: Extracted the analysis step review room (step cards, artifacts, logs, evidence and
+  step-scoped diff) into `ui/src/features/analysis/AnalysisStepReview.tsx`, preserving its existing
+  callbacks, test IDs and empty-state copy. `StagePanels.tsx` is now 3,336 lines; focused and full
+  UI tests pass (`42 files / 228 tests`) and mock E2E remains `8/8`.
+- 2026-08-10: Repeated the exact Qwen `0.19.11` artifact smoke. CLI exits zero but returns API
+  `403 permission_error` for the billing-cycle usage limit and creates no sentinel; the canonical
+  Claude/Qwen/Codex release matrix therefore remains blocked and was not bypassed with Codex-only.
+- 2026-08-10: Final exact-tree closure after `AnalysisStepReview` passed `make test` (contracts,
+  full Go suite, Python `267/267`, UI `42 files / 228 tests`), `make lint`, `make build`, embedded
+  UI equality and `git diff --check`. Current line counts are `App.tsx 1,224`, `StagePanels.tsx
+  3,336`, `styles.css 5,743`.
+- 2026-08-10: Extracted the complete Publish route container into
+  `ui/src/features/publish/PublishStagePanel.tsx` and retained the `StagePanels` re-export for
+  compatibility. Full-workspace diff truth, gate rendering, artifact preview, commit and branch
+  actions are unchanged. `StagePanels.tsx` is now 2,881 lines; focused/full UI `43 files / 229
+  tests`, mock E2E `8/8`, `make lint`, `make build`, embedded equality and `git diff --check` pass.
+- 2026-08-10: Final exact-tree `make test` after Publish extraction passed contracts, full Go,
+  Python `267/267` and UI `43 files / 229 tests`. No deterministic regression remains.
+- 2026-08-10: Extracted the full Ask/Q&A route container into
+  `ui/src/features/qa/AskStagePanel.tsx`, retaining the `StagePanels` re-export and all async
+  request gates, retry/reconciliation behavior, citations and proposal handoff. `StagePanels.tsx`
+  is now 2,387 lines; focused/full UI `44 files / 230 tests` and mock E2E `8/8` pass.
+- 2026-08-10: Final exact-tree `make test` after Ask extraction passed contracts, full Go, Python
+  `267/267` and UI `44 files / 230 tests`; `make lint`, `make build`, embedded equality and
+  `git diff --check` are green. Only the external Qwen-gated release matrix remains unqualified.
+- 2026-08-10: Extracted the Setup source/readiness route block into
+  `ui/src/features/setup/SetupStagePanels.tsx`, retaining `StagePanels` compatibility re-exports
+  and the existing SetupRoute behavior, recovery states, validation and test IDs. `StagePanels.tsx`
+  is now 1,515 lines; focused/full UI `45 files / 231 tests` and mock E2E `8/8` pass.
+- 2026-08-10: Final exact-tree closure after Setup extraction passed contracts, full Go suite,
+  Python `267/267` and UI `45 files / 231 tests`; `make lint`, `make build`, embedded UI equality
+  and `git diff --check` are green. Current line counts are `App.tsx 1,224`, `StagePanels.tsx
+  1,515`, `styles.css 5,743`. The canonical release provider matrix remains externally blocked by
+  Qwen `0.19.11` billing-cycle `403 permission_error`; no Codex-only release bypass was used.
+- 2026-08-10: Fresh resumed-goal audit repeated the exact Qwen artifact smoke; CLI `0.19.11`
+  still exits without a sentinel and returns the same billing-cycle `403 permission_error`. The
+  current UI tree remains green on Vitest `45 files / 231 tests` and mock E2E `8/8`, so no local
+  regression or unfinished deterministic fix remains. Release qualification is still waiting on
+  provider quota/permission recovery.
+
+### Plan ID
+EP-20260805-ui-bug-cleanup
+
+### Context
+После визуального pass нужно было проверить не только рендеринг, но и достоверность действий: часть
+новых экранов содержала неработающие настройки, скрытый дублирующий Home DOM и слишком сильные
+утверждения о состоянии Git.
+
+### Goals (must have)
+- [x] Найти и исправить подтверждённые баги в UI-навигации, Home primary action и Publish Git gate.
+- [x] Удалить безопасный скрытый дубликат Home architecture outcome и обновить его E2E-селектор.
+- [x] Защитить route parser от malformed percent-encoded path segments.
+- [x] Добавить регрессии для Settings navigation, clean workspace и malformed route.
+- [x] Прогнать typecheck, unit tests, mock E2E, Go vet/test, lint и production build.
+- [x] Повторить canonical Node 22 UI bundle freshness/determinism gate на trusted runtime.
+- [ ] Повторить полный release-provider matrix (Claude/Qwen/Codex) на trusted host, когда
+  соответствующие CLI и ресурсные prerequisites доступны.
+
+### Non-goals
+- Не менять API/schema/runtime semantics и не удалять legacy routes или test IDs.
+- Не трогать unrelated пользовательские изменения и generated embedded assets вне обычного build.
+
+### Progress log
+- 2026-08-05: Settings теперь ведёт к реальным секциям, а действие переименовано в `Edit in Setup`,
+  Home review CTA открывает run-pinned Changes, Publish не утверждает authoritative scope до загрузки
+  и блокирует пустой/no-op commit на уровне UI и Git hook.
+- 2026-08-05: Удалён скрытый promoted Home outcome, добавлена безопасная обработка malformed URL path,
+  регрессии расширены до 177 UI tests.
+- 2026-08-05: Проверки прошли: 22 Vitest files / 180 tests, mock E2E 8/8, TypeScript, Go vet и
+  targeted Go tests, `make lint`, `make build`, `git diff --check`.
+- 2026-08-05: Canonical matrix preflight ran the exact Node 22.21.1 bundle freshness/typecheck/lint/build
+  closure; `matrix-20260805T113030Z` then passed the Codex frontend snapshot gate on both selected
+  profiles. No stale embedded asset or nondeterministic bundle was reported.
+- 2026-08-05: Extracted review/publish artifact grouping and filter semantics into typed
+  `ui/src/lib/artifactFilters.ts` with focused tests; `StagePanels.tsx` keeps the same rendering and
+  test IDs while dropping another pure helper layer.
+- 2026-08-05: Added `appDerived.ts` for pure selected-run issue derivation and completed the safe
+  mechanical extraction of cross-cutting overlays plus artifact filters. `App.tsx` is now 1,270 lines;
+  remaining `StagePanels.tsx`/`styles.css` decomposition is still behavior-preserving follow-up work.
+
+### Plan ID
+EP-20260804-ui-truth-and-document-centric-flow
+
+### Context
+The current React console has strong recovery and Git safety primitives, but its workflow state can
+present an unknown Git diff as clean, Publish can enter with a selected-run diff even though commit
+is workspace-wide, and historical Changes can pair a selected run with the promoted-current semantic
+comparison. The approved UX also needs an explicit initial-vs-refresh flow, a first-class Settings
+surface and a documents-first Architecture workspace.
+
+### Goals (must have)
+- [x] Make Git/publication state fail-closed: `loading`/`unknown` never render as `clean`.
+- [x] Make Publish inventory and copy authoritative for full-workspace Git mutations.
+- [x] Prevent historical Changes from rendering a comparison whose run identity is not selected.
+- [x] Add a run-pinned review contract for initial and refresh analysis outcomes.
+- [x] Recompose the UI around Home, Analyze, Architecture, Changes and Settings while preserving
+  existing recovery, evidence and Git confirmation behavior.
+- [x] Add deterministic happy-path E2E coverage from initialization through full-workspace publish.
+- [x] Complete the canonical trusted-machine live refresh matrix and record its provider-backed
+  verdict after the pinned curated checkout passes preflight.
+- [ ] Repeat the validated happy path in a full release-provider matrix once the remaining provider
+  CLIs are available on the trusted host.
+
+### Non-goals
+- [ ] No new runtime providers, hosted mode or broad backend rewrite.
+- [ ] No filename-based domain inference for the Architecture document tree.
+- [ ] No replacement of the existing ReactFlow/ELK model map, EvidenceViewer or Git fingerprint
+  confirmation.
+- [ ] No destructive migration of existing URLs; legacy route aliases remain supported.
+
+### Approach
+1) Deliver a behavior-only P0 truth pass for workflow publication and historical comparison.
+2) Add the run-pinned review contract with schema, validator, fixture, API and UI synchronization.
+3) Split the App/StagePanels/CSS monoliths into behavior-preserving feature seams.
+4) Introduce the product shell, first-class Settings and shared Setup/Settings view models.
+5) Make Architecture documents-first, then reshape Analyze and Changes around initial/refresh
+   decisions.
+6) Finish Publish polish, responsive/accessibility checks and the deterministic happy path.
+
+### Files expected to change
+- First slice: `ui/src/lib/workflowState.ts`, `ui/src/lib/workflowState.test.ts`, `ui/src/App.tsx`,
+  `ui/src/components/StagePanels.tsx`, focused UI tests.
+- Contract slice: `schemas/`, `docs/spec/API_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`, backend review
+  handlers, `ui/src/lib/appContracts.ts`, fixtures and contract tests.
+- Composition/UX slices: `ui/src/components/ProductShell.tsx`, `ProductPages.tsx`,
+  `KnowledgePage.tsx`, new feature containers/hooks, styles and E2E specs.
+
+### Acceptance criteria
+- [x] A missing, loading or failed full Git diff renders `Unknown`/`Loading`/`Blocked`, never `Clean`.
+- [x] Publish loads full workspace scope by default and clearly states that commit is workspace-wide.
+- [x] A historical run cannot display a current comparison unless identities match.
+- [x] Initial analysis and refresh analysis have distinct outcome copy and review payloads.
+- [x] Settings is reachable without opening Readiness; Setup remains a guided lifecycle flow.
+- [x] Architecture opens on Documents, with diagrams/model/findings as explicit sibling modes.
+- [x] Typecheck, unit tests, UI E2E, accessibility checks and repository DoD pass for each slice.
+
+### Risks
+- Existing tests encode selected-run Publish wording and will need deliberate migration to the new
+  full-workspace semantics.
+- A correct historical semantic review may require an additive backend snapshot contract; the UI
+  must fail closed while that contract is unavailable.
+- Large component files make broad edits regression-prone, so decomposition precedes visual polish.
+
+### Progress log
+- 2026-08-04: Code/UI audit completed; no product files changed.
+- 2026-08-04: P0 truth pass implemented: publication loading/unknown states fail closed, Publish
+  loads authoritative full-workspace Git inventory, and selected-run comparison identity is
+  fail-closed. Focused UI tests and mock recovery E2E pass.
+- 2026-08-04: Added additive run-pinned `review-summary.review` contract for initial/refresh runs,
+  with snapshot authority, semantic/document deltas, runtime identity and deterministic counts;
+  synchronized API docs, fixture and Go/TypeScript types/tests.
+- 2026-08-05: Added first-class `/settings` with shared runtime profile controls and explicit
+  workspace/repository/scope/Git/diagnostic sections; renamed primary Analyze navigation while
+  retaining `/runs` and existing test IDs. Architecture now defaults to a URL-backed Documents
+  reader with Diagrams, Model and Findings sibling modes; legacy map/catalog/flows/evidence aliases
+  remain readable. Updated architecture, README and stakeholder docs.
+- 2026-08-05: Full deterministic checks passed with explicit local Go 1.25.10, Node 25.9.0 and
+  Python 3.10.8 binaries: contracts, Go and Python tests (266), UI tests (175), `make lint`,
+  `make build`, and all 8 mock E2E scenarios. The larger App/StagePanels decomposition
+  remains a follow-up slice; no behavior was changed for that non-goal.
+- 2026-08-05: Added the deterministic happy-path browser flow and folded it into `scripts/ui-mock-e2e.sh`;
+  all 8 mock E2E scenarios pass, including init → refresh → run-pinned Changes → full-workspace Publish.
+- 2026-08-05: Canonical non-release `regres-long` matrix `matrix-20260805T113030Z` passed `2/2`
+  selected Codex profiles (path and git URL), including live init→refresh and frontend snapshot E2E;
+  provider-backed reports are stored under `/tmp/provenarch-test_arch_project/reports/`.
+- 2026-08-05: Extracted cross-cutting Ask/Git/brief dialogs into `ui/src/components/AppOverlays.tsx`
+  and moved the live run-error copy helper out of `App.tsx`; exact Node 22 typecheck/tests/lint,
+  production build, embedded-bundle equality and mock E2E 8/8 pass. The larger StagePanels/CSS split
+  remains intentionally open as a maintenance follow-up rather than a risky visual rewrite.
+
+### Plan ID
 EP-20260804-runtime-model-selection
 
 ### Context
@@ -84,9 +611,11 @@ Official OpenAI model guidance identifies Luna as the efficient high-volume GPT-
   UI, including an explicit `Provider default` state.
 - [x] Snapshot the resolved provider model profile when a run is accepted so queued and running
   work cannot change model because `workspace.yaml` or process env changes mid-run.
-- [ ] Complete the trusted-host live E2E Codex migration check for the `gpt-5.6-luna/high` pin and
+- [x] Complete the trusted-host live E2E Codex migration check for the `gpt-5.6-luna/high` pin and
   accept the resulting preflight/release evidence; the canonical defaults and evidence fields are
   already migrated in code.
+- [ ] Compare the pinned model's artifact quality against the former baseline in the full release
+  provider matrix before closing the migration plan.
 - [x] Keep required CI provider-free and deterministic; validate live compatibility only through
   the existing trusted-machine harness and runbook.
 
@@ -270,6 +799,9 @@ startup remains fail-fast if that concrete default rejects the requested effort.
   rollback remains available through explicit `gpt-5.5/xhigh` environment overrides.
 - 2026-08-04: Contract validation, focused Python harness tests, and UI TypeScript checks pass.
   Go validation remains blocked by the host's Go 1.20 toolchain while the repository uses `os.Root`.
+- 2026-08-05: Trusted-machine non-release matrix `matrix-20260805T113030Z` captured the exact
+  `gpt-5.6-luna` model and `high` reasoning effort in Codex backend commands across both path and
+  git-URL profiles; preflight, backend hard-pass and frontend snapshot E2E passed `2/2`.
 
 ### Plan ID
 EP-20260804-agents-gpt-5-6

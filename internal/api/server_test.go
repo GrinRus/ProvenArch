@@ -2696,7 +2696,25 @@ func TestPipelineRunReviewSummaryEndpointMapsCanonicalSteps(t *testing.T) {
 		Pipeline    string `json:"pipeline"`
 		Status      string `json:"status"`
 		CurrentStep string `json:"current_step"`
-		Steps       []struct {
+		Review      *struct {
+			ReviewKind  string `json:"review_kind"`
+			SourceRunID string `json:"source_run_id"`
+			Semantic    struct {
+				Available bool `json:"available"`
+			} `json:"semantic_changes"`
+			DocumentChanges struct {
+				Available bool `json:"available"`
+			} `json:"document_changes"`
+			Runtime struct {
+				Mode string `json:"mode"`
+			} `json:"runtime"`
+			Authority struct {
+				Mode        string `json:"mode"`
+				SourceRunID string `json:"source_run_id"`
+			} `json:"authority"`
+			GeneratedAt string `json:"generated_at"`
+		} `json:"review"`
+		Steps []struct {
 			StepID        string   `json:"step_id"`
 			Key           string   `json:"key"`
 			State         string   `json:"state"`
@@ -2711,6 +2729,12 @@ func TestPipelineRunReviewSummaryEndpointMapsCanonicalSteps(t *testing.T) {
 	}
 	if payload.RunID != started.RunID || payload.Pipeline != "init" || payload.Status != "succeeded" {
 		t.Fatalf("unexpected summary identity: %+v", payload)
+	}
+	if payload.Review == nil || payload.Review.ReviewKind != "initial" || payload.Review.SourceRunID != started.RunID || payload.Review.Semantic.Available || payload.Review.GeneratedAt == "" {
+		t.Fatalf("expected run-pinned initial review contract, got %+v", payload.Review)
+	}
+	if payload.Review.Authority.SourceRunID != started.RunID || payload.Review.Runtime.Mode == "" {
+		t.Fatalf("expected review runtime and snapshot authority identity, got %+v", payload.Review)
 	}
 	if len(payload.Steps) != 5 {
 		t.Fatalf("expected five canonical steps, got %d", len(payload.Steps))

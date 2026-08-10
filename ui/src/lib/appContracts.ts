@@ -200,6 +200,43 @@ export type ArchitectureResponse = {
 export type ArchitectureChangeItem = { id: string; name: string; path?: string };
 export type ArchitectureChangeSet = { added: ArchitectureChangeItem[]; changed: ArchitectureChangeItem[]; removed: ArchitectureChangeItem[] };
 export type ArchitectureComparison = { available: boolean; baseline_run_id?: string; current_run_id?: string; reason?: string; categories: Record<"entities" | "edges" | "findings" | "gaps", ArchitectureChangeSet> };
+export type RunReviewContract = {
+  review_kind: "initial" | "refresh";
+  source_run_id: string;
+  baseline_run_id?: string;
+  semantic_changes: ArchitectureComparison;
+  document_changes: ArchitectureChangeSet & { available: boolean; reason?: string };
+  findings: Array<{ id: string; severity: string; title: string; description?: string; related_ids?: string[] }>;
+  questions: Array<{ id: string; text: string; priority?: string; related_ids?: string[] }>;
+  gaps: string[];
+  summary: {
+    entities_added: number;
+    entities_changed: number;
+    entities_removed: number;
+    edges_added: number;
+    edges_changed: number;
+    edges_removed: number;
+    documents_added: number;
+    documents_changed: number;
+    documents_removed: number;
+    findings: number;
+    questions: number;
+    gaps: number;
+  };
+  runtime: {
+    mode?: string;
+    providers: string[];
+    step_providers: Record<string, string>;
+    provider_models?: Record<string, { model?: string; effort?: string }>;
+  };
+  authority: {
+    mode: string;
+    source_run_id: string;
+    baseline_run_id?: string;
+    snapshot_path?: string;
+  };
+  generated_at: string;
+};
 
 export type RunProgress = {
   phase: "queued" | "provider_working" | "artifact_observed" | "validating" | "repairing" | "stalled" | "completed" | "succeeded" | "failed" | "canceled";
@@ -387,6 +424,7 @@ export type RunReviewSummaryResponse = {
   retry?: RetryLineage | null;
   result?: { state: "completed" | "completed_with_gaps" | "failed" | "canceled"; summary: string; produced: Record<string, number>; partial_scopes: number; failed_scopes: number; promotion: { changed: boolean; current_usable: boolean; baseline_run_id?: string }; recommended_action: string; coverage?: { observed: number; missing: number; status: "available" | "partial" | "unavailable" } };
   recovery?: { category: string; title: string; explanation: string; impact: string; retained_evidence: string; recommended_fix: string; can_retry: boolean; failed_step?: string; failed_scopes?: string[]; technical_code?: string } | null;
+  review?: RunReviewContract;
 };
 
 export type RetryPlanResponse = { parent_run_id: string; pipeline: string; requested_step: string; effective_start_step: string; requested_scopes: string[]; effective_scopes?: string[]; reused_inputs: string[]; execute_steps: string[]; invalidated_steps: string[]; estimated_units: number; widened: boolean; widen_reason?: string; plan_hash: string };

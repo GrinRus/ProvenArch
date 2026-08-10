@@ -169,9 +169,15 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 	}
 	defer stopHeartbeat()
 
+	// Headless providers currently expose a full-access mode rather than a hard
+	// process sandbox. Serialize audited provider calls within a run so one task
+	// cannot snapshot another task's transient protected-file mutation and then
+	// restore it after that task has already completed.
+	e.runtimeWriteAuditMu.Lock()
 	writeAudit := beginRuntimeWriteAudit(task)
 	result, err := runner.Run(taskCtx, task)
 	auditErr := e.completeRuntimeWriteAudit(stepID, domainID, resolvedProvider, task, writeAudit)
+	e.runtimeWriteAuditMu.Unlock()
 	if err != nil {
 		if isDraftOnlyRuntimeStep(stepID) {
 			if _, _, draftErr := runtimedrafts.ValidateRequiredManifest(

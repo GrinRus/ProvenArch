@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
 import { KnowledgePage } from "./KnowledgePage";
@@ -21,6 +21,18 @@ const partialKnowledge: KnowledgeResponse = {
 };
 
 describe("KnowledgePage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("opens the documents reader as the default architecture mode", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("# Architecture Home\n\nValidated services", { status: 200 })));
+    const onDocumentChange = vi.fn();
+    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="documents" onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={onDocumentChange} onOpenArtifact={vi.fn()} />);
+    expect(screen.getByTestId("architecture-documents")).toBeInTheDocument();
+    expect(screen.getByText("overview.md")).toBeInTheDocument();
+    expect(onDocumentChange).toHaveBeenCalledWith("reports/as-is/overview.md");
+    expect(await screen.findByTestId("evidence-viewer")).toBeInTheDocument();
+  });
+
   it("renders partial architecture flow without deriving topology from artifact names", () => {
     const onOpenArtifact = vi.fn();
     render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="flows" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={onOpenArtifact} />);
@@ -28,7 +40,7 @@ describe("KnowledgePage", () => {
     expect(screen.getByText("calls")).toBeInTheDocument();
     expect(screen.getByText(/Only model edges with valid endpoints/)).toBeInTheDocument();
     expect(screen.getByText(/Architecture is usable with gaps/)).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Evidence" })[1]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Evidence" })[0]);
     expect(onOpenArtifact).toHaveBeenCalledWith("model/edges/edge.payments.calls.users.yaml");
   });
 

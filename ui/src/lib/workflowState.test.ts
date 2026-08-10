@@ -16,6 +16,8 @@ describe("deriveWorkflowState", () => {
     [{ ...ready, execution: "pending" as const }, "runs", "available"],
     [{ ...ready, evidence: "unavailable" as const }, "runs", "blocked"],
     [{ ...ready, evidence: "partial" as const }, "knowledge", "needs_review"],
+    [{ ...ready, publication: "loading" as const }, "changes", "available"],
+    [{ ...ready, publication: "unknown" as const }, "changes", "blocked"],
     [{ ...ready, publication: "stale" as const }, "changes", "blocked"],
     [{ ...ready, publication: "blocked" as const }, "changes", "blocked"],
     [{ ...ready, publication: "dirty" as const }, "changes", "needs_review"],
@@ -27,5 +29,11 @@ describe("deriveWorkflowState", () => {
 
   it("labels dirty fake evidence as an explicit demo publication review", () => {
     expect(deriveWorkflowState({ ...ready, publication: "dirty", demo: true }).attention).toContain("Demo evidence");
+  });
+
+  it("never treats an unknown publication state as clean", () => {
+    const result = deriveWorkflowState({ ...ready, publication: "unknown" });
+    expect(result.publication).toBe("unknown");
+    expect(result.attention).toContain("unavailable");
   });
 });

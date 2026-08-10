@@ -1,0 +1,52 @@
+{
+  "review_kind": "refresh",
+  "source_run_id": "run-125",
+  "baseline_run_id": "run-124",
+  "semantic_changes": {
+    "available": true,
+    "baseline_run_id": "run-124",
+    "current_run_id": "run-125",
+    "categories": {
+      "entities": {"added": [{"id": "svc.orders", "name": "Orders"}], "changed": [], "removed": []},
+      "edges": {"added": [], "changed": [{"id": "edge.orders.payments", "name": "Orders calls Payments"}], "removed": []},
+      "findings": {"added": [], "changed": [], "removed": []},
+      "gaps": {"added": [], "changed": [], "removed": []}
+    }
+  },
+  "document_changes": {
+    "available": true,
+    "added": [{"id": "reports/as-is/orders/overview.md", "name": "overview.md", "path": "reports/as-is/orders/overview.md"}],
+    "changed": [],
+    "removed": []
+  },
+  "findings": [],
+  "questions": [],
+  "gaps": [],
+  "summary": {
+    "entities_added": 1,
+    "entities_changed": 0,
+    "entities_removed": 0,
+    "edges_added": 0,
+    "edges_changed": 1,
+    "edges_removed": 0,
+    "documents_added": 1,
+    "documents_changed": 0,
+    "documents_removed": 0,
+    "findings": 0,
+    "questions": 0,
+    "gaps": 0
+  },
+  "runtime": {
+    "mode": "headless",
+    "providers": ["claude-code"],
+    "step_providers": {"step1_collect": "claude-code"},
+    "provider_models": {"claude-code": {"model": "sonnet", "effort": "high"}}
+  },
+  "authority": {
+    "mode": "promoted_run_snapshot",
+    "source_run_id": "run-125",
+    "baseline_run_id": "run-124",
+    "snapshot_path": "reports/taskruns/run-125/promoted-snapshot/architecture-snapshot.json"
+  },
+  "generated_at": "2026-08-04T20:00:00Z"
+}

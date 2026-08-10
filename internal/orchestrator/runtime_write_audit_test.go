@@ -58,6 +58,75 @@ func TestRuntimeWriteAuditFailsOnProtectedWorkspaceMutation(t *testing.T) {
 	if !hasLogWithMessage(logs, runtimeWriteAuditUnexpectedMutation) {
 		t.Fatalf("expected runtime write audit log, got %#v", logs)
 	}
+	restored, err := os.ReadFile(filepath.Join(ws.Path, "workspace.yaml"))
+	if err != nil {
+		t.Fatalf("read restored workspace manifest: %v", err)
+	}
+	if string(restored) != "version: 1\nrepos: []\n" {
+		t.Fatalf("expected protected workspace mutation to be restored, got %q", restored)
+	}
+	if !hasLogWithMessage(logs, runtimeWriteAuditRestoredMutation) {
+		t.Fatalf("expected restore log, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditDoesNotOverwritePostRunConflict(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	path := filepath.Join(ws.Path, "workspace.yaml")
+	if err := os.WriteFile(path, []byte("provider mutation\n"), 0o644); err != nil {
+		t.Fatalf("mutate workspace manifest: %v", err)
+	}
+	after := snapshotProtectedWorkspaceFiles(ws.Path)
+	if err := os.WriteFile(path, []byte("external edit\n"), 0o644); err != nil {
+		t.Fatalf("write post-run conflict: %v", err)
+	}
+	execution.restoreRuntimeWriteAuditMutations("init.step1.collect", "", task, before.protectedFiles, after, []string{"workspace.yaml"})
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read conflicted workspace manifest: %v", err)
+	}
+	if string(content) != "external edit\n" {
+		t.Fatalf("restore must not overwrite post-run conflict, got %q", content)
+	}
+	if !hasWarningContaining(execution.warnings, runtimeWriteAuditRestoreConflict) {
+		t.Fatalf("expected restore conflict warning, got %#v", execution.warnings)
+	}
+	if !hasLogWithMessage(logs, runtimeWriteAuditRestoreConflict) {
+		t.Fatalf("expected restore conflict log, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditRestoresProtectedFileMode(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	execution, _ := newWriteAuditExecution(ws)
+	path := filepath.Join(ws.Path, "workspace.yaml")
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("set baseline mode: %v", err)
+	}
+	before := beginRuntimeWriteAudit(task)
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("mutate workspace mode: %v", err)
+	}
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err == nil {
+		t.Fatal("expected protected mode mutation to fail runtime audit")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat restored workspace manifest: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("expected mode %04o after restore, got %04o", want, got)
+	}
 }
 
 func TestRuntimeWriteAuditFailsOnRepoMutation(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -71,6 +73,11 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 	}
 	steps := buildRunReviewSteps(runInfo, artifacts, logs, snapshot.RuntimeConfig.Mode)
 	result, recovery := buildRunOutcome(snapshot.Workspace.Path, runInfo, artifacts, steps, logs, previousPromotedRunID(snapshot.Service, runInfo))
+	baselineRunID := previousPromotedRunID(snapshot.Service, runInfo)
+	if runInfo.RefreshSummary != nil && strings.TrimSpace(runInfo.RefreshSummary.BaselineRunID) != "" {
+		baselineRunID = strings.TrimSpace(runInfo.RefreshSummary.BaselineRunID)
+	}
+	review := buildRunReviewContract(snapshot.Workspace.Path, runInfo, baselineRunID, snapshot.RuntimeConfig.Mode)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"run_id":       runInfo.RunID,
 		"pipeline":     runInfo.Pipeline,
@@ -86,7 +93,176 @@ func (s *Server) handlePipelineRunReviewSummary(writer http.ResponseWriter, runI
 		"recovery":     recovery,
 		"progress":     runInfo.Progress,
 		"retry":        runInfo.Retry,
+		"review":       review,
 	})
+}
+
+type runReviewContract struct {
+	ReviewKind      string                   `json:"review_kind"`
+	SourceRunID     string                   `json:"source_run_id"`
+	BaselineRunID   string                   `json:"baseline_run_id,omitempty"`
+	SemanticChanges architectureComparison   `json:"semantic_changes"`
+	DocumentChanges runReviewDocumentChanges `json:"document_changes"`
+	Findings        []contracts.Finding      `json:"findings"`
+	Questions       []contracts.Question     `json:"questions"`
+	Gaps            []string                 `json:"gaps"`
+	Summary         runReviewCounts          `json:"summary"`
+	Runtime         runReviewRuntimeIdentity `json:"runtime"`
+	Authority       runReviewAuthority       `json:"authority"`
+	GeneratedAt     string                   `json:"generated_at"`
+}
+
+type runReviewDocumentChanges struct {
+	Available bool                     `json:"available"`
+	Reason    string                   `json:"reason,omitempty"`
+	Added     []architectureChangeItem `json:"added"`
+	Changed   []architectureChangeItem `json:"changed"`
+	Removed   []architectureChangeItem `json:"removed"`
+}
+
+type runReviewCounts struct {
+	EntitiesAdded    int `json:"entities_added"`
+	EntitiesChanged  int `json:"entities_changed"`
+	EntitiesRemoved  int `json:"entities_removed"`
+	EdgesAdded       int `json:"edges_added"`
+	EdgesChanged     int `json:"edges_changed"`
+	EdgesRemoved     int `json:"edges_removed"`
+	DocumentsAdded   int `json:"documents_added"`
+	DocumentsChanged int `json:"documents_changed"`
+	DocumentsRemoved int `json:"documents_removed"`
+	Findings         int `json:"findings"`
+	Questions        int `json:"questions"`
+	Gaps             int `json:"gaps"`
+}
+
+type runReviewRuntimeIdentity struct {
+	Mode           string                         `json:"mode,omitempty"`
+	Providers      []string                       `json:"providers"`
+	StepProviders  map[string]string              `json:"step_providers"`
+	ProviderModels acpruntime.ProviderModelValues `json:"provider_models,omitempty"`
+}
+
+type runReviewAuthority struct {
+	Mode          string `json:"mode"`
+	SourceRunID   string `json:"source_run_id"`
+	BaselineRunID string `json:"baseline_run_id,omitempty"`
+	SnapshotPath  string `json:"snapshot_path,omitempty"`
+}
+
+func buildRunReviewContract(root string, info orchestrator.RunInfo, baselineRunID, runtimeMode string) runReviewContract {
+	sourceRunID := strings.TrimSpace(info.RunID)
+	baselineRunID = strings.TrimSpace(baselineRunID)
+	reviewKind := "initial"
+	if strings.EqualFold(strings.TrimSpace(info.Pipeline), string(orchestrator.PipelineRefresh)) {
+		reviewKind = "refresh"
+	} else {
+		baselineRunID = ""
+	}
+	currentAuthorityMode, currentAuthorityPath := runReviewSnapshotAuthority(root, sourceRunID)
+	baselineAuthorityMode, baselineAuthorityPath := runReviewSnapshotAuthority(root, baselineRunID)
+	currentSemantic := loadRunSemanticSnapshot(root, sourceRunID)
+	if currentAuthorityMode == "promoted_run_snapshot" {
+		currentSemantic = loadPromotedSemanticSnapshot(root, sourceRunID)
+	}
+	semanticChanges := emptyArchitectureComparison("Initial architecture summary; no prior promoted baseline is available.")
+	semanticChanges.CurrentRunID = sourceRunID
+	if reviewKind == "refresh" && baselineRunID != "" && baselineAuthorityPath != "" && currentAuthorityPath != "" {
+		baselineSemantic := loadRunSemanticSnapshot(root, baselineRunID)
+		if baselineAuthorityMode == "promoted_run_snapshot" {
+			baselineSemantic = loadPromotedSemanticSnapshot(root, baselineRunID)
+		}
+		semanticChanges = compareSemanticSnapshots(sourceRunID, baselineRunID, currentSemantic, baselineSemantic)
+	}
+	documentChanges := runReviewDocumentChanges{Available: false, Added: []architectureChangeItem{}, Changed: []architectureChangeItem{}, Removed: []architectureChangeItem{}}
+	if currentAuthorityMode == "promoted_run_snapshot" {
+		currentFiles := readArchitectureSnapshotFiles(filepath.Dir(filepath.Join(root, filepath.FromSlash(currentAuthorityPath))))
+		baselineFiles := map[string]string{}
+		if baselineAuthorityMode == "promoted_run_snapshot" {
+			baselineFiles = readArchitectureSnapshotFiles(filepath.Dir(filepath.Join(root, filepath.FromSlash(baselineAuthorityPath))))
+		}
+		documentChanges.Available = true
+		fileChanges := compareArchitectureFiles(currentFiles, baselineFiles, "reports/")
+		documentChanges.Added = fileChanges.Added
+		documentChanges.Changed = fileChanges.Changed
+		documentChanges.Removed = fileChanges.Removed
+	} else {
+		documentChanges.Reason = "A promoted run snapshot is not available for document-level comparison."
+	}
+	providers := make([]string, 0, len(info.StepProviders))
+	seenProviders := map[string]struct{}{}
+	for _, provider := range info.StepProviders {
+		provider = strings.TrimSpace(provider)
+		if provider == "" {
+			continue
+		}
+		if _, seen := seenProviders[provider]; seen {
+			continue
+		}
+		seenProviders[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	return runReviewContract{
+		ReviewKind: reviewKind, SourceRunID: sourceRunID, BaselineRunID: baselineRunID,
+		SemanticChanges: semanticChanges, DocumentChanges: documentChanges,
+		Findings: append([]contracts.Finding{}, currentSemantic.Findings...), Questions: append([]contracts.Question{}, currentSemantic.Questions...), Gaps: append([]string{}, currentSemantic.Coverage.Missing...),
+		Summary:     runReviewCounts{EntitiesAdded: len(semanticChanges.Categories["entities"].Added), EntitiesChanged: len(semanticChanges.Categories["entities"].Changed), EntitiesRemoved: len(semanticChanges.Categories["entities"].Removed), EdgesAdded: len(semanticChanges.Categories["edges"].Added), EdgesChanged: len(semanticChanges.Categories["edges"].Changed), EdgesRemoved: len(semanticChanges.Categories["edges"].Removed), DocumentsAdded: len(documentChanges.Added), DocumentsChanged: len(documentChanges.Changed), DocumentsRemoved: len(documentChanges.Removed), Findings: len(currentSemantic.Findings), Questions: len(currentSemantic.Questions), Gaps: len(currentSemantic.Coverage.Missing)},
+		Runtime:     runReviewRuntimeIdentity{Mode: reviewRuntimeMode(info.RuntimeMode, runtimeMode), Providers: providers, StepProviders: cloneReviewStringMap(info.StepProviders), ProviderModels: info.ProviderModels},
+		Authority:   runReviewAuthority{Mode: currentAuthorityMode, SourceRunID: sourceRunID, BaselineRunID: baselineRunID, SnapshotPath: currentAuthorityPath},
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func reviewRuntimeMode(runMode, fallback string) string {
+	if mode := strings.TrimSpace(runMode); mode != "" {
+		return mode
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func cloneReviewStringMap(value map[string]string) map[string]string {
+	result := map[string]string{}
+	for key, item := range value {
+		result[key] = item
+	}
+	return result
+}
+
+func runReviewSnapshotAuthority(root, runID string) (string, string) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return "", ""
+	}
+	promoted := filepath.Join(root, "reports", "taskruns", runID, "promoted-snapshot", "architecture-snapshot.json")
+	if raw, err := os.ReadFile(promoted); err == nil {
+		var manifest struct {
+			RunID string `json:"run_id"`
+		}
+		if json.Unmarshal(raw, &manifest) == nil && strings.TrimSpace(manifest.RunID) == runID {
+			return "promoted_run_snapshot", filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "promoted-snapshot", "architecture-snapshot.json"))
+		}
+	}
+	finalIndex := filepath.Join(root, "reports", "taskruns", runID, "staging", "final", "final-run-index.json")
+	if raw, err := os.ReadFile(finalIndex); err == nil {
+		if index, parseErr := contracts.ParseFinalRunIndex(raw); parseErr == nil && strings.TrimSpace(index.RunID) == runID {
+			return "run_snapshot", filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", "final-run-index.json"))
+		}
+	}
+	return "run_record", ""
+}
+
+func compareSemanticSnapshots(currentRunID, baselineRunID string, current, baseline contracts.SemanticSnapshot) architectureComparison {
+	comparison := emptyArchitectureComparison("")
+	comparison.Available = true
+	comparison.CurrentRunID = currentRunID
+	comparison.BaselineRunID = baselineRunID
+	comparison.Categories["entities"] = compareArchitectureValues(current.Entities, baseline.Entities, func(item contracts.Entity) (string, string, string) { return item.ID, item.Name, "" })
+	comparison.Categories["edges"] = compareArchitectureValues(current.Edges, baseline.Edges, func(item contracts.Edge) (string, string, string) { return item.ID, item.Name, "" })
+	comparison.Categories["findings"] = compareArchitectureValues(current.Findings, baseline.Findings, func(item contracts.Finding) (string, string, string) {
+		return item.ID, item.Title, "reports/findings/findings.md"
+	})
+	comparison.Categories["gaps"] = compareArchitectureStrings(current.Coverage.Missing, baseline.Coverage.Missing, "reports/coverage/summary.md")
+	return comparison
 }
 
 type runOutcomeSummary struct {

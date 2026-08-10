@@ -614,21 +614,20 @@ func TestAsIsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing.T) {
 		`at most one bounded current-run evidence read/list command`,
 		`writes all three markdown targets first and the manifest last`,
 		`AS-IS FIRST-PASS WRITE SEQUENCE:`,
-		`write_root='/tmp/workspace/reports/taskruns/run-1/asis'`,
-		`draft_root='/tmp/workspace/reports/taskruns/run-1/staging/final'`,
-		`mkdir -p "$write_root" "$draft_root"`,
+		`Use these exact absolute targets in the direct-literal write command; do not assign shell variables such as write_root or draft_root`,
+		`mkdir -p '/tmp/workspace/reports/taskruns/run-1/asis' '/tmp/workspace/reports/taskruns/run-1/staging/final'`,
 		`immediately preceding command may read/list only bounded evidence from the current-run staged evidence index below`,
 		`Markdown writes must preserve literal backticks and paths`,
 		`write every markdown and manifest target directly with a single-quoted shell heredoc such as <<'EOF'`,
 		`do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings, template programs, or nested quote tricks`,
 		`Do not derive content by executing provider-authored code`,
 		`Do not put markdown content that contains backticks inside double-quoted shell strings or unquoted heredocs`,
-		`write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md"`,
-		`write "$write_root/asis-draft-manifest.json" last`,
-		`test -s "$draft_root/overview.md"`,
-		`test -s "$draft_root/summary.md"`,
-		`test -s "$draft_root/architect-summary.md"`,
-		`test -s "$write_root/asis-draft-manifest.json"`,
+		`write evidence-backed markdown directly to '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md', '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md', and '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md'`,
+		`write '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json' last`,
+		`test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/overview.md'`,
+		`test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/summary.md'`,
+		`test -s '/tmp/workspace/reports/taskruns/run-1/staging/final/architect-summary.md'`,
+		`test -s '/tmp/workspace/reports/taskruns/run-1/asis/asis-draft-manifest.json'`,
 		`do not rely on focused repair to create it later`,
 		`no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and"`,
 		`Architecture Home must never reference reports/taskruns/**, taskrun staging paths, write_root, draft_final_root, raw runtime artifacts, absolute runtime checkout paths, or .acp/repos paths`,
@@ -837,6 +836,8 @@ func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing
 		`then write proposals-draft-manifest.json last before returning`,
 		`a manifest-only first write before proposal/changelog markdown is invalid`,
 		`Same provider turn requirement`,
+		`Before proposal.md, changelog.md, and proposals-draft-manifest.json all exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks`,
+		`Do not invoke python3 -c (or another nested interpreter) to generate markdown or JSON`,
 		`validation-ready markdown files exist`,
 		`proposal.md and changelog.md must both contain the exact literal shard completeness shape planned=<n> succeeded=<n> failed=<n> incomplete=<n>`,
 		`both files must also state an explicit no-shard-coverage-blocker`,
@@ -896,6 +897,35 @@ func TestProposalsFirstActionSectionWritesEvidenceBackedDraftSetFirst(t *testing
 		if strings.Contains(section, forbidden) {
 			t.Fatalf("proposals first-action drafts must not include placeholder marker %q:\n%s", forbidden, section)
 		}
+	}
+}
+
+func TestSummarizePromptMarkdownFindingsIncludesActionContext(t *testing.T) {
+	t.Parallel()
+
+	findings := summarizePromptMarkdownFindings(strings.Join([]string{
+		"# Findings",
+		"",
+		"## Stateful topology needs an owner",
+		"",
+		"- ID: `finding.topology`",
+		"- Severity: `high`",
+		"- Related IDs: `datastore.clickhouse`, `team.platform`",
+		"- Evidence: `repo:.github/CODEOWNERS`, `repo:clickhouse/README.md`",
+		"",
+		"## Informational note",
+		"",
+		"- ID: `finding.note`",
+		"- Severity: `low`",
+		"- Related IDs: `component.cli`",
+		"- Evidence: `repo:cli/README.md`",
+	}, "\n"), 5)
+
+	if len(findings) != 1 {
+		t.Fatalf("expected the high-severity prompt finding preview, got %#v", findings)
+	}
+	if got := findings[0]; !strings.Contains(got, "finding.topology severity=high") || !strings.Contains(got, "affected=datastore.clickhouse, team.platform") || !strings.Contains(got, "evidence=repo:.github/CODEOWNERS, repo:clickhouse/README.md") {
+		t.Fatalf("expected high finding preview to retain action context, got %q", got)
 	}
 }
 
@@ -1103,6 +1133,8 @@ func TestDocFirstFilesystemPolicyDefinesCanonicalProposalsDraftSurface(t *testin
 		`Allowed canonical targets are proposals/* and reports/changelog/*.`,
 		`Use the FIRST PROPOSALS DRAFT COMMAND above as an evidence-first write contract`,
 		`The first proposals draft artifact set must already be validation-ready`,
+		`Before proposal.md, changelog.md, and proposals-draft-manifest.json all exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks`,
+		`Do not invoke python3 -c (or another nested interpreter) to generate markdown or JSON`,
 		`read current-run findings/coverage/index evidence first`,
 		`first-pass content is evidence-backed proposal/changelog content`,
 		`proposals-draft-manifest.json MUST include version=1, run_id, step_id, step_contract="proposals", agent_role, outputs[], and optional summary/updated_at.`,

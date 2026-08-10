@@ -191,7 +191,7 @@ Must show:
 
 Purpose: publish reviewed workspace artifacts to Git.
 
-Primary action: `Commit selected artifacts`.
+Primary action: `Commit all workspace changes`.
 
 Must show:
 - diff summary by workspace folder;

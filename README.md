@@ -91,13 +91,15 @@ The core pipeline is:
 3. Assemble the as-is Architecture Home, coverage report, and derived model.
 4. Validate citations, identities, findings, and the final artifact graph.
 5. Promote validator-approved artifacts and prepare proposal packages.
-6. Review the result in `Home`, `Runs`, `Architecture`, and `Changes`, then publish through an explicit
+6. Review the result in `Home`, `Analyze`, `Architecture`, and `Changes`, then publish through an explicit
    Git action.
 
 The UI treats the validator-promoted architecture as the product outcome. `Architecture` provides
-an interactive read-only Context/Container/Component explorer, service-scoped advanced Code view,
-structured findings/questions and evidence drill-down, while
-`Runs` separates provider activity from durable step/shard progress and offers dependency-aware
+Documents as the default read-only reader with Diagrams, Model and Findings sibling modes; the
+existing Context/Container/Component explorer remains available as Model, with service-scoped
+advanced Code view, structured findings/questions and evidence drill-down. `Settings` exposes
+workspace, repository, runtime, scope, Git and diagnostics controls, while
+`Analyze` separates provider activity from durable step/shard progress and offers dependency-aware
 child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
 runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
 revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain
@@ -243,7 +245,9 @@ machine:
 - managed mode is a policy boundary, not a hard process sandbox;
 - the provider's network behavior and data handling follow that provider's CLI and configuration;
 - a runtime write audit fails an otherwise successful step when protected workspace surfaces or an
-  analyzed repository are unexpectedly changed.
+  analyzed repository are unexpectedly changed; protected workspace files are restored when their
+  post-run fingerprint is still unchanged, while concurrent edits are left untouched and surfaced
+  as a restore conflict.
 
 Use a disposable checkout or a clean branch for sensitive live runs, and review the workspace
 before committing it. Workspaces may contain repository context, prompts, findings, questions, and

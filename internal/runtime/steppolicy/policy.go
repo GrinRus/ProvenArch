@@ -328,6 +328,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Use the FIRST AS-IS DRAFT COMMAND above as an evidence-first write contract, not as a bootstrap placeholder command.`,
 			`- The first draft artifact set must already be validation-ready: run at most one bounded staged-evidence read/list command, then immediately write all three markdown targets with direct literal heredocs and write the manifest last.`,
 			`- Same provider turn requirement: the normal turn must write all three markdown targets with bounded evidence-backed content before successful exit.`,
+			`- Before overview.md, summary.md, architect-summary.md, and asis-draft-manifest.json all exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks to assemble or rewrite artifacts.`,
+			`- Use one mechanically simple shell command with direct literal single-quoted heredocs for the three markdown files and final manifest; do not wrap the command in python3 -c or another nested interpreter.`,
 			`- Before successful exit, ensure the first-pass content is evidence-backed as-is content or explicit evidence-backed insufficiency tied to coverage/questions.`,
 			`- reports/as-is/overview.md is the canonical Architecture Home and must contain non-empty sections named exactly: System at a glance; Analyzed scope; Domains and ownership; Key flows; Integrations and datastores; Where to start; Safe-change guidance; Evidence gaps and open questions.`,
 			`- Write every required Architecture Home heading as its own Markdown H2 line (for example, "## System at a glance"), followed by the substantive section body on later lines; never append body text to the heading line.`,
@@ -357,6 +359,12 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- Use the FIRST PROPOSALS DRAFT COMMAND above as an evidence-first write contract, not as a bootstrap placeholder command.`,
 			`- The first proposals draft artifact set must already be validation-ready: read current-run findings/coverage/index evidence first, then write the manifest, proposal.md, and changelog.md in the same filesystem work unit.`,
 			`- Same provider turn requirement: the normal turn must write proposal.md and changelog.md with bounded evidence-backed content before successful exit.`,
+			`- Before proposal.md, changelog.md, and proposals-draft-manifest.json all exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks to assemble or rewrite artifacts.`,
+			`- Use one mechanically simple shell command with direct literal single-quoted heredocs for both markdown files and final manifest; do not wrap the command in python3 -c or another nested interpreter.`,
+			`- Do not invoke python3 -c (or another nested interpreter) to generate markdown or JSON; keep the first write command mechanically simple so shell quoting cannot truncate the artifact set.`,
+			`- Validation errors are diagnostics only: never copy their absolute paths, reports/taskruns or staging paths, empty shell-expanded slots, or recovery wording into proposal/changelog markdown.`,
+			`- Before writing each target, verify the exact current-run evidence file with test -f or an equivalent bounded check; if it is absent, record a concrete evidence gap instead of inventing a path or placeholder ID.`,
+			`- Resolve finding IDs and repo:path values into literal shell variables before writing; never allow an unset variable to produce empty evidence slots such as "from  and", "checked:  and", or an empty Finding ID.`,
 			`- Enrichment must read current-run staged final surfaces when visible: reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, reports/taskruns/<run_id>/staging/final/reports/coverage/summary.md, final-run-index.json, citation-index.json, and typed shard summary.`,
 			`- Those staged paths are read-only inputs, never operator navigation. Final proposal/changelog markdown must not contain reports/taskruns/**, staging/final/**, staging/shards/**, write_root, or draft_final_root paths; use canonical reports/findings/findings.md, reports/coverage/summary.md, proposal/report paths, exact finding/citation IDs, and stable repo:path evidence.`,
 			`- Do NOT look for current-run findings at reports/taskruns/<run_id>/reports/findings/findings.md; the current-run promoted proposal evidence lives under staging/final before publish.`,
@@ -568,24 +576,27 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 func asIsFirstPassWriteSequence(task acpruntime.Task) string {
 	writeRoot := strings.TrimSpace(task.WriteRoot)
 	draftRoot := strings.TrimSpace(task.DraftFinalRoot)
+	manifestTarget := filepath.Join(writeRoot, runtimedrafts.AsIsManifestFile)
+	overviewTarget := filepath.Join(draftRoot, "overview.md")
+	summaryTarget := filepath.Join(draftRoot, "summary.md")
+	architectSummaryTarget := filepath.Join(draftRoot, "architect-summary.md")
 	return strings.Join([]string{
-		"- Use this exact target setup at the top of the direct-literal write command:",
-		"  write_root=" + shellSingleQuote(writeRoot),
-		"  draft_root=" + shellSingleQuote(draftRoot),
-		`  mkdir -p "$write_root" "$draft_root"`,
+		"- Use these exact absolute targets in the direct-literal write command; do not assign shell variables such as write_root or draft_root and do not interpolate them inside the heredoc command:",
+		"  mkdir -p " + shellSingleQuote(writeRoot) + " " + shellSingleQuote(draftRoot),
 		"- The immediately preceding command may read/list only bounded evidence from the current-run staged evidence index below; after it returns, do not perform another read-only preflight before writing.",
 		"- Before all four required artifacts exist, do not use Ruby, Node, Python, Perl, awk, jq, generated source-code strings, template programs, or nested quote tricks for markdown/JSON assembly.",
+		"- Do not invoke python3 -c (or another nested interpreter) to generate markdown or JSON; keep the first write command mechanically simple so shell quoting cannot truncate the artifact set.",
 		"- Markdown writes must preserve literal backticks and paths: write every markdown and manifest target directly with a single-quoted shell heredoc such as <<'EOF'.",
 		"- Do not put markdown content that contains backticks inside double-quoted shell strings or unquoted heredocs; shell command substitution can erase refs and produce empty slots.",
-		`- Then write evidence-backed markdown to "$draft_root/overview.md", "$draft_root/summary.md", and "$draft_root/architect-summary.md".`,
+		"- Then write evidence-backed markdown directly to " + shellSingleQuote(overviewTarget) + ", " + shellSingleQuote(summaryTarget) + ", and " + shellSingleQuote(architectSummaryTarget) + ".",
 		"- Keep the write command mechanically simple: literal heredocs, a marker check, direct corrected heredoc overwrite only when needed, the final manifest heredoc, and existence checks. Do not derive content by executing provider-authored code.",
 		"- Before writing the manifest, scan all three completed markdown files case-insensitively for runtime/recovery markers (bounded evidence read/staged evidence/read roots/read pass, recovery/enrichment narration, draft surface/root/manifest recap, bootstrap/placeholder replacement, provider narration, and generated/assembled-by-runtime wording); if a marker is present, directly overwrite the affected file with corrected literal content and repeat the scan.",
-		`- Only after that three-file marker scan passes, write "$write_root/asis-draft-manifest.json" last using the manifest shape guide below and outputs for exactly those three markdown files.`,
+		"- Only after that three-file marker scan passes, write " + shellSingleQuote(manifestTarget) + " last using the manifest shape guide below and outputs for exactly those three markdown files.",
 		"- End the same command with these existence checks before exit:",
-		`  test -s "$draft_root/overview.md"`,
-		`  test -s "$draft_root/summary.md"`,
-		`  test -s "$draft_root/architect-summary.md"`,
-		`  test -s "$write_root/asis-draft-manifest.json"`,
+		"  test -s " + shellSingleQuote(overviewTarget),
+		"  test -s " + shellSingleQuote(summaryTarget),
+		"  test -s " + shellSingleQuote(architectSummaryTarget),
+		"  test -s " + shellSingleQuote(manifestTarget),
 		"- If any check would fail, fix the missing target in that same command before returning; do not rely on focused repair to create it later.",
 		`- Also check the markdown has no empty evidence slots such as "from  and", "checked:  and", "under .", or "Use  and".`,
 	}, "\n")
@@ -646,6 +657,11 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		"- The first filesystem work unit must read current-run staged findings/coverage/index evidence first, write proposal.md and changelog.md under draft_final_root, then write proposals-draft-manifest.json last before returning.",
 		"- Do not create, write, touch, or leave proposals-draft-manifest.json as a standalone first artifact; a manifest-only first write before proposal/changelog markdown is invalid and may be classified as pre-artifact stall.",
 		"- Same provider turn requirement: do not send any final answer, status note, or analysis-only prose before those validation-ready markdown files exist.",
+		"- Before proposal.md, changelog.md, and proposals-draft-manifest.json all exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks to assemble or rewrite artifacts.",
+		"- Use one mechanically simple shell command with direct literal single-quoted heredocs for both markdown files and the final manifest; do not wrap the command in python3 -c or another nested interpreter.",
+		"- Validation errors are diagnostics only: never copy their absolute paths, reports/taskruns or staging paths, empty shell-expanded slots, or recovery wording into user-visible markdown.",
+		"- Before writing each target, verify the exact current-run evidence file with test -f or an equivalent bounded check; if it is absent, record a concrete evidence gap instead of inventing a path or placeholder ID.",
+		"- Resolve finding IDs and repo:path values into literal shell variables before writing; never allow an unset variable to produce empty evidence slots such as 'from  and', 'checked:  and', or an empty Finding ID.",
 		"- In that first work unit, read current-run staged final findings and coverage under reports/taskruns/<run_id>/staging/final/reports/*, plus final-run-index.json, citation-index.json, and typed shard summary if visible; link non-empty findings to proposal/changelog content by finding ID.",
 		"- When typed shard-summary items[] is visible, proposal.md and changelog.md must both contain the exact literal shard completeness shape planned=<n> succeeded=<n> failed=<n> incomplete=<n>; if failed=0 and incomplete=0, both files must also state an explicit no-shard-coverage-blocker.",
 		"- The exact findings file is reports/taskruns/<run_id>/staging/final/reports/findings/findings.md, not reports/taskruns/<run_id>/staging/final/reports/findings.md. Copy IDs from backticked - ID: lines and never emit no-current-run-finding-id, no structured current-run finding ID, or finding unavailable.",
@@ -662,6 +678,8 @@ func ProposalsFirstActionSection(task acpruntime.Task) string {
 		fmt.Sprintf(`- Exact changelog target: %q.`, filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "changelog.md")),
 		"FIRST PROPOSALS DRAFT COMMAND:",
 		"Run one filesystem command as the next action. In that command, perform only a bounded current-run evidence read/list, write proposal.md and changelog.md first with all required sections, then write the manifest last before returning.",
+		"Before all three required artifacts exist, do not use Python, Node, Ruby, Perl, awk, jq, eval, generated source-code strings, template programs, or nested quote tricks; use direct literal single-quoted heredocs only.",
+		"Do not invoke python3 -c (or another nested interpreter) to generate markdown or JSON; keep the first write command mechanically simple so shell quoting cannot truncate the artifact set.",
 		"Do not run a separate read-only preflight, broad repo sweep, sibling taskrun inspection, prior-proposal templating, or analysis-only response before the writes.",
 		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing proposal/changelog markdown from observed evidence instead of copying scaffold prose.",
 		"PROPOSALS DRAFT MANIFEST SHAPE GUIDE:",
@@ -959,8 +977,10 @@ func summarizePromptMarkdownFindings(text string, limit int) []string {
 		return nil
 	}
 	type finding struct {
-		id       string
-		severity string
+		id         string
+		severity   string
+		relatedIDs string
+		evidence   string
 	}
 	findings := []finding{}
 	currentID := ""
@@ -978,6 +998,20 @@ func summarizePromptMarkdownFindings(text string, limit int) []string {
 			for idx := range findings {
 				if findings[idx].id == currentID {
 					findings[idx].severity = severity
+					break
+				}
+			}
+		case strings.HasPrefix(lower, "- related ids:") && currentID != "":
+			for idx := range findings {
+				if findings[idx].id == currentID {
+					findings[idx].relatedIDs = promptMarkdownContextValue(trimmed[len("- related ids:"):])
+					break
+				}
+			}
+		case strings.HasPrefix(lower, "- evidence:") && currentID != "":
+			for idx := range findings {
+				if findings[idx].id == currentID {
+					findings[idx].evidence = promptMarkdownContextValue(trimmed[len("- evidence:"):])
 					break
 				}
 			}
@@ -1009,12 +1043,26 @@ func summarizePromptMarkdownFindings(text string, limit int) []string {
 		if finding.severity != "" {
 			value += " severity=" + finding.severity
 		}
+		if finding.relatedIDs != "" {
+			value += " affected=" + finding.relatedIDs
+		}
+		if finding.evidence != "" {
+			value += " evidence=" + finding.evidence
+		}
 		out = append(out, value)
 		if len(out) >= limit {
 			break
 		}
 	}
 	return out
+}
+
+func promptMarkdownContextValue(value string) string {
+	value = strings.Join(strings.Fields(strings.ReplaceAll(strings.TrimSpace(value), "`", "")), " ")
+	if len(value) > 180 {
+		return value[:177] + "..."
+	}
+	return value
 }
 
 func promptMarkdownFieldValue(value string) string {

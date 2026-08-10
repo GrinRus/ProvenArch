@@ -57,3 +57,41 @@ func TestOutcomeWorkflowFixtureMatchesPublicShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestRunReviewContractFixtureMatchesPublicShape(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "api", "run-review-contract.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture runReviewContract
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatalf("decode run review fixture: %v", err)
+	}
+	if fixture.ReviewKind != "refresh" || fixture.SourceRunID == "" || fixture.BaselineRunID == "" || !fixture.SemanticChanges.Available || !fixture.DocumentChanges.Available {
+		t.Fatalf("run review fixture is incomplete: %#v", fixture)
+	}
+	if fixture.Authority.SourceRunID != fixture.SourceRunID || fixture.GeneratedAt == "" || len(fixture.Runtime.Providers) != 1 {
+		t.Fatalf("run review fixture lost identity metadata: %#v", fixture)
+	}
+}
+
+func TestRunReviewContractKeepsInitialRunsAsSummary(t *testing.T) {
+	root := t.TempDir()
+	writeSnapshot := func(runID string) {
+		t.Helper()
+		folder := filepath.Join(root, "reports", "taskruns", runID, "promoted-snapshot")
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		raw := []byte(`{"version":2,"run_id":"` + runID + `","files":[],"semantic":{"coverage":{"missing":[]},"questions":[],"entities":[],"edges":[],"findings":[]}}`)
+		if err := os.WriteFile(filepath.Join(folder, "architecture-snapshot.json"), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSnapshot("run-initial")
+	writeSnapshot("run-previous")
+	review := buildRunReviewContract(root, orchestrator.RunInfo{RunID: "run-initial", Pipeline: "init", RuntimeMode: "fake"}, "run-previous", "fake")
+	if review.ReviewKind != "initial" || review.BaselineRunID != "" || review.SemanticChanges.Available {
+		t.Fatalf("initial review must be a summary without a baseline delta: %#v", review)
+	}
+}

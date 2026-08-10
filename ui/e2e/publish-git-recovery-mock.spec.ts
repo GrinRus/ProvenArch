@@ -46,6 +46,7 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
     ok: true,
     state: "dirty",
     workspace: "/tmp/publish-git-recovery-workspace",
+    scope: "full_workspace",
     branch: "main",
     head_oid: "abc123",
     base_ref: "HEAD",
@@ -124,6 +125,7 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
               current_step: "init.step4.proposals",
               started_at: "2026-04-03T12:00:00Z",
               finished_at: "2026-04-03T12:08:00Z",
+              authoritative_index: true,
               warnings: [],
               error_code: null,
               error: null,
@@ -333,7 +335,8 @@ async function installPublishGitRecoveryMock(page: Page): Promise<{ commitMessag
     }
 
     if (method === "GET" && url.pathname === "/api/git/diff") {
-      await route.fulfill({ ...json(gitDiff) });
+      const scopedDiff = { ...gitDiff, run_id: new URL(request.url()).searchParams.get("run_id") };
+      await route.fulfill({ ...json(scopedDiff) });
       return;
     }
 
