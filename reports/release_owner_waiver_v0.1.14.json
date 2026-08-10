@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tag": "v0.1.14",
+  "decision": "owner_waived",
+  "release_state": "UNQUALIFIED PRERELEASE",
+  "base_qualification_sha": "d618c72d0ad0bb6fda4507b8147a7d93ed5a5026",
+  "approved_by": "GrinRus",
+  "reason": "Repository owner explicitly authorized publishing v0.1.14 without the Qwen live provider matrix; this candidate packages the merged truth-first publication flow, run-pinned review contract, decomposed UI routes, and deterministic recovery coverage while retaining an explicit unqualified prerelease state.",
+  "waived_requirements": [
+    "qwen-code live evidence",
+    "claude-code live evidence",
+    "composite release verdict"
+  ]
+}
