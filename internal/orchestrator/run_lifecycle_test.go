@@ -849,6 +849,11 @@ func TestPendingReplacementIsOneRegistryTransaction(t *testing.T) {
 	close(releaseRunner)
 	waitForRunTerminalInfo(t, service, activeRunID, 2*time.Second)
 	waitForRunTerminalInfo(t, service, pendingRunID, 2*time.Second)
+	// A terminal status is published before the async launcher has necessarily
+	// released its cancellation handle and finished its deferred cleanup. Wait
+	// for the service to become quiescent so t.TempDir cannot race a final
+	// task-run log/artifact write during cleanup.
+	waitForServiceQuiescent(t, service, 2*time.Second)
 }
 
 func TestLastGoodWriteFailurePublishesDurableCurrentAndDiagnostic(t *testing.T) {

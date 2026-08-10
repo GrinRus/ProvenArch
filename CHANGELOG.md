@@ -2,6 +2,38 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.14 - 2026-08-10
+
+Owner-authorized unqualified beta prerelease for the truth-first publication flow and decomposed
+architecture workspace.
+
+Highlights:
+- Made publication state fail closed: unknown/loading Git state no longer renders as clean, and
+  Publish inventory now reflects the authoritative full-workspace diff and commit scope.
+- Added run-pinned review contracts and initial-vs-refresh review semantics so historical runs cannot
+  display a comparison from the promoted current architecture.
+- Reframed the console around task-first Home, Analyze, Architecture, Changes and Settings flows while
+  preserving legacy routes, recovery paths, test IDs and Git safety checks.
+- Split the large UI surface into focused Analysis, Publish, Ask, Review, Setup, proposal-recovery,
+  diagnostics, settings and utility modules without changing user-facing behavior.
+- Hardened provider artifact recovery and prompt contracts, synchronized API/spec documentation, and
+  added deterministic happy-path and recovery coverage.
+
+Verification notes:
+- PR #218 passed all required GitHub Actions checks and was squash-merged into `main` as
+  `bc17b7278b80295d7c76a9f1f1b7412f6bcd5789`.
+- Provider-free validation passed with contracts, full Go suite, Python `267/267`, UI `45 files /
+  231 tests`, lint, production build, embedded UI parity and rendered mock E2E `8/8`.
+
+Known limitations:
+- `v0.1.14` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim canonical
+  `RELEASE READY`; Qwen/Claude live evidence and the composite release verdict are waived for this
+  exact tag.
+- The canonical trusted-machine Claude/Qwen/Codex release matrix was not completed because Qwen's
+  billing-cycle quota currently returns HTTP 403. No provider bypass or synthetic live evidence is
+  represented as release qualification.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.13 - 2026-08-03
 
 Outcome-first beta prerelease for architecture exploration, understandable run results, structured
