@@ -253,7 +253,7 @@ Implemented additional jobs:
 - `ui`
   - runs UI tests, production build, deterministic build verification and embedded bundle
     freshness; UI typecheck is owned by canonical `make lint` in the `lint` workflow
-  - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes seven local
+  - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes eight local
     provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
     horizontal overflow
   - optional local coverage is available through `npm run coverage --prefix ui`; it uses locked
@@ -365,9 +365,9 @@ Release workflow hardening:
   - happy-path `202`, `404 run_not_found`, `409 run_not_cancelable`, `400 invalid_request_body`
 - UI path: open Guided Setup, inspect Runs, select completed run evidence in Changes and open Publish through destination/view controls. In matrix live smoke this uses the backend refresh snapshot; direct `UI_E2E_ARTIFACT_SOURCE=live` diagnostics may still start a fresh UI init.
 - Required mock Playwright gate: `npm run e2e:mock --prefix ui` starts a local Vite UI through
-  `ui/playwright.mock.config.ts` and runs exactly seven deterministic scenarios:
-  source recovery, onboarding recovery, permission recovery, provider stream, failed-shard analysis,
-  Publish Git recovery and QA recovery. These scenarios use mocked `/api/**` responses only; live
+  `ui/playwright.mock.config.ts` and runs exactly eight deterministic scenarios:
+  initial-analysis-to-refresh happy path, source recovery, onboarding recovery, permission recovery,
+  provider stream, failed-shard analysis, Publish Git recovery and QA recovery. These scenarios use mocked `/api/**` responses only; live
   providers, external repositories and network runtime checks stay out of required CI.
 - UI run diagnostics surface:
   - Runs Step review tabs for artifacts/logs/evidence/diff

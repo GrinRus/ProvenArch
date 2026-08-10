@@ -525,7 +525,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await captureEvidenceScreenshot(page, "architecture-map-mobile.png");
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.getByTestId("destination-home").click();
-  await expect(page.locator(".home-map-preview")).toContainText("Checkout");
+  await expect(page.locator(".home-map-visual")).toContainText("Checkout");
   await captureEvidenceScreenshot(page, "home-architecture-desktop.png");
 	await page.goto("/runs/run-analysis-succeeded");
 	const targetedRerun = page.getByTestId("targeted-rerun-panel");

@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import stat
 import subprocess
 import tempfile
@@ -197,6 +198,9 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 mkdir -p "${REPORTS_ROOT}" "${BATCH_ROOT}/qwen-code/run1/reports/taskruns"
 
                 if [[ "${MATRIX_TEST_SLEEP_SEC:-0}" != "0" ]]; then
+                  if [[ -n "${MATRIX_TEST_SLEEP_PID_FILE:-}" ]]; then
+                    printf '%s\\n' "$$" > "${MATRIX_TEST_SLEEP_PID_FILE}"
+                  fi
                   sleep "${MATRIX_TEST_SLEEP_SEC}"
                 fi
 
@@ -921,6 +925,74 @@ class MatrixReleaseContractTest(unittest.TestCase):
         finally:
             stdout, stderr = proc.communicate(timeout=15)
         self.assertEqual(0, proc.returncode, msg=stderr or stdout)
+
+    def test_matrix_signal_terminates_active_child_batch_process_tree(self) -> None:
+        matrix_file = self._write_matrix_file(None, include_profiles=["single-path"])
+        matrix_id = "matrix-test-signal-child-cleanup"
+        child_pid_path = self.tmp_root / "sleep-child.pid"
+        env = self._build_subprocess_env(
+            {
+                "E2E_MATRIX_FILE": str(matrix_file),
+                "BATCH_SCRIPT": str(self.batch_script),
+                "MATRIX_ID": matrix_id,
+                "E2E_MATRIX_RELEASE_MODE": "0",
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_QWEN_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "E2E_MATRIX_MIN_FREE_KB": "0",
+                "MATRIX_TEST_SLEEP_SEC": "30",
+                "MATRIX_TEST_SLEEP_PID_FILE": str(child_pid_path),
+                "ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE": "1",
+            }
+        )
+        proc = subprocess.Popen(
+            [str(self.matrix_driver)],
+            cwd=self.repo_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            status_path = self.e2e_tmp_root / "matrix" / matrix_id / "profile-status" / "single-path--baseline.json"
+            deadline = time.time() + 5
+            while time.time() < deadline and not child_pid_path.exists():
+                time.sleep(0.1)
+            if not child_pid_path.exists():
+                stdout, stderr = proc.communicate(timeout=5)
+                self.fail(
+                    f"missing child pid file: {child_pid_path}; returncode={proc.returncode}; "
+                    f"stdout={stdout}; stderr={stderr}"
+                )
+            child_pid = int(child_pid_path.read_text(encoding="utf-8").strip())
+
+            proc.send_signal(signal.SIGINT)
+            stdout, stderr = proc.communicate(timeout=15)
+            self.assertEqual(130, proc.returncode, msg=stderr or stdout)
+            self.assertTrue(status_path.exists(), f"missing profile status file: {status_path}")
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            self.assertEqual("failed", status["status"])
+            self.assertEqual("infra_signal_terminated", status["failure_reason"])
+
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError:
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail(f"active child batch process survived matrix signal: pid={child_pid}")
+        finally:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.communicate(timeout=5)
 
     def test_matrix_reconcile_only_marks_stale_running_profile_as_failed(self) -> None:
         matrix_id = "matrix-test-stale-profile-reconcile"

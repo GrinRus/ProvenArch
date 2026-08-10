@@ -802,6 +802,20 @@ Persisted `progress.elapsed_ms` вычисляется от durable `started_at`
 partial/failed scopes агрегируются из structured log domain IDs. Unknown error taxonomy запрещает
 retry (`can_retry=false`) до безопасной классификации.
 
+`review-summary.review` — additive run-pinned review read model. It is generated from the selected
+run's immutable final/promoted snapshot and never borrows the comparison of `promoted_current` when
+the selected identity differs. `review_kind` is `initial` or `refresh`; `source_run_id` is always
+the selected run and `baseline_run_id` is present only when a validated prior promoted generation
+exists. `semantic_changes` is an architecture comparison with stable entity/edge/finding/gap
+identities; an initial run returns `available=false` with an explicit initial-summary reason.
+`document_changes` reports changed `reports/*` snapshot files when the promoted snapshot is
+available, otherwise it is `available=false` with a reason. `findings`, `questions` and `gaps` are
+the selected run's current semantic payload, while `summary` contains deterministic counts.
+`runtime` records the run mode, distinct providers, step provider map and resolved provider models.
+`authority` identifies the source run and snapshot path (`promoted_run_snapshot`, `run_snapshot` or
+`run_record`), and `generated_at` records read-model generation time. Older clients may ignore the
+field; they must not infer a comparison when `review` is absent or unavailable.
+
 ### POST `/api/pipeline/runs/{run_id}/retry-plan`
 Для любого terminal analysis run (`succeeded|failed|canceled`) рассчитывает безопасную dependency
 closure. Для failed/canceled UI по умолчанию передаёт failed step/scopes; для succeeded оператор

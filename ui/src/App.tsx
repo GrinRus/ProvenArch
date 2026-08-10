@@ -1,19 +1,17 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
+import { AppOverlays } from "./components/AppOverlays";
 import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
-import { GuidedSetupPage, GuidedSetupReview, HomePage, RunsPage } from "./components/ProductPages";
-import { ModalDialog } from "./components/ModalDialog";
+import { HomePage, RunsPage } from "./components/ProductPages";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
+import { SettingsPage } from "./components/SettingsPage";
+import { SetupRoute } from "./components/SetupRoute";
+import { WizardContractPanel } from "./components/WizardContractPanel";
 import {
   AnalysisStagePanel,
-  AskStagePanel,
-  CharterStagePanel,
-  ReadinessStagePanel,
-  SourceStagePanel,
 } from "./components/StagePanels";
-import { WizardContractPanel } from "./components/WizardContractPanel";
 
 const KnowledgePage = lazy(() => import("./components/KnowledgePage").then((module) => ({ default: module.KnowledgePage })));
 import {
@@ -29,17 +27,16 @@ import {
   type OnboardingStatusResponse,
   type RuntimeExecutionKey,
   type RuntimePermissionKey,
-  type RuntimePermissionRequest,
   type RuntimeTimeoutKey,
   type SystemVersionResponse,
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
-import type { InspectorItem, NextAction, StageId } from "./lib/consoleTypes";
+import type { StageId } from "./lib/consoleTypes";
 import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type ChangesView, type KnowledgeView, type SetupStep, type ViewerMode } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
-import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable } from "./lib/runState";
-import { deriveWorkflowState, type WorkflowDestination } from "./lib/workflowState";
+import { deriveAppWorkflowState, derivePublicationState, selectedRunIssueCopy } from "./lib/appDerived";
+import { type WorkflowDestination } from "./lib/workflowState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
@@ -323,6 +320,13 @@ export default function App() {
 		const restoredRoute = parseAppRoute(window.location, true);
 		setRouteNotice(restoredRoute.invalid.length ? `Unsupported URL context was removed: ${restoredRoute.invalid.join(", ")}.` : "");
 		navigateRoute(restoredRoute, true);
+		// bootstrapRuns selects the newest run for the initial console state. When
+		// a deep link pins a historical run, restore that selection explicitly
+		// after bootstrap so the default selection cannot win the race with the
+		// route-driven effect.
+		if (restoredRoute.runId) {
+		  await handleSelectRun(restoredRoute.runId, { silentErrors: true });
+		}
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
     }
@@ -793,11 +797,17 @@ export default function App() {
   const doctorFailures = useMemo(() => setupDoctorResult?.checks.filter((check) => check.status === "fail") ?? [], [setupDoctorResult]);
   const artifactCount = nonDiagramArtifacts.length + diagramArtifacts.length;
   useEffect(() => {
-    if (!consoleReady || onboardingStatus?.can_enter_console !== true) {
+    if (!consoleReady || onboardingStatus?.can_enter_console !== true || destination !== "changes" || route.changesView !== "publish") {
       return;
     }
-    const path = destination === "changes" && route.changesView === "publish" ? undefined : selectedArtifact || undefined;
-    void loadGitDiff({ runId, path });
+    void loadGitDiff({ runId: null });
+  }, [consoleReady, destination, loadGitDiff, onboardingStatus?.can_enter_console, route.changesView]);
+
+  useEffect(() => {
+    if (!consoleReady || onboardingStatus?.can_enter_console !== true || (destination === "changes" && route.changesView === "publish")) {
+      return;
+    }
+    void loadGitDiff({ runId, path: selectedArtifact || undefined });
   }, [consoleReady, destination, loadGitDiff, onboardingStatus?.can_enter_console, route.changesView, runId, selectedArtifact]);
 
   const handleLoadGitDiff = useCallback(
@@ -855,25 +865,46 @@ export default function App() {
     [doctorFailures, runStatus, validationErrors],
   );
 
-  const workflow = useMemo(() => {
-    const hasRunning = runList.some((run) => run.status === "running");
-    const hasQueued = runList.some((run) => run.status === "queued");
-    const evidence = evidenceSnapshot.status === "available"
-      ? "snapshot"
-      : evidenceSnapshot.status === "partial"
-        ? "partial"
-        : evidenceSnapshot.status === "not_produced" || evidenceSnapshot.status === "unavailable" || evidenceSnapshot.status === "error"
-          ? "unavailable"
-          : artifactCount > 0 ? "current" : "none";
-    return deriveWorkflowState({
-      workspace: validateResult?.ok ? "ready" : validateResult ? "invalid" : "unconfigured",
-      execution: hasRunning ? "active" : hasQueued ? "pending" : runStatus?.status === "failed" ? "failed" : runStatus?.status === "succeeded" ? "succeeded" : "idle",
-      evidence,
-      publication: gitError.toLowerCase().includes("stale_git_confirmation") ? "stale" : gitError ? "blocked" : (gitDiff?.files?.length ?? 0) > 0 ? "dirty" : "clean",
-      openQuestions: openQuestions.split("\n").filter((line) => /^\s*[-*]\s+/.test(line)).length,
-      demo: runStatus?.runtime_mode === "fake",
-    });
-  }, [artifactCount, evidenceSnapshot.status, gitDiff?.files?.length, gitError, openQuestions, runList, runStatus?.runtime_mode, runStatus?.status, validateResult]);
+  const publication = useMemo(() => derivePublicationState({ gitError, gitDiffStatus, gitDiff }), [gitDiff, gitDiffStatus, gitError]);
+  const workflow = useMemo(() => deriveAppWorkflowState({
+    workspace: validateResult?.ok ? "ready" : validateResult ? "invalid" : "unconfigured",
+    runStatuses: runList.map((run) => run.status),
+    selectedRunStatus: runStatus?.status,
+    evidenceStatus: evidenceSnapshot.status,
+    artifactCount,
+    publication,
+    openQuestions,
+    demo: runStatus?.runtime_mode === "fake",
+  }), [artifactCount, evidenceSnapshot.status, openQuestions, publication, runList, runStatus?.runtime_mode, runStatus?.status, validateResult]);
+
+  const architectureComparisonMismatch = Boolean(
+    runId
+      && architecture?.comparison?.available
+      && (!architecture.comparison.current_run_id || architecture.comparison.current_run_id !== runId),
+  );
+  const selectedArchitectureComparison = architectureComparisonMismatch ? undefined : architecture?.comparison;
+
+  const handleHomePrimaryAction = useCallback(() => {
+    const hasPromotedArchitecture = architecture?.status === "available" || architecture?.status === "partial";
+    const promotedRunID = architecture?.authority.source_run_id?.trim();
+    if (hasPromotedArchitecture && promotedRunID) {
+      navigateRoute({
+        destination: "changes",
+        runId: promotedRunID,
+        runRequested: true,
+        changesView: "overview",
+        source: "snapshot",
+        mode: "rendered",
+        invalid: [],
+      });
+      return;
+    }
+    if (hasPromotedArchitecture) {
+      navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] });
+      return;
+    }
+    handleDestinationChange(workflow.nextAction.destination);
+  }, [architecture, handleDestinationChange, navigateRoute, workflow.nextAction.destination]);
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -1001,9 +1032,11 @@ export default function App() {
 			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
 			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
 			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
-			architectureComparison: architecture?.comparison,
+			architectureComparison: selectedArchitectureComparison,
+			architectureComparisonMismatch,
+			runReview: runReviewSummary?.review,
 		  }}
-		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, runLogs, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
+		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
 		  proposals={{
 		    artifacts: [
 		      ...nonDiagramArtifacts,
@@ -1036,7 +1069,7 @@ export default function App() {
 		/>
 	  ) : null}
 	  {destination === "home" ? (
-		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} architecture={architecture} onPrimaryAction={() => handleDestinationChange(workflow.nextAction.destination)} onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })} />
+		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} architecture={architecture} onPrimaryAction={handleHomePrimaryAction} onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] })} />
 	  ) : null}
 	  {destination === "knowledge" ? (
 		<Suspense fallback={<section className="panel stage-panel"><p className="status info">Loading Architecture Explorer…</p></section>}><KnowledgePage
@@ -1045,19 +1078,32 @@ export default function App() {
 		  workspaceHealth={workspaceHealthReport}
 		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
 		  error={knowledgeError}
-		  view={route.knowledgeView ?? "map"}
+		  view={route.knowledgeView ?? "documents"}
 		  selectedEntityID={route.entity}
+		  selectedArtifactPath={route.artifact}
 		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
-		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "map", source: "current", entity, invalid: [] })}
+		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] })}
+		  onDocumentChange={(artifact) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] })}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
 		  onOpenRuns={() => handleDestinationChange("runs")}
 		/></Suspense>
 	  ) : null}
+	  {destination === "settings" ? (
+	    <SettingsPage
+	      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
+	      workspaceValid={validateResult?.ok === true}
+	      runtimeLabel={runtimeLabel}
+	      runtimeSettingsPanel={runtimeSettingsPanel}
+	      onOpenSetup={() => handleDestinationChange("setup")}
+	      onOpenChanges={() => handleDestinationChange("changes")}
+	      onOpenRuns={() => handleDestinationChange("runs")}
+	    />
+	  ) : null}
 
-      {destination === "setup" ? <GuidedSetupPage step={setupStep} onStepChange={handleSetupStepChange}>
-      {(setupStep === "workspace" || setupStep === "sources") ? (
-        <SourceStagePanel
-          setupView={setupStep}
+      {destination === "setup" ? (
+        <SetupRoute
+          step={setupStep}
+          onStepChange={handleSetupStepChange}
           busy={busy}
           guidedRepos={guidedRepos}
           guidedDocsImportsPath={guidedDocsImportsPath}
@@ -1067,8 +1113,10 @@ export default function App() {
           validationDiagnosticsByRepo={validationDiagnosticsByRepo}
           doctorResult={setupDoctorResult}
           doctorStatus={setupDoctorStatus}
-          setupRuntime={effectiveRuntimeMode}
-          setupRuntimeProvider={effectiveRuntimeProvider}
+          setupRuntime={setupRuntime}
+          setupRuntimeProvider={setupRuntimeProvider}
+          sourceRuntime={effectiveRuntimeMode}
+          sourceRuntimeProvider={effectiveRuntimeProvider}
           onRepoChange={handleSetupRepoChange}
           onAddRepo={handleSetupAddRepo}
           onRemoveRepo={handleSetupRemoveRepo}
@@ -1077,19 +1125,7 @@ export default function App() {
           onSaveGuidedWorkspaceSetup={() => void handleSetupSaveGuidedWorkspaceSetup()}
           onManifestChange={handleSetupManifestChange}
           onSaveManifest={() => void handleSaveManifest()}
-        />
-      ) : null}
-
-      {setupStep === "runner" ? (
-        <ReadinessStagePanel
-          busy={busy}
-          validateResult={validateResult}
-          validationDiagnosticsByRepo={validationDiagnosticsByRepo}
-          doctorResult={setupDoctorResult}
-          doctorStatus={setupDoctorStatus}
           firstRunStatus={firstRunStatus}
-          setupRuntime={setupRuntime}
-          setupRuntimeProvider={setupRuntimeProvider}
           selectedRunErrorCode={runStatus?.error_code}
           selectedRunError={runStatus?.error}
           onSetupRuntimeChange={handleSetupRuntimeChange}
@@ -1107,33 +1143,18 @@ export default function App() {
           runtimeExecutionEffective={runtimeExecutionEffective}
           runtimePermissionEffective={runtimePermissionEffective}
           runtimeStepProviderEffective={runtimeStepProviderEffective}
-        />
-      ) : null}
-
-      {setupStep === "brief" ? (
-        <CharterStagePanel
           wizardProjectName={wizardProjectName}
           wizardScope={wizardScope}
           wizardNfr={wizardNfr}
           wizardRules={wizardRules}
           gitStatus={gitStatus}
           proposalBranch={proposalBranch}
-          wizardPanel={
-            <WizardContractPanel
-              busy={busy}
-              wizardProjectName={wizardProjectName}
-              wizardScope={wizardScope}
-              wizardNfr={wizardNfr}
-              wizardRules={wizardRules}
-              wizardStatus={wizardStatus}
-              onProjectNameChange={setWizardProjectName}
-              onScopeChange={setWizardScope}
-              onNfrChange={setWizardNfr}
-              onRulesChange={setWizardRules}
-              onSave={() => void handleSaveStep0WizardContract()}
-            />
-          }
-          busy={busy}
+          wizardStatus={wizardStatus}
+          onProjectNameChange={setWizardProjectName}
+          onScopeChange={setWizardScope}
+          onNfrChange={setWizardNfr}
+          onRulesChange={setWizardRules}
+          onSaveWizardContract={() => void handleSaveStep0WizardContract()}
           baselineBundleWarnings={baselineBundleWarnings}
           baselineEditorArtifacts={baselineEditorArtifacts}
           selectedEditorPath={selectedEditorPath}
@@ -1141,13 +1162,11 @@ export default function App() {
           editorStatus={editorStatus}
           onEditorSelectionChange={(path) => void handleEditorSelectionChange(path)}
           onEditorContentChange={setSelectedEditorContent}
-          onSave={() => void handleSaveSelectedEditorArtifact()}
+          onSaveEditor={() => void handleSaveSelectedEditorArtifact()}
+          wizardContractReady={wizardContractReady}
+          onStart={() => void handleSetupFirstRun("analysis")}
         />
       ) : null}
-      {setupStep === "review" ? (
-        <GuidedSetupReview briefReady={wizardContractReady} workspaceReady={validateResult?.ok === true} busy={busy} onStart={() => void handleSetupFirstRun("analysis")} />
-      ) : null}
-      </GuidedSetupPage> : null}
 
       {destination === "runs" && activeStage === "analysis" ? (
         <RunsPage coordination={coordination} selectedRunID={route.runId}>
@@ -1179,7 +1198,7 @@ export default function App() {
           onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRunInRuns(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })}
+		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] })}
         />
         </RunsPage>
       ) : null}
@@ -1187,258 +1206,19 @@ export default function App() {
       {error ? <p className="status err">Error: {error}</p> : null}
       {routeNotice ? <p className="status warn" role="status" data-testid="route-notice">{routeNotice}</p> : null}
       </ProductShell>
-      <ModalDialog
-        open={askOpen}
-        title="Ask current workspace"
-        description="Current workspace · read-only. Q&A execution and history do not alter Change Review or Publish acceptance."
-        onCancel={() => setAskOpen(false)}
-      >
-        <AskStagePanel onOpenArtifact={(path) => void handleAskCitation(path)} onProposalCreated={(proposal) => void handleQAProposalCreated(proposal)} />
-      </ModalDialog>
-      <ModalDialog
-        open={gitConfirmation !== null}
-        title={gitConfirmation?.action === "branch" ? "Confirm proposal branch" : "Confirm workspace commit"}
-        description="This action uses the complete workspace Git inventory shown below. If branch, HEAD, or any file changes before confirmation, ACP will reject it without a Git mutation."
-        confirmLabel={gitConfirmation?.action === "branch" ? "Create proposal branch" : "Commit all workspace changes"}
+      <AppOverlays
+        askOpen={askOpen}
+        gitConfirmation={gitConfirmation}
+        briefSkipConfirmationOpen={briefSkipConfirmationOpen}
         busy={busy}
-        onCancel={cancelGitAction}
-        onConfirm={() => void confirmGitAction()}
-      >
-        {gitConfirmation ? (
-          <div className="git-confirmation" data-testid="git-confirmation-inventory">
-            <dl className="compact-defs">
-              <div><dt>Branch</dt><dd>{gitConfirmation.diff.branch}</dd></div>
-              <div><dt>HEAD</dt><dd><code>{gitConfirmation.diff.head_oid ?? "unborn"}</code></dd></div>
-              <div><dt>Base</dt><dd>{gitConfirmation.diff.base_ref} · <code>{gitConfirmation.diff.base_oid ?? "unborn"}</code></dd></div>
-              <div><dt>Fingerprint</dt><dd><code>{gitConfirmation.diff.fingerprint}</code></dd></div>
-            </dl>
-            {gitConfirmation.diff.files.length === 0 ? <p>No workspace changes.</p> : (
-              <ul>
-                {gitConfirmation.diff.files.map((file) => (
-                  <li key={`${file.status}:${file.original_path ?? ""}:${file.path}`}>
-                    <strong>{file.status}</strong> <code>{file.path}</code>
-                    {file.original_path ? <span> from <code>{file.original_path}</code></span> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : null}
-      </ModalDialog>
-      <ModalDialog
-        open={briefSkipConfirmationOpen}
-        title="Start without a saved analysis brief?"
-        description="The run can proceed, but missing project name and scope usually reduces evidence quality and actionability."
-        confirmLabel="Start with quality warning"
-        busy={busy}
-        onCancel={() => setBriefSkipConfirmationOpen(false)}
-        onConfirm={() => { setBriefSkipConfirmationOpen(false); void startFirstRun("analysis"); }}
+        onCloseAsk={() => setAskOpen(false)}
+        onOpenAskCitation={(path) => void handleAskCitation(path)}
+        onProposalCreated={(proposal) => void handleQAProposalCreated(proposal)}
+        onCancelGitAction={cancelGitAction}
+        onConfirmGitAction={() => void confirmGitAction()}
+        onCancelBriefSkip={() => setBriefSkipConfirmationOpen(false)}
+        onConfirmBriefSkip={() => { setBriefSkipConfirmationOpen(false); void startFirstRun("analysis"); }}
       />
     </>
   );
-}
-
-function selectedRunIssueCopy(errorCode: string, error: string | null | undefined, surface: "inspector" | "publish"): { label: string; detail: string } {
-  if (isRunCanceled(errorCode)) {
-    return {
-      label: "Canceled run",
-      detail:
-        surface === "publish"
-          ? "run_canceled: select a successful run or start a new analysis before publishing."
-          : "run_canceled: selected run was stopped by request; taskrun evidence remains in History.",
-    };
-  }
-  if (isRunReconciledAfterRestart(errorCode)) {
-    return {
-      label: "Run reconciled after restart",
-      detail:
-        surface === "publish"
-          ? "run_reconciled_after_restart: select a completed artifact run or start a new analysis before publishing."
-          : "run_reconciled_after_restart: ACP preserved the stale run evidence in History after service restart.",
-    };
-  }
-  if (isRunnerUnavailable(errorCode)) {
-    return {
-      label: "Provider unavailable",
-      detail:
-        surface === "publish"
-          ? "runner_unavailable: check Readiness provider setup, binary/auth/quota, then run a successful analysis before publishing."
-          : "runner_unavailable: check Readiness provider setup, binary/auth/quota, then retry the same analysis pipeline.",
-    };
-  }
-  return {
-    label: errorCode,
-    detail: error || (surface === "publish" ? "Selected run failed before publication." : "Selected run failed."),
-  };
-}
-
-export function formatPermissionBlockerDetail(request: RuntimePermissionRequest): string {
-  const step = request.step_id || "runtime step";
-  const decision = request.decision?.decision || "pending";
-  const rule = request.decision?.rule_id ? ` via ${request.decision.rule_id}` : "";
-  const target = request.path_or_command ? ` Target: ${request.path_or_command}.` : "";
-  const reason = request.reason || request.decision?.message;
-  const reasonDetail = reason ? ` Reason: ${reason}` : "";
-  return `${step} paused for ${decision}${rule}.${target}${reasonDetail}`;
-}
-
-export function workspaceHealthSeverity(severity: string): InspectorItem["severity"] {
-  switch (severity) {
-    case "error":
-      return "error";
-    case "warning":
-      return "warn";
-    default:
-      return "info";
-  }
-}
-
-export function deriveNextAction(
-  activeStage: StageId,
-  state: {
-    validateOK: boolean;
-    doctorOK: boolean;
-    hasArtifacts: boolean;
-    hasProposals: boolean;
-    hasRun: boolean;
-    blockersCount: number;
-    hardBlockersCount: number;
-    runBlockersCount: number;
-    runErrorCode?: string | null;
-    reviewFindingsCount: number;
-    releaseBlockersCount: number;
-    gitActionFailed: boolean;
-  },
-): NextAction {
-  if (activeStage === "publish") {
-    const disabledReason = !state.hasArtifacts
-      ? "No generated workspace artifacts are ready to publish."
-      : state.gitActionFailed
-        ? "Review the Git action failure in Commit plan before retrying."
-      : state.hardBlockersCount > 0
-        ? "Resolve hard blockers before committing workspace artifacts."
-        : undefined;
-    return {
-      label: state.gitActionFailed ? "Resolve Git action failure" : "Commit selected artifacts",
-      description: state.gitActionFailed
-        ? "Use the Commit plan recovery details, local Git status and prepared message before retrying the Git action."
-        : disabledReason
-          ? "Resolve publish blockers before creating a Git commit."
-          : "Create a Git commit for reviewed architecture workspace updates.",
-      primaryActionId: "publish",
-      disabledReason,
-    };
-  }
-  if (activeStage === "analysis" && state.runBlockersCount > 0) {
-    if (isRunCanceled(state.runErrorCode)) {
-      return {
-        label: "Review retained run evidence",
-        description: "The selected run was canceled; inspect retained History evidence or start a new analysis when ready.",
-        primaryActionId: "analysis",
-        intent: "focus-analysis-blocker",
-      };
-    }
-    if (isRunReconciledAfterRestart(state.runErrorCode)) {
-      return {
-        label: "Review retained run evidence",
-        description: "The selected run was recovered after restart; inspect retained History evidence or start a new analysis when ready.",
-        primaryActionId: "analysis",
-        intent: "focus-analysis-blocker",
-      };
-    }
-    if (isRunnerUnavailable(state.runErrorCode)) {
-      return {
-        label: "Check provider readiness",
-        description: "Provider/tool availability blocked the selected run; verify binary/auth/quota in Readiness before retrying the same pipeline.",
-        primaryActionId: "readiness",
-        intent: "open-readiness",
-      };
-    }
-    return {
-      label: "Review blocker",
-      description: "Focus the failed shard, pending permission or runtime error before retrying analysis.",
-      primaryActionId: "analysis",
-      intent: "focus-analysis-blocker",
-    };
-  }
-  switch (activeStage) {
-    case "source":
-      return {
-        label: "Save and validate sources",
-        description: "Persist source settings to workspace.yaml and run workspace validation.",
-        primaryActionId: "source",
-      };
-    case "readiness":
-      if (!state.validateOK) {
-        return {
-          label: "Validate workspace",
-          description: "Check manifest, layout and repo source resolution.",
-          primaryActionId: "readiness",
-        };
-      }
-      if (!state.doctorOK) {
-        return {
-          label: "Check local readiness",
-          description: "Verify local git, workspace write access, embedded UI and runtime provider readiness.",
-          primaryActionId: "readiness",
-        };
-      }
-      return {
-        label: "Run first analysis",
-        description: "Start init pipeline after validation and local readiness pass.",
-        primaryActionId: "readiness",
-      };
-    case "charter":
-      return {
-        label: "Save charter contract",
-        description: "Persist scope, NFR priorities and rules for step0 constitution.",
-        primaryActionId: "charter",
-      };
-    case "analysis":
-      return {
-        label: state.hasRun ? "Run refresh" : "Run init",
-        description: state.hasRun ? "Refresh architecture evidence from the current workspace." : "Run the initial staged architecture analysis.",
-        primaryActionId: "analysis",
-      };
-    case "review":
-      if (state.blockersCount > 0) {
-        if (state.releaseBlockersCount > 0) {
-          return {
-            label: "Verify release blockers",
-            description: "Inspect validation evidence before making a publication decision.",
-            primaryActionId: "review",
-          };
-        }
-        if (state.hardBlockersCount === 0 && state.reviewFindingsCount > 0) {
-          return {
-            label: "Review findings",
-            description: "Inspect coverage questions and findings before publishing.",
-            primaryActionId: "review",
-          };
-        }
-        return {
-          label: "Resolve blockers",
-          description: "Resolve workspace, doctor or runtime blockers before publishing.",
-          primaryActionId: "readiness",
-        };
-      }
-      return {
-        label: state.hasArtifacts ? "Ask about evidence" : "Run analysis first",
-        description: state.hasArtifacts ? "Use workspace-backed Q&A to inspect unresolved architecture context." : "Start analysis to generate reviewable evidence artifacts.",
-        primaryActionId: state.hasArtifacts ? "ask" : "analysis",
-      };
-    case "proposals":
-      return {
-        label: state.hasProposals ? "Review proposal" : "Review results first",
-        description: state.hasProposals ? "Inspect the generated proposal package, linked evidence and publication readiness." : "No proposal artifacts are available yet.",
-        primaryActionId: state.hasProposals ? "proposals" : "review",
-      };
-    case "ask":
-      return {
-        label: "Ask workspace",
-        description: "Submit an agent-backed question over existing workspace artifacts.",
-        primaryActionId: "ask",
-        intent: "submit-ask",
-      };
-  }
 }

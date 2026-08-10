@@ -340,10 +340,23 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expectProductShellNavigation(page);
   await expect(page.getByTestId("home-panel")).toBeVisible();
   await expect(page.getByTestId("home-primary-action")).toHaveCount(1);
-  await expect(page.getByTestId("home-attention-reason")).not.toBeEmpty();
-  await expect(page.getByTestId("top-status-bar")).toContainText("ACP");
-  await expect(page.getByTestId("brand-version")).not.toHaveText(/v0\.1\.1 beta/i);
-  await expect(page.getByTestId("brand-version")).toHaveText(/^(dev|v?\d|\w)/);
+  // A snapshot-backed live run may open on the promoted architecture outcome
+  // instead of the pre-analysis attention list. Both are valid first-viewport
+  // states; assert the appropriate actionable content for the rendered state.
+  const homeAttentionReason = page.getByTestId("home-attention-reason");
+  if (await homeAttentionReason.count() > 0) {
+    await expect(homeAttentionReason).not.toBeEmpty();
+  } else {
+    await expect(page.locator(".home-hero, .home-map-card").first()).toBeVisible();
+  }
+  await expect(page.getByTestId("top-status-bar")).toContainText("ProvenArch");
+  const brandVersion = page.getByTestId("brand-version");
+  if (await brandVersion.count() === 0) {
+    await page.getByTestId("top-status-bar").getByRole("button", { name: "Details", exact: true }).click();
+  }
+  await expect(brandVersion).toBeVisible();
+  await expect(brandVersion).not.toHaveText(/v0\.1\.1 beta/i);
+  await expect(brandVersion).toHaveText(/^(dev|v?\d|\w)/);
   await expectNoDocumentOverflow(page);
   await captureEvidenceScreenshot(page, "frontend-home-desktop.png");
 
@@ -419,13 +432,17 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
 
-  await page.goto("/knowledge?view=overview&source=current");
+  await page.goto("/knowledge?view=documents&source=current");
   await expect(page.getByTestId("knowledge-panel")).toBeVisible();
   await expect(page.getByTestId("destination-knowledge")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("knowledge-panel")).toContainText("Current workspace");
-  await expect(page.getByTestId("knowledge-overview")).toBeVisible();
-  await page.getByRole("button", { name: "Artifacts", exact: true }).click();
-  await expect(page.getByTestId("knowledge-artifacts")).toBeVisible();
+  // Architecture is documents-first. Verify the default reader and the
+  // adjacent diagrams mode rather than the retired overview/artifacts tabs.
+  await expect(page.getByTestId("architecture-documents")).toBeVisible();
+  await page.getByRole("button", { name: "Diagrams", exact: true }).click();
+  await expect(page.getByTestId("architecture-diagrams")).toBeVisible();
+  await page.getByRole("button", { name: "Documents", exact: true }).click();
+  await expect(page.getByTestId("architecture-documents")).toBeVisible();
   await expectNoDocumentOverflow(page);
   await captureEvidenceScreenshot(page, "frontend-knowledge-desktop.png");
 
@@ -550,7 +567,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toBeVisible();
-  await expect(page.getByTestId("publish-readiness-summary")).toContainText("Publication set");
+  await expect(page.getByTestId("publish-readiness-summary")).toContainText(/Workspace scope|Publication set/);
   await expect(page.getByTestId("publish-section-jumps")).toContainText("Preview");
   await expect(page.getByTestId("publish-preview-panel")).toBeVisible();
   await expect(page.getByTestId("publish-preview-tabs")).toBeVisible();

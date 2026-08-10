@@ -20,11 +20,19 @@ import (
 const (
 	runtimeWriteAuditUnexpectedMutation = "runtime_write_audit_unexpected_mutation"
 	runtimeWriteAuditRepoSkipped        = "runtime_write_audit_repo_skipped"
+	runtimeWriteAuditRestoredMutation   = "runtime_write_audit_restored_mutation"
+	runtimeWriteAuditRestoreConflict    = "runtime_write_audit_restore_conflict"
 	runtimeWriteAuditMaxPaths           = 20
 )
 
+type runtimeProtectedFileSnapshot struct {
+	digest  string
+	content []byte
+	mode    os.FileMode
+}
+
 type runtimeWriteAuditSnapshot struct {
-	protectedFiles map[string]string
+	protectedFiles map[string]runtimeProtectedFileSnapshot
 	repoStatuses   map[string][]string
 	skippedRepos   []runtimeWriteAuditSkippedRepo
 }
@@ -45,8 +53,9 @@ func beginRuntimeWriteAudit(task acpruntime.Task) runtimeWriteAuditSnapshot {
 func (e *pipelineExecution) completeRuntimeWriteAudit(stepID string, domainID string, provider acpruntime.Provider, task acpruntime.Task, before runtimeWriteAuditSnapshot) error {
 	violations := []string{}
 	afterProtected := snapshotProtectedWorkspaceFiles(task.Workspace)
-	if changed := changedSnapshotPaths(before.protectedFiles, afterProtected); len(changed) > 0 {
+	if changed := changedProtectedSnapshotPaths(before.protectedFiles, afterProtected); len(changed) > 0 {
 		violations = append(violations, e.reportRuntimeWriteAuditWarning(stepID, domainID, task, "workspace", strings.TrimSpace(task.Workspace), changed))
+		e.restoreRuntimeWriteAuditMutations(stepID, domainID, task, before.protectedFiles, afterProtected, changed)
 	}
 
 	afterStatuses := snapshotAuditedRepoStatuses(task)
@@ -108,14 +117,14 @@ func (e *pipelineExecution) reportRuntimeWriteAuditWarning(stepID string, domain
 	return message
 }
 
-func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {
+func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]runtimeProtectedFileSnapshot {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot == "" {
-		return map[string]string{}
+		return map[string]runtimeProtectedFileSnapshot{}
 	}
 	absWorkspace, err := filepath.Abs(workspaceRoot)
 	if err != nil {
-		return map[string]string{}
+		return map[string]runtimeProtectedFileSnapshot{}
 	}
 	roots := []string{
 		"workspace.yaml",
@@ -123,7 +132,7 @@ func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {
 		filepath.Join("docs", "spec"),
 		"charter",
 	}
-	out := map[string]string{}
+	out := map[string]runtimeProtectedFileSnapshot{}
 	for _, relRoot := range roots {
 		absRoot := filepath.Join(absWorkspace, relRoot)
 		info, err := os.Lstat(absRoot)
@@ -131,8 +140,8 @@ func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {
 			continue
 		}
 		if !info.IsDir() {
-			if digest, ok := fileDigest(absRoot); ok {
-				out[filepath.ToSlash(relRoot)] = digest
+			if snapshot, ok := protectedFileSnapshot(absRoot); ok {
+				out[filepath.ToSlash(relRoot)] = snapshot
 			}
 			continue
 		}
@@ -140,7 +149,7 @@ func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {
 			if walkErr != nil || entry == nil || entry.IsDir() {
 				return nil
 			}
-			digest, ok := fileDigest(path)
+			snapshot, ok := protectedFileSnapshot(path)
 			if !ok {
 				return nil
 			}
@@ -148,11 +157,28 @@ func snapshotProtectedWorkspaceFiles(workspaceRoot string) map[string]string {
 			if relErr != nil {
 				return nil
 			}
-			out[filepath.ToSlash(rel)] = digest
+			out[filepath.ToSlash(rel)] = snapshot
 			return nil
 		})
 	}
 	return out
+}
+
+func protectedFileSnapshot(path string) (runtimeProtectedFileSnapshot, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return runtimeProtectedFileSnapshot{}, false
+	}
+	content, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return runtimeProtectedFileSnapshot{}, false
+	}
+	sum := sha256.Sum256(content)
+	return runtimeProtectedFileSnapshot{
+		digest:  hex.EncodeToString(sum[:]),
+		content: append([]byte(nil), content...),
+		mode:    info.Mode().Perm(),
+	}, true
 }
 
 func fileDigest(path string) (string, bool) {
@@ -333,6 +359,28 @@ func repoRootAppearsReadOnly(root string) bool {
 	return checked > 0
 }
 
+func changedProtectedSnapshotPaths(before map[string]runtimeProtectedFileSnapshot, after map[string]runtimeProtectedFileSnapshot) []string {
+	seen := map[string]struct{}{}
+	for path := range before {
+		seen[path] = struct{}{}
+	}
+	for path := range after {
+		seen[path] = struct{}{}
+	}
+	changed := []string{}
+	for path := range seen {
+		beforeSnapshot, beforeOK := before[path]
+		afterSnapshot, afterOK := after[path]
+		if !beforeOK || !afterOK || beforeSnapshot.digest != afterSnapshot.digest || beforeSnapshot.mode != afterSnapshot.mode {
+			changed = append(changed, path)
+		}
+	}
+	return normalizeAuditPaths(changed)
+}
+
+// changedSnapshotPaths retains the small digest-map helper used by older
+// package tests and callers; protected workspace audits use the richer typed
+// snapshot above so file modes can also be restored.
 func changedSnapshotPaths(before map[string]string, after map[string]string) []string {
 	seen := map[string]struct{}{}
 	for path := range before {
@@ -348,6 +396,96 @@ func changedSnapshotPaths(before map[string]string, after map[string]string) []s
 		}
 	}
 	return normalizeAuditPaths(changed)
+}
+
+// restoreRuntimeWriteAuditMutations removes provider writes from protected
+// workspace surfaces after the audit has observed them. A restore is only
+// attempted when the file still matches the post-run snapshot; if another
+// actor changed it after the provider exited, we leave it untouched and make
+// the conflict visible in the run log.
+func (e *pipelineExecution) restoreRuntimeWriteAuditMutations(
+	stepID string,
+	domainID string,
+	task acpruntime.Task,
+	before map[string]runtimeProtectedFileSnapshot,
+	after map[string]runtimeProtectedFileSnapshot,
+	changed []string,
+) {
+	restored := []string{}
+	conflicts := []string{}
+	for _, rel := range normalizeAuditPaths(changed) {
+		beforeSnapshot, hadBefore := before[rel]
+		afterSnapshot, hadAfter := after[rel]
+		path := filepath.Join(absClean(task.Workspace), filepath.FromSlash(rel))
+		current, currentOK := protectedFileSnapshot(path)
+		if hadAfter {
+			if !currentOK || current.digest != afterSnapshot.digest || current.mode != afterSnapshot.mode {
+				conflicts = append(conflicts, rel)
+				continue
+			}
+		} else if currentOK {
+			conflicts = append(conflicts, rel)
+			continue
+		}
+
+		if hadBefore {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				conflicts = append(conflicts, rel)
+				continue
+			}
+			if err := os.WriteFile(path, beforeSnapshot.content, beforeSnapshot.mode); err != nil {
+				conflicts = append(conflicts, rel)
+				continue
+			}
+			if err := os.Chmod(path, beforeSnapshot.mode); err != nil {
+				conflicts = append(conflicts, rel)
+				continue
+			}
+			restored = append(restored, rel)
+			continue
+		}
+
+		if !hadAfter {
+			if _, err := os.Lstat(path); err == nil {
+				conflicts = append(conflicts, rel)
+				continue
+			} else if !errors.Is(err, os.ErrNotExist) {
+				conflicts = append(conflicts, rel)
+				continue
+			}
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			conflicts = append(conflicts, rel)
+			continue
+		}
+		restored = append(restored, rel)
+	}
+
+	if len(restored) > 0 {
+		e.logInfo(stepID, domainID, runtimeWriteAuditRestoredMutation, map[string]any{
+			"audit_code":     runtimeWriteAuditRestoredMutation,
+			"task_id":        task.TaskID,
+			"restored_count": len(restored),
+			"restored_paths": limitAuditPaths(restored),
+		})
+	}
+	if len(conflicts) > 0 {
+		e.addWarning(fmt.Sprintf("%s: protected workspace paths changed after runtime and were left untouched", runtimeWriteAuditRestoreConflict))
+		e.logWarn(stepID, domainID, runtimeWriteAuditRestoreConflict, map[string]any{
+			"audit_code":     runtimeWriteAuditRestoreConflict,
+			"task_id":        task.TaskID,
+			"conflict_count": len(conflicts),
+			"conflict_paths": limitAuditPaths(conflicts),
+		})
+	}
+}
+
+func limitAuditPaths(paths []string) []string {
+	paths = normalizeAuditPaths(paths)
+	if len(paths) > runtimeWriteAuditMaxPaths {
+		return paths[:runtimeWriteAuditMaxPaths]
+	}
+	return paths
 }
 
 func changedRepoStatusPaths(before []string, after []string) []string {

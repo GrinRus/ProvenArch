@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCENARIOS=(
   "analysis-failed-shard-mock"
+  "happy-path-mock"
   "onboarding-recovery-mock"
   "permission-recovery-mock"
   "provider-stream-mock"

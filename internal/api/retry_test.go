@@ -111,7 +111,10 @@ func TestRetryEndpointRejectsPlanAfterParentStagingDrifts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(8 * time.Second)
+	// The fake pipeline is asynchronous and the live precheck may run the full Go suite
+	// concurrently on a constrained host. Keep the test bounded, but avoid treating normal
+	// scheduler contention as a retry-contract failure.
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		parent, ok := snapshot.Service.GetRun(runID)
 		if !ok {

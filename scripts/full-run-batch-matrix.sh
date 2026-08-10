@@ -62,6 +62,7 @@ CURRENT_SWEEP_ID=""
 CURRENT_BATCH_ID=""
 CURRENT_BATCH_ROOT=""
 CURRENT_DRIVER_LOG=""
+CURRENT_BATCH_PID=""
 CURRENT_SOURCE_KIND=""
 CURRENT_EXPECTED_REPO_COUNT=""
 CURRENT_REPOS_FILE=""
@@ -617,6 +618,40 @@ stop_current_profile_status_heartbeat() {
   CURRENT_PROFILE_STATUS_HEARTBEAT_PID=""
 }
 
+process_tree_pids() {
+  local root_pid="$1"
+  [[ "$root_pid" =~ ^[0-9]+$ ]] || return 0
+  printf '%s\n' "$root_pid"
+  local child_pid
+  while IFS= read -r child_pid; do
+    [[ "$child_pid" =~ ^[0-9]+$ ]] || continue
+    process_tree_pids "$child_pid"
+  done < <(pgrep -P "$root_pid" 2>/dev/null || true)
+}
+
+stop_current_batch_process() {
+  local batch_pid="${CURRENT_BATCH_PID:-}"
+  [[ "$batch_pid" =~ ^[0-9]+$ ]] || return 0
+  local pid
+  local -a pids=()
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    pids+=("$pid")
+  done < <(process_tree_pids "$batch_pid")
+  [[ "${#pids[@]}" -gt 0 ]] || {
+    CURRENT_BATCH_PID=""
+    return 0
+  }
+  log "stopping active batch process tree: pid=$batch_pid"
+  kill -TERM "${pids[@]}" >/dev/null 2>&1 || true
+  sleep 1
+  # Reuse the original PID snapshot: the batch shell may exit on TERM while a
+  # provider descendant is still alive and therefore no longer discoverable.
+  kill -KILL "${pids[@]}" >/dev/null 2>&1 || true
+  wait "$batch_pid" >/dev/null 2>&1 || true
+  CURRENT_BATCH_PID=""
+}
+
 start_current_profile_status_heartbeat() {
   stop_current_profile_status_heartbeat
   [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
@@ -655,6 +690,7 @@ signal_exit_code() {
 on_matrix_signal() {
   local signal_name="$1"
   log "received termination signal: $signal_name profile=$CURRENT_PROFILE_ID sweep=$CURRENT_SWEEP_ID"
+  stop_current_batch_process
   stop_current_profile_status_heartbeat
   write_current_profile_status "failed" "infra_signal_terminated"
   exit "$(signal_exit_code "$signal_name")"
@@ -1417,7 +1453,8 @@ PY
   start_current_profile_status_heartbeat
   log "running profile=$profile_id sweep=$sweep_id source_kind=$PROFILE_META_CACHE_SOURCE_KIND expected_repo_count=$PROFILE_META_CACHE_EXPECTED_REPO_COUNT batch_id=$batch_id"
   status="passed"
-  if ! (
+  run_current_batch() {
+    (
     cd "$PROVENARCH_ROOT"
     if [[ "${#MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}" -gt 0 ]]; then
       for assignment in "${MATRIX_TIMEOUT_ENV_ASSIGNMENTS[@]}"; do
@@ -1463,7 +1500,14 @@ PY
       "ACP_CODEX_REASONING_EFFORT=$ACP_CODEX_REASONING_EFFORT" \
       "ACP_APPLY_TIMEOUTS_VIA_API=$ACP_APPLY_TIMEOUTS_VIA_API" \
       "$BATCH_SCRIPT" < /dev/null
-  ) >"$driver_log" 2>&1; then
+    ) >"$driver_log" 2>&1 &
+    CURRENT_BATCH_PID="$!"
+    local batch_rc=0
+    wait "$CURRENT_BATCH_PID" || batch_rc="$?"
+    CURRENT_BATCH_PID=""
+    return "$batch_rc"
+  }
+  if ! run_current_batch; then
     status="failed"
     log "profile+sweep failed: profile=$profile_id sweep=$sweep_id (see $driver_log)"
   fi

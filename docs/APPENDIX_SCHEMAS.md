@@ -431,5 +431,9 @@ client execution invariants covered by deterministic UI tests.
   new canonical workspace model schema; `semantic_source_run_id` preserves no-op baseline lineage.
 - Contract behavior is protected by Go API/orchestrator tests and TypeScript response types; unknown
   legacy fields remain safely absent rather than inferred.
+- `review-summary.review` is an additive transient run-pinned read model. Its contract is documented
+  in `docs/spec/API_SPEC.md`, represented by `fixtures/api/run-review-contract.json`, and covered by
+  Go API fixture tests plus the TypeScript `RunReviewContract` type. It does not alter persisted
+  `schemas/*` because the payload is derived from immutable run snapshots at request time.
 - Combined public-shape example/fixture: `examples/outcome-workflow.example.json` and
   `fixtures/api/outcome-workflow.json`.

@@ -1,16 +1,16 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
-import { architectureFromKnowledge } from "../lib/workspaceApi";
+import { architectureFromKnowledge, loadArtifactText } from "../lib/workspaceApi";
 import { ArchitectureMap, levelLabel } from "./ArchitectureMap";
+import { EvidenceViewer } from "./EvidenceViewer";
 
 const views: Array<{ id: KnowledgeView; label: string }> = [
-  { id: "map", label: "Map" },
-  { id: "overview", label: "Overview" },
-  { id: "catalog", label: "Catalog" },
-  { id: "flows", label: "Flows" },
-  { id: "evidence", label: "Evidence" },
+  { id: "documents", label: "Documents" },
+  { id: "diagrams", label: "Diagrams" },
+  { id: "model", label: "Model" },
+  { id: "findings", label: "Findings" },
 ];
 
 export function KnowledgePage({
@@ -20,9 +20,11 @@ export function KnowledgePage({
   error,
   view,
   selectedEntityID,
+  selectedArtifactPath,
   workspaceHealth,
   onViewChange,
   onEntityChange,
+  onDocumentChange,
   onOpenArtifact,
   onOpenRuns,
 }: {
@@ -32,9 +34,11 @@ export function KnowledgePage({
   error: string;
   view: KnowledgeView;
   selectedEntityID?: string;
+  selectedArtifactPath?: string;
   workspaceHealth?: WorkspaceHealthResponse | null;
   onViewChange: (view: KnowledgeView) => void;
   onEntityChange: (id?: string) => void;
+  onDocumentChange?: (path?: string) => void;
   onOpenArtifact: (path: string) => void;
   onOpenRuns?: () => void;
 }) {
@@ -95,7 +99,11 @@ export function KnowledgePage({
       {!loading && !error && architecture?.status === "unavailable" ? <div className="empty-state recovery-empty"><strong>No promoted knowledge is available.</strong><span>Run an analysis to create validator-approved architecture knowledge and C4 views. Source repositories stay read-only.</span>{onOpenRuns ? <button type="button" onClick={onOpenRuns}>Start or inspect analysis</button> : null}</div> : null}
       {architecture?.status === "partial" ? <aside className="status warn" role="status"><strong>Architecture is usable with gaps.</strong> Valid facts remain visible; {architecture.counts.issues} model issue(s) were excluded instead of guessed.</aside> : null}
 
-      {architecture && architecture.status !== "unavailable" && activeView && activePageView === "map" ? (
+      {architecture && architecture.status !== "unavailable" && activePageView === "documents" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="documents" /> : null}
+      {architecture && architecture.status !== "unavailable" && activePageView === "diagrams" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="diagrams" /> : null}
+      {architecture && architecture.status !== "unavailable" && activePageView === "findings" ? <FindingsView architecture={architecture} onOpenArtifact={onOpenArtifact} /> : null}
+
+      {architecture && architecture.status !== "unavailable" && activeView && (activePageView === "map" || activePageView === "model") ? (
         <div className="architecture-map-workspace">
           <div className="architecture-map-toolbar">
             <div className="segmented-control" aria-label="C4 level">
@@ -136,6 +144,54 @@ export function KnowledgePage({
       {workspaceHealth && activePageView === "evidence" ? <p className={`status ${workspaceHealth.status === "pass" ? "ok" : workspaceHealth.status === "warn" ? "warn" : "err"}`}>Workspace health: {workspaceHealth.status} · {workspaceHealth.summary.error} errors · {workspaceHealth.summary.warning} warnings</p> : null}
     </section>
   );
+}
+
+function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChange, onOpenArtifact, mode }: { architecture: ArchitectureResponse; selectedArtifactPath?: string; onDocumentChange?: (path?: string) => void; onOpenArtifact: (path: string) => void; mode: "documents" | "diagrams" }) {
+  const documents = architecture.artifacts.filter((artifact) => mode === "diagrams" ? artifact.path.endsWith(".mmd") : artifact.path.endsWith(".md")).sort((left, right) => left.path.localeCompare(right.path));
+  const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : documents[0]?.path;
+  const [content, setContent] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  useEffect(() => {
+    if (selectedPath && selectedPath !== selectedArtifactPath) onDocumentChange?.(selectedPath);
+  }, [onDocumentChange, selectedArtifactPath, selectedPath]);
+  useEffect(() => {
+    if (!selectedPath) {
+      setContent("");
+      setStatus("idle");
+      return;
+    }
+    let active = true;
+    setStatus("loading");
+    void loadArtifactText(selectedPath).then((value) => {
+      if (!active) return;
+      setContent(value ?? "");
+      setStatus(value === null ? "error" : "loaded");
+    });
+    return () => { active = false; };
+  }, [selectedPath]);
+  return <div className="architecture-documents" data-testid={`architecture-${mode}`}>
+    <aside className="architecture-document-tree" aria-label={`${mode === "documents" ? "Document" : "Diagram"} tree`}>
+      <div><p className="eyebrow">{mode === "documents" ? "Documents" : "Diagrams"}</p><h2>{documents.length} available</h2><p className="hint">Selected promoted workspace authority.</p></div>
+      {documents.length === 0 ? <p className="empty-state">No promoted {mode} are available yet.</p> : <ul>{documents.map((artifact) => <li key={artifact.path}><button type="button" aria-current={selectedPath === artifact.path ? "page" : undefined} onClick={() => onDocumentChange?.(artifact.path)}><strong>{artifact.name}</strong><code>{artifact.path}</code></button></li>)}</ul>}
+    </aside>
+    <section className="architecture-document-reader" aria-label="Architecture document reader">
+      {selectedPath && status === "loaded" ? <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} /> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
+    </section>
+    <aside className="architecture-document-context" aria-label="Document context">
+      <h2>Document context</h2>
+      <div className="document-context-group"><span>Trust</span><strong className="status ok">validated</strong><p>Promoted workspace authority · current snapshot.</p></div>
+      <div className="document-context-group"><span>Source</span><code>{selectedPath || "No document selected"}</code></div>
+      <div className="document-context-group"><span>Related</span><p>{mode === "documents" ? "System Context diagram" : "Architecture Home"}</p><p>Evidence and findings</p></div>
+      <button type="button" className="ui-button tone-primary" onClick={() => selectedPath && onOpenArtifact(selectedPath)} disabled={!selectedPath}>Open source artifact</button>
+    </aside>
+  </div>;
+}
+
+function FindingsView({ architecture, onOpenArtifact }: { architecture: ArchitectureResponse; onOpenArtifact: (path: string) => void }) {
+  const findings = architecture.review?.findings ?? [];
+  const questions = architecture.review?.questions ?? [];
+  const gaps = architecture.coverage?.missing ?? [];
+  return <section className="architecture-findings" data-testid="architecture-findings"><header><div><p className="eyebrow">Review queue</p><h2>Findings and open questions</h2><p className="hint">Only selected-run semantic findings and explicit coverage gaps are shown.</p></div><button type="button" onClick={() => onOpenArtifact("reports/findings/findings.md")}>Open findings document</button></header><div className="architecture-findings-grid"><article><h3>Findings <span>{findings.length}</span></h3>{findings.length === 0 ? <p className="empty-state">No findings in the promoted snapshot.</p> : <ul className="compact-list">{findings.map((finding) => <li key={finding.id}><strong>{finding.title}</strong><span>{finding.severity}</span><code>{finding.id}</code></li>)}</ul>}</article><article><h3>Questions <span>{questions.length}</span></h3>{questions.length === 0 ? <p className="empty-state">No open questions in the promoted snapshot.</p> : <ul className="compact-list">{questions.map((question) => <li key={question.id}><strong>{question.text}</strong><span>{question.priority || "open"}</span></li>)}</ul>}</article><article><h3>Coverage gaps <span>{gaps.length}</span></h3>{gaps.length === 0 ? <p className="empty-state">No named coverage gaps.</p> : <ul className="compact-list">{gaps.map((gap) => <li key={gap}><strong>{gap}</strong><span>coverage</span></li>)}</ul>}</article></div></section>;
 }
 
 function NodeInspector({ node, currentLevel, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; currentLevel: ArchitectureLevel; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {

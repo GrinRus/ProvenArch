@@ -23,7 +23,9 @@ type Props = {
 
 export function ChangesWorkspace({ view, source, page, review, proposals, publish, currentArtifact, viewerMode, askReturnAvailable, onViewerModeChange, onOpenCurrentArtifact, onReturnToAsk }: Props) {
   const model = buildChangesRouteModel(view, source);
-  const gitState = view === "proposals"
+  const gitState = source === "current"
+    ? "read-only"
+    : view === "proposals"
     ? proposals.gitDiff?.state ?? "unknown"
     : view === "publish"
       ? publish.gitDiff?.state ?? "unknown"
@@ -40,6 +42,15 @@ export function ChangesWorkspace({ view, source, page, review, proposals, publis
       </section>
     );
   } else content = <ReviewStagePanel {...review} routeView={view} />;
+
+  if (source === "current" && view !== "evidence") {
+    content = (
+      <section className="panel stage-panel current-evidence" data-testid="current-workspace-publish-blocked">
+        <h2>Current workspace is read-only</h2>
+        <p className="empty-state">This view cannot show historical review or publication data. Select Evidence to inspect the current workspace artifact, or choose a historical run from Changes.</p>
+      </section>
+    );
+  }
 
   return (
     <ChangesPage {...page} sourceMode={source} view={view}>

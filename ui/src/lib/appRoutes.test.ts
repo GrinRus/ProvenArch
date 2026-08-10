@@ -29,4 +29,18 @@ describe("application route codec", () => {
     expect(stageForRoute(parseAppRoute(location("/setup?step=runner"), true))).toBe("readiness");
     expect(destinationForStage("publish")).toBe("changes");
   });
+
+  it("opens Architecture in Documents while preserving legacy map aliases", () => {
+    const documents = parseAppRoute(location("/architecture"), true);
+    expect(documents).toMatchObject({ destination: "knowledge", knowledgeView: "documents" });
+    expect(formatAppRoute(documents)).toBe("/architecture?view=documents&source=current");
+    expect(parseAppRoute(location("/architecture/map"), true)).toMatchObject({ destination: "knowledge", knowledgeView: "map" });
+  });
+
+  it("does not crash on malformed percent-encoded path segments", () => {
+    const route = parseAppRoute({ pathname: "/runs/%E0%A4%A", search: "" } as Location, true);
+    expect(route.destination).toBe("runs");
+    expect(route.runId).toBe("%E0%A4%A");
+    expect(route.invalid).toContain("path");
+  });
 });

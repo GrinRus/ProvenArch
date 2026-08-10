@@ -979,6 +979,7 @@ type pipelineRuntimeState struct {
 	findingsOutcome          runtimeShardOutcome
 	findingsSkipped          bool
 	retryScopes              []string
+	runtimeWriteAuditMu      sync.Mutex
 }
 
 type pipelineQualityState struct {

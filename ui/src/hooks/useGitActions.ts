@@ -30,9 +30,18 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
     setGitStatus("");
     setGitError("");
     try {
+      if (action === "commit" && !gitMessage.trim()) {
+        throw new Error("Commit message is required.");
+      }
+      if (action === "branch" && !proposalBranch.trim()) {
+        throw new Error("Proposal branch name is required.");
+      }
       const diff = await loadWorkspaceGitDiff();
       if (diff.state === "blocked" || diff.state === "unknown" || diff.state === "stale") {
         throw new Error(diff.message || `Git state is ${diff.state}; refresh and resolve it before publication.`);
+      }
+      if (action === "commit" && diff.empty) {
+        throw new Error("There are no workspace changes to commit.");
       }
       setGitConfirmation({ action, diff });
     } catch (requestError) {

@@ -8,6 +8,10 @@ const testTimeoutSec = Math.max(360, initTimeoutSec + 120);
 
 export default defineConfig({
   testDir: "./e2e",
+  // This helper is imported by Vitest through vite.config.ts, but is not a
+  // Playwright spec. Ignoring it prevents Vitest's expect implementation from
+  // colliding with Playwright's global matchers before browser tests start.
+  testIgnore: ["**/liveArtifactQuality.test.ts"],
   outputDir,
   timeout: testTimeoutSec * 1000,
   expect: {

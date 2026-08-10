@@ -175,6 +175,7 @@ function createFetchMock(state: FetchMockState = {}) {
     ok: true,
     state: "dirty",
     workspace: "/tmp/workspace",
+    scope: "full_workspace",
     run_id: runID,
     step_id: null,
     selected_path: "reports/coverage/summary.md",
@@ -438,6 +439,7 @@ function createFetchMock(state: FetchMockState = {}) {
               status: "succeeded",
               started_at: "2026-04-03T12:00:00Z",
               finished_at: "2026-04-03T12:00:02Z",
+              authoritative_index: true,
               warnings: [],
               error_code: null,
               error: null,
@@ -891,7 +893,7 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
     fireEvent.click(screen.getByTestId("stage-ask"));
     return;
   }
-  const destination = stage === "analysis" ? "Runs" : stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
+  const destination = stage === "analysis" ? "Analyze" : stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
   const destinationLink = screen.getByRole("link", { name: destination });
   if (destinationLink.getAttribute("aria-current") !== "page") fireEvent.click(destinationLink);
   if (stage === "analysis") {
@@ -1483,10 +1485,16 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    for (const destination of ["Home", "Runs", "Architecture", "Changes", "Setup"]) {
+    for (const destination of ["Home", "Analyze", "Architecture", "Changes", "Settings", "Setup"]) {
       expect(screen.getByRole("link", { name: destination })).toBeInTheDocument();
     }
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-utility"));
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    const settingsDiagnostics = within(screen.getByTestId("settings-page")).getByRole("button", { name: /^Diagnostics$/ });
+    fireEvent.click(settingsDiagnostics);
+    expect(settingsDiagnostics).toHaveClass("is-active");
 
     navigateToStage("ask");
     expect(await screen.findByTestId("qa-panel")).toBeInTheDocument();
@@ -1571,7 +1579,7 @@ describe("App", () => {
 
     await renderConsoleApp("/home");
 
-    const action = screen.getByRole("button", { name: "Open Runs" });
+    const action = screen.getByRole("button", { name: "Open Analyze" });
     expect(action).not.toBeDisabled();
     fireEvent.click(action);
     expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
@@ -1607,6 +1615,23 @@ describe("App", () => {
     expect(await screen.findByTestId("home-panel")).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/home"));
     expect(screen.getByTestId("destination-home")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("does not invent a historical review when promoted architecture has no run identity", async () => {
+    const architecture = architecturePayload();
+    const authority = architecture.authority as MockJSON;
+    delete authority.source_run_id;
+    vi.stubGlobal("fetch", createFetchMock({ architectureResponse: architecture }));
+
+    await renderConsoleApp("/home");
+
+    const action = await screen.findByTestId("home-primary-action");
+    expect(action).toHaveTextContent("Explore architecture");
+    fireEvent.click(action);
+    await screen.findByTestId("knowledge-panel", {}, { timeout: 5000 });
+    expect(window.location.pathname).toBe("/architecture");
+    expect(window.location.search).toContain("view=documents");
+    expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
   });
 
   it("renders the Source V2 repo table with guided analysis scope summary", async () => {
@@ -1777,7 +1802,7 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    fireEvent.click(screen.getByRole("link", { name: "Runs" }));
+    fireEvent.click(screen.getByRole("link", { name: "Analyze" }));
     expect(window.location.pathname).toBe("/runs");
     expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
     window.history.pushState({}, "", "/setup");
@@ -1862,7 +1887,7 @@ describe("App", () => {
     await renderConsoleApp("/setup?step=sources");
 
     fireEvent.change(await screen.findByLabelText("workspace.yaml content"), { target: { value: "version: 1\nrepos: []\n" } });
-    fireEvent.click(screen.getByRole("link", { name: "Runs" }));
+    fireEvent.click(screen.getByRole("link", { name: "Analyze" }));
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Unsaved workspace or editor changes"));
     expect(window.location.pathname).toBe("/setup");
@@ -2439,19 +2464,20 @@ describe("App", () => {
     expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Gate");
     expect(screen.getByTestId("publish-section-jumps")).toHaveTextContent("Commit");
     expect(screen.getByTestId("publish-section-jumps").querySelector('a[href="#publish-gate-panel"]')).toBeInTheDocument();
-    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Publication set");
-    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("5 refs");
-    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("review");
+    await waitFor(() => expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Workspace Git inventory"));
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Workspace scope");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("3 changed");
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("ready");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("No loaded open questions");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Git action");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("ready");
-    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Selected run Git diff");
+    expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Full workspace Git diff");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("model");
     expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("proposals");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("No hard blockers");
     expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers");
     expect(screen.getByTestId("publish-open-questions")).toHaveTextContent("No open questions");
-    expect(screen.getByTestId("publish-ready-checks")).toHaveTextContent("Artifacts");
+    expect(screen.getByTestId("publish-ready-checks")).toHaveTextContent("Workspace Git inventory");
     expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("proposal/beta-refresh");
     expect(screen.getByTestId("publish-commit-selected-btn")).toBeInTheDocument();
     const proposalBranchButton = screen.getByTestId("git-proposal-branch-btn").closest("button") as HTMLButtonElement;
@@ -2461,12 +2487,13 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Coverage ready for publication."));
 
     fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Selected run Git diff"));
+    await waitFor(() => expect(screen.getByTestId("publish-panel")).toHaveTextContent("Full workspace Git diff"));
     await waitFor(() => expect(screen.getByTestId("git-diff-view")).toHaveTextContent("Workspace Git diff loaded."));
     expect(screen.getByTestId("git-diff-hunks")).toHaveTextContent("Workspace Git diff is reviewable.");
 
-    fireEvent.click(screen.getByRole("button", { name: "Load full workspace diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh full workspace diff" }));
     await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("Full workspace Git diff"));
+    await waitFor(() => expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers"));
 
     expect(screen.getByTestId("publish-preview-tabs")).toHaveTextContent("Changelog");
     expect(screen.getByTestId("publish-preview-tabs")).not.toHaveTextContent("Checklist");
@@ -2475,6 +2502,8 @@ describe("App", () => {
 
     const commitInput = screen.getByLabelText("Commit message");
     fireEvent.change(commitInput, { target: { value: "docs: publish architecture workspace" } });
+    expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeEnabled();
     fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
     fireEvent.click(await screen.findByRole("button", { name: "Commit all workspace changes" }));
     await waitFor(() => expect(screen.getByTestId("publish-commit-plan")).toHaveTextContent("committed: docs: publish architecture workspace"));
@@ -2639,7 +2668,8 @@ describe("App", () => {
     navigateToStage("publish");
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("0 refs");
+    await waitFor(() => expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Workspace Git inventory"));
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("3 changed");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Run analysis before publishing workspace artifacts.");
@@ -2651,6 +2681,37 @@ describe("App", () => {
     fireEvent.click(proposalBranchButton);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/commit")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter((call) => call[0] === "/api/git/proposal-branch")).toHaveLength(0);
+  });
+
+  it("does not offer a no-op workspace commit when the authoritative diff is clean", async () => {
+    vi.stubGlobal("fetch", createFetchMock({
+      runStarted: true,
+      gitDiff: {
+        ok: true,
+        state: "clean",
+        workspace: "/tmp/workspace",
+        scope: "full_workspace",
+        run_id: null,
+        step_id: null,
+        selected_path: null,
+        selected_file: null,
+        files: [],
+        folders: [],
+        hunks: [],
+        message: "No workspace Git changes.",
+        empty: true,
+      },
+      runArtifacts: { "run-1": { run_id: "run-1", artifacts: [{ path: "reports/as-is/overview.md", kind: "report", label: "Overview" }] } },
+      artifactText: { "reports/as-is/overview.md": "# Overview\n" },
+    }));
+
+    await renderConsoleApp("/changes?run=run-1&view=overview&source=snapshot&mode=rendered");
+    await screen.findByTestId("review-panel");
+    navigateToStage("publish");
+
+    await waitFor(() => expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("no changes"));
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeDisabled();
+    expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("workspace is clean");
   });
 
   it("blocks Publish Git actions when generated artifacts still have runtime blockers", async () => {
@@ -2683,7 +2744,7 @@ describe("App", () => {
     navigateToStage("publish");
 
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    await waitFor(() => expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Workspace Git inventory"));
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("blocked");
     expect(screen.getByTestId("publish-readiness-summary")).toHaveTextContent("runtime_contract_failed");
     expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("runtime_contract_failed");
@@ -2722,8 +2783,11 @@ describe("App", () => {
 
     navigateToStage("publish");
     expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("publish-diff-summary")).toHaveTextContent("reports/coverage"));
+    await waitFor(() => expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Workspace Git inventory"));
+    await waitFor(() => expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers"));
 
+    expect(screen.getByTestId("publish-hard-blockers")).toHaveTextContent("No hard blockers");
+    expect(screen.getByTestId("publish-commit-selected-btn")).toBeEnabled();
     fireEvent.click(screen.getByTestId("publish-commit-selected-btn"));
     fireEvent.click(await screen.findByRole("button", { name: "Commit all workspace changes" }));
 
@@ -4862,6 +4926,19 @@ describe("App", () => {
           error: "provider quota exhausted",
         },
       },
+      runList: [
+        {
+          run_id: runID,
+          pipeline: "refresh",
+          status: "failed",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: "2026-04-03T12:01:00Z",
+          warnings: [],
+          error_code: "runner_unavailable",
+          error: "provider quota exhausted",
+          authoritative_index: false,
+        },
+      ],
       runArtifacts: {
         [runID]: {
           run_id: runID,
@@ -4915,10 +4992,8 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("destination-changes"));
     await waitFor(() => expect(screen.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page"));
-    fireEvent.click(screen.getByTestId("stage-publish"));
-    expect(await screen.findByTestId("publish-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("Provider unavailable");
-    expect(screen.getByTestId("publish-gate-panel")).toHaveTextContent("run a successful analysis before publishing");
+    expect(screen.getByTestId("changes-open-run-studio")).toHaveTextContent("Open Run Studio");
+    expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
 
     navigateToStage("analysis");
     await screen.findByTestId("run-status-panel");
