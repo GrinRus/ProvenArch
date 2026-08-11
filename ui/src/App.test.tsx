@@ -1485,9 +1485,11 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    for (const destination of ["Home", "Analyze", "Architecture", "Changes", "Settings", "Setup"]) {
+    for (const destination of ["Tasks", "Home", "Analyze", "Architecture", "Changes", "Settings", "Setup"]) {
       expect(screen.getByRole("link", { name: destination })).toBeInTheDocument();
     }
+    expect(screen.getByTestId("destination-tasks")).toHaveTextContent("Tasks");
+    expect(screen.getByText("Legacy diagnostics")).toBeInTheDocument();
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("settings-utility"));

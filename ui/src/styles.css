@@ -5554,7 +5554,8 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 .primary-nav a[aria-current="page"] > span:first-child { color: #6de3d5; }
 .nav-collapse { align-self: flex-end; width: 26px !important; min-height: 28px !important; padding: 0 !important; color: #8ebdc0 !important; }
 .nav-section-label { margin: 8px 11px 7px; color: var(--sidebar-ink-muted); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
-.nav-section-label-utilities { margin-top: 22px; }
+.nav-section-label-utilities, .nav-section-label-legacy { margin-top: 22px; }
+.nav-section-label-legacy { color: var(--sidebar-ink-muted); }
 .product-content { width: min(1340px, 100%); padding: 28px 32px 42px; }
 .context-drawer { border-radius: var(--radius-panel); }
 .ui-button { min-height: 39px; padding: 0 14px; border-radius: 9px; font-weight: 720; }

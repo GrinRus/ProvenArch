@@ -159,7 +159,9 @@ the final removal of Home/Analyze routes.
       allowlisted Markdown reader/editor, W23I model inspector, W23J Mermaid Evidence Studio,
       W23K findings queue, W23L Changes context, W23M Ask/Runner authority boundaries and W23N
       Task state/accessibility coverage are implemented additively.
-- [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
+- [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors. The first
+      navigation slice now groups Tasks/Architecture/Changes as Workspace and labels Home/Analyze
+      as Legacy diagnostics; component removal remains in W23O.
 
 ### Non-goals
 
@@ -197,7 +199,8 @@ the final removal of Home/Analyze routes.
   snapshot publication. W23M now makes the global Ask read-only authority and Runner Settings
   desired/effective/source boundary explicit, including provider-outage behavior. W23N now covers
   Task Inbox empty/error recovery, keyboard row activation, 44px filter/Attempt targets and explicit
-  status semantics; W23O remains pending.
+  status semantics. The first 23B2 navigation slice now makes Tasks primary and labels legacy
+  diagnostics; final Home/Analyze removal remains in W23O.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

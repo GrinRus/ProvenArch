@@ -19,11 +19,15 @@ type ProductShellProps = {
   onRefresh: () => void;
 };
 
-const destinations: Array<{ id: WorkflowDestination; label: string; icon: string }> = [
-  { id: "home", label: "Home", icon: "⌂" },
-  { id: "runs", label: "Analyze", icon: "▶" },
+const workspaceDestinations: Array<{ id: WorkflowDestination; label: string; icon: string }> = [
+  { id: "tasks", label: "Tasks", icon: "▣" },
   { id: "knowledge", label: "Architecture", icon: "◇" },
   { id: "changes", label: "Changes", icon: "Δ" },
+];
+
+const legacyDestinations: Array<{ id: WorkflowDestination; label: string; icon: string }> = [
+  { id: "home", label: "Home", icon: "⌂" },
+  { id: "runs", label: "Analyze", icon: "▶" },
 ];
 
 export function ProductShell({ destination, workflow, workspacePath, runtimeLabel, buildLabel, buildTitle, workspaceValid, children, onDestinationChange, onAsk, onDiagnostics, onRefresh }: ProductShellProps) {
@@ -49,10 +53,12 @@ export function ProductShell({ destination, workflow, workspacePath, runtimeLabe
         </div>
       </header>
       <div className={`product-layout ${navCollapsed ? "nav-collapsed" : ""}`}>
-        <nav className="primary-nav" aria-label="Primary">
-          <button className="nav-collapse" type="button" aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={() => setNavCollapsed((value) => !value)}>{navCollapsed ? "›" : "‹"}</button>
+          <nav className="primary-nav" aria-label="Primary">
+            <button className="nav-collapse" type="button" aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={() => setNavCollapsed((value) => !value)}>{navCollapsed ? "›" : "‹"}</button>
           <p className="nav-section-label">Workspace</p>
-          {destinations.map((item) => <a key={item.id} href={destinationPaths[item.id]} data-testid={`destination-${item.id}`} aria-current={destination === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange(item.id); }}><span aria-hidden="true">{item.icon}</span><span className="nav-label">{item.label}</span></a>)}
+          {workspaceDestinations.map((item) => <a key={item.id} href={destinationPaths[item.id]} data-testid={`destination-${item.id}`} aria-current={destination === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange(item.id); }}><span aria-hidden="true">{item.icon}</span><span className="nav-label">{item.label}</span></a>)}
+          <p className="nav-section-label nav-section-label-legacy">Legacy diagnostics</p>
+          {legacyDestinations.map((item) => <a key={item.id} href={destinationPaths[item.id]} data-testid={`destination-${item.id}`} aria-current={destination === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange(item.id); }}><span aria-hidden="true">{item.icon}</span><span className="nav-label">{item.label}</span></a>)}
           <p className="nav-section-label nav-section-label-utilities">Utilities</p>
           <a href={destinationPaths.settings} data-testid="settings-nav" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}><span aria-hidden="true">⚙</span><span className="nav-label">Settings</span></a>
           <a href={destinationPaths.setup} data-testid="setup-nav" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}><span aria-hidden="true">↗</span><span className="nav-label">Setup</span></a>
