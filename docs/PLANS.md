@@ -8,6 +8,7 @@ ExecPlan помогает агентам доставлять многошаго
 - `docs/archive/PLANS_ARCHIVE_2026-05.md`
 - `docs/archive/PLANS_ARCHIVE_2026-06.md`
 - `docs/archive/PLANS_ARCHIVE_2026-07.md`
+- `docs/archive/PLANS_ARCHIVE_2026-08.md`
 - `docs/archive/PLANS_SNAPSHOT_2026-04-21.md`
 
 Канонический stakeholder статус находится в `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.

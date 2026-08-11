@@ -1,34 +1,22 @@
 # UI Console V2 Design Baseline
 
-Статус: **historical approved V2 design baseline and current shell lineage**, 2026-05-27.
+Статус: **superseded historical V2 design record; not a target baseline**, 2026-05-27.
 
-Будущее post-beta направление зафиксировано в
-[`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md). Текст и
-PNG этого документа сохраняются для traceability; до инкрементальной миграции фактическое
-поведение продукта остаётся Console V2. Порядок безопасного cutover и retirement описан в
-[`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+Единственное актуальное planned-направление зафиксировано в
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md), а порядок cutover — в
+[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md). Старые PNG
+удалены намеренно: этот текст остаётся только как traceability реализованного lineage.
 
 Этот документ фиксирует историческую V2 design specification и решения, на которых построена
 текущая консоль. Спецификация была реализована частично: фактическое поведение описывают README и
 `docs/ARCHITECTURE.md`; approval affordances и selected-artifact commit copy ниже не следует
 считать действующими contracts.
 
-## Visual references
+## Retired visual references
 
-Approved PNG references are stored in `docs/assets/ui-console-v2/`:
-
-- [01 Source](assets/ui-console-v2/01-source.png)
-- [02 Readiness](assets/ui-console-v2/02-readiness.png)
-- [03 Charter](assets/ui-console-v2/03-charter.png)
-- [04 Analysis](assets/ui-console-v2/04-analysis.png)
-- [05 Review - Evidence](assets/ui-console-v2/05-review-evidence.png)
-- [06 Review - Domain Map](assets/ui-console-v2/06-review-domain-map.png)
-- [07 Proposals](assets/ui-console-v2/07-proposals.png)
-- [08 Ask](assets/ui-console-v2/08-ask.png)
-- [09 Publish](assets/ui-console-v2/09-publish.png)
-
-The PNGs are design references, not product runtime assets. Implementation should translate them
-into native React/CSS components and preserve the behavior contracts below.
+The former V2 PNG set was removed on 2026-08-11. Use the task-first reference inventory in
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md); behavior claims for the
+current binary remain in README and `ARCHITECTURE.md`.
 
 ## Product framing
 

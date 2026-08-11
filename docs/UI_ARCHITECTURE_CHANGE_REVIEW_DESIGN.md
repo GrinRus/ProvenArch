@@ -1,11 +1,11 @@
-# Architecture Change Review — целевой UX/UI baseline
+# Architecture Change Review — superseded UX/UI exploration
 
-Статус: **user-selected approved target direction, planned implementation**, 2026-07-15.
+Статус: **superseded historical exploration; not implementation acceptance**, 2026-07-15.
 
-Реализованный продуктовый baseline остаётся Console V2 и описан в
-[`UI_CONSOLE_V2_DESIGN.md`](UI_CONSOLE_V2_DESIGN.md). Этот документ задаёт post-beta
-направление для Epic 20 и не утверждает, что новая навигация, экраны или состояния уже
-реализованы.
+Единственный актуальный planned UX baseline —
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md). Этот документ сохранён для
+decision traceability Epic 20; он не задаёт новые acceptance criteria и не должен использоваться
+как визуальный источник реализации.
 
 Письменные UX-правила, state model и contract boundaries ниже авторитетнее PNG-референсов.
 Изображения задают композицию и визуальную иерархию, но не являются pixel-perfect контрактом.
@@ -805,29 +805,11 @@ separate: source identity must not be confused with success/failure.
 - Logs do not auto-scroll without pause when the operator has moved away from the end.
 - Long paths remain copyable and do not create page overflow.
 
-## 16. Reference screens
+## 16. Retired reference screens
 
-Project-owned design references live in `docs/assets/ui-architecture-change-review/`:
-
-1. [Guided Setup — Runner readiness](assets/ui-architecture-change-review/00-guided-setup-readiness.png)
-2. [Home — Needs attention](assets/ui-architecture-change-review/01-home-needs-attention.png)
-3. [Runs — Active Run Studio](assets/ui-architecture-change-review/02-run-studio-active.png)
-4. [Changes — Architecture Change Review](assets/ui-architecture-change-review/03-change-review-overview.png)
-5. [Changes — Evidence Studio](assets/ui-architecture-change-review/04-evidence-studio.png)
-6. [Knowledge — Architecture Atlas](assets/ui-architecture-change-review/05-knowledge-atlas.png)
-7. [Changes — Publish confirmation](assets/ui-architecture-change-review/06-publish-confirmation.png)
-
-Shared fictional fixture across references:
-
-- workspace: `Nova Platform`;
-- selected run: `run-20260714-1630`;
-- live provider: `claude-code`;
-- affected domain: `Payments`;
-- one high finding, three open questions and full-workspace Git changes;
-- source repositories remain read-only.
-
-The PNGs may contain minor generated typography imperfections. Implementation copy, behavior,
-counts and accessibility follow this document and deterministic fixtures, not accidental pixels.
+The former seven-screen PNG set was removed on 2026-08-11 to prevent it competing with the
+task-first target. The current 13-screen inventory is maintained only in
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 
 ## 17. Implementation sequence and Epic 20 mapping
 

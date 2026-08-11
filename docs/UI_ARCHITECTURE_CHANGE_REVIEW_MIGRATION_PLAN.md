@@ -1,6 +1,11 @@
-# Architecture Change Review — план переезда на новый UI
+# Architecture Change Review — superseded migration record
 
-Статус: **approved implementation wave plan; product UI not implemented**, 2026-07-15.
+Статус: **superseded historical Epic 20 migration record**, 2026-07-15.
+
+Актуальный planned cutover описан в
+[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md) и Epic 23.
+Ниже сохранена историческая последовательность решений Epic 20; она не задаёт acceptance для
+нового UI.
 
 Этот документ задаёт порядок доставки Epic 20. Он не создаёт второй backlog и не переименовывает
 существующие slice `20A–20N`: [`BACKLOG.md`](BACKLOG.md) остаётся acceptance backlog,
@@ -73,27 +78,10 @@ boundary или фактический full-workspace `git add -A` contract.
 | Предыдущий UX evidence | [`ux_current_state_20260707.md`](../reports/ux_current_state_20260707.md), [`ux_ui_assessment_20260708.md`](../reports/ux_ui_assessment_20260708.md) | Проверка, что новый slice закрывает исходную task-level проблему, а не только меняет стиль |
 | Repo operating rules | [`AGENTS.md`](../AGENTS.md) | Local-first boundary, contract sync и обязательный DoD |
 
-### 3.2 Reference screens
+### 3.2 Retired reference screens
 
-Все семь экранов используют одну фиктивную Nova Platform fixture. Они задают композицию,
-иерархию, density и visual character:
-
-1. [Guided Setup — Runner readiness](assets/ui-architecture-change-review/00-guided-setup-readiness.png)
-2. [Home — Needs attention](assets/ui-architecture-change-review/01-home-needs-attention.png)
-3. [Runs — Active Run Studio](assets/ui-architecture-change-review/02-run-studio-active.png)
-4. [Changes — Architecture Change Review](assets/ui-architecture-change-review/03-change-review-overview.png)
-5. [Changes — Evidence Studio](assets/ui-architecture-change-review/04-evidence-studio.png)
-6. [Knowledge — Architecture Atlas](assets/ui-architecture-change-review/05-knowledge-atlas.png)
-7. [Changes — Publish confirmation](assets/ui-architecture-change-review/06-publish-confirmation.png)
-
-При review реализации сравниваем не координаты пикселей, а:
-
-- порядок title -> source/state -> primary action;
-- одну доминирующую рабочую область вместо nested-card grid;
-- явную source identity и demo/live identity;
-- progressive disclosure diagnostics;
-- читабельность evidence и Git scope;
-- responsive hierarchy и сохранение task completion.
+Former Epic 20 PNGs were removed on 2026-08-11. Visual review for future implementation uses only
+the 13-screen inventory in [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 
 ### 3.3 Внешние interaction references
 
