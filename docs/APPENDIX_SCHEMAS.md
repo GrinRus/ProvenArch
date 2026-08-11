@@ -281,7 +281,20 @@ Output mapping rules:
 }
 ```
 
-## 8) Source Revisions Schema
+## 8) Task/Attempt contracts
+
+- **Source of truth:** `schemas/task.schema.json`, `schemas/attempt.schema.json` and `schemas/task-history.schema.json`.
+- `Task` is durable user intent with a server-generated opaque `task_id`, monotonic revision,
+  explicit repository/path scope, desired runner preset and explicit outcome/publication states.
+- `Attempt` is an immutable admitted snapshot with its own opaque id, exact `task_id`/`run_id`
+  linkage, parent retry lineage, effective provider/model/permission/scope snapshot and terminal
+  evidence summary.
+- `task-history.json` is a versioned registry. Its semantic validator checks unique identities,
+  task-to-attempt membership, exact run/revision/status summary joins and same-task parent lineage.
+- Historical pipeline runs are not synthesized as Tasks; legacy run identity remains outside this
+  registry and is read-only until an explicit user action creates a Task.
+
+## 9) Source Revisions Schema
 
 - **Source of truth:** `schemas/source-revisions.schema.json`
 - Per-run, pre-execution audit artifact at `reports/taskruns/<run_id>/source-revisions.json`.
@@ -289,7 +302,7 @@ Output mapping rules:
 - Absolute resolved checkout paths are not persisted. A configured absolute local path is represented by a stable redacted `external/<name>-<hash>` identity.
 - Dirty/unavailable/non-ancestor states are valid conservative results, not parse failures.
 
-## 9) Refresh Impact Plan Schema
+## 10) Refresh Impact Plan Schema
 
 - **Source of truth:** `schemas/refresh-impact-plan.schema.json`
 - Pre-collect refresh audit artifact at `reports/taskruns/<run_id>/refresh-impact-plan.json`.
@@ -297,13 +310,13 @@ Output mapping rules:
 - `repo_deltas[]` preserve complete changed-file status including rename/copy original path, scope and mapped shards/domains. More than 10,000 changed paths records the exact count with `changes_complete=false` and never maps a partial list.
 - Stale/preserved artifacts are candidates only; this schema does not authorize selective execution or promotion.
 
-## 10) Refresh Execution Schema
+## 11) Refresh Execution Schema
 
 - **Source of truth:** `schemas/refresh-execution.schema.json`
 - Фиксирует фактический режим refresh (`no_op`, `affected_only`, `full`), исходное решение planner, source ranges, причины fallback и реально сохранённые/затронутые shards.
 - `refresh-impact-plan.json` остаётся неизменяемым advisory input; execution audit не переписывает исходное решение planner.
 
-## 11) Refresh Materialization Schema
+## 12) Refresh Materialization Schema
 
 - **Source of truth:** `schemas/refresh-materialization.schema.json`
 - Фиксирует решения `updated`, `preserved`, `removed`, `uncertain`, baseline provenance и SHA-256 доступного содержимого.
@@ -316,7 +329,7 @@ identity, source ranges and sorted SHA-256/size inventory. Missing/legacy/invali
 full refresh; they are never inferred from mutable canonical files. Its parser and fixtures live
 with orchestrator tests so no public example or schema is added.
 
-## 12) QA Answer Schema
+## 13) QA Answer Schema
 
 - **Source of truth:** `schemas/qa-answer.schema.json`
 - Primary runtime output для async Ask step `qa.ask`.
@@ -338,7 +351,7 @@ Semantic role:
 - file is written only under `reports/taskruns/<run_id>/qa/qa-answer.json`;
 - it is run/audit output, not a promoted canonical architecture artifact.
 
-## 13) Source QA Answer Schema
+## 14) Source QA Answer Schema
 
 - **Source of truth:** `schemas/source-qa-answer.schema.json`
 - Immutable provenance record inside an explicitly created Ask-to-Proposal package.
@@ -352,7 +365,7 @@ Optional `operator_note` records the confirming operator context. The closed sch
 before atomic directory publication. It is a provenance record, not a replacement for the
 immutable taskrun answer.
 
-## 14) Model conventions
+## 15) Model conventions
 
 - **Source of truth:** `docs/spec/MODEL_SPEC.md`
 - Каноническая модель хранится как entity-per-file:
@@ -361,14 +374,14 @@ immutable taskrun answer.
 - Stable ID patterns и normalization rules зафиксированы в `MODEL_SPEC`.
 - Канонические patterns в MVP: `svc.<slug>`, `team.<slug>`, `repo.<slug>`, `ext.<slug>`, `db.<engine>.<slug>`, `api.http.<service-slug>.<method>.<path-slug>`, `api.grpc.<service-slug>.<service>.<method>`, `topic.<slug>`, `edge.<from>.<type>.<to>`.
 
-## 12) Charter и skills conventions
+## 16) Charter и skills conventions
 
 - **Source of truth:** `docs/spec/PIPELINE_SPEC.md`
 - Charter хранится в `charter/`.
 - Cards `charter/cards/domains/*` и `charter/cards/teams/*` являются canonical human-owned source of truth; runtime pipeline не пишет в них напрямую.
 - Skills хранятся в `skills/` в версионируемом формате (manifest + prompts + templates).
 
-## 13) Изменения схем/контрактов
+## 17) Изменения схем/контрактов
 
 Public HTTP contracts, не представленные JSON Schema, фиксируются в
 `docs/spec/API_SPEC.md` и проверяются handler tests + TypeScript response types. Для Epic 20
@@ -402,7 +415,7 @@ Epic 22J adds transient `state` to the existing Git diff HTTP read model; it is 
 Epic 22K changes no API or persisted schema; immutable request keys and URL canonicalization are
 client execution invariants covered by deterministic UI tests.
 
-## 14) Current knowledge API read model
+## 18) Current knowledge API read model
 
 - **Source of truth:** `docs/spec/API_SPEC.md` (`GET /api/knowledge`) и Go response types в `internal/api/knowledge.go`.
 - Это transient read model, а не новая persisted schema: `schemas/*` не меняются.
@@ -413,7 +426,7 @@ client execution invariants covered by deterministic UI tests.
 - Malformed/unreadable/broken-reference файл фиксируется в typed `issues[]` и переводит общий `status` в `partial`, не скрывая валидные записи.
 - Contract examples: `examples/knowledge-current-workspace.example.json` и `fixtures/api/knowledge-current-workspace.json`.
 
-## 15) Architecture, progress and retry read models
+## 19) Architecture, progress and retry read models
 
 - `GET /api/architecture`, run `progress/result/recovery/retry` and retry-plan responses are
   transient API read models documented in `docs/spec/API_SPEC.md`; canonical `schemas/*` remain

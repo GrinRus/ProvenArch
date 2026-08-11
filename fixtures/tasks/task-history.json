@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "generated_at": "2026-08-11T10:05:00Z",
+  "tasks": [
+    {
+      "version": 1,
+      "task_id": "task_20260811_0001",
+      "title": "Refresh payments architecture",
+      "goal": "Reconcile the payments service architecture with the current repository evidence.",
+      "context": "Use the existing workspace contract and preserve explicit evidence links.",
+      "scope": {"repositories": [{"name": "payments-service", "paths": ["."]}]},
+      "desired_runner": {"preset": "default", "mode": "fake", "provider": "claude-code", "model": "sonnet", "effort": "high", "permissions": "trusted_full_access"},
+      "lifecycle": "open",
+      "revision": 1,
+      "created_at": "2026-08-11T10:00:00Z",
+      "updated_at": "2026-08-11T10:00:00Z",
+      "last_activity_at": "2026-08-11T10:05:00Z",
+      "archived_at": null,
+      "attempts": [{"attempt_id": "attempt_20260811_0001", "run_id": "run_20260811_100000_001", "parent_attempt_id": null, "task_revision": 1, "status": "succeeded", "admitted_at": "2026-08-11T10:01:00Z", "updated_at": "2026-08-11T10:05:00Z", "finished_at": "2026-08-11T10:05:00Z", "summary": "Promoted architecture snapshot is available.", "retained_evidence": "full"}],
+      "outcome": {"state": "available", "attempt_id": "attempt_20260811_0001", "run_id": "run_20260811_100000_001", "snapshot_path": "reports/taskruns/run_20260811_100000_001/promoted-snapshot/architecture-snapshot.json"},
+      "publication": {"state": "unavailable", "unavailable_reason": "No Git publication has been requested."}
+    }
+  ],
+  "attempts": [
+    {
+      "version": 1,
+      "attempt_id": "attempt_20260811_0001",
+      "task_id": "task_20260811_0001",
+      "run_id": "run_20260811_100000_001",
+      "parent_attempt_id": null,
+      "task_revision": 1,
+      "intent_snapshot": {"title": "Refresh payments architecture", "goal": "Reconcile the payments service architecture with the current repository evidence.", "context": "Use the existing workspace contract and preserve explicit evidence links.", "scope": {"repositories": [{"name": "payments-service", "paths": ["."]}]}, "desired_runner": {"preset": "default", "mode": "fake", "provider": "claude-code", "model": "sonnet", "effort": "high", "permissions": "trusted_full_access"}},
+      "effective_runtime": {"mode": "fake", "provider": "claude-code", "model": "sonnet", "effort": "high", "permissions": "trusted_full_access", "timeouts": {"pipeline_timeout_sec": 1800}, "scope": {"repositories": [{"name": "payments-service", "paths": ["."]}]}, "execution": {"strategy": "sequential", "max_parallel": 1, "failure_policy": "fail_fast", "shard_mode": "heuristics"}, "resolution_sources": {"provider": "task_preset", "model": "workspace", "effort": "workspace", "permissions": "workspace", "scope": "request"}},
+      "status": "succeeded",
+      "admitted_at": "2026-08-11T10:01:00Z",
+      "queued_at": "2026-08-11T10:01:00Z",
+      "started_at": "2026-08-11T10:01:01Z",
+      "finished_at": "2026-08-11T10:05:00Z",
+      "terminal_summary": {"status": "succeeded", "summary": "Promoted architecture snapshot is available.", "retained_evidence": "full"},
+      "retained_evidence": "full",
+      "outcome": {"state": "available", "run_id": "run_20260811_100000_001", "snapshot_path": "reports/taskruns/run_20260811_100000_001/promoted-snapshot/architecture-snapshot.json"},
+      "publication": {"state": "unavailable", "unavailable_reason": "No Git publication has been requested."}
+    }
+  ],
+  "diagnostics": []
+}

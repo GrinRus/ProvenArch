@@ -49,8 +49,9 @@
    - Реализованное поведение ниже описывает текущий binary. Planned task-first cutover
      `Tasks / Architecture / Changes`, runner presets и content-aware artifact workbenches
      зафиксированы отдельно в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md)
-     и accepted target contract [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md); они не считаются
-     реализованными до acceptance Epic 23.
+     и accepted target contract [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md). W23A1 machine-readable
+     schemas and semantic Go contracts are now present; persistence, APIs, admission and UI remain
+     gated by the subsequent Epic 23 slices.
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → deterministic `ui/dist` встраивается в Go бинарь как
      versioned `internal/api/ui_dist`; CI verifies same-commit build determinism and rejects

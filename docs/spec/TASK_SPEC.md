@@ -1,10 +1,12 @@
-# Task and Attempt contract (accepted target, not implemented)
+# Task and Attempt contract (W23A1 schema/domain slice)
 
-Status: **accepted target for Epic 23; no current schema, API or UI implementation is claimed.**
+Status: **W23A1 schemas, semantic Go contracts, examples and provider-free fixtures are implemented.**
+Persistence, public Task APIs, Attempt admission and the task-first UI remain pending W23A2–W23O.
 
 This document fixes the product identity and persistence boundary that must exist before the
-Task-first shell can replace the implemented run-first UI. Until the 23A schema/API slice is
-accepted, current `/api/pipeline/runs*` behavior remains authoritative.
+Task-first shell can replace the implemented run-first UI only after the remaining W23A slices are
+accepted. Current `/api/pipeline/runs*` behavior remains authoritative until the Task API and
+admission boundary are wired into the service.
 
 ## 1) Goals
 

@@ -1581,22 +1581,34 @@ Native SCM webhook listener/hosted control plane остаются вне MVP; re
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.
 - Exact CLI flags, run log retention knobs, env precedence и local runbook examples намеренно не дублируются здесь; canonical source of truth — CLI help, `README.md` quickstart и профильные runbook docs.
 
-## 10) Planned Task-first API boundary (Epic 23; not implemented)
+## 10) Task-first API boundary (Epic 23; W23A1–A3 partial)
 
 Accepted Task/Attempt identity, persistence, lifecycle, admission and publication decisions are
-specified in `docs/spec/TASK_SPEC.md`. No `/api/tasks*` endpoint is part of the implemented v0 API
-until the schema-first 23A slice lands.
+specified in `docs/spec/TASK_SPEC.md`. W23A1 machine-readable contracts and W23A2 registry
+persistence are implemented, together with the read/write Task surface below. Attempt admission,
+retry and run linkage remain W23A4 work; existing `/api/pipeline/runs*` behavior is unchanged.
 
-The planned boundary adds create/list/read/update/archive operations for durable Tasks and exact
-nested Attempt admission/read/retry operations. Writes use server-generated opaque identities,
-optimistic Task revision checks and idempotent Attempt-start tokens. One Attempt maps to one exact
-pipeline run and snapshots effective runner/scope configuration at admission. Explicit Task,
-Attempt, run and publication identities never fall back to latest/current state.
+The implemented W23A3 boundary currently exposes:
+
+- `POST /api/tasks` with `{title, goal, context?, scope, desired_runner}`; the server creates a
+  versioned Task with an opaque id and explicit unavailable outcome/publication states.
+- `GET /api/tasks` with stable base64url cursors (`last_activity_at`, `task_id`), `limit` (1–100),
+  lifecycle/runner/repository filters and RFC3339 `from`/`to` activity filters.
+- `GET /api/tasks/<task_id>` and `PATCH /api/tasks/<task_id>`; PATCH requires
+  `expected_revision` and increments the server-owned revision.
+- `POST /api/tasks/<task_id>/archive` and `/unarchive`; both require `expected_revision`.
+- `GET /api/tasks/<task_id>/attempts` and
+  `GET /api/tasks/<task_id>/attempts/<attempt_id>`; both require an exact Task identity and never
+  fall back to another Task or latest run.
+
+Attempt admission, retry and idempotent start tokens are still W23A4 work. One admitted Attempt
+will map to one exact pipeline run and snapshot effective runner/scope configuration at admission.
+Explicit Task, Attempt, run and publication identities never fall back to latest/current state.
 
 Current `/api/pipeline/runs*` remains authoritative for implemented execution lifecycle and legacy
 run history during migration. Pre-contract runs remain readable but are not synthesized into Tasks.
-The exact JSON schemas, typed errors and pagination cursors must be added together with validators,
-fixtures and API tests in 23A; frontend code cannot invent an interim wire shape.
+The Task/Attempt JSON schemas, typed errors, pagination cursors, fixtures and API tests are now
+covered by the W23A1–A3 slice; frontend code cannot invent a parallel wire shape.
 
 Planned publication linkage extends successful Git mutation responses with server-authored
 Task/Attempt/run context and the exact confirmed full-workspace inventory fingerprint. It does not

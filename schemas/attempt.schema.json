@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/attempt.schema.json",
+  "title": "ACP Immutable Task Attempt",
+  "type": "object",
+  "required": [
+    "version",
+    "attempt_id",
+    "task_id",
+    "run_id",
+    "task_revision",
+    "intent_snapshot",
+    "effective_runtime",
+    "status",
+    "admitted_at",
+    "retained_evidence",
+    "outcome",
+    "publication"
+  ],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "attempt_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+    "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+    "run_id": {"type": "string", "minLength": 1},
+    "parent_attempt_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+    "retry_reason": {"type": "string", "maxLength": 2000},
+    "task_revision": {"type": "integer", "minimum": 1},
+    "intent_snapshot": {"$ref": "#/$defs/intent_snapshot"},
+    "effective_runtime": {"$ref": "#/$defs/effective_runtime"},
+    "status": {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "canceled", "timeout"]},
+    "admitted_at": {"type": "string", "format": "date-time"},
+    "queued_at": {"type": ["string", "null"], "format": "date-time"},
+    "started_at": {"type": ["string", "null"], "format": "date-time"},
+    "finished_at": {"type": ["string", "null"], "format": "date-time"},
+    "terminal_summary": {"$ref": "#/$defs/terminal_summary"},
+    "retained_evidence": {"type": "string", "enum": ["full", "summary_only", "unavailable"]},
+    "outcome": {"$ref": "#/$defs/outcome"},
+    "publication": {"$ref": "#/$defs/publication"}
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "required": ["repositories"],
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/repository_scope"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "repository_scope": {
+      "type": "object",
+      "required": ["name", "paths"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    },
+    "runner": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": {"type": "string", "minLength": 1, "maxLength": 128},
+        "mode": {"type": "string", "enum": ["fake", "headless"]},
+        "provider": {"type": "string", "enum": ["claude-code", "qwen-code", "codex-code"]},
+        "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "effort": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permissions": {"type": "string", "enum": ["trusted_full_access", "managed"]}
+      },
+      "additionalProperties": false
+    },
+    "intent_snapshot": {
+      "type": "object",
+      "required": ["title", "goal", "scope", "desired_runner"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "goal": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "context": {"type": "string", "maxLength": 50000},
+        "scope": {"$ref": "#/$defs/scope"},
+        "desired_runner": {"$ref": "#/$defs/runner"}
+      },
+      "additionalProperties": false
+    },
+    "execution_settings": {
+      "type": "object",
+      "properties": {
+        "strategy": {"type": "string", "enum": ["sequential", "parallel"]},
+        "max_parallel": {"type": "integer", "minimum": 1},
+        "failure_policy": {"type": "string", "enum": ["fail_fast", "best_effort"]},
+        "shard_mode": {"type": "string", "enum": ["heuristics", "semantic"]}
+      },
+      "additionalProperties": false
+    },
+    "effective_runtime": {
+      "type": "object",
+      "required": ["mode", "provider", "permissions", "scope", "execution", "resolution_sources"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["fake", "headless"]},
+        "provider": {"type": "string", "enum": ["claude-code", "qwen-code", "codex-code"]},
+        "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "effort": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permissions": {"type": "string", "enum": ["trusted_full_access", "managed"]},
+        "timeouts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+        "scope": {"$ref": "#/$defs/scope"},
+        "execution": {"$ref": "#/$defs/execution_settings"},
+        "step_overrides": {"type": "object", "additionalProperties": {"$ref": "#/$defs/runner"}},
+        "resolution_sources": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"type": "string", "enum": ["env", "workspace", "provider_default", "task_preset", "request"]}
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal_summary": {
+      "type": "object",
+      "required": ["status", "retained_evidence"],
+      "properties": {
+        "status": {"type": "string", "enum": ["succeeded", "failed", "canceled", "timeout"]},
+        "error_code": {"type": "string", "maxLength": 256},
+        "error": {"type": "string", "maxLength": 4000},
+        "summary": {"type": "string", "maxLength": 4000},
+        "retained_evidence": {"type": "string", "enum": ["full", "summary_only", "unavailable"]}
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {"type": "string", "enum": ["available", "unavailable"]},
+        "run_id": {"type": "string", "minLength": 1},
+        "snapshot_path": {"type": "string", "minLength": 1},
+        "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      },
+      "additionalProperties": false
+    },
+    "publication": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {"type": "string", "enum": ["linked", "unavailable"]},
+        "action": {"type": "string", "enum": ["commit", "branch", "pull_request"]},
+        "branch": {"type": "string", "minLength": 1},
+        "commit": {"type": "string", "minLength": 1},
+        "inventory_fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+        "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

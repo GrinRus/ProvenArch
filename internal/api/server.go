@@ -24,6 +24,7 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/qa"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtimeprofile"
+	producttasks "github.com/GrinRus/ProvenArch/internal/tasks"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 	"github.com/GrinRus/ProvenArch/internal/workspacehealth"
 )
@@ -38,6 +39,8 @@ type Server struct {
 	launcherMode      bool
 	consoleEntered    bool
 	service           *orchestrator.Service
+	taskRegistry      *producttasks.Registry
+	taskRegistryErr   error
 	runtimeConfig     ServerRuntimeConfig
 	serviceFactory    ServiceFactory
 	generation        uint64
@@ -96,6 +99,7 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 	if service != nil {
 		service.SetRuntimeMode(runtimeConfig.Mode)
 	}
+	taskRegistry, taskRegistryErr := producttasks.NewRegistry(ws, time.Now)
 	return &Server{
 		workspace:         ws,
 		workspacePath:     ws.Path,
@@ -103,6 +107,8 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		runtimeSelected:   true,
 		runtimeConfig:     runtimeConfig,
 		service:           service,
+		taskRegistry:      taskRegistry,
+		taskRegistryErr:   taskRegistryErr,
 		consoleEntered:    true,
 		generation:        1,
 	}
@@ -153,6 +159,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/pipeline/refresh", s.handlePipelineRefresh)
 	mux.HandleFunc("/api/pipeline/runs", s.handlePipelineRuns)
 	mux.HandleFunc("/api/pipeline/runs/", s.handlePipelineRuns)
+	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("/api/tasks/", s.handleTasks)
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/") {
@@ -276,6 +284,24 @@ func (s *Server) getService() *orchestrator.Service {
 	return s.sessionSnapshot().Service
 }
 
+func (s *Server) taskRegistrySnapshot() (*producttasks.Registry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.taskRegistry == nil {
+		if s.taskRegistryErr != nil {
+			return nil, s.taskRegistryErr
+		}
+		return nil, errors.New("task history is not available")
+	}
+	return s.taskRegistry, nil
+}
+
+func (s *Server) resetTaskRegistryLocked(ws workspace.Root) {
+	registry, err := producttasks.NewRegistry(ws, time.Now)
+	s.taskRegistry = registry
+	s.taskRegistryErr = err
+}
+
 func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
 	return s.sessionSnapshot().RuntimeConfig
 }
@@ -303,6 +329,7 @@ func (s *Server) mutateWorkspaceRoot(mutate func(workspace.Root) (workspace.Root
 	s.workspace = reopened
 	s.workspacePath = reopened.Path
 	s.workspaceSelected = true
+	s.resetTaskRegistryLocked(reopened)
 	s.generation++
 	return reopened, nil
 }
@@ -336,6 +363,7 @@ func (s *Server) saveWorkspaceManifest(content string) (*orchestrator.Service, e
 	s.workspace = reopened
 	s.workspacePath = reopened.Path
 	s.workspaceSelected = true
+	s.resetTaskRegistryLocked(reopened)
 	var reconcileService *orchestrator.Service
 	if s.service == nil && s.serviceFactory != nil {
 		s.service = s.serviceFactory(reopened, s.runtimeConfig)
@@ -356,6 +384,7 @@ func (s *Server) setWorkspace(ws workspace.Root) error {
 	s.workspace = ws
 	s.workspacePath = ws.Path
 	s.workspaceSelected = true
+	s.resetTaskRegistryLocked(ws)
 	s.generation++
 	return nil
 }
@@ -372,6 +401,8 @@ func (s *Server) setDraftWorkspace(path string) error {
 	s.workspacePath = path
 	s.workspaceSelected = true
 	s.service = nil
+	s.taskRegistry = nil
+	s.taskRegistryErr = nil
 	s.generation++
 	return nil
 }
@@ -387,6 +418,7 @@ func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, erro
 	s.workspace = ws
 	s.workspacePath = ws.Path
 	s.workspaceSelected = true
+	s.resetTaskRegistryLocked(ws)
 	if s.serviceFactory != nil {
 		s.service = s.serviceFactory(ws, s.runtimeConfig)
 	}
