@@ -132,6 +132,47 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   frontend and later Epic 24/25 slices remain pending.
 
 ### Plan ID
+EP-20260811-task-first-ui
+
+### Context
+
+The accepted Task-first target must enter the current shell additively. W23B1 establishes typed
+route/history authority and truthful containers before any primary-navigation cutover; later
+slices own Task data loading, composer, Attempt outcome, Architecture/Changes workbenches and
+the final removal of Home/Analyze routes.
+
+### Goals (must have)
+
+- [x] Add typed `/tasks`, `/tasks/new`, Task detail and Task/Attempt routes with exact identity
+      round-trips.
+- [x] Preserve optional Task context on Architecture and Changes routes.
+- [x] Fail closed on malformed or unsafe Task identities without selecting another run/result.
+- [x] Add an explicit read-only W23B1 target container with focused component coverage.
+- [ ] Implement Task Inbox/composer/detail/outcome and Attempt history vertical slices.
+- [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
+
+### Non-goals
+
+- Loading or mutating Task data before its owning vertical slice is ready.
+- Synthetic Tasks for historical runs or implicit latest-run selection.
+- Trusted live E2E; that remains gated behind W23 `23O` and W24 `24I`.
+
+### Acceptance criteria
+
+- [x] Task route codec preserves exact selected identities across direct load and format/parse
+      round-trips.
+- [x] Invalid Task path/query identity produces an explicit notice and canonical safe route.
+- [x] W23B1 target container exposes no fabricated Task/Attempt/run data.
+- [ ] Back/Forward/reload and rendered responsive/keyboard state matrix pass after cutover.
+- [ ] Full deterministic DoD passes for each merged UI slice.
+
+### Progress log
+
+- 2026-08-11: Implemented W23B1 typed route codec, Task-aware Architecture/Changes context and
+  truthful target container; focused and full UI unit/component tests and UI build pass. W23C–O
+  remain pending.
+
+### Plan ID
 EP-20260811-weak-model-validation-authority
 
 ### Context

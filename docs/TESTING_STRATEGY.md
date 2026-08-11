@@ -179,6 +179,9 @@ Baseline scenario set:
   - `reports/changelog/*` draft files are activated through the journaled file path while preserving existing changelog history; stale managed artifact registry entries are removed only after successful activation
 - UI route-shell seams:
   - feature-owned Changes/Knowledge/Publish view models receive authoritative route/data inputs;
+  - W23B1 route codec tests cover Task Inbox/New/Detail/Attempt deep links, optional Task context on
+    Architecture/Changes and fail-closed unsafe identities; the target container is tested to avoid
+    legacy/latest-run fallback;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
