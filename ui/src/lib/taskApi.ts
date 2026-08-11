@@ -26,7 +26,7 @@ export type ProductTask = {
   updated_at: string;
   last_activity_at: string;
   attempts: Array<{ attempt_id: string; run_id: string; status: string; updated_at: string }>;
-  outcome: { state: "available" | "unavailable"; unavailable_reason?: string };
+  outcome: { state: "available" | "unavailable"; unavailable_reason?: string; attempt_id?: string; run_id?: string; snapshot_path?: string };
   publication: { state: "linked" | "unavailable"; unavailable_reason?: string };
 };
 

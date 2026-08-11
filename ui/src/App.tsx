@@ -1034,6 +1034,7 @@ export default function App() {
 	    onSelectTask={(taskId, filters) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: filters, invalid: [] })}
 	    onSelectAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
 	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
+	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", taskId, invalid: [] })}
 	  /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace
