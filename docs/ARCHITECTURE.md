@@ -51,10 +51,11 @@
      зафиксированы отдельно в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md)
      и accepted target contract [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md). W23A1 machine-readable
      schemas, semantic Go contracts, durable registry, Task APIs and Attempt admission are now
-     present; W23B1 additive typed Task routes, W23C composer, W23D public Inbox/detail/history reads
-     and W23E exact-run outcome rendering are now present, while the Task-first shell cutover remains
-     gated by the subsequent Epic 23 slices. Inbox state and semantic outcome display are derived only
-     from authoritative Task/Attempt and public run-review identities, never from legacy run recency.
+     present; W23B1 additive typed Task routes, W23C composer, W23D public Inbox/detail/history reads,
+     W23E exact-run outcome rendering and W23F Attempt-bound Pipeline Studio are now present, while
+     the Task-first shell cutover remains gated by the subsequent Epic 23 slices. Inbox state,
+     semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and
+     public run-review identities, never from legacy run recency or provider-output heuristics.
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → deterministic `ui/dist` встраивается в Go бинарь как
      versioned `internal/api/ui_dist`; CI verifies same-commit build determinism and rejects

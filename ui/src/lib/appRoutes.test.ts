@@ -44,6 +44,9 @@ describe("application route codec", () => {
     const attempt = parseAppRoute(location("/tasks/task-opaque/attempts/attempt-opaque"), true);
     expect(attempt).toMatchObject({ destination: "tasks", taskView: "attempt", taskId: "task-opaque", attemptId: "attempt-opaque" });
     expect(formatAppRoute(attempt)).toBe("/tasks/task-opaque/attempts/attempt-opaque");
+    const studio = parseAppRoute(location("/tasks/task-opaque/attempts/attempt-opaque/studio"), true);
+    expect(studio).toMatchObject({ destination: "tasks", taskView: "studio", taskId: "task-opaque", attemptId: "attempt-opaque" });
+    expect(formatAppRoute(studio)).toBe("/tasks/task-opaque/attempts/attempt-opaque/studio");
   });
 
   it("round-trips URL-restorable Task Inbox filters through detail", () => {
