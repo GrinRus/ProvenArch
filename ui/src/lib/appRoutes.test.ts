@@ -12,6 +12,11 @@ describe("application route codec", () => {
     expect(parseAppRoute(location("/changes?run=old"), false)).toMatchObject({ destination: "setup", setupStep: "workspace" });
   });
 
+  it("defaults an unknown console path to the authoritative Task Inbox", () => {
+    expect(parseAppRoute(location("/"), true)).toMatchObject({ destination: "tasks", taskView: "inbox" });
+    expect(parseAppRoute(location("/unknown-path"), true)).toMatchObject({ destination: "tasks", taskView: "inbox" });
+  });
+
   it("round-trips run and Changes context", () => {
     const changes = parseAppRoute(location("/changes?run=run-1&view=evidence&source=snapshot&artifact=doc.overview&mode=raw"), true);
     expect(changes).toMatchObject({ destination: "changes", runId: "run-1", changesView: "evidence", source: "snapshot", artifact: "doc.overview", mode: "raw" });

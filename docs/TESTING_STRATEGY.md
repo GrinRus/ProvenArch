@@ -212,6 +212,8 @@ Baseline scenario set:
     desired draft, effective/source resolution, readiness and immutable admitted Attempt history;
   - W23N fixtures cover Task Inbox loading/empty/error/retry states, keyboard row activation,
     explicit status/alert semantics and 44px filter/Attempt control targets;
+  - W23B2 route fixtures cover Tasks-first navigation and root/unknown path canonicalization to
+    the Task Inbox while explicit legacy deep links remain compatibility-only;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage

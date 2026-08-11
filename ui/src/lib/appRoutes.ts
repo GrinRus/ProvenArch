@@ -59,7 +59,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
   });
   const destination = segments[0] === "architecture" || segments[0] === "knowledge" ? "knowledge" : segments[0] && Object.prototype.hasOwnProperty.call(destinationPaths, segments[0])
     ? segments[0] as WorkflowDestination
-    : "home";
+    : "tasks";
   const route: AppRoute = { destination, invalid };
 
   if (destination === "setup") route.setupStep = enumParam(params, "step", setupSteps, "workspace", invalid);
