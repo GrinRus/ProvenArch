@@ -2299,3 +2299,464 @@ Acceptance:
 - Changes explains automatic promotion; Publish confirms full workspace Git mutation.
 - responsive, keyboard, accessibility and state fixtures pass deterministically.
 - no obsolete UI screenshots, conflicting target docs or hidden legacy shell remains.
+
+## Epic 24 — Weak-model runtime validation and promotion hardening
+
+Status (2026-08-11): **planned; implementation not started.** This epic extends the completed
+`22G` typed recovery state machine and `22H` provider-free auditor. It does not reopen or replace
+those slices.
+
+### Goal
+
+Make weak but supported headless models fail predictably at the earliest authoritative boundary,
+without accepting plausible-but-unsupported architecture and without forcing a provider retry for
+mechanical metadata that ACP can own deterministically.
+
+The runtime must accept sparse truthful output with explicit coverage gaps, but reject foreign-run
+artifacts, contradictory validator verdicts, unverifiable evidence, broken semantic graphs and any
+selected-run snapshot that fails provider-free integrity checks. Technical `PASS | FAIL` authority
+must move toward the orchestrator; provider-authored findings and questions remain advisory semantic
+input and never bypass deterministic validation.
+
+### Confirmed gaps on current `main`
+
+- validator artifact admission parses `validator-verdict.json`, but does not bind its `run_id` or
+  `checked_paths` to the current runtime task;
+- the verdict contract accepts `verdict=PASS` together with one or more `severity=error` issues;
+- semantic/citation evidence checks concrete repository file existence and containment, but do not
+  verify optional line ranges, excerpts or excerpt hashes against the referenced bytes;
+- several semantic `evidence`, `provenance`, entity, edge and finding schema objects allow unknown
+  properties, so an unsupported model alias can pass schema validation and then disappear during Go
+  decoding;
+- the provider-free auditor is exposed as a read-only selected-run/promoted-current API, but is not
+  yet the mandatory final gate immediately before canonical promotion;
+- provider-authored verdict findings/questions are merged before every deterministic selected-run
+  integrity decision has completed;
+- current recovery is typed and bounded per transition, but the total number of possible
+  provider-authored repair transitions is still large and step/provider asymmetric.
+
+### Epic boundaries and non-goals
+
+- No hosted mode, source-repository writes, security/compliance enforcement or new provider.
+- No default provider/model/reasoning change; model compatibility is measured separately.
+- No deterministic invention of architecture prose, entities, relations, findings or evidence.
+- No weakening of schema, evidence, write-set, containment, final-index or promotion checks to make
+  a weak model appear successful.
+- No live network dependency in required CI; `fake`, synthetic fixtures and recorded incident-shaped
+  artifacts remain the required baseline.
+- Historical taskruns remain readable. A strict writer/runtime contract may evolve before v1, but
+  any schema-version change requires a dual-read compatibility decision and full
+  `acp-schema-guardian` synchronization.
+- Epic 23 may later render the typed diagnostics, but Epic 24 backend correctness does not depend on
+  the Task-first UI migration.
+- The canonical live matrices and curated repository list are not changed by this epic.
+
+### Delivery order
+
+`24A -> 24B -> 24C -> 24D -> 24E -> 24F -> 24H -> 24I`
+
+`24G` is conditional and starts after `24F` only when the recorded first-pass/repair metrics meet its
+entry condition. Each slice is a separate reviewable implementation unit with its own ExecPlan,
+focused tests and documentation synchronization.
+
+### Cross-slice invariants
+
+- equivalent invalid output yields the same ordered typed issue set across
+  `claude-code | qwen-code | codex-code`;
+- runtime validation is read-only; repair is a separate explicit transition with before/after bytes;
+- provider-authored output never mutates stable `reports/*`, `model/*` or `proposals/*` directly;
+- no merge into execution semantic state occurs before the artifact passes its task-aware boundary;
+- no canonical promotion starts while any deterministic issue or selected-run audit issue has
+  `severity=error`;
+- missing support becomes a coverage gap/question, not an ACP-authored fact and not an automatic
+  technical failure;
+- warnings and advisory findings remain visible but cannot override a deterministic technical gate.
+
+### 24A — Task-bound validator identity and checked-path admission
+
+**Goal:** reject a structurally valid validator artifact that belongs to another run, checks the
+wrong snapshot or points outside the validator's assigned read surface.
+
+What:
+
+- replace parse-only validator admission with task-aware validation in the shared provider runtime;
+- require exact normalized `verdict.run_id == task.run_id` before apply or semantic merge;
+- normalize and deduplicate `checked_paths`, rejecting empty entries and ambiguous aliases;
+- require every checked path to resolve to a regular file inside the exact current
+  `reports/taskruns/<run_id>/staging/final/` snapshot;
+- require the exact current `final-run-index.json` and `citation-index.json` paths, not only a parent
+  directory, suffix match, validator write root, canonical workspace path or another run's index;
+- reject absolute paths, traversal, symlink escape, missing files, directories and foreign-run paths;
+- preserve the validator write-set rule: provider writes only `validator-verdict.json` inside its
+  task-local write root and treats checked paths as read-only inputs;
+- emit stable issue codes with artifact/JSON path rather than routing on error text.
+
+Expected modules:
+
+- `internal/runtime/providercommon/artifacts.go` and focused tests;
+- shared validation issue mapping used by `providercommon` recovery;
+- validator task builders/fake runtime fixtures where exact checked paths are authored;
+- `docs/spec/PIPELINE_SPEC.md` and `docs/TESTING_STRATEGY.md`.
+
+Tests:
+
+- wrong/empty/case-changed `run_id`;
+- checked path under another run, validator root, canonical path and source repository;
+- traversal, absolute path, symlink escape, missing target and directory target;
+- missing one required index, duplicate path and parent-directory-only check;
+- clean current-run validator artifact for local `path` and resolved `git_url` repositories;
+- provider adapter metamorphic fixtures prove identical typed admission failure.
+
+Acceptance:
+
+- every invalid variant terminates before findings/questions merge and before staged reassembly;
+- no rejected validator task changes canonical workspace bytes;
+- clean fake/current-run artifacts continue to pass without an additional provider call;
+- the public verdict JSON shape remains unchanged in this slice.
+
+### 24B — Verdict consistency and technical-field ownership
+
+**Goal:** make the existing verdict shape internally coherent before changing the larger verdict
+authority model.
+
+What:
+
+- add the invariant `PASS` cannot contain any `issues[].severity=error`;
+- require `FAIL` to contain at least one error issue or an explicitly documented provider advisory
+  reason; decide and encode one unambiguous rule instead of allowing empty opaque failure;
+- reject provider-authored non-empty `fixed_paths`; only the orchestrator may add a path after a
+  successful deterministic repair and full revalidation;
+- validate issue `path`, `document_id` and `citation_id` against the current selected-run inventory
+  when present;
+- define whether duplicate issues are rejected or deterministically collapsed by
+  `(code,path,document_id,citation_id)`, and make ordering stable;
+- persist before/after digests and exact repair code for every orchestrator-added `fixed_path`;
+- keep provider issues/findings/questions isolated until the full verdict consistency check passes.
+
+Expected modules:
+
+- `internal/contracts/docflow.go` and schema fixtures;
+- `internal/runtime/providercommon/artifacts.go`;
+- `internal/orchestrator/docflow_repair.go` and `runtime_task_apply.go`;
+- `internal/runtime/steppolicy` and `internal/runtime/fakeruntime` verdict builders.
+
+Tests:
+
+- `PASS + error`, `PASS + warning`, empty `FAIL`, `FAIL + error`;
+- provider-authored `fixed_paths`, orchestrator-authored repaired paths and stale fixed path;
+- issue refs to absent document/citation/foreign path;
+- duplicate/reordered issue sets and JSON round trip;
+- retry/replay preserves effective repaired verdict identity without accepting parent-run paths.
+
+Acceptance:
+
+- no contradictory verdict reaches `applyValidatorRuntimeExecution`;
+- deterministic repair is the only source of non-empty `fixed_paths`;
+- the same inconsistency maps to one stable code across normal, focused repair and replay paths;
+- historical valid v1 verdict fixtures remain readable.
+
+### 24C — Evidence locator and claim-integrity validation
+
+**Goal:** prove that a syntactically valid evidence locator actually identifies the claimed source
+bytes rather than merely naming an existing repository file.
+
+What:
+
+- introduce one reusable evidence validator shared by collect artifact admission, validator
+  findings, staged validation and provider-free audit;
+- resolve logical repo names and generated checkout aliases to the exact current task repository
+  roots without accepting an ambiguous basename match;
+- keep current relative-path, regular-file, containment and symlink rules;
+- when `lines` is present, require `start <= end`, both values within file bounds and a bounded read;
+- when `excerpt` is present, compare it with the documented normalized line-range bytes;
+- when `excerpt_hash` is present, define one SHA-256 normalization algorithm and verify the digest;
+- reject excerpt/hash fields that cannot be tied to an explicit line range, unless the contract
+  deliberately defines and tests a whole-file mode;
+- apply identical rules to `citations[]` and
+  `entities|edges|findings[].provenance.evidence[]`;
+- preserve inference/assertion only when its evidence policy is explicit; unsupported observations
+  are removed by the provider or surfaced as questions/coverage gaps, never silently promoted;
+- bound file size, line count, excerpt length and issue count so malicious or accidental large files
+  cannot make validation unbounded.
+
+Expected modules:
+
+- new shared evidence-quality module under `internal/artifactquality` or another cycle-safe package;
+- collect validation in `internal/artifactquality/canonicalize.go`;
+- staged citation validation in `internal/orchestrator/docflow.go`;
+- validator finding admission and `internal/artifactaudit/audit.go`;
+- schemas/spec/examples/fixtures if evidence normalization semantics change.
+
+Tests:
+
+- missing/ambiguous repo, missing file, directory, traversal and symlink escape;
+- reversed, zero, negative and out-of-range line ranges;
+- valid LF and CRLF excerpts; whitespace/Unicode normalization decision fixtures;
+- wrong excerpt, wrong hash, oversized file/range and unreadable file;
+- the same valid evidence reused by collect, validator and auditor;
+- sparse repository output represented as a gap passes without fabricated evidence.
+
+Acceptance:
+
+- all consumers return the same evidence issue codes and normalized locator identity;
+- no observation with an invalid locator/excerpt/hash enters the promoted semantic snapshot;
+- validation remains read-only and bounded;
+- required CI uses temporary repository trees and deterministic bytes only.
+
+### 24D — Strict semantic envelope and cross-shard graph integrity
+
+**Goal:** prevent weak-model aliases, silently dropped fields and dangling cross-shard relations from
+surviving aggregation.
+
+What:
+
+- inventory currently allowed extension fields in semantic evidence, provenance, entity, edge and
+  finding objects and classify each as product data, intentional extension or unsupported drift;
+- stop silently dropping unsupported fields: reject them at the authoritative contract boundary or
+  preserve them losslessly under an explicitly documented extension object;
+- if tightening `additionalProperties` is required, perform an explicit schema/version decision with
+  dual-read behavior for historical taskruns and full `acp-schema-guardian` synchronization;
+- require unique normalized entity, edge and finding IDs after all shards are aggregated;
+- detect normalization collisions separately from exact duplicates; never merge distinct semantic
+  objects only because weak-model spelling normalizes to the same token;
+- require each edge `from` and `to` to resolve to an entity in the aggregated selected-run graph;
+- validate aliases and `related_ids` against their documented namespace, while allowing explicitly
+  typed external/unresolved references only if the contract defines them;
+- require merged provenance/evidence to remain attributable to the winning object and record any
+  deterministic alias/remap decision;
+- reject provider/runtime/taskrun paths embedded as semantic evidence or canonical identifiers.
+
+Expected modules:
+
+- `schemas/shard-pack-manifest.schema.json` and `schemas/validator-verdict.schema.json` when needed;
+- `internal/contracts`, `internal/artifactquality` and orchestrator semantic assembly;
+- model materialization/resolver fixtures and `docs/APPENDIX_SCHEMAS.md`;
+- ADR for extension and collision policy if the public contract changes.
+
+Tests:
+
+- unknown aliases at every semantic nesting level;
+- exact duplicates, order-only duplicates and normalized-ID collisions;
+- edge to missing, foreign-run and ambiguous entity;
+- cross-shard valid edge, alias remap and multi-repo same-name entities;
+- replay/selective-refresh preserved shards mixed with new shards;
+- lossless historical v1 read when a new strict writer version is introduced.
+
+Acceptance:
+
+- no unsupported semantic field is silently discarded;
+- every promoted edge resolves deterministically in the selected-run graph;
+- collision behavior is stable, documented and protected by golden fixtures;
+- schema, parser, validator, examples, appendix and ADR remain synchronized.
+
+### 24E — Mandatory provider-free pre-promotion audit gate
+
+**Goal:** reuse the completed `22H` auditor as the final read-only technical gate before any
+canonical mutation.
+
+What:
+
+- invoke selected-run audit after final-index/citation reconciliation and deterministic validator
+  repairs, but before the first promotion write;
+- pass resolved repository roots into the audit so local `path` and managed `git_url` checkouts use
+  the same containment/evidence authority;
+- fail promotion on any audit `severity=error`; warnings remain visible and non-blocking;
+- keep the HTTP audit endpoint read-only and compatible, while sharing the same scanner/options with
+  the promotion path;
+- record the bounded audit summary and issue codes in run diagnostics without copying raw provider
+  logs or writing an additional model-authored artifact;
+- prove that failed audit leaves the previous canonical generation and Git state byte-identical;
+- avoid circular authority: selected-run audit consumes the effective validated verdict and indexes,
+  but never repairs or rewrites them.
+
+Expected modules:
+
+- `internal/artifactaudit/audit.go` and fixtures;
+- orchestrator finalization/promotion transaction;
+- resolved repository source plumbing;
+- run diagnostics/quality summary and pipeline specification.
+
+Tests:
+
+- foreign validator/index identity, staged path escape and missing indexed file;
+- asymmetric document/citation refs and promoted digest mismatch;
+- invalid evidence locator, execution/scaffold contamination and broken graph signal;
+- local path and `git_url` selected-run audit;
+- injected promotion write failure and audit failure preserve prior canonical bytes;
+- repeated scans are byte-identical and create no files.
+
+Acceptance:
+
+- zero canonical writes occur after any selected-run audit error;
+- clean fake and deterministic incident-clean fixtures promote successfully;
+- API/on-demand and promotion-gate scans use the same issue codes;
+- auditor remains bounded, redacted, deterministic and provider-free.
+
+### 24F — Orchestrator-owned effective technical verdict
+
+**Goal:** ensure that a weak provider cannot green a broken snapshot or fail a clean snapshot through
+an unsupported technical opinion.
+
+What:
+
+- distinguish provider draft assessment from the effective persisted technical verdict;
+- compute the effective technical verdict from the ordered deterministic issue set after assembly,
+  repair and selected-run validation: any error means `FAIL`, no errors means `PASS`;
+- make `checked_paths`, `fixed_paths`, technical issue codes and final `PASS | FAIL`
+  orchestrator-owned;
+- admit provider findings/questions only as advisory semantic candidates after evidence and graph
+  validation;
+- preserve a provider issue as an advisory warning when it does not match a deterministic issue;
+- define a stable matching key for provider/deterministic issue correlation without comparing prose;
+- remove or collapse special owner-gap/evidence-advisory verdict reconciliation branches once the
+  common effective-verdict rule covers them;
+- decide whether the existing `validator-verdict.json` can remain the effective persisted shape or a
+  versioned draft/effective split is required; record the authority decision in an ADR;
+- keep terminal technical failure distinct from `runtime_contract_failed` and
+  `runner_unavailable`.
+
+Expected modules:
+
+- `internal/orchestrator/runtime_task_apply.go`, staged validation and repair code;
+- contracts/schema/ADR if draft/effective representation changes;
+- provider step policy and fake runtime artifact generation;
+- run history/quality diagnostics and retry-input rebinding.
+
+Tests:
+
+- provider `PASS` with deterministic graph/evidence/index errors;
+- provider `FAIL` with a clean deterministic snapshot;
+- matching and non-matching provider advisory issues;
+- owner-only/evidence-gap scenarios retain findings/questions without false technical failure;
+- replay, child retry and selective refresh preserve exact effective authority;
+- fake runtime remains deterministic and provider-free.
+
+Acceptance:
+
+- provider-authored `PASS | FAIL` cannot override the deterministic technical result;
+- advisory semantic content remains visible only after its own validation;
+- one common verdict rule replaces provider/model-specific reconciliation behavior;
+- historical persisted verdicts have a documented read/interpretation policy.
+
+### 24G — Conditional reduction of model-authored mechanical envelope
+
+**Entry condition:** start only after `24A`–`24F` metrics show first-pass success below 95%, more than
+10% of otherwise valid tasks entering provider repair, or p95 provider invocations above two because
+of identity/path/link/shape errors. Record the measurement before choosing a contract design.
+
+**Goal:** remove mechanically derivable fields from the weak model's responsibility without letting
+ACP synthesize semantic meaning.
+
+What:
+
+- move `run_id`, `step_id`, `shard_id`, `domain_id`, `artifact_root`, assigned repo/scope identity,
+  output mappings, reciprocal index bindings, checked paths and technical verdict to orchestrator
+  ownership where derivable;
+- keep provider ownership of authored Markdown, candidate semantic objects, evidence candidates,
+  questions and coverage gaps;
+- compare two explicit designs in an ADR: orchestrator base envelope plus bounded semantic patch, or
+  an internal provider-draft format compiled into the public artifact contract;
+- forbid generic map merge and arbitrary JSON Patch paths; whitelist model-authored semantic fields
+  and validate the compiled result through the full existing contract;
+- retain provider-authored bytes and compiler provenance so the final artifact is explainable;
+- introduce schema v2 only when necessary, with v1/v2 reader compatibility and v2 writer fixtures;
+- update prompts to show one minimal semantic payload rather than requiring the provider to repeat
+  long runtime paths and identity metadata.
+
+Tests:
+
+- weak-model payload omits every orchestrator-owned field yet compiles deterministically;
+- provider cannot override task identity, output path, checked path or verdict;
+- forbidden patch paths, unknown fields and conflicting IDs fail closed;
+- compiled artifact round trip, replay and historical v1 read;
+- no generated semantic entities/findings appear when provider returns only gaps/questions.
+
+Acceptance:
+
+- measured mechanical contract failures decrease without relaxing semantic/evidence checks;
+- ACP-authored fields are exclusively factual task metadata or deterministic bindings;
+- provider-authored semantic bytes and evidence remain attributable;
+- the entry metric, ADR and before/after conformance result are retained with the slice.
+
+### 24H — Global bounded recovery budget and provider parity
+
+**Goal:** make failure cost and terminal behavior predictable after validation has become
+authoritative.
+
+What:
+
+- add a global per-task provider invocation budget shared by all recovery transitions;
+- target a default hard maximum of three invocations: normal attempt, one focused
+  contract/semantic repair and one transport retry only for silent/unavailable execution;
+- count every provider process start against the budget, including chained specialized cleanup;
+- keep deterministic normalization/repair outside the provider count but log its transition and
+  before/after digest;
+- route by typed issue class and target artifact, never provider stderr wording;
+- collapse specialized shape/marker/index repair branches that are made redundant by `24A`–`24G`;
+- keep provider adapters limited to invocation, stream parsing, activity policy and unavailable
+  classification; shared recovery owns transition semantics;
+- require fresh target mutation for repair success and reject unchanged, stale, wrong-target or
+  out-of-write-set output;
+- persist attempts used/remaining, selected transition and terminal exhaustion reason.
+
+Tests:
+
+- normal success, focused success and transport retry success;
+- mixed issue classes cannot enter a single-class cleanup;
+- silent, printed-command, no-op, stale bytes and wrong-target mutation;
+- issue ordering/message paraphrase metamorphic cases;
+- equivalent Claude/Qwen/Codex fixtures consume the same budget and reach the same terminal code;
+- cancellation and controlled valid-artifact stop do not start an extra repair process.
+
+Acceptance:
+
+- hard provider invocation budget cannot be exceeded by chained transitions;
+- p95 provider invocations is at most two on the deterministic conformance corpus;
+- repeated/no-op repair is terminal with complete recovery evidence;
+- no provider-specific branch changes the semantic acceptance result.
+
+### 24I — Weak-model conformance corpus, diagnostics and closure
+
+**Goal:** make the hardening measurable and prevent future prompts/models from reopening the same
+false-accept and repair-loop classes.
+
+What:
+
+- build a provider-free incident-shaped corpus covering foreign identity, schema drift, missing
+  evidence, invalid ranges/hashes, graph collisions, contradictory verdicts, stale repairs and audit
+  failures;
+- use table-driven temporary repository/workspace trees for invalid-run cases; add persistent
+  fixtures/goldens only where byte-stable public outputs are the product contract;
+- run the same semantic payload through Claude/Qwen/Codex adapter envelopes without invoking live
+  binaries and compare typed issues, recovery transitions and terminal status;
+- add diagnostic counters for first-pass validity, issue class, repair count, provider invocations,
+  effective verdict source and promotion audit result;
+- expose bounded issue code/stage/path and attempts used/remaining through existing diagnostics/run
+  surfaces; raw provider text remains secondary disclosure;
+- optionally add an explicitly invoked provider/model artifact canary to `doctor` or diagnostics,
+  keyed by provider/model/CLI/config fingerprint; it is never required CI and never changes model
+  defaults automatically;
+- synchronize README/ARCHITECTURE/PIPELINE_SPEC/TESTING_STRATEGY/runbooks after implemented behavior,
+  then run full deterministic DoD before any trusted-machine live diagnostic.
+
+Acceptance:
+
+- false accepts = 0 for the incident corpus;
+- equivalent adapter inputs produce the same ordered typed issues and terminal code;
+- clean and sparse-with-gaps fixtures pass without recovery;
+- no audit error permits promotion;
+- `make contracts`, `make test`, `make lint` and `make build` pass with pinned toolchains;
+- live validation, when requested after deterministic closure, uses only `acp-e2e-live-gate` and the
+  canonical harness without changing release matrices or curated repos.
+
+### Epic acceptance
+
+- Foreign-run, wrong-snapshot and contradictory validator artifacts fail before semantic merge.
+- Evidence line/excerpt/hash claims are verified against contained repository bytes.
+- Unsupported semantic fields are never silently discarded and every promoted edge resolves.
+- Provider-free selected-run audit is a mandatory fail-closed pre-promotion gate.
+- Effective technical verdict is orchestrator-owned; provider findings/questions remain validated
+  advisory input.
+- A global recovery budget bounds provider invocations and is provider-parity tested.
+- Sparse truthful analysis remains successful with explicit gaps; unsupported facts do not.
+- Required CI remains deterministic, offline and independent of live provider binaries.

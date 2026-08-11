@@ -61,6 +61,58 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260811-weak-model-validation-backlog
+
+### Context
+Current runtime validation and recovery already fail closed for many malformed artifacts, but a
+review of the current `main` found remaining false-accept and repair-cost boundaries around validator
+task identity, evidence byte truthfulness, semantic graph integrity, provider verdict authority and
+promotion audit enforcement. The requested deliverable is a detailed implementation backlog, not a
+runtime/code change.
+
+### Goals (must have)
+- [x] Rebase the planning surface on the latest `origin/main` without losing the squashed UI baseline.
+- [x] Record confirmed current-code gaps rather than reopening completed Epic 22 work.
+- [x] Define small reviewable fix slices with dependencies, modules, tests and acceptance criteria.
+- [x] Preserve local-first, provider-free required CI and schema compatibility boundaries.
+
+### Non-goals
+- No runtime, schema, provider, UI or release-matrix implementation in this planning slice.
+- No default model/provider change and no live E2E execution.
+- No reinterpretation of incomplete historical live runs as acceptance evidence.
+
+### Approach
+1. Fetch and inspect current `origin/main`; create a clean work branch from that exact commit.
+2. Reconcile the proposed fixes with `PIPELINE_SPEC`, completed `22G/22H` and current runtime code.
+3. Add Epic 24 to `docs/BACKLOG.md`, including ordered slices, conditional work, tests and closure.
+
+### Files expected to change
+- `docs/BACKLOG.md`
+- `docs/PLANS.md`
+
+### Acceptance criteria
+- [x] Epic 24 identifies goals, boundaries, confirmed gaps and delivery order.
+- [x] Every fix slice has concrete implementation scope, tests and measurable acceptance.
+- [x] Schema, compatibility, deterministic CI and live-gate constraints are explicit.
+- [x] Documentation diff and formatting are verified on the fresh-main branch.
+
+### Risks
+- Schema strictness can make historical taskruns unreadable unless a dual-read decision is made.
+- Moving verdict authority without separating advisory semantics can accidentally discard useful
+  provider findings; the backlog therefore requires evidence validation and explicit authority.
+- A universal retry budget can regress provider availability recovery unless transport and contract
+  failures remain separate typed classes.
+
+### Progress log
+- 2026-08-11: Fetched `origin/main` at `64b42251`; the detached baseline tree was byte-identical to
+  the squash-merged main tree. Created `codex/weak-model-validation-backlog` from `origin/main`.
+- 2026-08-11: Added detailed Epic 24 planning for task-bound validator admission, evidence/graph
+  integrity, mandatory audit gate, orchestrator-owned verdict, conditional envelope reduction,
+  bounded recovery and provider-free conformance.
+- 2026-08-11: `git diff --check` passed; the worktree diff is limited to `docs/BACKLOG.md` and this
+  ExecPlan mirror.
+
+### Plan ID
 EP-20260805-live-runtime-safety-fixes
 
 ### Context
