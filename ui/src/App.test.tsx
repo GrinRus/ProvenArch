@@ -1492,6 +1492,8 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("settings-utility"));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-settings-authority")).toHaveTextContent("Desired");
+    expect(screen.getByTestId("runtime-settings-authority")).toHaveTextContent("immutable snapshot");
     const settingsDiagnostics = within(screen.getByTestId("settings-page")).getByRole("button", { name: /^Diagnostics$/ });
     fireEvent.click(settingsDiagnostics);
     expect(settingsDiagnostics).toHaveClass("is-active");
