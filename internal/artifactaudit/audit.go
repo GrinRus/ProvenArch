@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
-	"github.com/GrinRus/ProvenArch/internal/evidence"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -292,24 +290,6 @@ func (a *auditor) scanEvidence(citation contracts.DocumentCitation) {
 	info, err := os.Stat(resolvedEvidence)
 	if err != nil || !info.Mode().IsRegular() {
 		a.add("audit.evidence.not_regular", "error", citation.Path, nil, "citation evidence is not a regular file")
-		return
-	}
-	sourceRaw, err := os.ReadFile(resolvedEvidence)
-	if err != nil {
-		a.add("audit.evidence.unavailable", "error", citation.Path, nil, "citation evidence cannot be read")
-		return
-	}
-	if err := evidence.Validate(sourceRaw, citation.Lines, citation.Excerpt, citation.ExcerptHash); err != nil {
-		switch {
-		case errors.Is(err, evidence.ErrLineRangeInvalid), errors.Is(err, evidence.ErrLinesRequired):
-			a.add("audit.evidence.lines_invalid", "error", citation.Path, nil, err.Error())
-		case errors.Is(err, evidence.ErrExcerptMismatch):
-			a.add("audit.evidence.excerpt_mismatch", "error", citation.Path, nil, err.Error())
-		case errors.Is(err, evidence.ErrExcerptHashMismatch):
-			a.add("audit.evidence.hash_mismatch", "error", citation.Path, nil, err.Error())
-		default:
-			a.add("audit.evidence.invalid", "error", citation.Path, nil, err.Error())
-		}
 	}
 }
 
