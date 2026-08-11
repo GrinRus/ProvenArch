@@ -1200,6 +1200,11 @@ fallback. Для run обязательны matching `final-run-index.json`, `ci
 `scope` для HTTP endpoint всегда `selected_run`; внутренний promoted-current scanner дополнительно
 сравнивает canonical bytes с exact staging snapshot.
 
+Аудит fail-closed проверяет exact run identity и containment staged document paths. `checked_paths[]`
+обязан содержать exact selected-run `final-run-index.json` и `citation-index.json`; duplicate/foreign
+checked paths и `fixed_paths[]` за пределами selected run — ошибки. Evidence line ranges/excerpts/hashes
+проходят shared bounded normalization из `internal/evidence`.
+
 **200**
 ```json
 {

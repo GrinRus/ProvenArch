@@ -173,7 +173,7 @@ func writeAuditFixture(t *testing.T, incident bool) (workspace.Root, string) {
 	verdict := contracts.ValidatorVerdict{
 		Version: 1, RunID: runID, GeneratedAt: "2026-07-26T00:00:00Z",
 		Verdict: "PASS", Summary: "selected-run snapshot passed validation",
-		CheckedPaths: []string{path.Join(finalRoot, "final-run-index.json")},
+		CheckedPaths: []string{path.Join(finalRoot, "final-run-index.json"), path.Join(finalRoot, "citation-index.json")},
 		FixedPaths:   []string{}, Findings: []contracts.Finding{},
 		Questions: []contracts.Question{}, Issues: []contracts.ValidatorIssue{},
 	}

@@ -170,6 +170,8 @@ Semantic role:
 ## 6) Validator Verdict Schema
 
 - **Source of truth:** `schemas/validator-verdict.schema.json`
+- Provider-free selected-run audit requires `checked_paths[]` to contain the exact current
+  `final-run-index.json` and `citation-index.json` paths; duplicate or foreign paths fail closed.
 - Primary runtime output для `step3.findings` / validator phase
 
 Required fields:
