@@ -147,7 +147,7 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - [x] Enforce coherent provider draft verdicts and deterministic issue ownership/order.
 - [x] Validate evidence line/excerpt/hash claims through one bounded shared implementation.
 - [x] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
-- [ ] Run provider-free selected-run audit before the first canonical write.
+- [x] Run provider-free selected-run audit before the first canonical write.
 - [ ] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
 
 ### Non-goals
@@ -203,7 +203,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
   consistency rules, evidence normalization and runtime-unit recovery-budget terminology. Added the
   accepted ADR/spec/backlog package. W24A exact run/citation/final containment checks are
   implemented; W24B coherent verdict admission, W24C shared bounded evidence validation and W24D
-  semantic envelope/graph checks are implemented; W24E–W24F remain pending.
+  semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
+  implemented; W24F remains pending.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

@@ -43,6 +43,8 @@
   explicit reconciliation.
 - W24D semantic fixtures reject unknown nested fields, conflicting cross-shard ID collisions and dangling edge
   endpoints while preserving unresolved finding/question references as advisory coverage gaps.
+- W24E promotion fixtures run the public selected-run scanner before activation, fail closed on
+  contaminated staged output, and verify the previous canonical generation remains unchanged.
 - W24C provider-free evidence fixtures exercise one shared bounded implementation across collect,
   staged validation and selected-run audit: 1-based inclusive ranges, CRLF/CR-to-LF normalization,
   exact whitespace/Unicode preservation, excerpt bytes and SHA-256 identity.

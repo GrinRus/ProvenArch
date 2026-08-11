@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,6 +222,30 @@ func TestPromoteValidatedArtifactsRejectsFailVerdict(t *testing.T) {
 	if !strings.Contains(err.Error(), "validator verdict is FAIL") {
 		t.Fatalf("expected validator verdict failure, got %v", err)
 	}
+}
+
+func TestPromoteValidatedArtifactsFailsClosedOnSelectedRunAudit(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	execution := prepareTransactionalPromotionExecution(t, workspaceRoot)
+	execution.prePromotionAuditRequired = true
+	writeSelectedRunAuditFixtureForPromotion(t, execution)
+	stagedOverview := execution.finalRunIndex.CanonicalDocuments[0].StagedPath
+	overview, err := execution.workspace.ReadFile(stagedOverview)
+	if err != nil {
+		t.Fatalf("read staged overview: %v", err)
+	}
+	if err := execution.workspace.WriteFile(stagedOverview, append(overview, []byte("\nreports/taskruns/run-foreign/staging/final\n")...)); err != nil {
+		t.Fatalf("contaminate staged overview: %v", err)
+	}
+
+	if err := execution.promoteValidatedArtifacts(); err == nil || !strings.Contains(err.Error(), "pre-promotion audit failed") {
+		t.Fatalf("expected fail-closed pre-promotion audit, got %v", err)
+	}
+	assertFileContains(t, workspaceRoot, "reports/as-is/overview.md", "Old Overview")
+	assertFileContains(t, workspaceRoot, "model/entities/service.old.yaml", "service.old")
+	assertFileMissing(t, workspaceRoot, "model/entities/service.new.yaml")
 }
 
 func TestPromoteValidatedArtifactsRemovesStaleManagedCanonicalFiles(t *testing.T) {
@@ -456,6 +481,73 @@ func prepareTransactionalPromotionExecution(t *testing.T, workspaceRoot string) 
 			},
 			validatorVerdict: &contracts.ValidatorVerdict{Verdict: "PASS"},
 		},
+	}
+}
+
+func writeSelectedRunAuditFixtureForPromotion(t *testing.T, execution *pipelineExecution) {
+	t.Helper()
+	if execution == nil || execution.finalRunIndex == nil {
+		t.Fatal("promotion execution final index is required")
+	}
+	runID := execution.runID
+	finalRoot := path.Join("reports", "taskruns", runID, "staging", "final")
+	index := *execution.finalRunIndex
+	index.Version = 1
+	index.RunID = runID
+	index.Pipeline = "init"
+	index.GeneratedAt = "2026-08-11T00:00:00Z"
+	index.CitationIndexPath = runtimeCitationIndexPath(runID)
+	index.Topics = []contracts.TopicIndexEntry{}
+	index.CanonicalDocuments = append([]contracts.FinalRunDocument(nil), execution.finalRunIndex.CanonicalDocuments...)
+	for idx := range index.CanonicalDocuments {
+		index.CanonicalDocuments[idx].Topics = []string{"architecture"}
+		index.CanonicalDocuments[idx].CitationIDs = []string{}
+		index.CanonicalDocuments[idx].SourceShards = []string{"promotion-test"}
+		index.CanonicalDocuments[idx].Status = "staged"
+	}
+	index.Semantic = contracts.SemanticSnapshot{
+		Coverage:  contracts.Coverage{Observed: []string{"promotion"}, Missing: []string{}, Notes: []string{}},
+		Questions: []contracts.Question{},
+		Entities:  []contracts.Entity{},
+		Edges:     []contracts.Edge{},
+		Findings:  []contracts.Finding{},
+	}
+	finalRaw, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal promotion audit final index: %v", err)
+	}
+	if err := execution.workspace.WriteFile(filepath.ToSlash(filepath.Join(finalRoot, finalRunIndexFile)), append(finalRaw, '\n')); err != nil {
+		t.Fatalf("write promotion audit final index: %v", err)
+	}
+	citationIndex := contracts.CitationIndex{
+		Version: 1, RunID: runID, GeneratedAt: index.GeneratedAt, Citations: []contracts.DocumentCitation{},
+	}
+	citationRaw, err := json.MarshalIndent(citationIndex, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal promotion audit citation index: %v", err)
+	}
+	if err := execution.workspace.WriteFile(runtimeCitationIndexPath(runID), append(citationRaw, '\n')); err != nil {
+		t.Fatalf("write promotion audit citation index: %v", err)
+	}
+	verdict := contracts.ValidatorVerdict{
+		Version: 1, RunID: runID, GeneratedAt: index.GeneratedAt, Verdict: "PASS",
+		CheckedPaths: []string{runtimeFinalRunIndexPath(runID), runtimeCitationIndexPath(runID)},
+		FixedPaths:   []string{}, Issues: []contracts.ValidatorIssue{}, Findings: []contracts.Finding{}, Questions: []contracts.Question{},
+	}
+	verdictRaw, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal promotion audit verdict: %v", err)
+	}
+	if err := execution.workspace.WriteFile(runtimeValidatorVerdictPath(runID), append(verdictRaw, '\n')); err != nil {
+		t.Fatalf("write promotion audit verdict: %v", err)
+	}
+	var overview strings.Builder
+	overview.WriteString("# Architecture Home\n\n")
+	for _, section := range runtimedrafts.ArchitectureHomeRequiredSections() {
+		overview.WriteString("## " + section + "\n\nEvidence-backed promotion test content.\n\n")
+	}
+	if err := execution.workspace.WriteFile(execution.finalRunIndex.CanonicalDocuments[0].StagedPath, []byte(overview.String())); err != nil {
+		t.Fatalf("write promotion audit overview: %v", err)
 	}
 }
 

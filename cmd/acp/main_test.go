@@ -1610,7 +1610,10 @@ elif step_id in {"init.step3.findings", "refresh.step3.findings"} and write_root
         "generated_at": "2026-04-21T10:00:00Z",
         "verdict": "PASS",
         "summary": "stub validator verdict",
-        "checked_paths": ["reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json"],
+        "checked_paths": [
+            "reports/taskruns/" + (run_id or "run-1") + "/staging/final/final-run-index.json",
+            "reports/taskruns/" + (run_id or "run-1") + "/staging/final/citation-index.json",
+        ],
         "fixed_paths": [],
         "findings": [],
         "questions": [],
@@ -1851,7 +1854,10 @@ elif current_step in {"init.step3.findings", "refresh.step3.findings"}:
         "generated_at": "2026-04-21T10:00:00Z",
         "verdict": "PASS",
         "summary": "stub codex validator verdict",
-        "checked_paths": ["reports/taskruns/" + run_id + "/staging/final/final-run-index.json"],
+        "checked_paths": [
+            "reports/taskruns/" + run_id + "/staging/final/final-run-index.json",
+            "reports/taskruns/" + run_id + "/staging/final/citation-index.json",
+        ],
         "fixed_paths": [],
         "findings": [],
         "questions": []

@@ -50,7 +50,7 @@ func (Runner) Run(_ context.Context, task acpruntime.Task) (acpruntime.Result, e
 			GeneratedAt:  task.StartedAtUTC.UTC().Add(2 * time.Second).Format(time.RFC3339),
 			Verdict:      "PASS",
 			Summary:      "Fake validator verdict accepted",
-			CheckedPaths: []string{"reports/taskruns/" + task.RunID + "/staging/final"},
+			CheckedPaths: collectValidatorCheckedPaths(task),
 			Findings:     append([]contracts.Finding(nil), semantic.Findings...),
 			Questions:    append([]contracts.Question(nil), semantic.Questions...),
 		}

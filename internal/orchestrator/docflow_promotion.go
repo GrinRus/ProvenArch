@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactaudit"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
@@ -26,6 +27,9 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 	}
 	if e.validatorVerdict.Verdict != "PASS" {
 		return fmt.Errorf("promote validated artifacts: validator verdict is %s", e.validatorVerdict.Verdict)
+	}
+	if err := e.auditSelectedRunBeforePromotion(); err != nil {
+		return err
 	}
 
 	generation, err := e.buildPromotionGeneration()
@@ -50,6 +54,36 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 		"canonical_docs": len(e.finalRunIndex.CanonicalDocuments),
 	})
 	return nil
+}
+
+func (e *pipelineExecution) auditSelectedRunBeforePromotion() error {
+	if !e.prePromotionAuditRequired {
+		return nil
+	}
+	report := artifactaudit.ScanSelectedRun(e.workspace, e.promotionRunID())
+	if report.Status != artifactaudit.StatusFail {
+		return nil
+	}
+	codes := make([]string, 0, len(report.Issues))
+	for _, issue := range report.Issues {
+		if code := strings.TrimSpace(issue.Code); code != "" {
+			codes = append(codes, code)
+		}
+	}
+	sort.Strings(codes)
+	if len(codes) > 5 {
+		codes = codes[:5]
+	}
+	message := "selected-run audit failed"
+	if len(codes) > 0 {
+		message += ": " + strings.Join(codes, ", ")
+	}
+	e.logError(e.stepStatus.CurrentStep, "", message, map[string]any{
+		"audit_status": report.Status,
+		"issue_count":  len(report.Issues),
+		"issue_codes":  codes,
+	})
+	return fmt.Errorf("promote validated artifacts: pre-promotion audit failed (%s)", strings.Join(codes, ", "))
 }
 
 type promotionGeneration struct {

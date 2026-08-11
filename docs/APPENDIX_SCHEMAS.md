@@ -196,6 +196,10 @@ snapshots are rejected, and graph edge endpoints resolve to entities. Repeated s
 may reuse an ID only when core identity fields agree; provenance evidence remains mergeable.
 Historical v1 reads remain compatible.
 
+W24E keeps the selected-run audit read-only and provider-free. Promotion is fail-closed on audit
+errors before a promotion generation or canonical activation is created; warning diagnostics remain
+visible without replacing the previous generation.
+
 Allowed `verdict` values:
 - `PASS`
 - `FAIL`
