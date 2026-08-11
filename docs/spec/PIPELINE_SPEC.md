@@ -666,4 +666,8 @@ identity/schema/evidence/graph/verdict/repair/audit failures, Claude/Qwen/Codex 
 parity and a deterministic p95 invocation trace. `reports/taskruns/<run_id>-quality.json.totals`
 also exposes `validation_first_pass_valid`, `validation_first_pass_invalid`, bounded
 `validation_issue_classes`, `effective_verdict_source` and `promotion_audit_result`; provider text
-remains secondary diagnostic evidence.
+remains secondary diagnostic evidence. The retained W24G entry metric is the provider-free
+`fixtures/conformance/w24g-entry-metric.json` corpus: it records 20/20 first-pass-valid
+observations, 0% otherwise-valid repair entry and p95 provider starts of two, so the conditional
+mechanical-envelope reduction remains deferred. A future threshold crossing must record a new
+before/after corpus and ADR before changing the envelope.

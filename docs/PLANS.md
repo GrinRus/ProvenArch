@@ -238,7 +238,9 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - [x] Bound provider process starts to three per runtime execution unit across normal and recovery transitions.
 - [x] Complete the provider-free recovery-budget and conformance closure in W24H–W24I; keep W24G
   conditional until its entry metric is recorded.
-- [ ] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted.
+- [x] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted;
+      the provider-free corpus is 100% first-pass-valid, 0% repair-entry and p95=2, so W24G is
+      deferred without changing the public envelope.
 
 ### Non-goals
 
@@ -300,13 +302,18 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
   semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
   implemented; W24F effective verdict persistence, public authority selection and retry rebinding
   are implemented; W24H shared three-start runtime-unit budget and W24I conformance corpus/closure
-  counters are implemented; W24G metric entry remains pending.
+  counters are implemented; W24G entry metric is recorded in
+  `fixtures/conformance/w24g-entry-metric.json` and the conditional slice is deferred.
 - 2026-08-11: W24H process-start enforcement is provider-adapter agnostic: the same budget context
   counts normal, transport-retry and focused-repair starts, denies the next process before spawn,
   and persists used/remaining counters, last transition and explicit exhaustion reason in runtime
   diagnostics and the run quality summary. Provider-free Claude/Qwen/Codex parity and concurrent
   reservation tests pass; W24I adds the provider-free incident corpus, adapter issue-code parity,
   closure counters and deterministic p95 invocation measurement (two).
+- 2026-08-12: Added the provider-free W24G entry metric and retained fixture. The recorded corpus
+  has 20/20 first-pass-valid observations, no otherwise-valid repair entries and p95=2; ADR
+  `ADR-20260812-w24g-entry-metric.md` defers mechanical-envelope reduction until a future metric
+  crosses the accepted threshold.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

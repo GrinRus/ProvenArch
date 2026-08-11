@@ -2398,7 +2398,7 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **authority decision accepted; W24A–W24F, W24H and W24I implemented; metric-gated W24G remains pending.**
+Status (2026-08-12): **authority decision accepted; W24A–W24F, W24H and W24I implemented; W24G entry metric recorded and deferred.**
 This epic extends the completed `22G` typed recovery state machine and `22H`
 provider-free auditor. It does not reopen or replace those slices.
 
@@ -2753,7 +2753,10 @@ Acceptance:
 
 **Entry condition:** start only after `24A`–`24F` metrics show first-pass success below 95%, more than
 10% of otherwise valid tasks entering provider repair, or p95 provider invocations above two because
-of identity/path/link/shape errors. Record the measurement before choosing a contract design.
+of identity/path/link/shape errors. Record the measurement before choosing a contract design. The
+2026-08-12 provider-free W24I corpus records 100% first-pass success, 0% repair entry and p95=2;
+the entry condition is false and W24G is deferred. See
+[`ADR-20260812-w24g-entry-metric.md`](adr/ADR-20260812-w24g-entry-metric.md).
 
 **Goal:** remove mechanically derivable fields from the weak model's responsibility without letting
 ACP synthesize semantic meaning.
