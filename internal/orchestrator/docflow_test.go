@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/evidence"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
@@ -986,6 +989,28 @@ func TestValidateCitationEvidenceFileRequiresConcreteContainedFile(t *testing.T)
 	}
 	if err := validateCitationEvidenceFile(repoRoot, "escape.md"); err == nil {
 		t.Fatal("expected symlink escape to fail")
+	}
+}
+
+func TestValidateCitationEvidenceContentUsesSharedNormalization(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("first  \r\nsecond\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	selected := "first  \nsecond"
+	digest := sha256.Sum256([]byte(selected))
+	citation := contracts.DocumentCitation{
+		Repo: "sample", Path: "README.md", Lines: &contracts.LineRange{Start: 1, End: 2},
+		Excerpt: selected, ExcerptHash: hex.EncodeToString(digest[:]),
+	}
+	if err := validateCitationEvidenceContent(repoRoot, citation); err != nil {
+		t.Fatalf("expected exact normalized evidence to pass: %v", err)
+	}
+	citation.Excerpt = "first\nsecond"
+	if err := validateCitationEvidenceContent(repoRoot, citation); evidence.Code(err) != "evidence.excerpt_mismatch" {
+		t.Fatalf("expected stable excerpt issue, got %v", err)
 	}
 }
 

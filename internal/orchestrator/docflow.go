@@ -14,6 +14,7 @@ import (
 
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/evidence"
 	"github.com/GrinRus/ProvenArch/internal/model"
 	"github.com/GrinRus/ProvenArch/internal/reports"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -1917,6 +1918,41 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 					Path:       citation.Path,
 					CitationID: citation.ID,
 				})
+			case citationHasBoundedEvidence(citation):
+				if err := validateCitationEvidenceContent(repoRoot, citation); err != nil {
+					issues = append(issues, contracts.ValidatorIssue{
+						Code:       evidence.Code(err),
+						Severity:   "error",
+						Message:    fmt.Sprintf("citation %q evidence bytes failed bounded validation: %v", citation.ID, err),
+						Path:       citation.Path,
+						CitationID: citation.ID,
+					})
+				}
+			}
+		}
+	}
+	if len(e.resolvedRepoPaths) > 0 {
+		repoAliases := newSemanticRepoAliasResolver(e.resolvedRepoPaths, e.shardPacks)
+		evidencePaths := newSemanticEvidencePathResolver(e.resolvedRepoPaths, repoAliases)
+		for _, entity := range e.finalRunIndex.Semantic.Entities {
+			for _, source := range entity.Provenance.Evidence {
+				if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+					appendSemanticEvidenceIssue(&issues, evidencePaths, repoAliases, source)
+				}
+			}
+		}
+		for _, edge := range e.finalRunIndex.Semantic.Edges {
+			for _, source := range edge.Provenance.Evidence {
+				if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+					appendSemanticEvidenceIssue(&issues, evidencePaths, repoAliases, source)
+				}
+			}
+		}
+		for _, finding := range e.finalRunIndex.Semantic.Findings {
+			for _, source := range finding.Provenance.Evidence {
+				if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+					appendSemanticEvidenceIssue(&issues, evidencePaths, repoAliases, source)
+				}
 			}
 		}
 	}
@@ -2087,6 +2123,49 @@ func validateCitationEvidenceFile(repoRoot string, rawPath string) error {
 		return fmt.Errorf("evidence path is not a regular file")
 	}
 	return nil
+}
+
+func citationHasBoundedEvidence(citation contracts.DocumentCitation) bool {
+	return evidence.HasBoundedEvidence(citation.Lines, citation.Excerpt, citation.ExcerptHash)
+}
+
+func validateCitationEvidenceContent(repoRoot string, citation contracts.DocumentCitation) error {
+	return validateEvidenceContent(repoRoot, citation.Path, citation.Lines, citation.Excerpt, citation.ExcerptHash)
+}
+
+func validateEvidenceContent(repoRoot, rawPath string, lines *contracts.LineRange, excerpt, excerptHash string) error {
+	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
+	relative := filepath.Clean(filepath.FromSlash(strings.TrimSpace(rawPath)))
+	resolvedTarget, err := filepath.EvalSymlinks(filepath.Join(repoRoot, relative))
+	if err != nil {
+		return err
+	}
+	return evidence.ValidateFile(resolvedTarget, lines, excerpt, excerptHash)
+}
+
+func appendSemanticEvidenceIssue(issues *[]contracts.ValidatorIssue, evidencePaths semanticEvidencePathResolver, repoAliases semanticRepoAliasResolver, source contracts.Evidence) {
+	canonicalRepo := repoAliases.canonical(source.Repo)
+	repoRoot := strings.TrimSpace(evidencePaths.rootsByRepo[strings.ToLower(canonicalRepo)])
+	if repoRoot == "" {
+		*issues = append(*issues, contracts.ValidatorIssue{
+			Code: "evidence_repo_unknown", Severity: "error", Message: fmt.Sprintf("semantic evidence references unknown repository %q", source.Repo), Path: source.Path,
+		})
+		return
+	}
+	resolvedPath := evidencePaths.resolve(canonicalRepo, source.Path)
+	if err := validateCitationEvidenceFile(repoRoot, resolvedPath); err != nil {
+		*issues = append(*issues, contracts.ValidatorIssue{
+			Code: "evidence_unavailable", Severity: "error", Message: fmt.Sprintf("semantic evidence path %q is not a concrete in-root file", source.Path), Path: source.Path,
+		})
+		return
+	}
+	if citationHasBoundedEvidence(contracts.DocumentCitation{Lines: source.Lines, Excerpt: source.Excerpt, ExcerptHash: source.ExcerptHash}) {
+		if err := validateEvidenceContent(repoRoot, resolvedPath, source.Lines, source.Excerpt, source.ExcerptHash); err != nil {
+			*issues = append(*issues, contracts.ValidatorIssue{
+				Code: evidence.Code(err), Severity: "error", Message: fmt.Sprintf("semantic evidence bytes failed bounded validation: %v", err), Path: source.Path,
+			})
+		}
+	}
 }
 
 func keyDocumentClaimsCitationCompleteness(document contracts.FinalRunDocument, ws workspace.Root) bool {

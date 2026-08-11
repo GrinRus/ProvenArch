@@ -181,6 +181,11 @@ Required fields:
 - `verdict`
 - `checked_paths[]`
 
+Evidence locators with `lines`, `excerpt` or `excerpt_hash` use the shared bounded W24C validator:
+1-based inclusive UTF-8 lines, CRLF/CR-to-LF normalization, exact whitespace/Unicode preservation,
+no synthetic trailing LF, and SHA-256 over the selected bytes. Excerpt/hash fields require an
+explicit line range; oversized, invalid-UTF-8 or out-of-range sources fail closed.
+
 Allowed `verdict` values:
 - `PASS`
 - `FAIL`

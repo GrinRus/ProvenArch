@@ -37,6 +37,12 @@
 - deterministic canonicalization top-level `questions/coverage`
 - stable ID normalization и collision rules
 - ownership/card linkage constraints
+- W24C provider-free evidence fixtures exercise one shared bounded implementation across collect,
+  staged validation and selected-run audit: 1-based inclusive ranges, CRLF/CR-to-LF normalization,
+  exact whitespace/Unicode preservation, excerpt bytes and SHA-256 identity.
+- Negative evidence fixtures cover invalid UTF-8, empty/reversed/out-of-range ranges, excerpt/hash
+  mismatch, missing explicit range, oversized source/line/excerpt limits and symlink/path escapes;
+  semantic provenance evidence with no bounded line assertion remains advisory path-only input.
 
 ### Golden/regression tests
 - docs-first staged + promoted outputs (`reports/*`, `proposals/*`)

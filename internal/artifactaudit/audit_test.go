@@ -1,6 +1,8 @@
 package artifactaudit
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path"
@@ -109,6 +111,47 @@ func TestScanSelectedRunRejectsForeignIdentityAndOversizedFiles(t *testing.T) {
 	report = ScanSelectedRun(ws, runID)
 	if !hasIssue(report, "audit.final_index.unavailable") {
 		t.Fatalf("expected bounded read issue, got %+v", report.Issues)
+	}
+}
+
+func TestScanSelectedRunValidatesCitationEvidenceBytes(t *testing.T) {
+	ws, runID := writeAuditFixture(t, false)
+	citationPath := path.Join("reports", "taskruns", runID, "staging", "final", "citation-index.json")
+	raw, err := ws.ReadFile(citationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var index contracts.CitationIndex
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatal(err)
+	}
+	selected := "# Evidence"
+	digest := sha256.Sum256([]byte(selected))
+	index.Citations[0].Lines = &contracts.LineRange{Start: 1, End: 1}
+	index.Citations[0].Excerpt = selected
+	index.Citations[0].ExcerptHash = hex.EncodeToString(digest[:])
+	updated, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFileAtomic(citationPath, append(updated, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if report := ScanSelectedRun(ws, runID); report.Status != StatusPass {
+		t.Fatalf("expected exact line evidence to pass, got %+v", report)
+	}
+
+	index.Citations[0].Excerpt = "Evidence"
+	updated, err = json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFileAtomic(citationPath, append(updated, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	report := ScanSelectedRun(ws, runID)
+	if !hasIssue(report, "audit.evidence.excerpt_mismatch") {
+		t.Fatalf("expected exact excerpt issue, got %+v", report.Issues)
 	}
 }
 

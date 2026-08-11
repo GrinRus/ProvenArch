@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/evidence"
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
@@ -164,6 +165,27 @@ func (a *auditor) scan() {
 	for _, citation := range citationIndex.Citations {
 		a.scanEvidence(citation)
 	}
+	for _, entity := range index.Semantic.Entities {
+		for _, source := range entity.Provenance.Evidence {
+			if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+				a.scanSourceEvidence(source.Repo, source.Path, source.Lines, source.Excerpt, source.ExcerptHash)
+			}
+		}
+	}
+	for _, edge := range index.Semantic.Edges {
+		for _, source := range edge.Provenance.Evidence {
+			if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+				a.scanSourceEvidence(source.Repo, source.Path, source.Lines, source.Excerpt, source.ExcerptHash)
+			}
+		}
+	}
+	for _, finding := range index.Semantic.Findings {
+		for _, source := range finding.Provenance.Evidence {
+			if evidence.HasBoundedEvidence(source.Lines, source.Excerpt, source.ExcerptHash) {
+				a.scanSourceEvidence(source.Repo, source.Path, source.Lines, source.Excerpt, source.ExcerptHash)
+			}
+		}
+	}
 	if _, ok := findCanonicalDocument(index.CanonicalDocuments, "reports/as-is/overview.md"); !ok {
 		a.add("audit.architecture_home.missing", "error", "reports/as-is/overview.md", nil, "Architecture Home is missing from the selected final index")
 	}
@@ -254,42 +276,57 @@ func (a *auditor) scanReciprocalReferences() {
 }
 
 func (a *auditor) scanEvidence(citation contracts.DocumentCitation) {
-	source, ok := a.repoSources[citation.Repo]
+	a.scanSourceEvidence(citation.Repo, citation.Path, citation.Lines, citation.Excerpt, citation.ExcerptHash)
+}
+
+func (a *auditor) scanSourceEvidence(repoName, evidencePath string, lines *contracts.LineRange, excerpt, excerptHash string) {
+	source, ok := a.repoSources[repoName]
 	if !ok {
-		a.add("audit.evidence.repo_unknown", "error", citation.Path, nil, "citation references an unknown repository")
+		a.add("audit.evidence.repo_unknown", "error", evidencePath, nil, "evidence references an unknown repository")
 		return
 	}
 	repoRoot := strings.TrimSpace(source.Path)
 	if repoRoot == "" {
-		a.add("audit.evidence.repo_unavailable", "warning", citation.Path, nil, "citation repository is not available as a local path")
+		a.add("audit.evidence.repo_unavailable", "warning", evidencePath, nil, "evidence repository is not available as a local path")
 		return
 	}
 	if !filepath.IsAbs(repoRoot) {
 		repoRoot = filepath.Join(a.ws.Path, repoRoot)
 	}
-	rel := filepath.Clean(filepath.FromSlash(strings.TrimSpace(citation.Path)))
+	rel := filepath.Clean(filepath.FromSlash(strings.TrimSpace(evidencePath)))
 	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		a.add("audit.evidence.path_escape", "error", citation.Path, nil, "citation evidence path escapes its repository")
+		a.add("audit.evidence.path_escape", "error", evidencePath, nil, "evidence path escapes its repository")
 		return
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(repoRoot)
 	if err != nil {
-		a.add("audit.evidence.repo_unavailable", "warning", citation.Path, nil, "citation repository cannot be resolved")
+		a.add("audit.evidence.repo_unavailable", "warning", evidencePath, nil, "evidence repository cannot be resolved")
 		return
 	}
 	resolvedEvidence, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, rel))
 	if err != nil {
-		a.add("audit.evidence.file_missing", "error", citation.Path, nil, "citation evidence file does not exist")
+		a.add("audit.evidence.file_missing", "error", evidencePath, nil, "evidence file does not exist")
 		return
 	}
 	contained, err := filepath.Rel(resolvedRoot, resolvedEvidence)
 	if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) || filepath.IsAbs(contained) {
-		a.add("audit.evidence.path_escape", "error", citation.Path, nil, "citation evidence resolves outside its repository")
+		a.add("audit.evidence.path_escape", "error", evidencePath, nil, "evidence resolves outside its repository")
 		return
 	}
 	info, err := os.Stat(resolvedEvidence)
-	if err != nil || !info.Mode().IsRegular() {
-		a.add("audit.evidence.not_regular", "error", citation.Path, nil, "citation evidence is not a regular file")
+	if err != nil {
+		a.add("audit.evidence.not_regular", "error", evidencePath, nil, "evidence cannot be stat'ed")
+		return
+	}
+	if !info.Mode().IsRegular() {
+		a.add("audit.evidence.not_regular", "error", evidencePath, nil, "evidence is not a regular file")
+		return
+	}
+	if lines == nil && excerpt == "" && strings.TrimSpace(excerptHash) == "" {
+		return
+	}
+	if err := evidence.ValidateFile(resolvedEvidence, lines, excerpt, excerptHash); err != nil {
+		a.add("audit."+evidence.Code(err), "error", evidencePath, nil, "evidence bytes failed bounded validation: "+err.Error())
 	}
 }
 

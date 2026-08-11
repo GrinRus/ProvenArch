@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
+	"github.com/GrinRus/ProvenArch/internal/evidence"
 )
 
 func ValidateCollectManifestInRoot(writeRoot string) error {
@@ -153,7 +154,7 @@ func validateCollectManifestRepoEvidencePaths(manifest contracts.ShardPackManife
 		return nil
 	}
 	problems := map[string]struct{}{}
-	check := func(label string, repo string, evidencePath string) {
+	check := func(label string, repo string, evidencePath string, lines *contracts.LineRange, excerpt, excerptHash string) {
 		repo = strings.TrimSpace(repo)
 		evidencePath = strings.TrimSpace(evidencePath)
 		if repo == "" && evidencePath == "" {
@@ -172,26 +173,26 @@ func validateCollectManifestRepoEvidencePaths(manifest contracts.ShardPackManife
 			problems[fmt.Sprintf("%s.repo %q has no resolved repo root", label, repo)] = struct{}{}
 			return
 		}
-		if err := validateRepoEvidencePathExists(root, evidencePath); err != nil {
+		if err := validateRepoEvidence(root, evidencePath, lines, excerpt, excerptHash); err != nil {
 			problems[fmt.Sprintf("%s %v", label, err)] = struct{}{}
 		}
 	}
 	for idx, citation := range manifest.Citations {
-		check(fmt.Sprintf("citations[%d]", idx), citation.Repo, citation.Path)
+		check(fmt.Sprintf("citations[%d]", idx), citation.Repo, citation.Path, citation.Lines, citation.Excerpt, citation.ExcerptHash)
 	}
 	for idx, entity := range manifest.Semantic.Entities {
 		for evidenceIdx, evidence := range entity.Provenance.Evidence {
-			check(fmt.Sprintf("semantic.entities[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path)
+			check(fmt.Sprintf("semantic.entities[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path, evidence.Lines, evidence.Excerpt, evidence.ExcerptHash)
 		}
 	}
 	for idx, edge := range manifest.Semantic.Edges {
 		for evidenceIdx, evidence := range edge.Provenance.Evidence {
-			check(fmt.Sprintf("semantic.edges[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path)
+			check(fmt.Sprintf("semantic.edges[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path, evidence.Lines, evidence.Excerpt, evidence.ExcerptHash)
 		}
 	}
 	for idx, finding := range manifest.Semantic.Findings {
 		for evidenceIdx, evidence := range finding.Provenance.Evidence {
-			check(fmt.Sprintf("semantic.findings[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path)
+			check(fmt.Sprintf("semantic.findings[%d].provenance.evidence[%d]", idx, evidenceIdx), evidence.Repo, evidence.Path, evidence.Lines, evidence.Excerpt, evidence.ExcerptHash)
 		}
 	}
 	if len(problems) == 0 {
@@ -263,42 +264,78 @@ func stripGeneratedRepoRootSuffix(value string) string {
 }
 
 func validateRepoEvidencePathExists(repoRoot string, evidencePath string) error {
+	_, err := resolveRepoEvidencePath(repoRoot, evidencePath)
+	return err
+}
+
+func validateRepoEvidence(repoRoot string, evidencePath string, lines *contracts.LineRange, excerpt, excerptHash string) error {
+	resolved, err := resolveRepoEvidencePath(repoRoot, evidencePath)
+	if err != nil {
+		return err
+	}
+	if !evidence.HasBoundedEvidence(lines, excerpt, excerptHash) {
+		return nil
+	}
+	if err := evidence.ValidateFile(resolved, lines, excerpt, excerptHash); err != nil {
+		return fmt.Errorf("%s: %w", evidence.Code(err), err)
+	}
+	return nil
+}
+
+func resolveRepoEvidencePath(repoRoot string, evidencePath string) (string, error) {
 	root := filepath.Clean(strings.TrimSpace(repoRoot))
 	cleanRel := filepath.Clean(filepath.FromSlash(strings.TrimSpace(evidencePath)))
 	if root == "" || root == "." {
-		return fmt.Errorf("repo evidence root is empty")
+		return "", fmt.Errorf("repo evidence root is empty")
 	}
 	if cleanRel == "" || cleanRel == "." {
-		return fmt.Errorf("repo evidence path %q must not be empty", evidencePath)
+		return "", fmt.Errorf("repo evidence path %q must not be empty", evidencePath)
 	}
 	if filepath.IsAbs(cleanRel) {
-		return fmt.Errorf("repo evidence path %q must be relative", evidencePath)
+		return "", fmt.Errorf("repo evidence path %q must be relative", evidencePath)
 	}
 	if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
+		return "", fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
 	}
 	absPath := filepath.Join(root, cleanRel)
 	relToRoot, relErr := filepath.Rel(root, absPath)
 	if relErr != nil {
-		return fmt.Errorf("resolve repo evidence path %q: %v", evidencePath, relErr)
+		return "", fmt.Errorf("resolve repo evidence path %q: %v", evidencePath, relErr)
 	}
 	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
+		return "", fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
 	}
-	if info, err := os.Stat(absPath); err == nil {
-		if info.IsDir() {
-			return fmt.Errorf("repo evidence path %q is a directory, not a file", evidencePath)
-		}
-		return nil
-	}
-	if filepath.Ext(cleanRel) == "" {
-		if resolved, ok := resolveUniqueExtensionlessRepoEvidencePath(root, cleanRel); ok {
-			if info, err := os.Stat(filepath.Join(root, resolved)); err == nil && !info.IsDir() {
-				return nil
+	if _, err := os.Stat(absPath); err != nil {
+		if filepath.Ext(cleanRel) == "" {
+			if resolved, ok := resolveUniqueExtensionlessRepoEvidencePath(root, cleanRel); ok {
+				absPath = filepath.Join(root, resolved)
+			} else {
+				return "", fmt.Errorf("repo evidence path %q is missing under resolved repo root", evidencePath)
 			}
+		} else {
+			return "", fmt.Errorf("repo evidence path %q is missing under resolved repo root", evidencePath)
 		}
 	}
-	return fmt.Errorf("repo evidence path %q is missing under resolved repo root", evidencePath)
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("repo evidence path %q is missing under resolved repo root", evidencePath)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("repo evidence path %q is a directory, not a file", evidencePath)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve repo evidence root %q: %v", repoRoot, err)
+	}
+	resolvedEvidence, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve repo evidence path %q: %v", evidencePath, err)
+	}
+	contained, err := filepath.Rel(resolvedRoot, resolvedEvidence)
+	if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) || filepath.IsAbs(contained) {
+		return "", fmt.Errorf("repo evidence path %q must not escape repo root", evidencePath)
+	}
+	return resolvedEvidence, nil
 }
 
 func resolveUniqueExtensionlessRepoEvidencePath(root string, cleanRel string) (string, bool) {
