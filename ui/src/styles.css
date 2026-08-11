@@ -5203,6 +5203,7 @@ body:has(.product-shell), html:has(.product-shell), #root:has(.product-shell) { 
 .task-inbox, .task-detail { display: grid; gap: var(--space-4); min-width: 0; }
 .task-filters { display: grid; grid-template-columns: minmax(12rem, 2fr) repeat(3, minmax(8rem, 1fr)) repeat(2, minmax(8rem, .8fr)); gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line-soft); border-radius: var(--radius-panel); background: var(--surface-muted); }
 .task-filters .field { min-width: 0; }
+.task-filters input, .task-filters select { min-height: 44px; }
 .task-inbox-groups { display: grid; gap: var(--space-4); }
 .task-group { display: grid; gap: var(--space-2); min-width: 0; }
 .task-group-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -5227,7 +5228,7 @@ body:has(.product-shell), html:has(.product-shell), #root:has(.product-shell) { 
 .task-inbox-recovery p { margin: 0; }
 .task-detail-summary, .task-attempt-history { display: grid; gap: var(--space-3); min-width: 0; }
 .task-detail-summary > p { margin: 0; overflow-wrap: anywhere; }
-.task-attempt-row { display: grid; grid-template-columns: minmax(8rem, 1.1fr) minmax(7rem, 1fr) minmax(4rem, .5fr) minmax(8rem, 1.2fr); gap: var(--space-3); align-items: center; width: 100%; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: inherit; text-align: left; cursor: pointer; }
+.task-attempt-row { display: grid; grid-template-columns: minmax(8rem, 1.1fr) minmax(7rem, 1fr) minmax(4rem, .5fr) minmax(8rem, 1.2fr); gap: var(--space-3); align-items: center; width: 100%; min-height: 44px; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: inherit; text-align: left; cursor: pointer; }
 .task-attempt-row:hover, .task-attempt-row:focus-visible { border-color: var(--accent); }
 .task-attempt-row span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .task-attempt-row small { color: var(--ink-muted); overflow-wrap: anywhere; }

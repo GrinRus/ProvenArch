@@ -155,10 +155,10 @@ the final removal of Home/Analyze routes.
       review, including explicit semantic partial state and independent current Architecture status.
 - [x] Implement the additive W23F Attempt-bound Pipeline Studio with structured steps, bounded
       blocker/diagnostics disclosure and no provider-output percentage inference.
-- [ ] Implement the remaining W23N–O closure. W23G Task-scoped Architecture context, W23H
+- [ ] Implement the remaining W23O closure. W23G Task-scoped Architecture context, W23H
       allowlisted Markdown reader/editor, W23I model inspector, W23J Mermaid Evidence Studio,
-      W23K findings queue, W23L Changes context and W23M Ask/Runner authority boundaries are
-      implemented additively.
+      W23K findings queue, W23L Changes context, W23M Ask/Runner authority boundaries and W23N
+      Task state/accessibility coverage are implemented additively.
 - [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
 
 ### Non-goals
@@ -195,8 +195,9 @@ the final removal of Home/Analyze routes.
   W23K now adds a filtered findings/questions/gaps queue, bounded detail and an explicit no-approval
   boundary. W23L now adds exact Task context to Changes and keeps current evidence separate from
   snapshot publication. W23M now makes the global Ask read-only authority and Runner Settings
-  desired/effective/source boundary explicit, including provider-outage behavior; W23N–O remain
-  pending.
+  desired/effective/source boundary explicit, including provider-outage behavior. W23N now covers
+  Task Inbox empty/error recovery, keyboard row activation, 44px filter/Attempt targets and explicit
+  status semantics; W23O remains pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

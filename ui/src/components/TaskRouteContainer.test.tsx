@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskRouteContainer } from "./TaskRouteContainer";
-import { getTask, listTaskAttempts, type ProductTask, type TaskAttempt } from "../lib/taskApi";
+import { getTask, listTaskAttempts, listTasks, type ProductTask, type TaskAttempt } from "../lib/taskApi";
 
 const task = {
   version: 1,
@@ -43,6 +43,28 @@ describe("TaskRouteContainer", () => {
     await waitFor(() => expect(screen.getByTestId("task-row-task-1")).toHaveTextContent("Map payment authorization"));
     expect(screen.getByTestId("task-group-ready")).toHaveTextContent("Payments");
     expect(screen.getByTestId("task-route-inbox")).not.toHaveTextContent("latest run");
+  });
+
+  it("keeps empty and error states explicit with one recovery action", async () => {
+    vi.mocked(listTasks).mockResolvedValueOnce({ items: [], next_cursor: "", has_more: false });
+    const { unmount } = render(<TaskRouteContainer view="inbox" filters={{}} />);
+    expect(await screen.findByTestId("task-inbox-empty")).toHaveTextContent("No Tasks match these filters");
+    expect(screen.getByTestId("task-inbox-empty")).toHaveAttribute("role", "status");
+    unmount();
+
+    vi.mocked(listTasks).mockRejectedValueOnce(new Error("Task service unavailable"));
+    render(<TaskRouteContainer view="inbox" filters={{}} />);
+    expect(await screen.findByTestId("task-inbox-error")).toHaveTextContent("Task service unavailable");
+    expect(screen.getByTestId("task-inbox-error")).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("opens a Task row from the keyboard without changing its identity", async () => {
+    const onSelectTask = vi.fn();
+    render(<TaskRouteContainer view="inbox" filters={{}} onSelectTask={onSelectTask} />);
+    const row = await screen.findByLabelText("Open Task Payments");
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onSelectTask).toHaveBeenCalledWith("task-1", {});
   });
 
   it("keeps exact Task and Attempt identities visible while loading", () => {
