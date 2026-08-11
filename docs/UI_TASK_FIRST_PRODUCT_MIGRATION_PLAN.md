@@ -89,10 +89,13 @@ flowchart LR
   L --> N
   M --> N
   N --> O["23O deterministic closure and cutover"]
+  O -.-> P["Epic 25 Task-first live E2E alignment"]
 ```
 
 `23A` может быть разделён на contract-only PRs, если Task и runner admission затрагивают разные
-schemas. Остальные slices не должны начинать с invented frontend types.
+schemas. Остальные slices не должны начинать с invented frontend types. Epic 25 остаётся отдельной
+release-gate задачей: frontend migration начинается после `23O`, а assertions по hardened runtime
+evidence добавляются только после стабилизации публичных diagnostics в `24I`.
 
 ## 6. Target module ownership
 
@@ -191,6 +194,8 @@ critical axe violations and screenshot artifacts on failure.
 - full DoD: `make contracts`, `make test`, `make lint`, `make build`;
 - deterministic mock E2E and embedded UI parity;
 - live provider gate only after `23O` and only through canonical runbook.
+- Task-first migration release-facing `init-inspect` и синхронизация Epic 24 public evidence живут в
+  отдельном Epic 25; canonical profile taxonomy при этом не расширяется автоматически.
 
 ## 10. Cutover and cleanup
 

@@ -2760,3 +2760,129 @@ Acceptance:
 - A global recovery budget bounds provider invocations and is provider-parity tested.
 - Sparse truthful analysis remains successful with explicit gaps; unsupported facts do not.
 - Required CI remains deterministic, offline and independent of live provider binaries.
+
+## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
+
+Status (2026-08-11): **planned; implementation not started.** This is a cross-epic release-gate
+alignment task. The Task-first frontend migration starts only after `23O`; hardened runtime evidence
+assertions start only after the public diagnostics from `24I` are stable.
+
+### Goal
+
+Keep the existing canonical trusted-machine release gate truthful after Epics 23 and 24 land: the
+release-facing frontend `init-inspect` must follow the public Task-first journey, and live execution
+reports must consume the final public audit/verdict/recovery evidence without depending on product
+internals or preserving the retired shell.
+
+### Non-goals
+
+- no new canonical matrix profile, provider, curated repository, sweep or timeout taxonomy;
+- no wrapper around `scripts/full-run-batch-matrix.sh` and no hosted live-provider CI workflow;
+- no hidden legacy routes, selectors or compatibility DOM for `/home`, `/runs` or `/knowledge`;
+- no second provider-backed analysis started by frontend snapshot inspection;
+- no attempt to force live models to emit deterministic invalid artifacts; Epic 24 negative cases
+  remain provider-free fixture/fault-injection coverage;
+- no product API/schema invented by the harness; it consumes only contracts accepted by Epics 23
+  and 24.
+
+### 25A — Task-first frontend `init-inspect` cutover
+
+**Depends on:** `23O` deterministic closure and accepted Task/Attempt routes/contracts.
+
+What:
+
+- keep the release-facing scenario ID `UI_E2E_SCENARIO=init-inspect` and existing frontend failure
+  taxonomy, but replace the retired `Home / Runs / Knowledge / Changes` journey;
+- inspect the exact Task and immutable Attempt bound to the selected backend snapshot;
+- verify terminal Outcome, effective runner/config identity and contextual Pipeline Studio;
+- traverse current Architecture map/document/Mermaid/evidence surfaces with explicit authority;
+- review task/run-pinned semantic Changes and the authoritative full-workspace Publish gate;
+- exercise global read-only Ask and citation return without mutating canonical architecture;
+- retain desktop/tablet/mobile, keyboard/focus, critical axe, overflow and console-error checks;
+- migrate operator-facing selectors, screenshots, result JSON evidence refs and contract tests in
+  the same slice; do not retain hidden compatibility controls.
+
+Expected files/modules:
+
+- `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes;
+- `scripts/frontend-live-e2e.sh`, `scripts/tests/frontend_live_e2e_contract_test.py`;
+- Task/Attempt public UI/API clients and operator-facing test IDs introduced by Epic 23;
+- `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+
+Tests:
+
+- snapshot-bound Task/Attempt selection, reload and Back/Forward identity restoration;
+- terminal success opens Outcome rather than active pipeline language;
+- Pipeline Studio preserves Attempt identity and exposes bounded diagnostics;
+- Architecture, evidence, Changes, Publish and Ask never silently switch authority;
+- old shell routes/selectors are absent after cutover;
+- frontend result reason mapping, active-run cleanup and dependent-skip behavior remain stable;
+- deterministic fake/mock E2E passes before any trusted-machine run.
+
+Acceptance:
+
+- all three release providers pass the Task-first frontend `init-inspect` over `artifact_source=snapshot`;
+- no release screenshot or assertion refers to the retired Home/Analyze/Knowledge shell;
+- the scenario does not launch a second live analysis and does not mutate source repositories;
+- exact Task, Attempt, run snapshot and publication identities remain consistent through the flow;
+- existing `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`,
+  `server_exited` and `playwright_failed` classifications remain distinguishable.
+
+### 25B — Epic 24 public evidence consumption
+
+**Depends on:** `24I` deterministic closure and stable public diagnostic fields.
+
+What:
+
+- extend batch/matrix/report inspection to consume the public pre-promotion audit result, effective
+  technical verdict authority and global recovery-budget counters established by Epic 24;
+- keep `runtime_contract_status`, artifact-quality status and release execution verdict separate;
+- fail closed on any public deterministic audit error or inconsistent effective verdict;
+- retain repair/invocation pressure as explicit evidence and enforce the accepted hard budget;
+- prove identical report interpretation for Claude/Qwen/Codex without importing orchestrator or
+  validator internals.
+
+Expected files/modules:
+
+- `scripts/full-run-batch.sh`, report helpers and focused script tests;
+- `scripts/full-run-batch-matrix.sh` only where public report aggregation requires it;
+- `scripts/verify-release-verdict.py` only if the accepted release-verdict contract changes;
+- `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md` and operator assessment template.
+
+Tests:
+
+- clean public audit/verdict/budget fixture passes for all provider envelopes;
+- audit error, foreign authority, contradictory effective verdict and exhausted budget fail with
+  stable public classifications;
+- reordered diagnostics and provider-specific prose do not change interpretation;
+- historical report fixtures retain their documented read behavior;
+- canonical profile totals, baseline/parallel-default invariant and release companion assessment
+  requirements remain unchanged.
+
+Acceptance:
+
+- live release evidence proves the promoted snapshot passed the mandatory public technical gate;
+- provider-authored opinion cannot be mistaken for the effective technical verdict;
+- recovery-budget exhaustion is visible and cannot be hidden by a terminal provider success;
+- no product-internal package, selector or validation helper is imported by the harness;
+- required CI remains deterministic/provider-free; trusted live execution remains manual.
+
+### 25C — Closure and optional Task-start diagnostic decision
+
+What:
+
+- run focused shell/Python/Playwright contract suites, deterministic UI scenarios, full DoD and
+  embedded UI parity before trusted-machine validation;
+- synchronize current behavior in testing strategy/runbook and remove retired screenshot/selector
+  references;
+- decide explicitly whether a small non-release `smoke tiny` UI Task-start diagnostic is worth its
+  provider cost; absence of that owner decision does not expand canonical release taxonomy;
+- execute canonical live validation only through `acp-e2e-live-gate` from a clean committed tree.
+
+Acceptance:
+
+- `make contracts`, `make test`, `make lint` and `make build` pass;
+- frontend live contract tests prove only the accepted Task-first `init-inspect` release scenario;
+- canonical release matrices and curated repos are byte-unchanged unless separately approved;
+- release readiness still requires machine execution `PASS` plus accepted SWE UX and artifact-quality
+  assessments for the same matrix ID.
