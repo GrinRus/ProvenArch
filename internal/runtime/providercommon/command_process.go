@@ -22,6 +22,10 @@ import (
 )
 
 func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy) (acpruntime.Result, error) {
+	return runProviderCommandWithTransition(ctx, task, adapter, policy, "normal")
+}
+
+func runProviderCommandWithTransition(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy, transition string) (acpruntime.Result, error) {
 	spec, err := adapter.CommandSpec(task)
 	if err != nil {
 		return acpruntime.Result{}, err
@@ -29,11 +33,34 @@ func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter Provi
 	if spec.Provider == "" {
 		spec.Provider = adapter.Provider()
 	}
-	return runCommandSpec(ctx, task, spec, policy)
+	return runCommandSpecWithTransition(ctx, task, spec, policy, transition)
 }
 
 func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy) (acpruntime.Result, error) {
+	return runCommandSpecWithTransition(ctx, task, spec, policy, ProviderInvocationTransitionFromContext(ctx))
+}
+
+func runCommandSpecWithTransition(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy, transition string) (acpruntime.Result, error) {
 	commandDiag := newProviderCommandDiagnostics(spec, task, policy)
+	transition = normalizeInvocationTransition(transition)
+	commandDiag.RecoveryTransition = transition
+	var reservation ProviderInvocationReservation
+	if budget := ProviderInvocationBudgetFromContext(ctx); budget != nil {
+		var budgetErr error
+		reservation, budgetErr = budget.Reserve(transition)
+		commandDiag.setInvocationBudget(reservation)
+		if budgetErr != nil {
+			commandDiag.finish("budget_exhausted", 0, 0, budgetErr)
+			fields := commandDiag.fields()
+			fields["terminal_exhaustion_reason"] = "provider_invocation_budget_exhausted"
+			emitDiagnostic(task, "provider invocation budget exhausted", fields)
+			return acpruntime.Result{Diagnostics: map[string]any{
+				"provider_lifecycle":         fields,
+				"provider_invocation_budget": fields,
+				"terminal_exhaustion_reason": "provider_invocation_budget_exhausted",
+			}}, budgetErr
+		}
+	}
 	cmd := exec.CommandContext(ctx, strings.TrimSpace(spec.Command), append([]string(nil), spec.Args...)...)
 	configureCommandProcessGroup(cmd)
 	if dir := strings.TrimSpace(spec.Dir); dir != "" {
@@ -197,31 +224,46 @@ func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec,
 }
 
 type providerCommandDiagnostics struct {
-	Provider                 string
-	Command                  string
-	CommandPath              string
-	Args                     []string
-	Dir                      string
-	IncludeDirs              []string
-	PromptBytes              int
-	ActivityPolicy           map[string]any
-	Environment              map[string]any
-	TimeoutProfile           map[string]any
-	Permissions              map[string]any
-	PID                      int
-	StartedAt                time.Time
-	FinishedAt               time.Time
-	DurationMillis           int64
-	ExitReason               string
-	Error                    string
-	StdoutBytes              int
-	StderrBytes              int
-	LastPipeActivity         time.Time
-	LastArtifactMutation     time.Time
-	ArtifactObserved         bool
-	ArtifactValid            bool
-	ArtifactState            string
-	NoProgressDurationMillis int64
+	Provider                  string
+	Command                   string
+	CommandPath               string
+	Args                      []string
+	Dir                       string
+	IncludeDirs               []string
+	PromptBytes               int
+	ActivityPolicy            map[string]any
+	Environment               map[string]any
+	TimeoutProfile            map[string]any
+	Permissions               map[string]any
+	RecoveryTransition        string
+	InvocationIndex           int
+	InvocationBudgetMax       int
+	InvocationBudgetRemaining int
+	InvocationBudgetExhausted bool
+	PID                       int
+	StartedAt                 time.Time
+	FinishedAt                time.Time
+	DurationMillis            int64
+	ExitReason                string
+	Error                     string
+	StdoutBytes               int
+	StderrBytes               int
+	LastPipeActivity          time.Time
+	LastArtifactMutation      time.Time
+	ArtifactObserved          bool
+	ArtifactValid             bool
+	ArtifactState             string
+	NoProgressDurationMillis  int64
+}
+
+func (d *providerCommandDiagnostics) setInvocationBudget(reservation ProviderInvocationReservation) {
+	if d == nil || reservation.Max <= 0 {
+		return
+	}
+	d.InvocationIndex = reservation.Used
+	d.InvocationBudgetMax = reservation.Max
+	d.InvocationBudgetRemaining = reservation.Remaining
+	d.InvocationBudgetExhausted = reservation.Exhausted
 }
 
 func newProviderCommandDiagnostics(spec CommandSpec, task acpruntime.Task, policy ActivityPolicy) *providerCommandDiagnostics {
@@ -320,6 +362,7 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 		"env":                     d.Environment,
 		"timeout_profile":         cloneDiagnosticMap(d.TimeoutProfile),
 		"permissions":             cloneDiagnosticMap(d.Permissions),
+		"recovery_transition":     d.RecoveryTransition,
 		"pid":                     d.PID,
 		"started_at":              d.StartedAt.Format(time.RFC3339Nano),
 		"stdout_bytes":            d.StdoutBytes,
@@ -328,6 +371,12 @@ func (d *providerCommandDiagnostics) fields() map[string]any {
 		"artifact_valid":          d.ArtifactValid,
 		"artifact_state":          d.ArtifactState,
 		"no_progress_duration_ms": d.NoProgressDurationMillis,
+	}
+	if d.InvocationBudgetMax > 0 {
+		fields["provider_invocation_index"] = d.InvocationIndex
+		fields["provider_invocation_budget_max"] = d.InvocationBudgetMax
+		fields["provider_invocation_budget_remaining"] = d.InvocationBudgetRemaining
+		fields["provider_invocation_budget_exhausted"] = d.InvocationBudgetExhausted
 	}
 	if !d.LastPipeActivity.IsZero() {
 		fields["last_pipe_activity_at"] = d.LastPipeActivity.UTC().Format(time.RFC3339Nano)

@@ -123,6 +123,37 @@ func TestRuntimeDiagnosticCountersSurfaceRepairStallPressure(t *testing.T) {
 	}
 }
 
+func TestRuntimeDiagnosticCountersPersistProviderInvocationBudget(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{}
+	for index, transition := range []string{"normal", "focused_repair", "transport_retry"} {
+		execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+			Message: "provider command started",
+			Fields: map[string]any{
+				"provider_invocation_index":            index + 1,
+				"provider_invocation_budget_max":       3,
+				"provider_invocation_budget_remaining": 2 - index,
+				"recovery_transition":                  transition,
+			},
+		})
+	}
+	execution.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "provider invocation budget exhausted",
+		Fields: map[string]any{
+			"provider_invocation_budget_max":       3,
+			"provider_invocation_budget_remaining": 0,
+			"provider_invocation_budget_exhausted": true,
+			"terminal_exhaustion_reason":           "provider_invocation_budget_exhausted",
+		},
+	})
+
+	counters := execution.runtimeRecoveryCounters
+	if counters.ProviderInvocations != 3 || counters.ProviderInvocationBudgetMax != 3 || counters.ProviderInvocationRemaining != 0 || counters.ProviderBudgetExhausted != 1 || counters.ProviderLastTransition != "transport_retry" || counters.ProviderTerminalExhaustion != "provider_invocation_budget_exhausted" {
+		t.Fatalf("unexpected provider invocation counters: %+v", counters)
+	}
+}
+
 func TestRuntimeDiagnosticCountersIgnoreValidArtifactControlledStop(t *testing.T) {
 	t.Parallel()
 

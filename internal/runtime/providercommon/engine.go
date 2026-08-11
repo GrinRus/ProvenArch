@@ -256,7 +256,10 @@ func RunHeadlessProvider(ctx context.Context, task acpruntime.Task, adapter Prov
 			)
 		}
 	}
-	result, runErr := runProviderCommand(ctx, task, adapter, normalizeActivityPolicy(adapter.ActivityPolicy(task)))
+	if ProviderInvocationBudgetFromContext(ctx) == nil {
+		ctx = WithProviderInvocationBudget(ctx, NewProviderInvocationBudget(DefaultProviderInvocationBudget))
+	}
+	result, runErr := runProviderCommandWithTransition(ctx, task, adapter, normalizeActivityPolicy(adapter.ActivityPolicy(task)), "normal")
 	if runErr != nil {
 		if recovered, recoveredResult, recoveredErr := recoverAfterStall(ctx, task, adapter, result, runErr); recovered {
 			if recoveredErr != nil {

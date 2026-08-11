@@ -26,7 +26,7 @@ func recoverAfterArtifactValidationFailure(ctx context.Context, task acpruntime.
 
 	initialStructuralFailure := isStructuralArtifactContractFailure(validationErr)
 	emitArtifactRetryScheduledDiagnostic(task, adapter.Provider(), validationErr)
-	retryResult, retryErr := runProviderCommand(ctx, task, adapter, normalizeActivityPolicy(adapter.ActivityPolicy(task)))
+	retryResult, retryErr := runProviderCommandWithTransition(ctx, task, adapter, normalizeActivityPolicy(adapter.ActivityPolicy(task)), "transport_retry")
 	if retryErr != nil {
 		var retryStalled StallError
 		if errors.As(retryErr, &retryStalled) {
@@ -104,7 +104,7 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 		retryPolicy.PreArtifactWallClockWindow = retryPolicy.RetryPreArtifactStallWindow
 	}
 	emitStallRetryScheduledDiagnostic(task, adapter.Provider(), stalled.Diagnostic)
-	retryResult, retryErr := runProviderCommand(ctx, task, adapter, retryPolicy)
+	retryResult, retryErr := runProviderCommandWithTransition(ctx, task, adapter, retryPolicy, "transport_retry")
 	if retryErr != nil {
 		var retryStalled StallError
 		if errors.As(retryErr, &retryStalled) {
@@ -595,7 +595,7 @@ func recoverCollectManifestRepair(ctx context.Context, task acpruntime.Task, ada
 	if repairPolicy.ValidArtifactStopWindow <= 0 {
 		repairPolicy.ValidArtifactStopWindow = defaultRepairValidStopWindow
 	}
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	repairResult, repairErr := runCommandSpecWithTransition(ctx, task, spec, repairPolicy, "focused_repair")
 	if repairErr != nil {
 		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
 			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, repairResult, "collect_manifest_repair", "manifest-only collect repair wrote outside shard-pack-manifest.json", err)
@@ -695,7 +695,7 @@ func runCollectManifestShapeCleanup(ctx context.Context, task acpruntime.Task, a
 	if err != nil {
 		return acpruntime.Result{}, classifyCommandFailure(adapter, task, baseResult, err), true
 	}
-	cleanupResult, cleanupRunErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	cleanupResult, cleanupRunErr := runCommandSpecWithTransition(ctx, task, spec, repairPolicy, "focused_repair")
 	if cleanupRunErr != nil {
 		if err := validateCollectManifestRepairWriteSet(task, beforeRepairFiles); err != nil {
 			return acpruntime.Result{}, classifyArtifactFailure(adapter, task, cleanupResult, "collect_manifest_shape_cleanup", "collect manifest shape cleanup wrote outside shard-pack-manifest.json", err), true
@@ -1969,7 +1969,7 @@ func runCollectArtifactPairRepairCommand(ctx context.Context, task acpruntime.Ta
 	repairPolicy.MonitorArtifacts = true
 	repairPolicy.MonitorPreArtifact = true
 	repairPolicy = collectArtifactPairRepairActivityPolicy(repairPolicy)
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	repairResult, repairErr := runCommandSpecWithTransition(ctx, task, spec, repairPolicy, "focused_repair")
 	return repairResult, repairErr, nil
 }
 
@@ -1982,7 +1982,7 @@ func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acprunt
 	if configure != nil {
 		repairPolicy = configure(repairPolicy)
 	}
-	repairResult, repairErr := runCommandSpec(ctx, task, spec, repairPolicy)
+	repairResult, repairErr := runCommandSpecWithTransition(ctx, task, spec, repairPolicy, "focused_repair")
 	return repairResult, repairErr, nil
 }
 
