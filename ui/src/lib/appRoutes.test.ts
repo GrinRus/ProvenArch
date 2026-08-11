@@ -46,6 +46,19 @@ describe("application route codec", () => {
     expect(formatAppRoute(attempt)).toBe("/tasks/task-opaque/attempts/attempt-opaque");
   });
 
+  it("round-trips URL-restorable Task Inbox filters through detail", () => {
+    const route = parseAppRoute(location("/tasks?search=payments&lifecycle=open&runner=claude-code&repository=payments&from=2026-08-01T00:00:00Z&to=2026-08-11T23:59:59Z"), true);
+    expect(route.taskFilters).toEqual({ search: "payments", lifecycle: "open", runner: "claude-code", repository: "payments", from: "2026-08-01T00:00:00Z", to: "2026-08-11T23:59:59Z" });
+    expect(formatAppRoute({ ...route, taskView: "detail", taskId: "task-1" })).toBe("/tasks/task-1?search=payments&lifecycle=open&runner=claude-code&repository=payments&from=2026-08-01T00%3A00%3A00Z&to=2026-08-11T23%3A59%3A59Z");
+  });
+
+  it("rejects an inverted Task activity range without selecting a different identity", () => {
+    const route = parseAppRoute(location("/tasks?from=2026-08-11&to=2026-08-01"), true);
+    expect(route.invalid).toContain("task_time_range");
+    expect(route.taskFilters?.from).toBeUndefined();
+    expect(route.taskFilters?.to).toBeUndefined();
+  });
+
   it("rejects ambiguous Task identities and never chooses another item", () => {
     const malformed = parseAppRoute(location("/tasks/task%2Fwith-slash"), true);
     expect(malformed).toMatchObject({ destination: "tasks", taskView: "inbox" });

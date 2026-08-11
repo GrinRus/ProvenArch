@@ -2062,8 +2062,10 @@ Acceptance:
 Implementation status (2026-08-11): `23C` is implemented as an additive New Task composer. It
 submits the displayed repository scope to the authoritative Task API, snapshots the selected
 runtime mode/provider in the desired runner preset, blocks mode/provider/scope mismatches with an
-adjacent reason, and routes to the exact created Task identity. Attempt admission and Task Inbox
-remain in later slices.
+adjacent reason, and routes to the exact created Task identity. `23D` now adds the additive
+authoritative Inbox/detail/Attempt read surfaces, URL-restorable filters, derived lifecycle groups,
+keyboard-safe rows and archive/unarchive controls; Attempt admission remains server-owned and later
+outcome/workbench slices remain pending.
 
 ### 23D — Task Inbox, filters and Attempt history
 
@@ -2085,6 +2087,11 @@ Acceptance:
 - empty/filtered-empty/loading/error/offline states offer one clear recovery;
 - no `current step` appears on terminal Task rows;
 - list/detail/history component tests and 1000-row performance fixture pass.
+
+Implementation status (2026-08-11): `23D` loads only public Task/Attempt endpoints, derives Inbox
+groups from Task lifecycle and linked Attempt summaries, keeps exact identities through detail/history
+routes, restores filters through the URL, and exposes explicit loading/error/empty/recovery states.
+It does not synthesize Tasks from legacy runs or infer a result from recency.
 
 ### 23E — Outcome-first Task detail and semantic result
 

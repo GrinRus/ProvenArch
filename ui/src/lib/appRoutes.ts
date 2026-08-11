@@ -5,6 +5,15 @@ export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
 export type KnowledgeView = "documents" | "diagrams" | "model" | "findings" | "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
 export type TaskRouteView = "inbox" | "new" | "detail" | "attempt";
+export type TaskLifecycleFilter = "open" | "archived";
+export type TaskFilters = {
+  search?: string;
+  lifecycle?: TaskLifecycleFilter;
+  runner?: string;
+  repository?: string;
+  from?: string;
+  to?: string;
+};
 export type RouteSource = "snapshot" | "current";
 export type ViewerMode = "rendered" | "raw" | "diff";
 
@@ -16,6 +25,7 @@ export type AppRoute = {
   taskView?: TaskRouteView;
   taskId?: string;
   attemptId?: string;
+  taskFilters?: TaskFilters;
   knowledgeView?: KnowledgeView;
   changesView?: ChangesView;
   source?: RouteSource;
@@ -60,7 +70,10 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
     }
     else if (segments.length > 1) invalid.push("run");
   }
-  if (destination === "tasks") parseTaskRoute(segments, route, invalid);
+  if (destination === "tasks") {
+    route.taskFilters = parseTaskFilters(params, invalid);
+    parseTaskRoute(segments, route, invalid);
+  }
   if (destination === "knowledge") {
 	const legacy = params.get("view") ?? segments[1];
 	const migrated = legacy === "atlas" ? "map" : legacy === "entities" ? "catalog" : legacy === "artifacts" ? "evidence" : legacy;
@@ -87,10 +100,20 @@ export function formatAppRoute(route: AppRoute): string {
   if (route.destination === "home") return "/home";
   if (route.destination === "runs") return route.runId ? `/runs/${encodeURIComponent(route.runId)}` : "/runs";
   if (route.destination === "tasks") {
-    if (route.taskView === "new") return "/tasks/new";
-    if (route.taskView === "detail" && validTaskRouteId(route.taskId)) return `/tasks/${encodeURIComponent(route.taskId)}`;
-    if (route.taskView === "attempt" && validTaskRouteId(route.taskId) && validTaskRouteId(route.attemptId)) return `/tasks/${encodeURIComponent(route.taskId)}/attempts/${encodeURIComponent(route.attemptId)}`;
-    return "/tasks";
+    const path = route.taskView === "new" ? "/tasks/new"
+      : route.taskView === "detail" && validTaskRouteId(route.taskId) ? `/tasks/${encodeURIComponent(route.taskId)}`
+      : route.taskView === "attempt" && validTaskRouteId(route.taskId) && validTaskRouteId(route.attemptId) ? `/tasks/${encodeURIComponent(route.taskId)}/attempts/${encodeURIComponent(route.attemptId)}`
+      : "/tasks";
+    const params = new URLSearchParams();
+    const filters = route.taskFilters;
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.lifecycle) params.set("lifecycle", filters.lifecycle);
+    if (filters?.runner) params.set("runner", filters.runner);
+    if (filters?.repository) params.set("repository", filters.repository);
+    if (filters?.from) params.set("from", filters.from);
+    if (filters?.to) params.set("to", filters.to);
+    const query = params.toString();
+    return `${path}${query ? `?${query}` : ""}`;
   }
   const params = new URLSearchParams();
   if (route.destination === "setup") params.set("step", route.setupStep ?? "workspace");
@@ -183,6 +206,31 @@ function parseTaskRoute(segments: string[], route: AppRoute, invalid: string[]):
     return;
   }
   invalid.push("task_route");
+}
+
+function parseTaskFilters(params: URLSearchParams, invalid: string[]): TaskFilters {
+  const filters: TaskFilters = {};
+  const search = params.get("search")?.trim();
+  if (search) filters.search = search;
+  const lifecycle = params.get("lifecycle")?.trim();
+  if (lifecycle === "open" || lifecycle === "archived") filters.lifecycle = lifecycle;
+  else if (lifecycle) invalid.push("lifecycle");
+  for (const key of ["runner", "repository"] as const) {
+    const value = params.get(key)?.trim();
+    if (value) filters[key] = value;
+  }
+  for (const key of ["from", "to"] as const) {
+    const value = params.get(key)?.trim();
+    if (!value) continue;
+    if (Number.isNaN(Date.parse(value))) invalid.push(key);
+    else filters[key] = value;
+  }
+  if (filters.from && filters.to && Date.parse(filters.to) < Date.parse(filters.from)) {
+    invalid.push("task_time_range");
+    delete filters.from;
+    delete filters.to;
+  }
+  return filters;
 }
 
 function validTaskRouteId(value: string | undefined): value is string {
