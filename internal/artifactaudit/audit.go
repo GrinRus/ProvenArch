@@ -154,6 +154,7 @@ func (a *auditor) scan() {
 		return
 	}
 	a.record(verdictPath, verdictRaw)
+	a.scanValidatorPaths(verdict, finalRoot, finalPath, citationPath)
 
 	for _, document := range index.CanonicalDocuments {
 		a.documents[document.ID] = document
@@ -289,6 +290,37 @@ func (a *auditor) scanEvidence(citation contracts.DocumentCitation) {
 	info, err := os.Stat(resolvedEvidence)
 	if err != nil || !info.Mode().IsRegular() {
 		a.add("audit.evidence.not_regular", "error", citation.Path, nil, "citation evidence is not a regular file")
+	}
+}
+
+func (a *auditor) scanValidatorPaths(verdict contracts.ValidatorVerdict, finalRoot, finalPath, citationPath string) {
+	seen := map[string]struct{}{}
+	hasFinal, hasCitation := false, false
+	taskRoot := path.Join("reports", "taskruns", a.runID) + "/"
+	for _, raw := range verdict.CheckedPaths {
+		clean := filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
+		if clean == "." || filepath.IsAbs(clean) || strings.Contains(clean, "\\") || !strings.HasPrefix(clean, taskRoot) {
+			a.add("audit.validator.checked_path_foreign", "error", clean, nil, "validator checked path is outside the selected run")
+			continue
+		}
+		if _, exists := seen[clean]; exists {
+			a.add("audit.validator.checked_path_duplicate", "error", clean, nil, "validator checked paths must be unique")
+		}
+		seen[clean] = struct{}{}
+		hasFinal = hasFinal || clean == finalPath
+		hasCitation = hasCitation || clean == citationPath
+	}
+	if !hasFinal {
+		a.add("audit.validator.checked_path_missing_final", "error", finalPath, nil, "validator checked_paths must include the selected final index")
+	}
+	if !hasCitation {
+		a.add("audit.validator.checked_path_missing_citation", "error", citationPath, nil, "validator checked_paths must include the selected citation index")
+	}
+	for _, raw := range verdict.FixedPaths {
+		clean := filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
+		if clean == "." || filepath.IsAbs(clean) || strings.Contains(clean, "\\") || !strings.HasPrefix(clean, taskRoot) {
+			a.add("audit.validator.fixed_path_foreign", "error", clean, []string{finalPath}, "provider fixed_paths must remain inside the selected run")
+		}
 	}
 }
 

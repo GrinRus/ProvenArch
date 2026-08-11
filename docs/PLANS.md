@@ -143,7 +143,7 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 
 ### Goals (must have)
 
-- [ ] Bind validator identity and checked paths to the exact current runtime task/run snapshot.
+- [x] Bind validator identity and checked paths to the exact current runtime task/run snapshot.
 - [ ] Enforce coherent provider draft verdicts and deterministic issue ownership/order.
 - [ ] Validate evidence line/excerpt/hash claims through one bounded shared implementation.
 - [ ] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
@@ -173,6 +173,7 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 
 - `schemas/validator-verdict.schema.json`, semantic schemas and a new effective-verdict schema.
 - `internal/contracts`, `internal/artifactquality`, `internal/artifactaudit`.
+- `internal/evidence` owns the provider-free CRLF/LF, line-range, exact excerpt and SHA-256 validator.
 - `internal/runtime/providercommon`, `internal/orchestrator` validation/repair/promotion.
 - `internal/runtime/fakeruntime`, incident-shaped fixtures and adapter parity tests.
 - `docs/spec/PIPELINE_SPEC.md`, `docs/spec/API_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`,
@@ -200,7 +201,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 
 - 2026-08-11: Owner accepted the draft/candidate/audit/effective authority chain, exact issue
   consistency rules, evidence normalization and runtime-unit recovery-budget terminology. Added the
-  accepted ADR/spec/backlog package; implementation has not started.
+  accepted ADR/spec/backlog package. W24A exact run/citation/final containment checks are
+  implemented; W24B–W24F and the shared W24C evidence validator remain pending.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes
