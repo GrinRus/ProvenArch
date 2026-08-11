@@ -1944,9 +1944,9 @@ Follow-up note (2026-04-22):
 
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
-Status (2026-08-11): **target design and pre-implementation authority decisions accepted; 23B1
-through 23L additive slices are implemented without shell cutover; the remaining UI wave and
-Tasks-primary closure are pending.**
+Status (2026-08-12): **target design and pre-implementation authority decisions accepted; 23B1
+through 23N additive slices and the Tasks-primary navigation cutover are implemented; explicit
+legacy route/component removal and final deterministic closure remain W23O work.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2030,13 +2030,14 @@ Acceptance:
 - old Home/Analyze route components/selectors are removed in the accepted cutover diff;
 - route/component/rendered tests cover 1440/1024/390 widths and keyboard navigation.
 
-Implementation status (2026-08-11): `23B1` is implemented on the additive UI route surface. The
+Implementation status (2026-08-12): `23B1` is implemented on the additive UI route surface. The
 codec now preserves `/tasks`, `/tasks/new`, exact Task detail and Task/Attempt identities, plus
 optional Task context on Architecture/Changes. The target container is explicit and read-only:
 it does not query or mutate Task data and never substitutes a legacy/latest run. The first `23B2`
-navigation slice now puts Tasks, Architecture and Changes in the Workspace group and labels Home /
-Analyze as Legacy diagnostics; unknown/root console paths resolve to Task Inbox; final removal of
-those legacy routes/components remains a W23O gate.
+navigation cutover now exposes only Tasks, Architecture and Changes in the Workspace group and
+removes Home/Analyze links and selectors from the ProductShell; unknown/root console paths resolve
+to Task Inbox. Explicit `/home` and `/runs` compatibility routes remain read-only diagnostic
+surfaces until their legacy components are removed in W23O.
 
 ### 23C — New Task composer and inline runner readiness
 
