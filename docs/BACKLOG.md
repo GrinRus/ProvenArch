@@ -226,8 +226,8 @@ Suggested PR slices:
 ## Epic 16 — ACP Console V2 UX + Live E2E Coverage
 
 Acceptance:
-- целевой UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`
-- approved visual references сохранены в `docs/assets/ui-console-v2/*.png`
+- исторический UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`; его PNG references
+  удалены после supersession и не являются текущим target
 - implementation baseline после rebase на `origin/main` `3aa458a`: текущий UI уже имеет
   stage shell, компактный activity drawer/artifact links, optional `UI_E2E_QA_SMOKE=1`,
   screenshot refs в frontend result JSON и удалённые hidden compatibility controls
@@ -895,13 +895,14 @@ Context:
   task-based аудит показал системный разрыв: console хорошо объясняет runtime diagnostics,
   однако недостаточно надёжно отвечает на вопросы «какой run я смотрю», «какие данные
   проверены», «что именно будет закоммичено» и «что считается завершённым».
-- Это corrective successor для UI/IA частей Epics 16–17. Канонический target описан в
-  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md). После
+- Это corrective successor для UI/IA частей Epics 16–17. Его historical target описан в
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) и
+  superseded task-first Epic 23. После
   реализации Epic 20 primary IA `Home / Runs / Knowledge / Changes`, contextual Setup и global
   Ask заменяют требование о восьми обязательных numbered stages; backend/runtime contracts,
   local-first boundary, deterministic required CI и release live-E2E guardrails сохраняются.
-- Детальный delivery order, обязательные contract-first PR, code/test map, cutover/rollback и
-  reference matrix зафиксированы в
+- Historical delivery order, обязательные contract-first PR, code/test map, cutover/rollback и
+  reference matrix были зафиксированы в
   [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
   План отображает эти же `20A–20N` и не является вторым roadmap.
 - Исходный trust audit подтвердил несколько defects: selected historical run терял обязательный
@@ -1940,3 +1941,361 @@ Resolved (2026-04-05):
 
 Follow-up note (2026-04-22):
 - статус `docs/BACKLOG.md` как active planning surface vs reference/history требует отдельного owner decision; этот cleanup-slice синхронизирует только terminology, не меняя роль документа.
+
+## Epic 23 — Task-first Product UI and Artifact Workbench
+
+Status (2026-08-11): **target design and delivery backlog defined; implementation not started.**
+
+Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
+Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
+
+### Product outcome
+
+ProvenArch перестаёт показывать pipeline run как основную работу пользователя. Пользователь создаёт
+устойчивую Task с goal/scope/runner, видит immutable Attempts, получает outcome-first result,
+работает с Markdown/YAML/Mermaid/evidence в content-appropriate workbench и публикует полный
+architecture workspace через явное Git confirmation.
+
+### Epic non-goals
+
+- hosted/multi-user collaboration и persisted approval workflow;
+- source-repository writes;
+- новый provider вне `fake|claude-code|qwen-code|codex-code`;
+- visual Mermaid drag editor;
+- selected-file Git commit при текущем full-workspace publication contract;
+- frontend-only Task façade без schema/API authority;
+- hidden compatibility UI ради старых selectors.
+
+### 23A — Task, Attempt and runner admission contracts
+
+**Goal:** дать UI устойчивый пользовательский Task object и immutable execution Attempt вместо
+эвристического переименования runs.
+
+What:
+
+- определить schema/spec для Task: ID, title, goal/context, repo/scope, runner preset, lifecycle,
+  attempts, created/updated/archive metadata;
+- связать Attempt с existing run identity, parent/child retry lineage и immutable effective config;
+- определить storage/read APIs, pagination/filtering и restart persistence;
+- решить per-Attempt fake/headless admission либо документированный service-session restart flow;
+- snapshot-ить provider, model, effort, permissions and per-step overrides в Attempt history;
+- определить authoritative task/run/change/publication linkage без ложного `Published` inference;
+- выполнить `acp-schema-guardian`: specs, schemas, validators, examples, fixtures, appendix and ADR.
+
+Acceptance:
+
+- Task переживает restart и остаётся той же сущностью после retry/rerun;
+- admitted Attempt config не меняется от последующего Settings/workspace/env update;
+- concurrent Task start/session switch остаётся serialized admission lease;
+- invalid scope/runner/task identity fail-closed до provider execution;
+- API and schema round-trip fixtures cover create/list/read/archive and parent-child attempts;
+- no Task data is written to analyzed source repositories or promoted Architecture surfaces.
+
+### 23B — Task-first shell and navigation cutover
+
+**Goal:** единственный shell `Tasks / Architecture / Changes`, global Ask and contextual Settings.
+
+What:
+
+- добавить typed routes `/tasks`, `/tasks/new`, Task/Attempt detail and target Architecture/Changes;
+- сделать Tasks default destination; удалить Home and Analyze primary destinations;
+- сохранить explicit authority, selected identities and viewer mode in URL;
+- migrate Back/Forward/reload and invalid/stale identity notices;
+- introduce quiet architectural desk tokens, vector icon set and three density modes;
+- cut over without hidden legacy shell or duplicate controls.
+
+Acceptance:
+
+- every primary destination has one purpose and one dominant action;
+- deep links restore exact Task/Attempt/artifact/source context;
+- invalid explicit identity never falls back to another run/current workspace;
+- mobile uses bottom nav and safe-area; desktop supports collapsed semantic nav;
+- old Home/Analyze route components/selectors are removed in the accepted cutover diff;
+- route/component/rendered tests cover 1440/1024/390 widths and keyboard navigation.
+
+### 23C — New Task composer and inline runner readiness
+
+**Goal:** пользователь формулирует анализ и выбирает runner без перехода в Settings.
+
+What:
+
+- goal-first composer with optional context, repositories and include/exclude scope summary;
+- runner picker: Deterministic demo, Claude Code, Qwen Code, Codex, Advanced mix;
+- show effective model/effort, demo/live identity, readiness and last check in picker;
+- preserve draft across in-app navigation, runner recovery and temporary offline state;
+- block start only on real contract/readiness blockers with adjacent reason;
+- start protection against double click and active/pending admission conflict.
+
+Acceptance:
+
+- first-time user can explain read/write boundary and effective runner before Start Task;
+- ordinary provider choice needs no Settings navigation;
+- demo copy never implies live architecture analysis;
+- provider unavailable flow offers actionable recovery and demo fallback without losing draft;
+- create/start/error/queued/offline states pass component and mock E2E tests;
+- scope is submitted exactly as displayed and never inferred from UI-only filters.
+
+### 23D — Task Inbox, filters and Attempt history
+
+**Goal:** сделать ежедневную работу с несколькими задачами быстрой и сканируемой.
+
+What:
+
+- groups `Needs attention`, `Running`, `Ready`, `Completed`, `Archived`;
+- search and URL-restorable filters by lifecycle, runner, repo and time;
+- compact rows show user goal, current state, runner and meaningful last activity;
+- selected Task opens detail without losing list position/filter;
+- Attempt history shows terminal status, runner snapshot, duration, parent/child lineage;
+- archive/unarchive uses confirmation/undo and never deletes run evidence.
+
+Acceptance:
+
+- grouping/counts derive from authoritative Task state and reconcile with detail;
+- large lists remain keyboard navigable and virtualizable without focus loss;
+- empty/filtered-empty/loading/error/offline states offer one clear recovery;
+- no `current step` appears on terminal Task rows;
+- list/detail/history component tests and 1000-row performance fixture pass.
+
+### 23E — Outcome-first Task detail and semantic result
+
+**Goal:** после terminal Attempt сначала показать полученное знание и решения, не telemetry.
+
+What:
+
+- terminal success header: outcome, validated scope, semantic counts and next action;
+- semantic rows for added/changed/removed entities/edges/findings/gaps;
+- decisions/questions separated from generated files;
+- current Architecture availability shown independently from Attempt lifecycle;
+- retry/rerun moves to secondary menu; plan preview explains downstream closure;
+- failed/canceled outcomes explain retained evidence and last-good Architecture.
+
+Acceptance:
+
+- succeeded Attempt renders no active/current-step language;
+- failed Attempt never hides or invalidates last-good Architecture;
+- semantic summary binds to exact run snapshot and does not compare mutable bytes implicitly;
+- missing semantic comparison becomes explicit partial state, not fabricated zero delta;
+- success/failure/canceled/recovered/demo/live fixtures pass.
+
+### 23F — Focused Pipeline Studio and recovery
+
+**Goal:** дать операторам глубокую диагностику без превращения всего продукта в dashboard.
+
+What:
+
+- open from a specific Attempt only; no global nav item;
+- pipeline track shows canonical steps and durable progress only;
+- current step shows scope table, artifacts and last useful progress;
+- one selected blocker panel explains cause, retained data and recommended action;
+- raw logs, JSON, permissions and telemetry live in Diagnostics disclosure;
+- `Retry failed scope`, `Change runner for next attempt`, cooperative `Stop task` flows.
+
+Acceptance:
+
+- percentage is never derived from stdout/heartbeat;
+- retry creates child Attempt and never mutates terminal parent;
+- changing runner cannot alter active Attempt;
+- failed step/log line deep links preserve Attempt identity;
+- active/retrying/stalled/permission-required/failed/canceled rendered scenarios pass;
+- raw output cannot expand the document into an unbounded scrolling wall.
+
+### 23G — Architecture Map as current knowledge home
+
+**Goal:** открывать продукт на понятной текущей архитектуре, а не на runtime dashboard.
+
+What:
+
+- map/list views from validator-approved entities/edges only;
+- type-specific node shapes/icons, ownership, coverage and confidence states;
+- selection inspector links document, model entity, findings and evidence;
+- update banner routes to exact task/run Changes review;
+- search/filter by name, type, domain, owner and evidence status;
+- mandatory list/table equivalent and bounded layout performance.
+
+Acceptance:
+
+- filenames/layout positions are never semantic facts;
+- partial/missing evidence is at least as visible as validated topology;
+- map remains available after active/failed Attempts;
+- empty map explains required analysis/artifacts and one next action;
+- keyboard selection, zoom, list parity and large-graph fixtures pass.
+
+### 23H — Markdown Document Workbench
+
+**Goal:** сделать Architecture Home и authored docs первоклассным читаемым продуктом.
+
+What:
+
+- semantic document tree plus secondary folder/path explorer;
+- Rendered default, document outline, search, safe relative links and citations;
+- Source mode with line numbers and bounded large-file fallback;
+- explicit Edit for current workspace only; run/QA snapshots always read-only;
+- unsaved draft, validation, atomic Save and Git dirty feedback;
+- preserve scroll/focus when opening/closing evidence drawer.
+
+Acceptance:
+
+- Markdown XSS/link traversal/cross-run protections stay intact;
+- edit/save cannot target source repo, taskrun snapshot or unsupported file;
+- broken links/render failure/oversized/empty/offline states are actionable;
+- save failure preserves draft and original workspace bytes;
+- headings/tables/code/long paths/citations fixtures and keyboard E2E pass.
+
+### 23I — YAML/JSON Model and Schema Workbench
+
+**Goal:** безопасно работать с entity-per-file model, charter and schema-governed data.
+
+What:
+
+- intentional structured inspectors for entities, edges, charter, workspace and indexes;
+- schema name/version, field descriptions, evidence and validation summary;
+- Source mode in Advanced with field/line-linked diagnostics;
+- lossless patch editor requirement for structured mutations;
+- structural key-path diff plus raw diff fallback;
+- batch navigation between related entity/edge files without file identity drift.
+
+Acceptance:
+
+- no structured save until comments, unknown keys, ordering and multiline scalars are preserved;
+- schema + semantic validation occurs before atomic write;
+- invalid YAML/JSON never destroys last valid rendered state or draft;
+- entity IDs/relations remain exact and long bounded filenames display full logical ID;
+- fixtures cover comments, aliases, unknown keys, invalid types, large files and conflicts.
+
+### 23J — Mermaid and shared Evidence Studio
+
+**Goal:** объединить diagram viewing и claim-to-source provenance без ложной visual authority.
+
+What:
+
+- Rendered/Source modes, zoom/fit and accessible relation list;
+- edit source with bounded live preview for current workspace only;
+- node/entity/document/evidence navigation using validated IDs;
+- evidence drawer: authority, claim, repo/path/ref, confidence and coverage issue;
+- Markdown/YAML/Mermaid citations use one shared identity/navigation model;
+- Mermaid source diff only until deterministic visual diff contract exists.
+
+Acceptance:
+
+- broken/oversized diagram exposes actionable source fallback;
+- diagram layout is never persisted or described as semantic relation;
+- evidence authority never silently changes across navigation;
+- drawer focus/return, cross-run containment and citation reciprocity tests pass;
+- every map/diagram relation has accessible list/table equivalent.
+
+### 23K — Findings, questions and proposal decision workflow
+
+**Goal:** превратить findings/gaps/questions в понятную очередь решений, не approval theater.
+
+What:
+
+- separate findings, questions, gaps and proposals with severity/priority/evidence count;
+- detail shows observation, why it matters, evidence and suggested direction;
+- filters by severity/domain/owner/status with URL restoration;
+- explicit proposal-draft action where existing contract permits it;
+- no `Approved` status until persisted human decision contract exists;
+- unresolved items remain visible in Task outcome and publication risk summary.
+
+Acceptance:
+
+- counters reconcile across Task, Architecture and Changes;
+- missing evidence is not shown as low-confidence fact;
+- proposal links exact findings/evidence or shows disconnected state;
+- empty/partial/error/filtered states and keyboard list/detail flow pass;
+- no runtime logs required to understand any operator-facing finding.
+
+### 23L — Changes truth and full-workspace Publish
+
+**Goal:** честно разделить automatic promotion, semantic review and Git publication.
+
+What:
+
+- copy states that validated knowledge is already Current workspace;
+- summary/evidence/files/publish are materially distinct routes;
+- semantic delta first; Git file diff second; exact baselines named;
+- authoritative full workspace inventory with new/modified/deleted/untracked/renamed/copied;
+- confirmation includes branch, HEAD, inventory fingerprint, demo/live and open risks;
+- commit/proposal branch results, stale confirmation and retry behavior.
+
+Acceptance:
+
+- no copy asks whether current snapshot should be replaced;
+- no selected preview implies selected-file commit scope;
+- active/pending work and stale HEAD/inventory block mutation authoritatively;
+- successful commit refreshes state and cannot be double-submitted;
+- semantic and Git counters are labelled and never presented as the same metric;
+- full success/stale/conflict/blocked/unknown/demo fixtures pass.
+
+### 23M — Global Ask and Runner Settings
+
+**Goal:** сохранить Ask быстрым, а advanced runner configuration — доступным, но не обязательным.
+
+What:
+
+- global `Ask this architecture…` over current workspace with explicit read-only authority;
+- history, confidence, citations, unresolved and retry/recovery states;
+- Runner Settings presets with provider/model/effort/readiness and per-step overrides;
+- effective vs desired/source values and last check;
+- explicit proposal draft mutation remains separate confirmation;
+- remove duplicate runtime controls from ordinary Task/Architecture screens.
+
+Acceptance:
+
+- Ask never changes workspace without explicit proposal action;
+- provider outage explains whether it blocks Ask/new Attempt but not existing Architecture review;
+- preset edits cannot mutate active Attempt history;
+- unsupported effort/provider values fail inline before save;
+- modal/sheet focus trap, return context and mobile fullscreen tests pass.
+
+### 23N — Responsive, accessibility and complete state coverage
+
+**Goal:** закрыть quality bar до release, не после visual polish.
+
+What:
+
+- 1440/1280/1024/768/390 layouts; bottom nav and safe areas;
+- Task list/detail route split, overlay inspectors and fullscreen sheets;
+- 44px touch targets, visible focus, one `h1`, logical landmarks;
+- keyboard contracts for lists, tabs, dialogs, comboboxes, editors and map alternative;
+- reduced motion, 200% zoom, long paths and local source/diff scrolling;
+- fixture matrix for every state from target design.
+
+Acceptance:
+
+- no global horizontal overflow, hidden focus targets or clipped primary actions;
+- critical axe violations = 0 in all deterministic rendered scenarios;
+- every primary job completes keyboard-only;
+- status uses text/icon/shape and live regions do not announce duplicates;
+- mobile title/authority/state/action fit before the first long content section.
+
+### 23O — Deterministic UI closure, old-shell removal and docs sync
+
+**Goal:** не объявлять новый UI законченным, пока старый shell и противоречивые docs реально живы.
+
+What:
+
+- run all target mock E2E scenarios and component/contract suites;
+- remove obsolete routes/components/CSS/testids and hidden compatibility surfaces;
+- ensure current-behavior screenshots are ephemeral, target PNGs are the only committed UI refs;
+- synchronize README, ARCHITECTURE, STAKEHOLDER, TESTING_STRATEGY and runbooks;
+- verify embedded UI bundle parity and clean source repositories;
+- full DoD before trusted-machine live gate.
+
+Acceptance:
+
+- `make contracts`, `make test`, `make lint`, `make build` pass;
+- target rendered scenarios pass at desktop/tablet/mobile with no skips;
+- source scans find no Home/Analyze legacy navigation or obsolete UI asset paths;
+- current binary behavior and planned/implemented docs status are consistent;
+- release live gate runs only through `acp-e2e-live-gate` after deterministic closure.
+
+### Epic acceptance
+
+- Task is the stable user object; Attempt is immutable execution detail.
+- runner choice is available at Task creation with truthful readiness.
+- terminal outcomes are result-first and Pipeline Studio is contextual.
+- Architecture is the independent current knowledge product.
+- Markdown/YAML/JSON/Mermaid have content-appropriate, authority-safe workbenches.
+- Changes explains automatic promotion; Publish confirms full workspace Git mutation.
+- responsive, keyboard, accessibility and state fixtures pass deterministically.
+- no obsolete UI screenshots, conflicting target docs or hidden legacy shell remains.

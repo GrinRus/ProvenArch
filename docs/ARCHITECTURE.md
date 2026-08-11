@@ -46,6 +46,10 @@
 
 2) **UI (`ui/`)** *(operator console shell)*
    - React + TypeScript + Vite
+   - Реализованное поведение ниже описывает текущий binary. Planned task-first cutover
+     `Tasks / Architecture / Changes`, runner presets и content-aware artifact workbenches
+     зафиксированы отдельно в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md)
+     и не считаются реализованными до acceptance Epic 23.
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → deterministic `ui/dist` встраивается в Go бинарь как
      versioned `internal/api/ui_dist`; CI verifies same-commit build determinism and rejects
