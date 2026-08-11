@@ -208,6 +208,32 @@ def extract_quality_runtime_counters(quality_payload: dict[str, Any]) -> dict[st
     return counters
 
 
+def extract_public_authority_evidence(quality_payload: dict[str, Any]) -> dict[str, Any]:
+    """Read only the public Epic 24 quality-summary authority fields.
+
+    The batch reporter deliberately consumes persisted JSON fields rather than importing Go
+    validators/orchestrator packages. Missing fields preserve historical v1 semantics.
+    """
+    totals = quality_payload.get("totals") or {}
+    if not isinstance(totals, dict):
+        totals = {}
+    source = str(totals.get("effective_verdict_source", "")).strip()
+    audit = str(totals.get("promotion_audit_result", "")).strip()
+    exhausted_raw = totals.get("provider_budget_exhausted", 0)
+    exhausted = exhausted_raw in (True, 1, "1", "true", "True")
+    return {
+        "effective_verdict_source": source,
+        "promotion_audit_result": audit,
+        "provider_invocations": parse_int(totals.get("provider_invocations", 0), 0),
+        "provider_invocation_budget_max": parse_int(totals.get("provider_invocation_budget_max", 0), 0),
+        "provider_invocation_remaining": parse_int(totals.get("provider_invocation_remaining", 0), 0),
+        "provider_budget_exhausted": exhausted,
+        "provider_terminal_exhaustion_reason": str(totals.get("provider_terminal_exhaustion_reason", "")).strip(),
+        "validation_first_pass_valid": parse_int(totals.get("validation_first_pass_valid", 0), 0),
+        "validation_first_pass_invalid": parse_int(totals.get("validation_first_pass_invalid", 0), 0),
+    }
+
+
 def focused_recovery_counter_floor(reason_counts: Counter[str]) -> tuple[int, int]:
     focused = sum(reason_counts.values())
     exhausted = sum(count for tag, count in reason_counts.items() if tag in FOCUSED_REPAIR_EXHAUSTED_REASON_TAGS)
@@ -1605,6 +1631,15 @@ class RunEvaluation:
     zero_output_pre_artifact_stalls: int = 0
     partial_failure_count: int = 0
     quality_alerts: int = 0
+    provider_invocations: int = 0
+    provider_invocation_budget_max: int = 0
+    provider_invocation_remaining: int = 0
+    provider_budget_exhausted: bool = False
+    provider_terminal_exhaustion_reason: str = ""
+    validation_first_pass_valid: int = 0
+    validation_first_pass_invalid: int = 0
+    effective_verdict_source: str = ""
+    promotion_audit_result: str = ""
     artifact_source: str = "snapshot"
     semantic_hard_fail: bool = False
     off_topic_hits: int = 0
@@ -1801,6 +1836,17 @@ def evaluate_run(
         if row and str(row.get("run_id", "")).strip()
     }
     quality_counter_totals: Counter[str] = Counter()
+    public_authority = {
+        "provider_invocations": 0,
+        "provider_invocation_budget_max": 0,
+        "provider_invocation_remaining": None,
+        "provider_budget_exhausted": False,
+        "provider_terminal_exhaustion_reason": "",
+        "validation_first_pass_valid": 0,
+        "validation_first_pass_invalid": 0,
+        "effective_verdict_source": "",
+        "promotion_audit_result": "",
+    }
     for row in (init_row, refresh_row):
         if not row:
             continue
@@ -1808,7 +1854,27 @@ def evaluate_run(
         if not quality_path.exists():
             continue
         try:
-            quality_counter_totals.update(extract_quality_runtime_counters(read_json(quality_path)))
+            quality_payload = read_json(quality_path)
+            quality_counter_totals.update(extract_quality_runtime_counters(quality_payload))
+            evidence = extract_public_authority_evidence(quality_payload)
+            public_authority["provider_invocations"] += int(evidence["provider_invocations"])
+            public_authority["provider_invocation_budget_max"] = max(public_authority["provider_invocation_budget_max"], int(evidence["provider_invocation_budget_max"]))
+            budget_remaining = int(evidence["provider_invocation_remaining"])
+            if public_authority["provider_invocation_remaining"] is None or budget_remaining < public_authority["provider_invocation_remaining"]:
+                public_authority["provider_invocation_remaining"] = budget_remaining
+            public_authority["provider_budget_exhausted"] = bool(public_authority["provider_budget_exhausted"] or evidence["provider_budget_exhausted"])
+            if evidence["provider_terminal_exhaustion_reason"]:
+                public_authority["provider_terminal_exhaustion_reason"] = evidence["provider_terminal_exhaustion_reason"]
+            public_authority["validation_first_pass_valid"] += int(evidence["validation_first_pass_valid"])
+            public_authority["validation_first_pass_invalid"] += int(evidence["validation_first_pass_invalid"])
+            source = str(evidence["effective_verdict_source"])
+            audit = str(evidence["promotion_audit_result"])
+            if source:
+                previous_source = str(public_authority["effective_verdict_source"])
+                public_authority["effective_verdict_source"] = source if not previous_source or previous_source == source else "conflict"
+            if audit:
+                previous_audit = str(public_authority["promotion_audit_result"])
+                public_authority["promotion_audit_result"] = audit if not previous_audit or previous_audit == audit else "conflict"
         except Exception:
             continue
     raw_stall_sources: list[Path] = []
@@ -1834,6 +1900,28 @@ def evaluate_run(
     zero_output_pre_artifact_stalls = int(quality_counter_totals.get("zero_output_pre_artifact_stalls", 0))
     partial_failure_count = int(quality_counter_totals.get("partial_failure_count", 0))
     quality_alerts = int(quality_counter_totals.get("quality_alerts", 0))
+    effective_verdict_source = str(public_authority["effective_verdict_source"])
+    promotion_audit_result = str(public_authority["promotion_audit_result"])
+    authority_source_invalid = bool(effective_verdict_source and effective_verdict_source != "orchestrator")
+    authority_audit_invalid = bool(promotion_audit_result and promotion_audit_result not in {"pass", "fail"})
+    authority_gate_failed = (
+        promotion_audit_result == "fail"
+        or authority_source_invalid
+        or authority_audit_invalid
+        or bool(public_authority["provider_budget_exhausted"])
+    )
+    if promotion_audit_result == "fail":
+        issues.append("execution:promotion-audit-failed")
+        details.append("execution/public-authority -> promotion_audit_result=fail")
+    if bool(public_authority["provider_budget_exhausted"]):
+        issues.append("execution:provider-budget-exhausted")
+        details.append("execution/public-authority -> provider_budget_exhausted=true")
+    if authority_source_invalid:
+        issues.append("execution:effective-verdict-authority")
+        details.append(f"execution/public-authority -> effective_verdict_source={effective_verdict_source}")
+    if authority_audit_invalid:
+        issues.append("execution:promotion-audit-invalid")
+        details.append(f"execution/public-authority -> promotion_audit_result={promotion_audit_result}")
     if repair_attempts >= 2:
         issues.append("execution:repair-heavy")
         details.append(f"execution/runtime-recovery -> repair_attempts={repair_attempts} fresh_retries={fresh_retries} focused_repairs={focused_repairs}")
@@ -2495,7 +2583,7 @@ def evaluate_run(
     analysis = bool_score(overview_ok, 10) + bool_score(findings_ok, 10) + bool_score(coverage_ok, 10) + bool_score(questions_ok, 10)
 
     artifact_quality_failed = "quality:artifact-quality" in issues
-    quality_gates_failed = quality_gates_failed or artifact_quality_failed
+    quality_gates_failed = quality_gates_failed or artifact_quality_failed or authority_gate_failed
 
     failure_class = "none"
     if summary_missing:
@@ -2642,6 +2730,15 @@ def evaluate_run(
         zero_output_pre_artifact_stalls=zero_output_pre_artifact_stalls,
         partial_failure_count=partial_failure_count,
         quality_alerts=quality_alerts,
+        provider_invocations=int(public_authority["provider_invocations"]),
+        provider_invocation_budget_max=int(public_authority["provider_invocation_budget_max"]),
+        provider_invocation_remaining=int(public_authority["provider_invocation_remaining"] or 0),
+        provider_budget_exhausted=bool(public_authority["provider_budget_exhausted"]),
+        provider_terminal_exhaustion_reason=str(public_authority["provider_terminal_exhaustion_reason"]),
+        validation_first_pass_valid=int(public_authority["validation_first_pass_valid"]),
+        validation_first_pass_invalid=int(public_authority["validation_first_pass_invalid"]),
+        effective_verdict_source=effective_verdict_source,
+        promotion_audit_result=promotion_audit_result,
         artifact_source=artifact_source,
         semantic_hard_fail=semantic_hard_fail,
         off_topic_hits=off_topic_hits,
@@ -2786,8 +2883,8 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
         )
     lines.extend(
         [
-            "| provider | run | hard_pass | runtime_contract_status | artifact_quality_status | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | artifact_quality_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | valid_artifact_controlled_stops | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | excellent_blockers | issues |",
-            "|---|---:|---:|---|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+            "| provider | run | hard_pass | runtime_contract_status | artifact_quality_status | reliability | contract | analysis | total | verdict | artifact_source | semantic_hard_fail | failure_class | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | artifact_quality_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | off_topic_hits | init_signal | refresh_signal | refresh_findings | refresh_questions | refresh_cov_missing | repair_attempts | repair_exhausted | fresh_retries | focused_repairs | stall_count | pre_artifact_stalls | post_artifact_stalls | valid_artifact_controlled_stops | zero_output_pre_artifact_stalls | partial_failure_count | quality_alerts | artifact_quality_findings | excellent_blockers | issues | effective_verdict_source | promotion_audit_result | provider_invocations | provider_invocation_budget_max | provider_invocation_remaining | provider_budget_exhausted | provider_terminal_exhaustion_reason | validation_first_pass_valid | validation_first_pass_invalid |",
+            "|---|---:|---:|---|---|---:|---:|---:|---:|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|",
         ]
     )
     for item in runs:
@@ -2804,7 +2901,9 @@ def write_run_matrix(path: Path, runs: list[RunEvaluation]) -> None:
             f"{item.stall_count} | {item.pre_artifact_stalls} | {item.post_artifact_stalls} | "
             f"{item.valid_artifact_controlled_stops} | {item.zero_output_pre_artifact_stalls} | {item.partial_failure_count} | {item.quality_alerts} | {item.artifact_quality_findings} | "
             f"{', '.join(item.excellent_blockers) if item.excellent_blockers else '-'} | "
-            f"{', '.join(item.issues) if item.issues else '-'} |"
+            f"{', '.join(item.issues) if item.issues else '-'} | {item.effective_verdict_source or '-'} | {item.promotion_audit_result or '-'} | "
+            f"{item.provider_invocations} | {item.provider_invocation_budget_max} | {item.provider_invocation_remaining} | {int(item.provider_budget_exhausted)} | "
+            f"{item.provider_terminal_exhaustion_reason or '-'} | {item.validation_first_pass_valid} | {item.validation_first_pass_invalid} |"
         )
     step_entries = [
         entry
@@ -2989,6 +3088,11 @@ def provider_matrix_rows(
                 "precheck_failed_failures": sum(1 for item in items if item.precheck_failed),
                 "runtime_flow_failed_failures": sum(1 for item in items if item.runtime_flow_failed),
                 "cancellation_like_failures": sum(1 for item in items if item.cancellation_like),
+                "provider_invocations": sum(item.provider_invocations for item in items),
+                "provider_budget_exhausted": sum(1 for item in items if item.provider_budget_exhausted),
+                "promotion_audit_failed": sum(1 for item in items if item.promotion_audit_result == "fail"),
+                "validation_first_pass_valid": sum(item.validation_first_pass_valid for item in items),
+                "validation_first_pass_invalid": sum(item.validation_first_pass_invalid for item in items),
                 "error_codes": ", ".join(f"{code}={count}" for code, count in sorted(error_codes_counter.items())) or "-",
                 "issues_top": ", ".join(f"{name}={count}" for name, count in issues_counter.most_common(3)) or "-",
                 "artifact_sources": ", ".join(f"{name}={count}" for name, count in sorted(artifact_sources.items())) or "-",
@@ -3025,6 +3129,14 @@ def write_execution_report(
     zero_output_pre_artifact_stalls_total = sum(run.zero_output_pre_artifact_stalls for run in runs)
     partial_failure_count_total = sum(run.partial_failure_count for run in runs)
     quality_alerts_total = sum(run.quality_alerts for run in runs)
+    provider_invocations_total = sum(run.provider_invocations for run in runs)
+    provider_invocation_budget_max = max((run.provider_invocation_budget_max for run in runs), default=0)
+    provider_invocation_remaining_min = min((run.provider_invocation_remaining for run in runs), default=0)
+    provider_budget_exhausted_runs = sum(1 for run in runs if run.provider_budget_exhausted)
+    promotion_audit_failed_runs = sum(1 for run in runs if run.promotion_audit_result == "fail")
+    validation_first_pass_valid_total = sum(run.validation_first_pass_valid for run in runs)
+    validation_first_pass_invalid_total = sum(run.validation_first_pass_invalid for run in runs)
+    authority_sources = sorted({run.effective_verdict_source for run in runs if run.effective_verdict_source})
     split_status_runs = [
         f"{run.provider} run{run.run_index}"
         for run in runs
@@ -3078,6 +3190,17 @@ def write_execution_report(
         f"- partial_failure_count: {partial_failure_count_total}",
         f"- quality_alerts: {quality_alerts_total}",
         f"- artifact_quality_findings: {sum(run.artifact_quality_findings for run in runs)}",
+        "",
+        "## Public Promotion Authority",
+        "This section is derived from persisted public quality-summary fields only; no internal Go validator or orchestrator package is imported by the batch reporter.",
+        f"- effective_verdict_sources: {', '.join(authority_sources) if authority_sources else 'legacy/missing'}",
+        f"- promotion_audit_failed_runs: {promotion_audit_failed_runs}/{len(runs)}",
+        f"- provider_invocations: {provider_invocations_total}",
+        f"- provider_invocation_budget_max: {provider_invocation_budget_max}",
+        f"- provider_invocation_remaining_min: {provider_invocation_remaining_min}",
+        f"- provider_budget_exhausted_runs: {provider_budget_exhausted_runs}/{len(runs)}",
+        f"- validation_first_pass_valid: {validation_first_pass_valid_total}",
+        f"- validation_first_pass_invalid: {validation_first_pass_invalid_total}",
         "",
         "## Excellent Blockers",
     ]
@@ -3254,6 +3377,15 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
         "excellent_blockers_by_step",
         "off_topic_hits",
         "issues",
+        "effective_verdict_source",
+        "promotion_audit_result",
+        "provider_invocations",
+        "provider_invocation_budget_max",
+        "provider_invocation_remaining",
+        "provider_budget_exhausted",
+        "provider_terminal_exhaustion_reason",
+        "validation_first_pass_valid",
+        "validation_first_pass_invalid",
     ]
     lines = ["\t".join(header)]
     for run in runs:
@@ -3305,6 +3437,15 @@ def write_meta_tsv(path: Path, runs: list[RunEvaluation]) -> None:
                     json.dumps(run.excellent_blockers_by_step, ensure_ascii=True, separators=(",", ":")),
                     str(run.off_topic_hits),
                     ",".join(run.issues),
+                    run.effective_verdict_source,
+                    run.promotion_audit_result,
+                    str(run.provider_invocations),
+                    str(run.provider_invocation_budget_max),
+                    str(run.provider_invocation_remaining),
+                    str(int(run.provider_budget_exhausted)),
+                    run.provider_terminal_exhaustion_reason,
+                    str(run.validation_first_pass_valid),
+                    str(run.validation_first_pass_invalid),
                 ]
             )
         )

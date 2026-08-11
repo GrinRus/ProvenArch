@@ -2398,7 +2398,7 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **authority decision accepted; W24A–W24F, W24H and W24I implemented; metric-gated W24G remains pending.**
+Status (2026-08-12): **authority decision accepted; W24A–W24F, W24H and W24I implemented; W24G entry metric recorded and deferred.**
 This epic extends the completed `22G` typed recovery state machine and `22H`
 provider-free auditor. It does not reopen or replace those slices.
 
@@ -2753,7 +2753,10 @@ Acceptance:
 
 **Entry condition:** start only after `24A`–`24F` metrics show first-pass success below 95%, more than
 10% of otherwise valid tasks entering provider repair, or p95 provider invocations above two because
-of identity/path/link/shape errors. Record the measurement before choosing a contract design.
+of identity/path/link/shape errors. Record the measurement before choosing a contract design. The
+2026-08-12 provider-free W24I corpus records 100% first-pass success, 0% repair entry and p95=2;
+the entry condition is false and W24G is deferred. See
+[`ADR-20260812-w24g-entry-metric.md`](adr/ADR-20260812-w24g-entry-metric.md).
 
 **Goal:** remove mechanically derivable fields from the weak model's responsibility without letting
 ACP synthesize semantic meaning.
@@ -2893,9 +2896,10 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-11): **release boundary accepted; implementation not started.** This is a cross-epic
-release-gate alignment task. The Task-first frontend migration starts only after `23O`; hardened
-runtime evidence assertions start only after the public diagnostics from `24I` are stable.
+Status (2026-08-12): **25A/25B implementation complete; 25C trusted gate pending.** The release
+boundary is accepted; Task-first frontend assertions, public authority report consumption and
+public-API Task/Attempt admission in the backend cycle are implemented provider-free. Missing or
+ambiguous identity remains intentionally fail-closed and is never synthesized from legacy runs.
 
 ### Goal
 
@@ -2941,6 +2945,8 @@ Expected files/modules:
 
 - `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes;
 - `scripts/frontend-live-e2e.sh`, `scripts/tests/frontend_live_e2e_contract_test.py`;
+- `scripts/internal/live-task-attempt.py`, `scripts/internal/live-e2e-backend-cycle.sh` for the
+  trusted backend Task/Attempt admission boundary;
 - Task/Attempt public UI/API clients and operator-facing test IDs introduced by Epic 23;
 - `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
@@ -2962,6 +2968,11 @@ Acceptance:
 - exact Task, Attempt, run snapshot and publication identities remain consistent through the flow;
 - existing `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`,
   `server_exited` and `playwright_failed` classifications remain distinguishable.
+
+Implementation status (2026-08-12): `live-flow.spec.ts` now admits/reads public Task/Attempt
+identities, pins exact Task → Attempt → run joins, and rejects latest-run or legacy fallback. The
+backend cycle creates fresh product-authored identity through `/api/tasks*`; the snapshot path still
+fails closed when a selected workspace lacks a matching identity.
 
 ### 25B — Epic 24 public evidence consumption
 
@@ -3001,6 +3012,11 @@ Acceptance:
 - recovery-budget exhaustion is visible and cannot be hidden by a terminal provider success;
 - no product-internal package, selector or validation helper is imported by the harness;
 - required CI remains deterministic/provider-free; trusted live execution remains manual.
+
+Implementation status (2026-08-12): `e2e_batch_report.py` consumes only persisted public quality
+summary fields for effective verdict source, promotion-audit result, recovery budget and first-pass
+validation counters; audit failure and budget exhaustion block hard pass while historical v1 fields
+retain their documented read behavior.
 
 ### 25C — Closure and optional Task-start diagnostic decision
 

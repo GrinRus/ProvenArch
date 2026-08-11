@@ -61,26 +61,26 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertNotIn("page.request", body)
         self.assertNotIn("page.waitForTimeout", body)
 
-    def test_live_flow_opens_runs_diagnostics_and_step_logs(self) -> None:
+    def test_live_flow_opens_attempt_bound_pipeline_studio(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
-        self.assertIn("openRunsDiagnostics", body)
-        self.assertIn('getByTestId("runs-diagnostics-drawer")', body)
-        self.assertIn('getByTestId("analysis-step-tab-logs").click()', body)
+        self.assertIn("resolveTaskAttemptForRun", body)
+        self.assertIn("createAndAdmitLiveTask", body)
+        self.assertIn('getByTestId("task-pipeline-studio")', body)
+        self.assertIn('getByTestId("attempt-open-studio").click()', body)
         self.assertNotIn("expectActivityDrawerOpen", body)
-        self.assertNotIn('getByTestId("run-logs-mode-select")', body)
+        self.assertNotIn('getByTestId("runs-diagnostics-drawer")', body)
+        self.assertNotIn('getByTestId("run-init-btn").click()', body)
 
     def test_live_flow_uses_product_shell_destinations_without_retired_shell(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         for selector in [
             "task-route-inbox",
-            "legacy-run-page",
             "readiness-summary-cards",
             "readiness-runtime-summary",
-            "analysis-run-progress",
-            "analysis-run-timeline",
-            "runs-diagnostics-drawer",
+            "task-route-attempt",
+            "task-pipeline-studio",
             "knowledge-panel",
             "architecture-documents",
             "architecture-diagrams",
@@ -109,7 +109,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         for name in [
             "frontend-tasks-desktop.png",
             "frontend-setup-desktop.png",
-            "frontend-legacy-diagnostics-desktop.png",
+            "frontend-task-attempt-studio-desktop.png",
             "frontend-knowledge-desktop.png",
             "frontend-changes-evidence-desktop.png",
             "frontend-changes-publish-desktop.png",
@@ -150,14 +150,16 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         self.assertIn('UI_E2E_ARTIFACT_SOURCE="$UI_E2E_ARTIFACT_SOURCE"', body)
         self.assertIn('UI_E2E_SNAPSHOT_RUN_ID="$UI_E2E_SNAPSHOT_RUN_ID"', body)
 
-    def test_live_flow_uses_snapshot_run_without_starting_init(self) -> None:
+    def test_live_flow_uses_public_task_attempt_without_starting_snapshot_init(self) -> None:
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         self.assertIn('const artifactSource = (process.env.UI_E2E_ARTIFACT_SOURCE ?? "live")', body)
-        self.assertIn("resolveSnapshotRunID", body)
+        self.assertIn("resolveTaskAttemptForRun", body)
         self.assertIn('if (artifactSource === "snapshot")', body)
-        self.assertIn('await page.getByTestId("run-init-btn").click();', body)
+        self.assertIn("createAndAdmitLiveTask", body)
+        self.assertNotIn('await page.getByTestId("run-init-btn").click();', body)
         self.assertIn('if (artifactSource !== "snapshot")', body)
+        self.assertIn("/api/tasks?limit=100", body)
 
     def test_success_result_includes_screenshot_refs(self) -> None:
         result = self._run_frontend_harness("success_with_screenshots", expect_success=True)
@@ -169,7 +171,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         for name in [
             "frontend-tasks-desktop.png",
             "frontend-setup-desktop.png",
-            "frontend-legacy-diagnostics-desktop.png",
+            "frontend-task-attempt-studio-desktop.png",
             "frontend-knowledge-desktop.png",
             "frontend-changes-evidence-desktop.png",
             "frontend-changes-publish-desktop.png",
@@ -414,7 +416,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 for name in [
                     "frontend-tasks-desktop.png",
                     "frontend-setup-desktop.png",
-                    "frontend-legacy-diagnostics-desktop.png",
+                    "frontend-task-attempt-studio-desktop.png",
                     "frontend-knowledge-desktop.png",
                     "frontend-changes-evidence-desktop.png",
                     "frontend-changes-publish-desktop.png",

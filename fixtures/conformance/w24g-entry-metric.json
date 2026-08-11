@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "measurement_kind": "provider_free_conformance",
+  "corpus": "w24i-incident-corpus",
+  "samples": [
+    {"id": "clean-01", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "clean-02", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "clean-03", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "clean-04", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-01", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "repair-budget-02", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-05", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-03", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-06", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-04", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-07", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "clean-08", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-05", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-09", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-06", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-10", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "clean-11", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-07", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2},
+    {"id": "clean-12", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 1},
+    {"id": "repair-budget-08", "first_pass_valid": true, "otherwise_valid": true, "provider_repair": false, "mechanical_issue": false, "provider_invocations": 2}
+  ],
+  "expected": {
+    "version": 1,
+    "measurement_kind": "provider_free_conformance",
+    "sample_count": 20,
+    "first_pass_valid": 20,
+    "first_pass_invalid": 0,
+    "first_pass_success_rate": 1,
+    "otherwise_valid_count": 20,
+    "provider_repair_count": 0,
+    "provider_repair_rate": 0,
+    "mechanical_contract_failures": 0,
+    "provider_invocation_p95": 2,
+    "triggered_conditions": [],
+    "entry_condition_met": false,
+    "decision": "defer_w24g"
+  }
+}

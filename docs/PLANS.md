@@ -174,8 +174,12 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
       pre-Task runs and removes the legacy shell components.
 - [x] Merge the W23O route-closure implementation branch and record the post-merge verification;
       W24G and Epic 25 remain owned by their separate active plans.
-- [ ] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
-      implementation plans.
+- [x] Re-run the combined deterministic closure after the W25A/B release-gate changes, including
+      embedded UI parity and the public Task/Attempt evidence boundary.
+- [x] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
+      implementation plan.
+- [ ] Close this UI ExecPlan after the W25 release-gate evidence confirms the Task-first frontend
+      journey on a trusted machine.
 
 ### Non-goals
 
@@ -218,6 +222,64 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
   shell by canonicalizing old run links to `/tasks/legacy` read-only diagnostics.
 
 ### Plan ID
+EP-20260812-task-first-live-evidence-alignment
+
+### Context
+
+W25 must preserve the canonical trusted-machine release boundary after the Task-first UI and Epic 24
+authority changes. The release frontend may inspect only one exact public Task/Attempt/run snapshot;
+the batch reporter may consume only persisted public audit/verdict/budget fields. A missing product
+identity is evidence failure, not permission to synthesize a Task from historical runs.
+
+### Goals (must have)
+
+- [x] Cut `init-inspect` over to exact public Task/Attempt admission and identity-bound Pipeline Studio.
+- [x] Remove latest-run and legacy-shell fallback from the release-facing Playwright flow.
+- [x] Add public-only promotion-audit, effective-verdict and recovery-budget fields to batch reports.
+- [x] Keep historical v1 report fields readable and preserve existing failure taxonomy.
+- [ ] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
+      identities, then run canonical live validation on a trusted host.
+- [x] Complete full deterministic DoD and embedded UI parity after the W25 changes.
+
+### Non-goals
+
+- No new providers, canonical matrices, curated repositories, release taxonomy or live CI workflow.
+- No internal Go validator/orchestrator imports in the harness and no second provider analysis.
+- No synthetic Task/Attempt rows for legacy runs.
+
+### Approach
+
+1. Update the frontend scenario and contract tests to resolve exact public Task/Attempt identities.
+2. Consume only persisted quality-summary authority fields in batch reports and fail closed on audit or
+   recovery-budget violations.
+3. Synchronize the runbook, testing strategy and backlog; run focused checks and the deterministic DoD.
+4. Use `acp-e2e-live-gate` for any later trusted-machine run; do not alter the canonical harness.
+
+### Acceptance criteria
+
+- [x] Frontend snapshot flow rejects missing/ambiguous public Task/Attempt identity and never selects
+      latest run or `/tasks/legacy` as a release fallback.
+- [x] Report TSV/Markdown contains effective authority, audit result, invocation budget and first-pass
+      validation evidence sourced from public JSON only.
+- [x] `make contracts`, `make test`, `make lint`, `make build` and embedded UI parity pass.
+- [ ] Canonical live gate has fresh public Task/Attempt evidence and no second analysis.
+
+### Progress log
+
+- 2026-08-12: Implemented W25A Playwright Task/Attempt admission and exact snapshot joins; updated
+  frontend contract tests. Snapshot mode now fails closed instead of materializing synthetic identity.
+- 2026-08-12: Implemented W25B public-authority extraction and report/TSV fields; audit failure and
+  provider-budget exhaustion are hard gates while historical missing fields retain legacy semantics.
+- 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
+  boundary. Trusted harness seeding and the final release gate remain open until a product-authored
+  Task/Attempt history is present.
+- 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (270 Python,
+  47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
+-  The trusted preflight remains blocked on exact Node 22.21.1 (host has 22.22.3); the backend cycle
+  now has a public-API Task/Attempt helper so future snapshots carry product-authored identity without
+  synthesizing legacy runs.
+
+### Plan ID
 EP-20260811-weak-model-validation-authority
 
 ### Context
@@ -238,7 +300,13 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - [x] Bound provider process starts to three per runtime execution unit across normal and recovery transitions.
 - [x] Complete the provider-free recovery-budget and conformance closure in W24H–W24I; keep W24G
   conditional until its entry metric is recorded.
-- [ ] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted.
+- [x] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted;
+      the provider-free corpus is 100% first-pass-valid, 0% repair-entry and p95=2, so W24G is
+      deferred without changing the public envelope.
+- [x] Re-run the combined deterministic DoD after downstream W25 public-report integration so the
+      Epic 24 authority remains verified at the release boundary.
+- [ ] Close the Epic 24 authority plan after W25 consumes fresh public audit/verdict evidence on the
+      trusted release gate.
 
 ### Non-goals
 
@@ -300,13 +368,18 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
   semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
   implemented; W24F effective verdict persistence, public authority selection and retry rebinding
   are implemented; W24H shared three-start runtime-unit budget and W24I conformance corpus/closure
-  counters are implemented; W24G metric entry remains pending.
+  counters are implemented; W24G entry metric is recorded in
+  `fixtures/conformance/w24g-entry-metric.json` and the conditional slice is deferred.
 - 2026-08-11: W24H process-start enforcement is provider-adapter agnostic: the same budget context
   counts normal, transport-retry and focused-repair starts, denies the next process before spawn,
   and persists used/remaining counters, last transition and explicit exhaustion reason in runtime
   diagnostics and the run quality summary. Provider-free Claude/Qwen/Codex parity and concurrent
   reservation tests pass; W24I adds the provider-free incident corpus, adapter issue-code parity,
   closure counters and deterministic p95 invocation measurement (two).
+- 2026-08-12: Added the provider-free W24G entry metric and retained fixture. The recorded corpus
+  has 20/20 first-pass-valid observations, no otherwise-valid repair entries and p95=2; ADR
+  `ADR-20260812-w24g-entry-metric.md` defers mechanical-envelope reduction until a future metric
+  crosses the accepted threshold.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

@@ -25,14 +25,27 @@ type RunArtifactsPollResponse = {
   artifacts?: unknown[];
 };
 
-type RunListPollResponse = {
-  items?: Array<{
-    run_id?: string;
-    status?: string;
-    pipeline?: string;
-    started_at?: string;
-  }>;
+type WorkspaceValidateResponse = {
+  ok?: boolean;
+  resolved_repos?: Array<{ name?: string; path?: string }>;
 };
+
+type ProductTask = {
+  task_id?: string;
+  title?: string;
+  goal?: string;
+  scope?: { repositories?: Array<{ name?: string; paths?: string[] }> };
+};
+
+type TaskAttempt = {
+  attempt_id?: string;
+  task_id?: string;
+  run_id?: string;
+  status?: string;
+};
+
+type TaskListResponse = { items?: ProductTask[]; next_cursor?: string; has_more?: boolean };
+type TaskAttemptListResponse = { items?: TaskAttempt[] };
 
 type RunObservation = {
   status: string;
@@ -85,28 +98,70 @@ async function fetchQARunObservation(api: APIRequestContext, runID: string): Pro
   };
 }
 
-async function resolveSnapshotRunID(api: APIRequestContext): Promise<string> {
+async function resolveTaskAttemptForRun(api: APIRequestContext, requestedRunID = ""): Promise<{ taskID: string; attemptID: string; runID: string }> {
   const deadline = Date.now() + 30_000;
-  let lastPayload: RunListPollResponse | null = null;
+  let lastPayload: unknown = null;
   while (Date.now() < deadline) {
-    const response = await api.get("/api/pipeline/runs?limit=100");
-    expect(response.ok(), "run list API should be available in snapshot mode").toBe(true);
-    const payload = (await response.json()) as RunListPollResponse;
+    const response = await api.get("/api/tasks?limit=100");
+    expect(response.ok(), "Task API should be available in snapshot mode").toBe(true);
+    const payload = (await response.json()) as TaskListResponse;
     lastPayload = payload;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    const requested = snapshotRunID
-      ? items.find((item) => item.run_id === snapshotRunID && item.status === "succeeded")
-      : null;
-    const latestSucceeded = items.find((item) => item.status === "succeeded" && item.run_id);
-    const selected = requested ?? latestSucceeded;
-    if (selected?.run_id) {
-      return selected.run_id;
+    for (const task of Array.isArray(payload.items) ? payload.items : []) {
+      if (!task.task_id) continue;
+      const attemptsResponse = await api.get(`/api/tasks/${encodeURIComponent(task.task_id)}/attempts`);
+      if (!attemptsResponse.ok()) continue;
+      const attemptsPayload = (await attemptsResponse.json()) as TaskAttemptListResponse;
+      const matching = (Array.isArray(attemptsPayload.items) ? attemptsPayload.items : []).filter(
+        (attempt) => attempt.task_id === task.task_id && attempt.status === "succeeded" && Boolean(attempt.attempt_id) && Boolean(attempt.run_id) && (!requestedRunID || attempt.run_id === requestedRunID)
+      );
+      if (matching.length === 1) {
+        return { taskID: task.task_id, attemptID: matching[0].attempt_id ?? "", runID: matching[0].run_id ?? "" };
+      }
+      if (matching.length > 1) {
+        throw new Error(`Task API returned multiple succeeded Attempts for exact run ${requestedRunID || "<any>"} under Task ${task.task_id}`);
+      }
     }
     await sleep(250);
   }
   throw new Error(
-    `snapshot mode could not find a succeeded run_id=${snapshotRunID || "<latest>"} in /api/pipeline/runs; last_payload=${JSON.stringify(lastPayload)}`
+    `snapshot mode could not find one succeeded public Task/Attempt for run_id=${requestedRunID || "<any>"}; last_payload=${JSON.stringify(lastPayload)}`
   );
+}
+
+async function createAndAdmitLiveTask(api: APIRequestContext, runtimeProvider: string, expectedRepoCount: number): Promise<{ taskID: string; attemptID: string; runID: string }> {
+  const validationResponse = await api.post("/api/workspace/validate");
+  expect(validationResponse.ok(), "workspace validation API should be available before Task admission").toBe(true);
+  const validation = (await validationResponse.json()) as WorkspaceValidateResponse;
+  const repositories = (Array.isArray(validation.resolved_repos) ? validation.resolved_repos : [])
+    .filter((repo) => typeof repo.name === "string" && repo.name.trim() !== "")
+    .map((repo) => ({ name: repo.name?.trim() ?? "", paths: ["."] }));
+  expect(repositories, "Task admission should use the validated workspace repository scope").toHaveLength(expectedRepoCount);
+
+  const taskResponse = await api.post("/api/tasks", {
+    data: {
+      title: "Live E2E Task-first inspection",
+      goal: "Inspect the exact immutable Attempt outcome and evidence without a second provider analysis.",
+      context: "W25A release-gate journey",
+      scope: { repositories },
+      desired_runner: { preset: `${runtimeProvider}-default`, mode: "headless", provider: runtimeProvider }
+    }
+  });
+  expect(taskResponse.status(), "Task creation should use the authoritative public API").toBe(201);
+  const taskPayload = (await taskResponse.json()) as { task?: ProductTask };
+  const taskID = taskPayload.task?.task_id ?? "";
+  expect(taskID, "Task creation should return an opaque Task identity").not.toBe("");
+
+  const idempotencyKey = `live-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const attemptResponse = await api.post(`/api/tasks/${encodeURIComponent(taskID)}/attempts`, {
+    data: { idempotency_key: idempotencyKey, pipeline: "init", intent: "start" }
+  });
+  expect(attemptResponse.ok(), "Attempt admission should use the authoritative public API").toBe(true);
+  const attemptPayload = (await attemptResponse.json()) as { attempt?: TaskAttempt };
+  const attempt = attemptPayload.attempt;
+  expect(attempt?.attempt_id, "Attempt admission should return an Attempt identity").toBeTruthy();
+  expect(attempt?.task_id, "Attempt should retain its parent Task identity").toBe(taskID);
+  expect(attempt?.run_id, "Attempt admission should return the exact linked run identity").toBeTruthy();
+  return { taskID, attemptID: attempt?.attempt_id ?? "", runID: attempt?.run_id ?? "" };
 }
 
 async function fetchArtifactText(api: APIRequestContext, artifactPath: string): Promise<string> {
@@ -174,8 +229,7 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
 }
 
 async function captureRunFailureScreenshot(page: Page): Promise<void> {
-  await page.goto("/tasks/legacy").catch(() => undefined);
-  await captureEvidenceScreenshot(page, "frontend-runs-failed-desktop.png").catch(() => undefined);
+  await captureEvidenceScreenshot(page, "frontend-task-attempt-failed-desktop.png").catch(() => undefined);
 }
 
 async function waitForInitInspectRun(api: APIRequestContext, page: Page, runID: string): Promise<void> {
@@ -305,14 +359,6 @@ async function expectFirstViewportContent(page: Page, locator: Locator, label: s
   expect(box?.y ?? Number.POSITIVE_INFINITY, `${label} should start in the first viewport`).toBeLessThan(maxY);
 }
 
-async function openRunsDiagnostics(page: Page): Promise<void> {
-  const diagnostics = page.getByTestId("runs-diagnostics-drawer");
-  await expect(diagnostics).toBeVisible();
-  const open = await diagnostics.evaluate((node) => ("open" in node ? Boolean(node.open) : true));
-  if (!open) await diagnostics.locator("summary").click();
-  await expect(page.getByTestId("analysis-shard-panel")).toBeVisible();
-}
-
 async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
   const explorer = page.getByTestId("review-artifact-explorer");
   await expect(explorer).toBeVisible();
@@ -326,7 +372,7 @@ async function openReviewArtifactExplorer(page: Page): Promise<Locator> {
   return explorer;
 }
 
-test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, request }) => {
+test("live ui flow: validate -> admit Task Attempt -> inspect exact outcome", async ({ page, request }) => {
   test.skip(scenario !== "init-inspect", `scenario ${scenario} skips init-inspect flow`);
   test.setTimeout(Math.max(initTimeoutMs + 120_000, 6 * 60 * 1000));
   const runtimeProvider = process.env.UI_E2E_RUNTIME_PROVIDER ?? "unknown";
@@ -371,22 +417,24 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
   await captureEvidenceScreenshot(page, "frontend-setup-desktop.png");
 
-  await page.goto("/tasks/legacy");
-  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
-  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
+  let taskID = "";
+  let attemptID = "";
   let runID = "";
   if (artifactSource === "snapshot") {
-    runID = await resolveSnapshotRunID(request);
-    await page.goto(`/tasks/legacy/${encodeURIComponent(runID)}`);
-    await expect(page.getByTestId("legacy-run-page")).toBeVisible();
+    const selected = await resolveTaskAttemptForRun(request, snapshotRunID);
+    taskID = selected.taskID;
+    attemptID = selected.attemptID;
+    runID = selected.runID;
     const snapshotObservation = await fetchRunObservation(request, runID);
     expect(snapshotObservation.status, `snapshot run ${runID} should be succeeded`).toBe("succeeded");
   } else {
-    await page.getByTestId("run-init-btn").click();
-    await expect(page.getByTestId("run-status-panel")).toBeVisible();
-    runID = ((await page.getByTestId("run-status-run-id").textContent()) ?? "").trim();
+    const selected = await createAndAdmitLiveTask(request, runtimeProvider, expectedRepoCount);
+    taskID = selected.taskID;
+    attemptID = selected.attemptID;
+    runID = selected.runID;
   }
+  expect(taskID).not.toBe("");
+  expect(attemptID).not.toBe("");
   expect(runID).not.toBe("");
   console.log(`ACP_UI_E2E_RUN_ID=${runID}`);
   await test.info().attach("run-id", {
@@ -395,34 +443,31 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   });
   if (artifactSource !== "snapshot") {
     await waitForInitInspectRun(request, page, runID);
-    await page.goto(`/tasks/legacy/${encodeURIComponent(runID)}`);
   }
 
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
-  await expect(page.getByTestId("run-status-run-id")).toHaveText(runID);
-  await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
-  await expect(page.getByTestId("analysis-step-review-panel")).toBeVisible();
-  const stepCards = page.getByTestId("analysis-step-review-card");
-  if ((await stepCards.count()) > 0) {
-    await stepCards.first().click();
-    await page.getByTestId("analysis-step-tab-logs").click();
-    await expect(page.getByTestId("analysis-step-review-panel")).toContainText(/No logs are available|Provider is silent|INFO|WARN|ERROR/i);
-  }
-  await openRunsDiagnostics(page);
+  await page.goto(`/tasks/${encodeURIComponent(taskID)}/attempts/${encodeURIComponent(attemptID)}`);
+  await expect(page.getByTestId("task-route-attempt")).toBeVisible();
+  await expect(page.getByTestId("task-route-identities")).toContainText(taskID);
+  await expect(page.getByTestId("task-route-identities")).toContainText(attemptID);
+  await expect(page.getByTestId("task-route-attempt")).toContainText(runID);
+  await page.getByTestId("attempt-open-studio").click();
+  await expect(page.getByTestId("task-pipeline-studio")).toBeVisible();
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(taskID);
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(attemptID);
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(runID);
   await expectNoDocumentOverflow(page);
-  await captureEvidenceScreenshot(page, "frontend-legacy-diagnostics-desktop.png");
+  await captureEvidenceScreenshot(page, "frontend-task-attempt-studio-desktop.png");
 
   await page.reload();
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
+  await expect(page.getByTestId("task-pipeline-studio")).toBeVisible();
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(attemptID);
   await page.goto("/tasks");
   await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await page.goBack();
-  await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
+  await expect(page.getByTestId("task-pipeline-studio")).toBeVisible();
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(taskID);
 
-  await page.goto("/knowledge?view=documents&source=current");
+  await page.goto(`/knowledge?view=documents&source=current&task=${encodeURIComponent(taskID)}`);
   await expect(page.getByTestId("knowledge-panel")).toBeVisible();
   await expect(page.getByTestId("destination-knowledge")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("knowledge-panel")).toContainText("Current workspace");
@@ -436,7 +481,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expectNoDocumentOverflow(page);
   await captureEvidenceScreenshot(page, "frontend-knowledge-desktop.png");
 
-  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("changes-page")).toBeVisible();
   await expect(page.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("changes-page")).toContainText(`Run snapshot · ${runID}`);
@@ -552,7 +597,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
     await page.keyboard.press("Escape");
   }
 
-  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=publish&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&run=${encodeURIComponent(runID)}&view=publish&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();
@@ -593,7 +638,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expectNoDocumentOverflow(page);
   await captureEvidenceScreenshot(page, "frontend-changes-publish-mobile.png");
 
-  await page.goto(`/changes?run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("review-panel")).toBeVisible();
   await expectFirstViewportContent(page, page.getByTestId("stage-evidence"), "Mobile evidence navigation");
   await expectNoDocumentOverflow(page);
