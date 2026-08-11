@@ -5476,7 +5476,7 @@ describe("App", () => {
     await waitFor(() => {
       const preview = screen.getByTestId("evidence-viewer").innerHTML;
       expect(preview).toContain("<img");
-      expect(preview).toContain("data:image/svg+xml");
+      expect(preview).toContain("blob:");
     });
   });
 

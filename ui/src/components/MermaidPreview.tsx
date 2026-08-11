@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import { useEffect, useRef, useState } from "react";
 
 type MermaidPreviewProps = {
@@ -22,6 +23,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
     const currentRequest = requestRef.current + 1;
     requestRef.current = currentRequest;
     let disposed = false;
+    let objectURL = "";
 
     void (async () => {
       try {
@@ -53,7 +55,8 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           setError("Mermaid returned an unsafe or invalid SVG.");
           return;
         }
-        setSVG(safeSVG);
+        objectURL = URL.createObjectURL(new Blob([safeSVG], { type: "image/svg+xml" }));
+        setSVG(objectURL);
         setError("");
       } catch (renderErr) {
         if (disposed || requestRef.current !== currentRequest) {
@@ -66,6 +69,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
 
     return () => {
       disposed = true;
+      if (objectURL) URL.revokeObjectURL(objectURL);
     };
   }, [source]);
 
@@ -75,7 +79,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
   if (!svg) {
     return <p className="hint">Rendering {title}...</p>;
   }
-  return <div className="diagram-svg"><img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt={title} /></div>;
+  return <div className="diagram-svg"><img src={svg} alt={title} /></div>;
 }
 
 const mermaidGraphStartPattern =
@@ -99,21 +103,8 @@ function isMermaidErrorSVG(svg: string): boolean {
 }
 
 function sanitizeMermaidSVG(svg: string): string {
-  if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") return "";
-  const document = new DOMParser().parseFromString(svg, "image/svg+xml");
-  const root = document.documentElement;
-  if (!root || root.tagName.toLowerCase() !== "svg" || document.querySelector("parsererror")) return "";
-  document.querySelectorAll("script, foreignObject").forEach((node) => node.remove());
-  document.querySelectorAll("*").forEach((element) => {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const value = attribute.value.trim().toLowerCase();
-      if (name.startsWith("on") || ((name === "href" || name.endsWith(":href")) && value.startsWith("javascript:"))) {
-        element.removeAttribute(attribute.name);
-      }
-    }
-  });
-  return new XMLSerializer().serializeToString(root);
+  const sanitized = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+  return sanitized.trim().toLowerCase().startsWith("<svg") ? sanitized : "";
 }
 
 function cleanupMermaidScratch(renderID: string) {
