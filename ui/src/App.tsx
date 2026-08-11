@@ -1103,6 +1103,8 @@ export default function App() {
 		  onDocumentChange={(artifact) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] })}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
 		  onOpenRuns={() => handleDestinationChange("runs")}
+		  taskId={route.taskId}
+		  onOpenTask={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] })}
 		/></Suspense>
 	  ) : null}
 	  {destination === "settings" ? (

@@ -2169,6 +2169,11 @@ Acceptance:
 - empty map explains required analysis/artifacts and one next action;
 - keyboard selection, zoom, list parity and large-graph fixtures pass.
 
+Implementation status (2026-08-11): the additive Architecture surface now accepts an exact Task
+context, labels the current promoted workspace authority, exposes a return path to that Task and
+states that it is read-only without latest-run inference. Remaining map/workbench parity and
+responsive closure continue in W23H–W23O.
+
 ### 23H — Markdown Document Workbench
 
 **Goal:** сделать Architecture Home и authored docs первоклассным читаемым продуктом.
