@@ -2357,6 +2357,11 @@ Acceptance:
 - status uses text/icon/shape and live regions do not announce duplicates;
 - mobile title/authority/state/action fit before the first long content section.
 
+Implementation status (2026-08-11, W23N): Task Inbox tests now cover loading, empty, error and retry
+states with explicit status/alert semantics; Task rows are keyboard-activatable without changing
+their opaque identity. Task filters and Attempt rows use 44px minimum controls, while existing
+focus-visible, safe-area and responsive shell rules remain unchanged.
+
 ### 23O — Deterministic UI closure, old-shell removal and docs sync
 
 **Goal:** не объявлять новый UI законченным, пока старый shell и противоречивые docs реально живы.

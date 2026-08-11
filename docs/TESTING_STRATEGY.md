@@ -210,6 +210,8 @@ Baseline scenario set:
   - W23M fixtures cover the in-panel current-workspace read-only Ask boundary, provider-outage
     admission wording and separate proposal mutation path; Runner Settings copy distinguishes
     desired draft, effective/source resolution, readiness and immutable admitted Attempt history;
+  - W23N fixtures cover Task Inbox loading/empty/error/retry states, keyboard row activation,
+    explicit status/alert semantics and 44px filter/Attempt control targets;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
