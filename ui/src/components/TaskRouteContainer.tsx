@@ -79,9 +79,9 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
     setError("");
     void listTasks(filters, "", controller.signal).then((response) => {
       if (controller.signal.aborted) return;
-      setTasks(response.items);
-      setNextCursor(response.next_cursor);
-      setHasMore(response.has_more);
+      setTasks(Array.isArray(response.items) ? response.items : []);
+      setNextCursor(typeof response.next_cursor === "string" ? response.next_cursor : "");
+      setHasMore(response.has_more === true);
       setStatus("loaded");
     }).catch((requestError) => {
       if (controller.signal.aborted) return;

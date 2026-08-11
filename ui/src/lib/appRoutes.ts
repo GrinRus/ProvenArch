@@ -4,7 +4,7 @@ import type { WorkflowDestination } from "./workflowState";
 export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
 export type KnowledgeView = "documents" | "diagrams" | "model" | "findings" | "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
-export type TaskRouteView = "inbox" | "new" | "detail" | "attempt" | "studio";
+export type TaskRouteView = "inbox" | "new" | "detail" | "attempt" | "studio" | "legacy";
 export type TaskLifecycleFilter = "open" | "archived";
 export type TaskFilters = {
   search?: string;
@@ -36,7 +36,7 @@ export type AppRoute = {
 };
 
 export const destinationPaths: Record<WorkflowDestination, string> = {
-  setup: "/setup", home: "/home", runs: "/runs", tasks: "/tasks", knowledge: "/architecture", changes: "/changes", settings: "/settings",
+  setup: "/setup", tasks: "/tasks", knowledge: "/architecture", changes: "/changes", settings: "/settings",
 };
 
 const setupSteps = new Set<SetupStep>(["workspace", "sources", "brief", "runner", "review"]);
@@ -57,21 +57,25 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
       return segment;
     }
   });
+  const legacyRunPath = segments[0] === "runs" && segments.length === 2 && !invalid.includes("path") && validTaskRouteId(segments[1]) ? segments[1] : undefined;
   const destination = segments[0] === "architecture" || segments[0] === "knowledge" ? "knowledge" : segments[0] && Object.prototype.hasOwnProperty.call(destinationPaths, segments[0])
     ? segments[0] as WorkflowDestination
     : "tasks";
   const route: AppRoute = { destination, invalid };
 
-  if (destination === "setup") route.setupStep = enumParam(params, "step", setupSteps, "workspace", invalid);
-  if (destination === "runs") {
-    if (segments.length === 2 && segments[1].trim()) {
-      route.runId = segments[1];
-      route.runRequested = true;
-    }
-    else if (segments.length > 1) invalid.push("run");
+  if (legacyRunPath) {
+    route.taskView = "legacy";
+    route.runId = legacyRunPath;
+    route.runRequested = true;
+  } else if (segments[0] === "runs") {
+    if (segments.length > 2 || (segments.length === 2 && !validTaskRouteId(segments[1]))) invalid.push("run");
+    route.taskView = segments.length === 1 ? "legacy" : "inbox";
   }
+
+  if (destination === "setup") route.setupStep = enumParam(params, "step", setupSteps, "workspace", invalid);
   if (destination === "tasks") {
     route.taskFilters = parseTaskFilters(params, invalid);
+    if (legacyRunPath || segments[0] === "runs") return route;
     parseTaskRoute(segments, route, invalid);
   }
   if (destination === "knowledge") {
@@ -97,10 +101,9 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
 }
 
 export function formatAppRoute(route: AppRoute): string {
-  if (route.destination === "home") return "/home";
-  if (route.destination === "runs") return route.runId ? `/runs/${encodeURIComponent(route.runId)}` : "/runs";
   if (route.destination === "tasks") {
-    const path = route.taskView === "new" ? "/tasks/new"
+    const path = route.taskView === "legacy" ? (validTaskRouteId(route.runId) ? `/tasks/legacy/${encodeURIComponent(route.runId)}` : "/tasks/legacy")
+      : route.taskView === "new" ? "/tasks/new"
       : route.taskView === "detail" && validTaskRouteId(route.taskId) ? `/tasks/${encodeURIComponent(route.taskId)}`
       : (route.taskView === "attempt" || route.taskView === "studio") && validTaskRouteId(route.taskId) && validTaskRouteId(route.attemptId) ? `/tasks/${encodeURIComponent(route.taskId)}/attempts/${encodeURIComponent(route.attemptId)}${route.taskView === "studio" ? "/studio" : ""}`
       : "/tasks";
@@ -142,21 +145,19 @@ export function destinationFromPath(pathname: string, consoleReady: boolean): Wo
 
 export function destinationForStage(stage: StageId): WorkflowDestination {
   if (stage === "source" || stage === "readiness" || stage === "charter") return "setup";
-  if (stage === "analysis") return "runs";
-  if (stage === "ask") return "home";
+  if (stage === "analysis" || stage === "ask") return "tasks";
   return "changes";
 }
 
 export function defaultStageForDestination(destination: WorkflowDestination): StageId {
   if (destination === "setup") return "source";
-  if (destination === "runs") return "analysis";
   if (destination === "tasks" || destination === "changes" || destination === "knowledge") return "review";
   return "source";
 }
 
 export function stageForRoute(route: AppRoute): StageId {
   if (route.destination === "setup") return route.setupStep === "runner" ? "readiness" : route.setupStep === "brief" || route.setupStep === "review" ? "charter" : "source";
-  if (route.destination === "runs") return "analysis";
+  if (route.destination === "tasks" && route.taskView === "legacy") return "analysis";
   if (route.destination === "changes") return route.changesView === "publish" ? "publish" : route.changesView === "proposals" ? "proposals" : "review";
   return defaultStageForDestination(route.destination);
 }
@@ -183,6 +184,20 @@ function taskParam(params: URLSearchParams, invalid: string[]): string | undefin
 function parseTaskRoute(segments: string[], route: AppRoute, invalid: string[]): void {
   route.taskView = "inbox";
   if (segments.length === 1) return;
+  if (segments.length === 2 && segments[1] === "legacy") {
+    route.taskView = "legacy";
+    return;
+  }
+  if (segments.length === 3 && segments[1] === "legacy") {
+    if (!validTaskRouteId(segments[2])) {
+      invalid.push("run");
+      return;
+    }
+    route.taskView = "legacy";
+    route.runId = segments[2];
+    route.runRequested = true;
+    return;
+  }
   if (segments.length === 2) {
     if (segments[1] === "new") {
       route.taskView = "new";

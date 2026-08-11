@@ -58,8 +58,8 @@
      filtered review queue, W23L exact Task-scoped Changes context and W23M Ask/Runner authority
      boundaries, W23N Task state/accessibility coverage and the W23B2 Tasks-primary nav cutover
      are now present; the primary shell exposes only Tasks, Architecture and Changes plus utilities.
-     Explicit `/home` and `/runs` diagnostic routes remain compatibility-only until the final W23O
-     route/component removal. Inbox state,
+     Explicit `/tasks/legacy` is the read-only migration surface for pre-Task evidence; legacy runs
+     are never converted into synthetic Tasks. Inbox state,
      semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and
      public run-review identities, never from legacy run recency or provider-output heuristics.
    - Dev: `npm run dev` с proxy на backend
@@ -68,7 +68,7 @@
      stale embedded assets.
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - UI first-run entrypoint использует Guided Setup `Workspace -> Sources -> Analysis brief -> Runner & readiness -> Review & start`; запуск без brief требует отдельного quality-warning confirmation
-   - UI shell использует native History API и direct-load пути: `/setup`, `/home`, `/runs`, `/tasks`, `/architecture`, `/changes`, `/settings`. Deep context кодируется без router dependency: setup step, `/runs/<run_id>`, Task/Attempt identity, Architecture view/entity/document и Changes run/source/view/artifact/viewer mode; explicit stale identity sanitizes with notice and never falls back to another run/source. Primary navigation: `Tasks / Architecture / Changes`; Setup, Settings, Ask and runtime diagnostics are utilities, while `/home` and `/runs` remain explicit compatibility routes until W23O removal.
+   - UI shell использует native History API и direct-load пути: `/setup`, `/tasks`, `/tasks/new`, `/tasks/<task_id>`, `/tasks/<task_id>/attempts/<attempt_id>`, `/tasks/legacy`, `/tasks/legacy/<run_id>`, `/architecture`, `/changes`, `/settings`. Deep context кодируется без router dependency: setup step, Task/Attempt identity, legacy run identity, Architecture view/entity/document и Changes run/source/view/artifact/viewer mode; explicit stale identity sanitizes with notice and never falls back to another run/source. Primary navigation: `Tasks / Architecture / Changes`; Setup, Settings, Ask and runtime diagnostics are utilities.
    - Один pure workflow selector интерпретирует workspace readiness, active/pending execution, run-pinned evidence snapshot и publication state; он возвращает ровно одну primary next action. Внутренняя taskrun telemetry не является product publication gate.
    - Architecture читает `promoted_current` прежде всего через read-only `GET /api/architecture` и
      исключает `reports/taskruns/**`; legacy `GET /api/knowledge` используется только как
@@ -89,13 +89,13 @@
    - Readiness показывает summary cards для workspace, repositories, runtime provider, permissions, artifacts и read-only workspace health snapshot, provider readiness recovery для headless/`runner_unavailable`/doctor-fail случаев, а также compact runtime profile summary и collapsed advanced runtime tools disclosure для timeout/execution/permission/provider overrides
    - Показывает repo overview в validate surface: `resolved_repos` + diagnostics, сгруппированные по repo
    - `Charter` показывает wizard summary, domain/team card overview, baseline prompt bundle status, charter baseline recovery для prompt/charter bundle diagnostics, explicit partial state для missing card artifacts и editor для baseline bundle artifacts (`charter/*`, `skills/*`, prompt packs, `skills/subagents.yaml`)
-   - Runs физически разделяет `/runs` launcher/history и `/runs/<run_id>` Run Studio: canonical `step0..step4` timeline, failed/canceled/recovered evidence recovery и provider identity остаются в detail surface, а shards/raw output/permissions/runtime telemetry собраны в локальном non-modal Diagnostics disclosure и не влияют на workflow acceptance.
+   - Legacy diagnostics физически разделяет `/tasks/legacy` launcher/history и `/tasks/legacy/<run_id>` detail: canonical `step0..step4` timeline, failed/canceled/recovered evidence recovery и provider identity остаются в detail surface, а shards/raw output/permissions/runtime telemetry собраны в локальном non-modal Diagnostics disclosure и не влияют на workflow acceptance.
    - `App.tsx` остаётся владельцем загрузки и команд; Changes/Knowledge/Publish используют feature composition и pure view models, а общий semantic primitive layer задаёт page hierarchy, context, density и async states. Ask обёрнут в global modal/sheet с focus trap, Escape/return focus и неизменным `Current workspace · read-only` context.
    - setup/baseline/wizard/git state и actions остаются за facade `useWorkspaceSetup`, но внутри разделены на `useManifestEditor`, `useBaselineEditor`, `useWizardEditor` и `useGitActions`; runtime settings живут в отдельном hook, а run explorer разделён на `useRunSelection`, `useRunPolling`, `useRunActions`, `useRunArtifacts` и `useRunLogs`
    - Runtime profile (`timeouts` + `execution` + `permissions`) доступен в `Readiness -> Advanced runtime settings`, включая effective per-step providers; это не отдельная primary stage
    - Показывает run dashboard (queued/running/succeeded/failed), включая завершённые run'ы из persisted history
    - При bootstrap авто-выбирает newest active run (`queued/running`), иначе newest completed run в history
-   - При bootstrap `/` канонизируется в contextual Setup для пустого workspace, `/runs/<run_id>` восстанавливает active/selected Run Studio, а `/changes?run=<id>&source=snapshot` открывает completed run evidence без fallback на current workspace
+   - При bootstrap `/` канонизируется в Task Inbox, `/tasks/legacy/<run_id>` восстанавливает exact legacy diagnostics identity, а `/changes?run=<id>&source=snapshot` открывает completed run evidence без fallback на current workspace
    - Если выбранный run исчезает из history и есть новый доступный run, UI переключается на него; если history временно пуста, но status endpoint ещё возвращает выбранный run, UI сохраняет текущий selection и не делает ложный auto-switch
    - Показывает `Run status` выбранного run с полным warnings list (`RunInfo.warnings`), `error_code` и `error`
    - Runs Step review показывает artifacts/logs/evidence/diff выбранного шага, а shards, raw runtime output, permissions и telemetry находятся в локальном non-modal Diagnostics disclosure; retired global activity drawer отсутствует

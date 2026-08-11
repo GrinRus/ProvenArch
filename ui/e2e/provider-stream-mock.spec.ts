@@ -394,11 +394,11 @@ test("provider stream mock: Analysis diagnostics remain readable", async ({ page
   await installProviderStreamMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/runs");
+  await page.goto("/tasks/legacy");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await expect(page.getByTestId("runs-page")).toBeVisible();
+  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
   await page.getByRole("button", { name: runID }).click();
-  await expect(page).toHaveURL(`/runs/${runID}`);
+  await expect(page).toHaveURL(`/tasks/legacy/${runID}`);
 
   const liveDiagnostics = page.getByTestId("analysis-live-diagnostics");
   await expect(liveDiagnostics).toBeVisible();

@@ -21,7 +21,10 @@ describe("application route codec", () => {
     const changes = parseAppRoute(location("/changes?run=run-1&view=evidence&source=snapshot&artifact=doc.overview&mode=raw"), true);
     expect(changes).toMatchObject({ destination: "changes", runId: "run-1", changesView: "evidence", source: "snapshot", artifact: "doc.overview", mode: "raw" });
     expect(formatAppRoute(changes)).toBe("/changes?run=run-1&view=evidence&source=snapshot&artifact=doc.overview&mode=raw");
-    expect(formatAppRoute(parseAppRoute(location("/runs/run-1"), true))).toBe("/runs/run-1");
+    expect(parseAppRoute(location("/runs/run-1"), true)).toMatchObject({ destination: "tasks", taskView: "legacy", runId: "run-1" });
+    expect(formatAppRoute(parseAppRoute(location("/runs/run-1"), true))).toBe("/tasks/legacy/run-1");
+    expect(parseAppRoute(location("/runs"), true)).toMatchObject({ destination: "tasks", taskView: "legacy" });
+    expect(formatAppRoute(parseAppRoute(location("/runs"), true))).toBe("/tasks/legacy");
   });
 
   it("preserves optional Task context on Architecture and Changes targets", () => {
@@ -52,6 +55,9 @@ describe("application route codec", () => {
     const studio = parseAppRoute(location("/tasks/task-opaque/attempts/attempt-opaque/studio"), true);
     expect(studio).toMatchObject({ destination: "tasks", taskView: "studio", taskId: "task-opaque", attemptId: "attempt-opaque" });
     expect(formatAppRoute(studio)).toBe("/tasks/task-opaque/attempts/attempt-opaque/studio");
+    const legacy = parseAppRoute(location("/tasks/legacy/run-opaque"), true);
+    expect(legacy).toMatchObject({ destination: "tasks", taskView: "legacy", runId: "run-opaque" });
+    expect(formatAppRoute(legacy)).toBe("/tasks/legacy/run-opaque");
   });
 
   it("round-trips URL-restorable Task Inbox filters through detail", () => {
@@ -102,8 +108,9 @@ describe("application route codec", () => {
 
   it("does not crash on malformed percent-encoded path segments", () => {
     const route = parseAppRoute({ pathname: "/runs/%E0%A4%A", search: "" } as Location, true);
-    expect(route.destination).toBe("runs");
-    expect(route.runId).toBe("%E0%A4%A");
+    expect(route.destination).toBe("tasks");
+    expect(route.taskView).toBe("inbox");
+    expect(route.runId).toBeUndefined();
     expect(route.invalid).toContain("path");
   });
 });

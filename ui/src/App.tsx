@@ -5,7 +5,7 @@ import { TaskRouteContainer } from "./components/TaskRouteContainer";
 import { TaskComposer } from "./components/TaskComposer";
 import { AppOverlays } from "./components/AppOverlays";
 import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
-import { HomePage, RunsPage } from "./components/ProductPages";
+import { LegacyRunPage } from "./components/LegacyRunPage";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import { SettingsPage } from "./components/SettingsPage";
@@ -281,8 +281,8 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const nextRoute = parseAppRoute(window.location, consoleReady);
-      if (nextRoute.invalid.length > 0) {
-        const canonicalPath = formatAppRoute(nextRoute);
+      const canonicalPath = formatAppRoute(nextRoute);
+      if (nextRoute.invalid.length > 0 || `${window.location.pathname}${window.location.search}` !== canonicalPath) {
         window.history.replaceState({}, "", canonicalPath);
       }
       setRoute(nextRoute);
@@ -314,21 +314,24 @@ export default function App() {
       syncOnboardingStatus(status);
       if (!status.can_enter_console) {
         setConsoleReady(false);
-		navigateDestination("setup", true);
+        navigateDestination("setup", true);
         return;
       }
       await bootstrapConsoleData({ validateWorkspace: true });
+      const restoredRoute = parseAppRoute(window.location, true);
+      setRouteNotice(restoredRoute.invalid.length ? `Unsupported URL context was removed: ${restoredRoute.invalid.join(", ")}.` : "");
+      navigateRoute(restoredRoute, true);
+      // Publish the restored route before exposing the console. Otherwise the
+      // first user click can race the final bootstrap state update and be
+      // overwritten by the initial /setup route.
       setConsoleReady(true);
-		const restoredRoute = parseAppRoute(window.location, true);
-		setRouteNotice(restoredRoute.invalid.length ? `Unsupported URL context was removed: ${restoredRoute.invalid.join(", ")}.` : "");
-		navigateRoute(restoredRoute, true);
-		// bootstrapRuns selects the newest run for the initial console state. When
-		// a deep link pins a historical run, restore that selection explicitly
-		// after bootstrap so the default selection cannot win the race with the
-		// route-driven effect.
-		if (restoredRoute.runId) {
-		  await handleSelectRun(restoredRoute.runId, { silentErrors: true });
-		}
+      // bootstrapRuns selects the newest run for the initial console state. When
+      // a deep link pins a historical run, restore that selection explicitly
+      // after bootstrap so the default selection cannot win the race with the
+      // route-driven effect.
+      if (restoredRoute.runId) {
+        await handleSelectRun(restoredRoute.runId, { silentErrors: true });
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "console data refresh failed");
     }
@@ -376,28 +379,28 @@ export default function App() {
   async function refreshKnowledge() {
     setKnowledgeStatus("loading");
     setKnowledgeError("");
-	let architectureError: unknown;
+    let architectureError: unknown;
     try {
-	  const response = await loadArchitectureAPI();
-	  setArchitecture(response);
-	  try { setKnowledge(await loadKnowledgeAPI()); } catch { setKnowledge(null); }
+      const response = await loadArchitectureAPI();
+      setArchitecture(response);
+      try { setKnowledge(await loadKnowledgeAPI()); } catch { setKnowledge(null); }
       setKnowledgeStatus("loaded");
-	  return null;
-	} catch (requestError) {
-	  architectureError = requestError;
-	}
-	try {
-	  const response = await loadKnowledgeAPI();
-	  setKnowledge(response);
-	  setArchitecture(architectureFromKnowledge(response));
-	  setKnowledgeStatus("loaded");
-	  return response;
-	} catch (requestError) {
+      return null;
+    } catch (requestError) {
+      architectureError = requestError;
+    }
+    try {
+      const response = await loadKnowledgeAPI();
+      setKnowledge(response);
+      setArchitecture(architectureFromKnowledge(response));
+      setKnowledgeStatus("loaded");
+      return response;
+    } catch (requestError) {
       setKnowledge(null);
-	  setArchitecture(null);
+      setArchitecture(null);
       setKnowledgeStatus("error");
-	  const failure = architectureError ?? requestError;
-	  setKnowledgeError(failure instanceof Error ? failure.message : "architecture failed to load");
+      const failure = architectureError ?? requestError;
+      setKnowledgeError(failure instanceof Error ? failure.message : "architecture failed to load");
       return null;
     }
   }
@@ -495,7 +498,7 @@ export default function App() {
 	const enteredStatus = await enterOnboardingConsole();
 	syncOnboardingStatus(enteredStatus);
 	setConsoleReady(true);
-	handleDestinationChange("home");
+	handleDestinationChange("tasks");
     return true;
   }
 
@@ -619,14 +622,14 @@ export default function App() {
     if (startedRunID) {
       setFirstRunStatus("First analysis started. Results will update as the run finishes.");
       setActiveStage(nextStage);
-      navigateRoute({ destination: "runs", runId: startedRunID, runRequested: true, invalid: [] });
+      navigateRoute({ destination: "tasks", taskView: "legacy", runId: startedRunID, runRequested: true, invalid: [] });
     }
   }
 
   async function handleRunPipelineFromRuns(pipeline: "init" | "refresh", intent: "start" | "queue" = "start") {
     const startedRunID = await handleRunPipeline(pipeline, intent);
     if (startedRunID && intent !== "queue") {
-      navigateRoute({ destination: "runs", runId: startedRunID, runRequested: true, invalid: [] });
+      navigateRoute({ destination: "tasks", taskView: "legacy", runId: startedRunID, runRequested: true, invalid: [] });
     }
   }
 
@@ -700,14 +703,14 @@ export default function App() {
 
   async function handleSelectRunAndRoute(id: string) {
     restoredRouteRunRef.current = id;
-    if (destination === "runs") navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
+    if (destination === "tasks" && route.taskView === "legacy") navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] });
     else navigateRoute({ ...route, destination: "changes", runId: id, runRequested: true, source: "snapshot", artifact: undefined, invalid: [] });
     await handleSelectRun(id);
   }
 
   async function handleSelectRunInRuns(id: string) {
     restoredRouteRunRef.current = id;
-    navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] });
+    navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] });
     await handleSelectRun(id);
   }
 
@@ -886,28 +889,6 @@ export default function App() {
   );
   const selectedArchitectureComparison = architectureComparisonMismatch ? undefined : architecture?.comparison;
 
-  const handleHomePrimaryAction = useCallback(() => {
-    const hasPromotedArchitecture = architecture?.status === "available" || architecture?.status === "partial";
-    const promotedRunID = architecture?.authority.source_run_id?.trim();
-    if (hasPromotedArchitecture && promotedRunID) {
-      navigateRoute({
-        destination: "changes",
-        runId: promotedRunID,
-        runRequested: true,
-        changesView: "overview",
-        source: "snapshot",
-        mode: "rendered",
-        invalid: [],
-      });
-      return;
-    }
-    if (hasPromotedArchitecture) {
-      navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] });
-      return;
-    }
-    handleDestinationChange(workflow.nextAction.destination);
-  }, [architecture, handleDestinationChange, navigateRoute, workflow.nextAction.destination]);
-
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
       busy={busy}
@@ -1020,11 +1001,18 @@ export default function App() {
         workspaceValid={validateResult?.ok === true}
         onDestinationChange={handleDestinationChange}
         onAsk={() => setAskOpen(true)}
-        onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
+        onDiagnostics={() => { navigateRoute({ destination: "tasks", taskView: "legacy", invalid: [] }); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
-	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer workspaceReady={validateResult?.ok === true} repos={guidedRepos} runtimeMode={effectiveRuntimeMode} runtimeProvider={effectiveRuntimeProvider} onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })} /> : null}
-	  {destination === "tasks" && route.taskView !== "new" ? <TaskRouteContainer
+	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer
+	    workspaceReady={validateResult?.ok === true}
+	    repos={guidedRepos}
+	    runtimeMode={effectiveRuntimeMode}
+	    runtimeProvider={effectiveRuntimeProvider}
+	    onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
+	    onStarted={(taskId, attemptId) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: route.taskFilters, invalid: [] })}
+	  /> : null}
+	  {destination === "tasks" && route.taskView !== "new" && route.taskView !== "legacy" ? <TaskRouteContainer
 	    view={route.taskView ?? "inbox"}
 	    taskId={route.taskId}
 	    attemptId={route.attemptId}
@@ -1048,7 +1036,7 @@ export default function App() {
 			selectedEvidenceStatus: evidenceSnapshot.status,
 			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
 			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
-			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "runs", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
+			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
 			architectureComparison: selectedArchitectureComparison,
 			architectureComparisonMismatch,
 			runReview: runReviewSummary?.review,
@@ -1087,9 +1075,6 @@ export default function App() {
 		  onReturnToAsk={() => { if (askReturnRoute) navigateRoute(askReturnRoute); setAskOpen(true); setAskReturnRoute(null); }}
 		/>
 	  ) : null}
-	  {destination === "home" ? (
-		<HomePage workflow={workflow} workspaceReady={validateResult?.ok === true} coordination={coordination} runStatus={runStatus} evidenceStatus={evidenceSnapshot.status} gitChanges={gitDiff?.files?.length ?? 0} architecture={architecture} onPrimaryAction={handleHomePrimaryAction} onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] })} />
-	  ) : null}
 	  {destination === "knowledge" ? (
 		<Suspense fallback={<section className="panel stage-panel"><p className="status info">Loading Architecture Explorer…</p></section>}><KnowledgePage
 		  architecture={architecture}
@@ -1104,7 +1089,7 @@ export default function App() {
 		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] })}
 		  onDocumentChange={(artifact) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] })}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
-		  onOpenRuns={() => handleDestinationChange("runs")}
+		  onOpenRuns={() => handleDestinationChange("tasks")}
 		  taskId={route.taskId}
 		  onOpenTask={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] })}
 		/></Suspense>
@@ -1117,7 +1102,7 @@ export default function App() {
 	      runtimeSettingsPanel={runtimeSettingsPanel}
 	      onOpenSetup={() => handleDestinationChange("setup")}
 	      onOpenChanges={() => handleDestinationChange("changes")}
-	      onOpenRuns={() => handleDestinationChange("runs")}
+	      onOpenRuns={() => handleDestinationChange("tasks")}
 	    />
 	  ) : null}
 
@@ -1189,8 +1174,8 @@ export default function App() {
         />
       ) : null}
 
-      {destination === "runs" && activeStage === "analysis" ? (
-        <RunsPage coordination={coordination} selectedRunID={route.runId}>
+      {destination === "tasks" && route.taskView === "legacy" && activeStage === "analysis" ? (
+        <LegacyRunPage coordination={coordination} selectedRunID={route.runId}>
         <AnalysisStagePanel
           detailMode={Boolean(route.runId)}
           busy={busy}
@@ -1221,7 +1206,7 @@ export default function App() {
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
 		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] })}
         />
-        </RunsPage>
+        </LegacyRunPage>
       ) : null}
 
       {error ? <p className="status err">Error: {error}</p> : null}

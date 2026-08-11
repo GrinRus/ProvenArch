@@ -1,6 +1,6 @@
 # Task-first Product UI — migration plan
 
-Статус: **planned implementation wave**, 2026-08-11.
+Статус: **implementation wave in progress; W23O route closure implemented**, 2026-08-12.
 
 Целевой UX зафиксирован в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Epic 23 в [`BACKLOG.md`](BACKLOG.md) является acceptance backlog. Этот документ задаёт dependency
@@ -44,7 +44,7 @@ API зафиксированы в [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md).
 MVP registry planned под `reports/taskruns/task-history.json` + `.last-good`: он Git/local-first
 compatible, но исключён из promoted Architecture, provider/QA context и анализируемых repositories.
 Run retention не удаляет Task identity/Attempt terminal summary; автоматического Task deletion нет.
-Schema-first 23A slice всё ещё обязан добавить schemas, validators, fixtures, API и examples до UI.
+Schema-first 23A добавил schemas, validators, fixtures, API и examples до UI cutover.
 Decision rationale: [`ADR-20260811-task-attempt-authority-and-persistence.md`](adr/ADR-20260811-task-attempt-authority-and-persistence.md).
 
 ### 4.2 Runner admission
@@ -71,9 +71,8 @@ Task. До такой association UI использует `Workspace has unpubli
 ### 4.4 Legacy run policy
 
 Pre-contract runs остаются exact read-only execution/snapshot evidence и не превращаются в
-synthetic Tasks. Task Inbox содержит только настоящие persisted Tasks. До удаления `/runs` shell
-должен появиться explicit legacy read/migration surface: visible migration notice или deliberate
-`Create Task from this run`, который создаёт новую identity и не переписывает history.
+synthetic Tasks. Task Inbox содержит только настоящие persisted Tasks. Explicit `/tasks/legacy`
+provides the read-only migration surface with a visible notice; it never creates a Task or rewrites history.
 
 ## 5. Delivery order
 
@@ -213,7 +212,8 @@ critical axe violations and screenshot artifacts on failure.
 
 - Cut over primary navigation only when Tasks, Architecture and Changes all have truthful target
   containers.
-- `/runs` may redirect to `/tasks` only after Task/run identity migration exists.
+- `/home` and `/runs` are no longer product destinations; old run links canonicalize to the explicit
+  `/tasks/legacy/<run_id>` read-only migration surface without creating a Task.
 - Remove Home and Analyze components/routes/selectors in the same accepted cutover slice; do not
   keep hidden equivalents.
 - Old design assets `ui-console-v2`, `ui-architecture-change-review` and `ui-product-shell` are

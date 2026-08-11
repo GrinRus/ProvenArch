@@ -410,9 +410,9 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   const { postedQuestions } = await installQARecoveryMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/home");
+  await page.goto("/tasks");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "home-desktop.png");
 
@@ -429,8 +429,8 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "knowledge-empty-mobile.png");
 
-  await page.goto("/home");
-  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await captureEvidenceScreenshot(page, "home-mobile.png");
 
   await page.setViewportSize({ width: 1440, height: 980 });
@@ -524,10 +524,10 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "architecture-map-mobile.png");
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/home");
-  await expect(page.locator(".home-map-visual")).toContainText("Checkout");
+  await page.goto("/architecture?view=map&source=current");
+  await expect(page.getByTestId("architecture-canvas")).toContainText("Checkout");
   await captureEvidenceScreenshot(page, "home-architecture-desktop.png");
-	await page.goto("/runs/run-analysis-succeeded");
+	await page.goto("/tasks/legacy/run-analysis-succeeded");
 	const targetedRerun = page.getByTestId("targeted-rerun-panel");
 	await expect(targetedRerun).toBeVisible();
 	await expect(targetedRerun).toContainText("Repeat only the work you need");

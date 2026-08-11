@@ -1,5 +1,5 @@
 export type WorkflowStatus = "available" | "needs_review" | "blocked" | "complete";
-export type WorkflowDestination = "setup" | "home" | "runs" | "tasks" | "knowledge" | "changes" | "settings";
+export type WorkflowDestination = "setup" | "tasks" | "knowledge" | "changes" | "settings";
 export type PublicationState = "clean" | "dirty" | "stale" | "blocked" | "loading" | "unknown";
 
 export type WorkflowStateInput = {
@@ -32,14 +32,14 @@ export function deriveWorkflowState(input: WorkflowStateInput): WorkflowState {
       status: "available",
       publication: input.publication,
       attention: input.execution === "pending" ? "A refresh is waiting behind the active run." : "Analysis is running.",
-      nextAction: { destination: "runs", label: "Open run progress" },
+      nextAction: { destination: "tasks", label: "Open Task progress" },
     };
   }
   if (input.execution === "failed") {
-    return { status: "blocked", publication: input.publication, attention: "The selected run needs recovery.", nextAction: { destination: "runs", label: "Review run blocker" } };
+    return { status: "blocked", publication: input.publication, attention: "The selected Attempt needs recovery.", nextAction: { destination: "tasks", label: "Review Attempt" } };
   }
   if (input.evidence === "none" || input.evidence === "unavailable") {
-    return { status: "blocked", publication: input.publication, attention: "No trustworthy evidence snapshot is available.", nextAction: { destination: "runs", label: "Open diagnostics" } };
+    return { status: "blocked", publication: input.publication, attention: "No trustworthy evidence snapshot is available.", nextAction: { destination: "tasks", label: "Open diagnostics" } };
   }
   if (input.evidence === "partial") {
     return { status: "needs_review", publication: input.publication, attention: "The selected evidence snapshot is partial.", nextAction: { destination: "knowledge", label: "Review partial evidence" } };
@@ -59,5 +59,5 @@ export function deriveWorkflowState(input: WorkflowStateInput): WorkflowState {
   if (input.publication === "dirty") {
     return { status: "needs_review", publication: input.publication, attention: input.demo ? "Demo evidence is ready for an explicit publication review." : "Workspace changes are ready for review.", nextAction: { destination: "changes", label: "Review workspace changes" } };
   }
-  return { status: "complete", publication: input.publication, attention: "Workspace evidence and publication state are current.", nextAction: { destination: "home", label: "View workspace summary" } };
+  return { status: "complete", publication: input.publication, attention: "Workspace evidence and publication state are current.", nextAction: { destination: "tasks", label: "View Task Inbox" } };
 }
