@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/acp/schemas/task.schema.json",
+  "title": "ACP Product Task",
+  "type": "object",
+  "required": [
+    "version",
+    "task_id",
+    "title",
+    "goal",
+    "scope",
+    "desired_runner",
+    "lifecycle",
+    "revision",
+    "created_at",
+    "updated_at",
+    "last_activity_at",
+    "attempts",
+    "outcome",
+    "publication"
+  ],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "goal": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "context": {"type": "string", "maxLength": 50000},
+    "scope": {"$ref": "#/$defs/scope"},
+    "desired_runner": {"$ref": "#/$defs/runner"},
+    "lifecycle": {"type": "string", "enum": ["open", "archived"]},
+    "revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "last_activity_at": {"type": "string", "format": "date-time"},
+    "archived_at": {"type": ["string", "null"], "format": "date-time"},
+    "attempts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/attempt_summary"}
+    },
+    "outcome": {"$ref": "#/$defs/outcome"},
+    "publication": {"$ref": "#/$defs/publication"}
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "required": ["repositories"],
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/repository_scope"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "repository_scope": {
+      "type": "object",
+      "required": ["name", "paths"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "paths": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "runner": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": {"type": "string", "minLength": 1, "maxLength": 128},
+        "mode": {"type": "string", "enum": ["fake", "headless"]},
+        "provider": {"type": "string", "enum": ["claude-code", "qwen-code", "codex-code"]},
+        "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "effort": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permissions": {"type": "string", "enum": ["trusted_full_access", "managed"]}
+      },
+      "additionalProperties": false
+    },
+    "attempt_summary": {
+      "type": "object",
+      "required": ["attempt_id", "run_id", "task_revision", "status", "admitted_at", "updated_at"],
+      "properties": {
+        "attempt_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+        "run_id": {"type": "string", "minLength": 1},
+        "parent_attempt_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+        "task_revision": {"type": "integer", "minimum": 1},
+        "status": {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "canceled", "timeout"]},
+        "admitted_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": ["string", "null"], "format": "date-time"},
+        "summary": {"type": "string", "maxLength": 4000},
+        "retained_evidence": {"type": "string", "enum": ["full", "summary_only", "unavailable"]}
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {"type": "string", "enum": ["available", "unavailable"]},
+        "attempt_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+        "run_id": {"type": "string", "minLength": 1},
+        "snapshot_path": {"type": "string", "minLength": 1},
+        "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      },
+      "additionalProperties": false
+    },
+    "publication": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": {"type": "string", "enum": ["linked", "unavailable"]},
+        "attempt_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
+        "run_id": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "enum": ["commit", "branch", "pull_request"]},
+        "branch": {"type": "string", "minLength": 1},
+        "commit": {"type": "string", "minLength": 1},
+        "inventory_fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+        "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

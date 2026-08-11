@@ -24,6 +24,9 @@ const (
 	RefreshImpactPlanSchema      Schema = "refresh-impact-plan.schema.json"
 	RefreshExecutionSchema       Schema = "refresh-execution.schema.json"
 	RefreshMaterializationSchema Schema = "refresh-materialization.schema.json"
+	TaskSchema                   Schema = "task.schema.json"
+	AttemptSchema                Schema = "attempt.schema.json"
+	TaskHistorySchema            Schema = "task-history.schema.json"
 )
 
 var (

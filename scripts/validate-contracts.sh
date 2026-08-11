@@ -74,10 +74,30 @@ docs_first_contracts=(
   "schemas/refresh-impact-plan.schema.json:fixtures/refresh-planning/full-fallback/refresh-impact-plan.json"
   "schemas/refresh-execution.schema.json:fixtures/refresh-planning/unchanged/refresh-execution.json"
   "schemas/refresh-materialization.schema.json:fixtures/refresh-planning/unchanged/refresh-materialization.json"
+  "schemas/task.schema.json:examples/task.example.json"
+  "schemas/attempt.schema.json:examples/attempt.example.json"
+  "schemas/task-history.schema.json:fixtures/tasks/task-history.json"
 )
 
 for entry in "${docs_first_contracts[@]}"; do
   schema="${entry%%:*}"
   sample="${entry##*:}"
   "$ajv_bin" validate --spec=draft2020 -c ajv-formats -s "$schema" -d "$sample"
+done
+
+task_invalid_cases=(
+  "schemas/task.schema.json:fixtures/tasks/invalid-task-version.json"
+  "schemas/attempt.schema.json:fixtures/tasks/invalid-attempt-unknown-field.json"
+)
+
+for entry in "${task_invalid_cases[@]}"; do
+  schema="${entry%%:*}"
+  sample="${entry##*:}"
+  invalid_log="$tmpdir/$(basename "$sample").invalid.log"
+  if "$ajv_bin" validate --spec=draft2020 -c ajv-formats -s "$schema" -d "$sample" >"$invalid_log" 2>&1; then
+    echo "Expected invalid Task/Attempt fixture to fail: $sample"
+    cat "$invalid_log"
+    exit 1
+  fi
+  echo "$sample invalid as expected"
 done

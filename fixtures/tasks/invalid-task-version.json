@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "task_id": "legacy-task",
+  "title": "Unsupported task",
+  "goal": "This fixture must fail the v1 schema."
+}
