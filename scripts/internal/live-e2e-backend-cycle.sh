@@ -26,6 +26,7 @@ ITERATIONS="${ITERATIONS:-1}"
 RUN_LOGS_TTL_HOURS="${RUN_LOGS_TTL_HOURS:-168}"
 RUN_LOGS_MAX_RUNS="${RUN_LOGS_MAX_RUNS:-200}"
 APPLY_TIMEOUTS_VIA_API="${ACP_APPLY_TIMEOUTS_VIA_API:-1}"
+TASK_FIRST_ADMISSION="${ACP_LIVE_E2E_TASK_FIRST:-1}"
 
 RUNTIME_STEP_TIMEOUT_SEC="${ACP_RUNTIME_STEP_TIMEOUT_SEC:-}"
 RUNTIME_HEARTBEAT_SEC="${ACP_RUNTIME_HEARTBEAT_SEC:-}"
@@ -95,6 +96,10 @@ if [[ "$KEEP_TMP" != "0" && "$KEEP_TMP" != "1" ]]; then
 fi
 if [[ "$APPLY_TIMEOUTS_VIA_API" != "0" && "$APPLY_TIMEOUTS_VIA_API" != "1" ]]; then
   echo "ACP_APPLY_TIMEOUTS_VIA_API must be 0 or 1, got: $APPLY_TIMEOUTS_VIA_API" >&2
+  exit 1
+fi
+if [[ "$TASK_FIRST_ADMISSION" != "0" && "$TASK_FIRST_ADMISSION" != "1" ]]; then
+  echo "ACP_LIVE_E2E_TASK_FIRST must be 0 or 1, got: $TASK_FIRST_ADMISSION" >&2
   exit 1
 fi
 if [[ ! "$RUN_LOGS_TTL_HOURS" =~ ^[1-9][0-9]*$ ]]; then
@@ -1034,17 +1039,38 @@ run_cli_pipeline() {
   local status
 
   log "run: iteration=$iteration runtime=$runtime_label pipeline=$pipeline"
-  local run_cmd=(
-    "$ACP_BIN" run
-    --workspace "$workspace_path"
-    --pipeline "$pipeline"
-    --runtime "$runtime_mode"
-    --non-interactive
-    --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS"
-    --run-logs-max-runs "$RUN_LOGS_MAX_RUNS"
-  )
-  if [[ "$runtime_mode" == "headless" ]]; then
-    run_cmd+=(--runtime-provider "$runtime_provider")
+  local -a run_cmd
+  if [[ "$TASK_FIRST_ADMISSION" == "1" ]]; then
+    local task_api_port
+    task_api_port="$(allocate_free_port)"
+    local task_api_listen
+    task_api_listen="127.0.0.1:$task_api_port"
+    run_cmd=(
+      python3 "$PROVENARCH_ROOT/scripts/internal/live-task-attempt.py"
+      --acp-bin "$ACP_BIN"
+      --workspace "$workspace_path"
+      --pipeline "$pipeline"
+      --runtime "$runtime_mode"
+      --runtime-provider "$runtime_provider"
+      --listen "$task_api_listen"
+      --output "$output_path"
+      --server-log "$output_path.server.log"
+      --api-ready-timeout-sec "$API_READY_TIMEOUT_SEC"
+    )
+    log "task-first admission: public Task/Attempt API runtime=$runtime_label pipeline=$pipeline listen=$task_api_listen"
+  else
+    run_cmd=(
+      "$ACP_BIN" run
+      --workspace "$workspace_path"
+      --pipeline "$pipeline"
+      --runtime "$runtime_mode"
+      --non-interactive
+      --run-logs-ttl-hours "$RUN_LOGS_TTL_HOURS"
+      --run-logs-max-runs "$RUN_LOGS_MAX_RUNS"
+    )
+    if [[ "$runtime_mode" == "headless" ]]; then
+      run_cmd+=(--runtime-provider "$runtime_provider")
+    fi
   fi
 
   local monitor_meta="$TMP_ROOT/.pipeline-monitor-${iteration}-${runtime_mode}-${runtime_provider}-${pipeline}.json"

@@ -40,6 +40,16 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         self.assertIn("current_step=${init_current_step:-unknown}", helper)
         self.assertIn("last_progress_age_sec", helper)
 
+    def test_backend_cycle_release_path_uses_public_task_attempt_admission(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        task_helper = (self.repo_root / "scripts" / "internal" / "live-task-attempt.py").read_text(encoding="utf-8")
+        for token in ("ACP_LIVE_E2E_TASK_FIRST", "live-task-attempt.py", "public Task/Attempt API"):
+            self.assertIn(token, helper)
+        for token in ("/api/tasks", "/attempts", "task_id", "attempt_id", "run_id"):
+            self.assertIn(token, task_helper)
+        self.assertNotIn("internal.orchestrator", task_helper)
+        self.assertNotIn("run-history.json", task_helper)
+
     def test_backend_cycle_restores_isolated_repo_permissions_before_cleanup(self) -> None:
         helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
         self.assertIn("ISOLATED_TARGET_REPOS_DIR", helper)

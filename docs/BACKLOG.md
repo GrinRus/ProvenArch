@@ -2896,10 +2896,10 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-12): **25A/25B implementation in progress.** The release boundary is accepted;
-Task-first frontend assertions and public authority report consumption are implemented provider-free.
-The trusted harness still needs a product-authored Task/Attempt history for snapshot runs; missing or
-ambiguous identity is intentionally fail-closed and is not synthesized from legacy runs.
+Status (2026-08-12): **25A/25B implementation complete; 25C trusted gate pending.** The release
+boundary is accepted; Task-first frontend assertions, public authority report consumption and
+public-API Task/Attempt admission in the backend cycle are implemented provider-free. Missing or
+ambiguous identity remains intentionally fail-closed and is never synthesized from legacy runs.
 
 ### Goal
 
@@ -2945,6 +2945,8 @@ Expected files/modules:
 
 - `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact behavior changes;
 - `scripts/frontend-live-e2e.sh`, `scripts/tests/frontend_live_e2e_contract_test.py`;
+- `scripts/internal/live-task-attempt.py`, `scripts/internal/live-e2e-backend-cycle.sh` for the
+  trusted backend Task/Attempt admission boundary;
 - Task/Attempt public UI/API clients and operator-facing test IDs introduced by Epic 23;
 - `docs/TESTING_STRATEGY.md` and `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 
@@ -2969,7 +2971,8 @@ Acceptance:
 
 Implementation status (2026-08-12): `live-flow.spec.ts` now admits/reads public Task/Attempt
 identities, pins exact Task → Attempt → run joins, and rejects latest-run or legacy fallback. The
-snapshot path fails closed when the copied workspace lacks a matching product-authored identity.
+backend cycle creates fresh product-authored identity through `/api/tasks*`; the snapshot path still
+fails closed when a selected workspace lacks a matching identity.
 
 ### 25B — Epic 24 public evidence consumption
 

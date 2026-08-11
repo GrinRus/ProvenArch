@@ -275,8 +275,9 @@ identity is evidence failure, not permission to synthesize a Task from historica
   Task/Attempt history is present.
 - 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (270 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
-  The trusted preflight remains blocked on exact Node 22.21.1 (host has 22.22.3) and the current CLI
-  backend cycle still does not author Task/Attempt identity for snapshot runs.
+-  The trusted preflight remains blocked on exact Node 22.21.1 (host has 22.22.3); the backend cycle
+  now has a public-API Task/Attempt helper so future snapshots carry product-authored identity without
+  synthesizing legacy runs.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority
