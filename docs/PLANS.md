@@ -185,7 +185,10 @@ the final removal of Home/Analyze routes.
   explicit missing-comparison state. W23F now adds the exact Attempt-bound Pipeline Studio route
   with bounded structured diagnostics. W23G now adds an explicit Task-scoped current Architecture
   context and return path without latest-run fallback. W23H now adds an allowlisted, lossless
-  Markdown reader/editor while promoted reports remain read-only. W23I–O remain pending.
+  Markdown reader/editor while promoted reports remain read-only. W23I now adds a structured,
+  read-only entity/edge inspector with schema/version labels, path-linked validation issues and
+  an advanced line-numbered source view; structured save remains gated on a future lossless
+  round-trip proof. W23J–O remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

@@ -130,4 +130,23 @@ describe("KnowledgePage", () => {
     expect(within(mobileList).getByRole("button", { name: /Users/ })).toBeInTheDocument();
     expect(within(mobileList).queryByRole("button", { name: /Payments/ })).not.toBeInTheDocument();
   });
+
+  it("keeps the structured model inspector read-only and exposes source diagnostics", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("id: svc.payments\ntype: service\n", { status: 200 })));
+    const onOpenArtifact = vi.fn();
+    function Harness() {
+      const [selectedID, setSelectedID] = useState<string>();
+      return <KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="map" selectedEntityID={selectedID} onViewChange={vi.fn()} onEntityChange={setSelectedID} onOpenArtifact={onOpenArtifact} />;
+    }
+    render(<Harness />);
+    fireEvent.click(within(screen.getByLabelText("Architecture elements")).getByRole("button", { name: /Payments/ }));
+    const inspector = await screen.findByTestId("structured-model-inspector");
+    expect(inspector).toHaveTextContent("architecture.entity v1");
+    expect(inspector).toHaveTextContent("Structured editing is unavailable until comments");
+    expect(inspector).not.toHaveTextContent("Save");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Source (Advanced)" }));
+    expect(await within(inspector).findByText(/0001 \| id: svc\.payments/)).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole("button", { name: "Open source artifact" }));
+    expect(onOpenArtifact).toHaveBeenCalledWith("model/entities/svc.payments.yaml");
+  });
 });
