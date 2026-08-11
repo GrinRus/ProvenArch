@@ -672,13 +672,14 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 
 	execution := pipelineExecution{
-		runID:            runID,
-		pipeline:         request.Pipeline,
-		workspace:        request.Workspace,
-		store:            model.NewStore(request.Workspace),
-		compiler:         reports.NewCompiler(request.Workspace),
-		clock:            s.clock,
-		refreshExecution: refreshExecution,
+		runID:                     runID,
+		pipeline:                  request.Pipeline,
+		prePromotionAuditRequired: true,
+		workspace:                 request.Workspace,
+		store:                     model.NewStore(request.Workspace),
+		compiler:                  reports.NewCompiler(request.Workspace),
+		clock:                     s.clock,
+		refreshExecution:          refreshExecution,
 		preservedArtifactCandidates: func() []string {
 			if refreshImpact == nil {
 				return nil
@@ -935,6 +936,7 @@ func retryRequestedScopes(request RunRequest) []string {
 type pipelineExecution struct {
 	runID                       string
 	pipeline                    Pipeline
+	prePromotionAuditRequired   bool
 	workspace                   workspace.Root
 	store                       model.Store
 	compiler                    reports.Compiler

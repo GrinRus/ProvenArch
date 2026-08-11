@@ -75,6 +75,12 @@ Finding/question related IDs remain advisory when they describe an unresolved co
 not invent graph nodes. Historical v1 artifacts remain parseable through the compatibility reader,
 while new collect/staged admission applies the strict writer policy.
 
+Before the first canonical promotion write, the orchestrator runs the same read-only
+`artifactaudit.ScanSelectedRun` scanner exposed by the public selected-run audit API, after
+validator repair/reconciliation. Any audit error fails closed before promotion-generation or
+canonical activation begins; the prior canonical generation therefore remains byte-identical.
+Audit warnings are retained as diagnostics and do not block promotion.
+
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`
