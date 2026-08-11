@@ -187,6 +187,9 @@ Baseline scenario set:
   - W23D component/route tests cover public Task/Attempt loading, five derived Inbox groups,
     URL-restorable lifecycle/runner/repository/time filters, keyboard-safe row activation, exact
     detail/history identities and explicit empty/error recovery without legacy/latest-run fallback;
+  - W23E outcome fixtures cover succeeded/failed/canceled Task detail states, exact Attempt→run
+    review-summary binding, semantic delta counts, independent current Architecture availability and
+    explicit missing-comparison partial state without fabricated zero deltas;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage

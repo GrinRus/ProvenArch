@@ -2114,6 +2114,12 @@ Acceptance:
 - missing semantic comparison becomes explicit partial state, not fabricated zero delta;
 - success/failure/canceled/recovered/demo/live fixtures pass.
 
+Implementation status (2026-08-11): the additive Task detail now binds terminal outcome rendering to
+the exact Attempt run's public review-summary endpoint. Success shows the snapshot identity,
+promotion/current-Architecture availability, semantic entity/edge/finding/question/gap counts and
+recommended next action; failed/canceled Attempts retain explicit evidence and never hide last-good
+Architecture. Missing semantic comparison is rendered as partial/unavailable rather than zero.
+
 ### 23F — Focused Pipeline Studio and recovery
 
 **Goal:** дать операторам глубокую диагностику без превращения всего продукта в dashboard.

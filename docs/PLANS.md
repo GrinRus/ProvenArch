@@ -151,7 +151,9 @@ the final removal of Home/Analyze routes.
 - [x] Implement the W23C New Task composer with displayed scope and inline runner readiness.
 - [x] Implement the W23D Task Inbox/detail/Attempt history read vertical slice with URL-restorable
       filters, authoritative lifecycle groups and explicit archive/unarchive states.
-- [ ] Implement outcome-first result, Pipeline Studio and the remaining W23E–M workbenches.
+- [x] Implement the W23E outcome-first Task detail result summary bound to the exact Attempt run
+      review, including explicit semantic partial state and independent current Architecture status.
+- [ ] Implement focused Pipeline Studio and the remaining W23F–M workbenches.
 - [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
 
 ### Non-goals
@@ -176,7 +178,8 @@ the final removal of Home/Analyze routes.
   truthful target container, then W23C New Task composer with inline runner readiness and
   authoritative create call. Merged W23C as PR #235 after full CI. W23D now loads public Task and
   Attempt identities, restores Inbox filters in URLs, derives five lifecycle groups and preserves
-  archive/read-only evidence semantics. W23E–O remain pending.
+  archive/read-only evidence semantics. W23E now renders exact-run outcome and semantic deltas with
+  explicit missing-comparison state. W23F–O remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority
