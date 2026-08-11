@@ -196,6 +196,8 @@ Baseline scenario set:
   - W23G fixtures cover the exact opaque Task identity in the Architecture context, current promoted
     authority wording, read-only/no-latest-run guardrail and return navigation without starting a
     second analysis;
+  - W23H fixtures cover lossless Markdown draft editing, allowlisted `charter/*` write admission,
+    explicit save status and read-only promoted report behavior;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage

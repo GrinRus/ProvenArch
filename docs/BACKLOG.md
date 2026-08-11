@@ -2174,6 +2174,11 @@ context, labels the current promoted workspace authority, exposes a return path 
 states that it is read-only without latest-run inference. Remaining map/workbench parity and
 responsive closure continue in W23H–W23O.
 
+Implementation status (2026-08-11, W23H): Architecture Documents now provide a bounded Markdown
+reader/editor. Only backend-allowlisted `charter/*` and `skills/*` Markdown can be edited and saved;
+promoted reports remain explicitly read-only evidence, preserving snapshot authority and lossless
+text until save.
+
 ### 23H — Markdown Document Workbench
 
 **Goal:** сделать Architecture Home и authored docs первоклассным читаемым продуктом.

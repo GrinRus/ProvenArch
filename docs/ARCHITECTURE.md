@@ -53,7 +53,7 @@
      schemas, semantic Go contracts, durable registry, Task APIs and Attempt admission are now
      present; W23B1 additive typed Task routes, W23C composer, W23D public Inbox/detail/history reads,
      W23E exact-run outcome rendering, W23F Attempt-bound Pipeline Studio and W23G Task-scoped
-     Architecture context are now present, while
+     Architecture context and a bounded allowlisted Markdown reader/editor are now present, while
      the Task-first shell cutover remains gated by the subsequent Epic 23 slices. Inbox state,
      semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and
      public run-review identities, never from legacy run recency or provider-output heuristics.

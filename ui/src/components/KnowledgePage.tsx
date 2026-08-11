@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
-import { architectureFromKnowledge, loadArtifactText } from "../lib/workspaceApi";
+import { architectureFromKnowledge, loadArtifactText, saveEditableArtifact } from "../lib/workspaceApi";
 import { ArchitectureMap, levelLabel } from "./ArchitectureMap";
 import { EvidenceViewer } from "./EvidenceViewer";
 
@@ -164,14 +164,20 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
   const documents = architecture.artifacts.filter((artifact) => mode === "diagrams" ? artifact.path.endsWith(".mmd") : artifact.path.endsWith(".md")).sort((left, right) => left.path.localeCompare(right.path));
   const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : documents[0]?.path;
   const [content, setContent] = useState("");
+  const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [editMode, setEditMode] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const editable = mode === "documents" && isEditableMarkdownPath(selectedPath);
   useEffect(() => {
     if (selectedPath && selectedPath !== selectedArtifactPath) onDocumentChange?.(selectedPath);
   }, [onDocumentChange, selectedArtifactPath, selectedPath]);
   useEffect(() => {
     if (!selectedPath) {
       setContent("");
+      setDraft("");
       setStatus("idle");
+      setEditMode(false);
       return;
     }
     let active = true;
@@ -179,7 +185,10 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
     void loadArtifactText(selectedPath).then((value) => {
       if (!active) return;
       setContent(value ?? "");
+      setDraft(value ?? "");
       setStatus(value === null ? "error" : "loaded");
+      setEditMode(false);
+      setSaveStatus("");
     });
     return () => { active = false; };
   }, [selectedPath]);
@@ -189,7 +198,17 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
       {documents.length === 0 ? <p className="empty-state">No promoted {mode} are available yet.</p> : <ul>{documents.map((artifact) => <li key={artifact.path}><button type="button" aria-current={selectedPath === artifact.path ? "page" : undefined} onClick={() => onDocumentChange?.(artifact.path)}><strong>{artifact.name}</strong><code>{artifact.path}</code></button></li>)}</ul>}
     </aside>
     <section className="architecture-document-reader" aria-label="Architecture document reader">
-      {selectedPath && status === "loaded" ? <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} /> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
+      {selectedPath && status === "loaded" ? <>
+        {editable ? <div className="markdown-editor-toolbar" aria-label="Markdown editor controls">
+          <span className="hint">Editable workspace Markdown · lossless text is preserved until save.</span>
+          <div>
+            <button type="button" className="ui-button tone-neutral" onClick={() => { if (editMode) setDraft(content); setEditMode((value) => !value); setSaveStatus(""); }}>{editMode ? "Cancel" : "Edit Markdown"}</button>
+            {editMode ? <button type="button" className="ui-button tone-primary" disabled={draft === content || saveStatus === "Saving…"} onClick={() => void (async () => { setSaveStatus("Saving…"); try { await saveEditableArtifact(selectedPath, draft); setContent(draft); setEditMode(false); setSaveStatus("Saved to the editable workspace surface."); } catch (error) { setSaveStatus(error instanceof Error ? error.message : "Markdown save failed."); } })()}>Save</button> : null}
+          </div>
+        </div> : <p className="status info markdown-read-only-note">Promoted Architecture documents are read-only evidence. Edit is available only for editable workspace Markdown under <code>charter/</code> or <code>skills/</code>.</p>}
+        {editMode ? <textarea className="markdown-editor" data-testid="markdown-editor" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Edit ${selectedPath}`} rows={24} /> : <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} />}
+        {saveStatus ? <p className={saveStatus.startsWith("Saved") ? "status ok" : saveStatus === "Saving…" ? "status info" : "status err"} role="status">{saveStatus}</p> : null}
+      </> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
     </section>
     <aside className="architecture-document-context" aria-label="Document context">
       <h2>Document context</h2>
@@ -199,6 +218,11 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
       <button type="button" className="ui-button tone-primary" onClick={() => selectedPath && onOpenArtifact(selectedPath)} disabled={!selectedPath}>Open source artifact</button>
     </aside>
   </div>;
+}
+
+function isEditableMarkdownPath(path?: string): boolean {
+  if (!path || !path.endsWith(".md")) return false;
+  return path === "charter" || path.startsWith("charter/") || path === "skills" || path.startsWith("skills/");
 }
 
 function FindingsView({ architecture, onOpenArtifact }: { architecture: ArchitectureResponse; onOpenArtifact: (path: string) => void }) {

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
 import { KnowledgePage } from "./KnowledgePage";
@@ -84,6 +85,29 @@ describe("KnowledgePage", () => {
     expect(context).toHaveTextContent("does not infer state from the latest run");
     fireEvent.click(within(context).getByRole("button", { name: "Back to Task" }));
     expect(onOpenTask).toHaveBeenCalledWith("task-opaque-1");
+  });
+
+  it("edits only allowlisted workspace Markdown and keeps promoted reports read-only", async () => {
+    const editableKnowledge: KnowledgeResponse = { ...partialKnowledge, artifacts: [...partialKnowledge.artifacts, { path: "charter/readme.md", kind: "document", name: "readme.md" }] };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+      ? new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } })
+      : new Response("# Editable charter\n\nKeep this exact text", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    function Harness() {
+      const [selectedPath, setSelectedPath] = useState<string>();
+      return <KnowledgePage knowledge={editableKnowledge} loading={false} error="" view="documents" selectedArtifactPath={selectedPath} onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={setSelectedPath} onOpenArtifact={vi.fn()} />;
+    }
+    render(<Harness />);
+    await screen.findByTestId("evidence-viewer");
+    fireEvent.click(screen.getByRole("button", { name: "Edit Markdown" }));
+    const editor = await screen.findByTestId("markdown-editor");
+    fireEvent.change(editor, { target: { value: "# Updated charter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved to the editable workspace surface.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/artifacts/write", expect.objectContaining({ method: "POST" }));
+    fireEvent.click(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/ }));
+    expect(await screen.findByText(/Promoted Architecture documents are read-only evidence/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Markdown" })).not.toBeInTheDocument();
   });
 
   it("filters the map and mobile fallback by canonical owner and domain tags", () => {
