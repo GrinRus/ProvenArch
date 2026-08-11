@@ -56,7 +56,8 @@
      Architecture context, W23H bounded allowlisted Markdown reader/editor, W23I read-only
      schema-aware model inspection, W23J non-authoritative Mermaid Evidence Studio and W23K
      filtered review queue, W23L exact Task-scoped Changes context and W23M Ask/Runner authority
-     boundaries and W23N Task state/accessibility coverage are now
+     boundaries, W23N Task state/accessibility coverage and the first W23B2 Tasks-primary nav slice
+     are now
      present, while
      the Task-first shell cutover remains gated by the subsequent Epic 23 slices. Inbox state,
      semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and

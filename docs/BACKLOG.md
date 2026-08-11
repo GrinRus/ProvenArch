@@ -2033,9 +2033,9 @@ Acceptance:
 Implementation status (2026-08-11): `23B1` is implemented on the additive UI route surface. The
 codec now preserves `/tasks`, `/tasks/new`, exact Task detail and Task/Attempt identities, plus
 optional Task context on Architecture/Changes. The target container is explicit and read-only:
-it does not query or mutate Task data and never substitutes a legacy/latest run. `23B2`, the
-primary-navigation cutover and removal of Home/Analyze routes, remain pending until the vertical
-Task, Architecture and Changes slices are ready.
+it does not query or mutate Task data and never substitutes a legacy/latest run. The first `23B2`
+navigation slice now puts Tasks, Architecture and Changes in the Workspace group and labels Home /
+Analyze as Legacy diagnostics; final removal of those legacy routes/components remains a W23O gate.
 
 ### 23C — New Task composer and inline runner readiness
 
