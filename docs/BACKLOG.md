@@ -1944,7 +1944,8 @@ Follow-up note (2026-04-22):
 
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
-Status (2026-08-11): **target design and delivery backlog defined; implementation not started.**
+Status (2026-08-11): **target design, delivery backlog and pre-implementation authority decisions
+accepted; implementation not started.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -1971,6 +1972,17 @@ architecture workspace через явное Git confirmation.
 **Goal:** дать UI устойчивый пользовательский Task object и immutable execution Attempt вместо
 эвристического переименования runs.
 
+Accepted decisions:
+
+- Task is a separate durable aggregate; Attempt maps one-to-one to an exact pipeline run and is
+  immutable after admission;
+- planned persistence is versioned `reports/taskruns/task-history.json` plus `.last-good`, excluded
+  from promoted Architecture/provider/QA context; pre-contract runs remain explicit legacy evidence
+  and are never synthesized into Tasks;
+- runner selection is per-Attempt, with immutable effective config/sources and one global active plus
+  at most one queued Attempt under the shared admission lease;
+- authoritative details live in `docs/spec/TASK_SPEC.md` and the 2026-08-11 Task/Attempt ADRs.
+
 What:
 
 - определить schema/spec для Task: ID, title, goal/context, repo/scope, runner preset, lifecycle,
@@ -1994,6 +2006,10 @@ Acceptance:
 ### 23B — Task-first shell and navigation cutover
 
 **Goal:** единственный shell `Tasks / Architecture / Changes`, global Ask and contextual Settings.
+
+Delivery boundary: implement as two reviewable PRs. `23B1` adds typed routes and truthful target
+containers without claiming cutover complete. `23B2` runs after Tasks, Architecture and Changes are
+ready, makes Tasks primary and removes old routes/components/selectors in the same accepted diff.
 
 What:
 
@@ -2302,9 +2318,9 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **planned; implementation not started.** This epic extends the completed
-`22G` typed recovery state machine and `22H` provider-free auditor. It does not reopen or replace
-those slices.
+Status (2026-08-11): **pre-implementation validation authority decision accepted; implementation
+not started.** This epic extends the completed `22G` typed recovery state machine and `22H`
+provider-free auditor. It does not reopen or replace those slices.
 
 ### Goal
 
@@ -2422,14 +2438,14 @@ authority model.
 What:
 
 - add the invariant `PASS` cannot contain any `issues[].severity=error`;
-- require `FAIL` to contain at least one error issue or an explicitly documented provider advisory
-  reason; decide and encode one unambiguous rule instead of allowing empty opaque failure;
+- require technical `FAIL` to contain at least one error issue; unsupported provider concerns belong
+  in advisory findings/questions rather than an empty opaque failure;
 - reject provider-authored non-empty `fixed_paths`; only the orchestrator may add a path after a
   successful deterministic repair and full revalidation;
 - validate issue `path`, `document_id` and `citation_id` against the current selected-run inventory
   when present;
-- define whether duplicate issues are rejected or deterministically collapsed by
-  `(code,path,document_id,citation_id)`, and make ordering stable;
+- deterministically collapse exact duplicate issues by `(code,path,document_id,citation_id)`;
+  conflicting duplicates fail consistency validation, and orchestrator ordering is stable;
 - persist before/after digests and exact repair code for every orchestrator-added `fixed_path`;
 - keep provider issues/findings/questions isolated until the full verdict consistency check passes.
 
@@ -2479,6 +2495,12 @@ What:
 - bound file size, line count, excerpt length and issue count so malicious or accidental large files
   cannot make validation unbounded.
 
+Accepted normalization decision: line ranges are 1-based inclusive UTF-8 text; CRLF normalizes to
+LF, while whitespace and Unicode content are not trimmed or normalized. Excerpt compares to those
+exact normalized line bytes: selected logical line contents joined by LF with no synthetic trailing
+LF. `excerpt_hash` is SHA-256 of the same bytes. Invalid UTF-8, excerpt/hash without an explicit line
+range and whole-file excerpt mode are not supported in the MVP.
+
 Expected modules:
 
 - new shared evidence-quality module under `internal/artifactquality` or another cycle-safe package;
@@ -2526,6 +2548,11 @@ What:
   deterministic alias/remap decision;
 - reject provider/runtime/taskrun paths embedded as semantic evidence or canonical identifiers.
 
+Accepted compatibility policy: new writes never silently discard unsupported properties; intentional
+extensions require a typed namespace. First inventory current v1 fixtures. If strict writer rules
+would invalidate supported historical v1 bytes, introduce a v2 writer with explicit v1 read-only
+compatibility; never rewrite historical taskruns automatically.
+
 Expected modules:
 
 - `schemas/shard-pack-manifest.schema.json` and `schemas/validator-verdict.schema.json` when needed;
@@ -2566,8 +2593,9 @@ What:
 - record the bounded audit summary and issue codes in run diagnostics without copying raw provider
   logs or writing an additional model-authored artifact;
 - prove that failed audit leaves the previous canonical generation and Git state byte-identical;
-- avoid circular authority: selected-run audit consumes the effective validated verdict and indexes,
-  but never repairs or rewrites them.
+- avoid circular authority: selected-run audit consumes an internal orchestrator technical candidate
+  plus exact indexes after deterministic validation/repair; it never consumes the not-yet-final
+  effective verdict and never repairs or rewrites inputs;
 
 Expected modules:
 
@@ -2599,9 +2627,10 @@ an unsupported technical opinion.
 
 What:
 
-- distinguish provider draft assessment from the effective persisted technical verdict;
+- preserve provider-authored `validator-verdict.json` as immutable draft evidence and persist a
+  separately versioned orchestrator-owned effective technical verdict;
 - compute the effective technical verdict from the ordered deterministic issue set after assembly,
-  repair and selected-run validation: any error means `FAIL`, no errors means `PASS`;
+  repair and the mandatory selected-run audit: any error means `FAIL`, no errors means `PASS`;
 - make `checked_paths`, `fixed_paths`, technical issue codes and final `PASS | FAIL`
   orchestrator-owned;
 - admit provider findings/questions only as advisory semantic candidates after evidence and graph
@@ -2610,8 +2639,9 @@ What:
 - define a stable matching key for provider/deterministic issue correlation without comparing prose;
 - remove or collapse special owner-gap/evidence-advisory verdict reconciliation branches once the
   common effective-verdict rule covers them;
-- decide whether the existing `validator-verdict.json` can remain the effective persisted shape or a
-  versioned draft/effective split is required; record the authority decision in an ADR;
+- use the accepted versioned draft/effective split from
+  `ADR-20260811-validation-audit-effective-verdict-authority.md`; historical provider verdicts
+  remain readable and are never rewritten or treated as inferred effective PASS;
 - keep terminal technical failure distinct from `runtime_contract_failed` and
   `runner_unavailable`.
 
@@ -2682,6 +2712,11 @@ Acceptance:
 
 **Goal:** make failure cost and terminal behavior predictable after validation has become
 authoritative.
+
+Terminology decision: the hard maximum applies to one runtime provider task envelope
+(step/shard/target execution unit), not the durable product Task and not the whole multi-step
+Attempt. Attempt/run diagnostics aggregate counters across those runtime units; a new product
+Attempt receives new runtime-unit budgets.
 
 What:
 
@@ -2763,9 +2798,9 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-11): **planned; implementation not started.** This is a cross-epic release-gate
-alignment task. The Task-first frontend migration starts only after `23O`; hardened runtime evidence
-assertions start only after the public diagnostics from `24I` are stable.
+Status (2026-08-11): **release boundary accepted; implementation not started.** This is a cross-epic
+release-gate alignment task. The Task-first frontend migration starts only after `23O`; hardened
+runtime evidence assertions start only after the public diagnostics from `24I` are stable.
 
 ### Goal
 
@@ -2773,6 +2808,11 @@ Keep the existing canonical trusted-machine release gate truthful after Epics 23
 release-facing frontend `init-inspect` must follow the public Task-first journey, and live execution
 reports must consume the final public audit/verdict/recovery evidence without depending on product
 internals or preserving the retired shell.
+
+Accepted boundary decisions: `init-inspect` selects one exact existing Task/Attempt/run snapshot and
+never starts a second provider analysis; batch/frontend harnesses consume public API/report fields
+only; optional `smoke tiny` Task-start remains a separate non-release owner decision and does not
+expand canonical taxonomy by default.
 
 ### Non-goals
 

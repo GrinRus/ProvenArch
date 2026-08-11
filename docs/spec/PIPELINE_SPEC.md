@@ -41,6 +41,31 @@ Post-validation audit:
 - output is deterministic, bounded, redacted and transient; scanning writes neither workspace nor
   source repositories.
 
+Planned Epic 24 authority chain (accepted decision, not implemented):
+- provider-authored `validator-verdict.json` remains immutable draft evidence;
+- task-aware admission and deterministic assembly/repair produce an internal orchestrator technical
+  candidate; any candidate error fails before audit;
+- a candidate PASS is scanned by the same provider-free selected-run auditor after index/citation
+  reconciliation and before the first canonical write;
+- audit errors contribute to a separately versioned orchestrator-owned effective verdict; canonical
+  promotion requires that final effective verdict to be PASS;
+- checked paths, orchestrator fixed paths, technical issue codes, audit summary and effective
+  PASS/FAIL are orchestrator-owned, while validated provider findings/questions remain advisory;
+- historical provider verdicts without an effective-verdict artifact remain readable as
+  legacy/unavailable authority and are never rewritten or inferred.
+
+This planned chain resolves audit/final-verdict circularity through the pre-audit technical
+candidate. The implemented baseline above remains on-demand/read-only until slices 24E/24F land.
+See `docs/adr/ADR-20260811-validation-audit-effective-verdict-authority.md`.
+
+Planned Epic 24 evidence normalization (accepted decision, not implemented): line ranges are
+1-based inclusive and require valid UTF-8. Normalize CRLF to LF but do not trim whitespace or apply
+Unicode normalization. Canonical excerpt bytes are the selected logical line contents joined by LF
+with no synthetic trailing LF; `excerpt_hash` is SHA-256 of those same bytes. Excerpt/hash requires
+an explicit range, and whole-file excerpt mode is outside the MVP. Collect admission, staged
+validation, validator findings and provider-free audit must share this one bounded implementation
+and issue taxonomy.
+
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`
@@ -597,3 +622,14 @@ not treated as one synthetic finding. Run review exposes terminal outcome, produ
 counts, partial/failed scope counts, previous baseline and promotion decision. Persisted progress
 includes unit breakdown, repair attempt/limit and stall deadline; the UI never derives a percentage
 from stdout or heartbeat activity.
+
+### Planned global recovery budget clarification (Epic 24H; not implemented)
+
+`per-task provider invocation budget` means one runtime provider task envelope (one concrete
+step/shard/target execution unit), not the durable product Task introduced by Epic 23 and not the
+entire multi-step pipeline Attempt. The accepted target permits at most three provider process
+starts for that runtime unit: normal execution, one typed focused repair and one transport retry
+only for silent/unavailable execution. Deterministic repairs do not consume provider starts but
+must retain transition code and before/after digests. Attempt/run diagnostics aggregate used and
+remaining counters across their runtime units. A new product Attempt receives new runtime-unit
+budgets; cancellation or valid-artifact controlled stop cannot create an extra repair process.

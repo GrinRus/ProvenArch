@@ -61,6 +61,146 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260811-task-attempt-contracts
+
+### Context
+
+Epic 23 cannot start as a frontend rename of pipeline runs. The accepted target introduces a durable
+product Task, immutable Attempt admission, exact legacy-run behavior and honest full-workspace
+publication linkage. Decision authority is fixed in `docs/spec/TASK_SPEC.md` and the 2026-08-11
+Task/Attempt ADRs; current APIs remain authoritative until this plan is implemented.
+
+### Goals (must have)
+
+- [ ] Add schema-validated public Task, Attempt and registry contracts with full schema-guardian sync.
+- [ ] Implement crash-safe `task-history.json` current/last-good persistence and restart diagnostics.
+- [ ] Add create/list/read/update/archive/unarchive Task APIs with stable pagination and revision checks.
+- [ ] Add idempotent per-Attempt admission with immutable scope/runner snapshots and exact run linkage.
+- [ ] Preserve pre-contract runs as explicit read-only legacy evidence without synthetic Tasks.
+- [ ] Expose unknown/unavailable result and publication linkage without inferred `Published` state.
+
+### Non-goals
+
+- Task-first shell cutover, artifact workbench implementation or removal of current routes.
+- Unlimited scheduling, hosted collaboration, Task deletion or source-repository writes.
+- Epic 24 validation authority changes or trusted-provider live qualification.
+
+### Approach
+
+1. Land Task/Attempt/registry schemas, Go contracts, fixtures, examples and documentation as one
+   schema-first review boundary.
+2. Add a dedicated Task registry using the existing atomic current/last-good lifecycle pattern,
+   including write-fault and restart recovery tests.
+3. Add Task read/write APIs and exact Task/Attempt/run joins without changing current run endpoints.
+4. Extend admission to resolve and snapshot per-Attempt runner/scope under the shared service lease;
+   preserve one active plus one queued pipeline Attempt.
+5. Add legacy-run and publication-linkage unavailable states, then run focused contract/API tests and
+   full deterministic DoD before opening 23C frontend work.
+
+### Files expected to change
+
+- `schemas/*task*.schema.json`, `internal/contracts`, new Task registry/application package.
+- `internal/orchestrator` admission/run linkage and `internal/api` Task handlers.
+- `internal/runtime/fakeruntime` and fixtures only where admitted snapshot coverage requires them.
+- `docs/spec/TASK_SPEC.md`, `docs/spec/API_SPEC.md`, `docs/spec/WORKSPACE_SPEC.md`,
+  `docs/APPENDIX_SCHEMAS.md`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`.
+
+### Acceptance criteria
+
+- [ ] Task survives restart and remains the same aggregate across child retry/rerun Attempts.
+- [ ] Admitted Attempt config cannot change after Settings/workspace/env updates.
+- [ ] Invalid identity/scope/runner and queue overflow fail before provider execution.
+- [ ] Duplicate start token returns the same Attempt and cannot create a second run.
+- [ ] Primary/last-good write faults never publish partial Task state in memory.
+- [ ] Legacy runs remain readable and never appear as fabricated Task rows.
+- [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
+
+### Risks
+
+- Task and run registries are separate durable files; admission/terminal recovery must never invent a
+  cross-file association after a partial write.
+- Registry growth is unbounded in the MVP because Task deletion/retention is explicitly out of scope.
+- Current single-pending replacement behavior may need a narrow compatibility migration so a queued
+  Attempt belonging to another Task is never silently superseded.
+
+### Progress log
+
+- 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,
+  single-active/single-queued coordination, legacy-run and publication-linkage decisions. Added the
+  accepted ADR/spec package; implementation has not started.
+
+### Plan ID
+EP-20260811-weak-model-validation-authority
+
+### Context
+
+Epic 24 must close false-accept and repair-loop classes without weakening sparse truthful output or
+making provider opinion the promotion authority. The accepted chain is provider draft → deterministic
+technical candidate → mandatory provider-free selected-run audit → persisted effective verdict.
+This plan covers reviewable slices 24A–24F only; budget/corpus closure remains 24H/24I.
+
+### Goals (must have)
+
+- [ ] Bind validator identity and checked paths to the exact current runtime task/run snapshot.
+- [ ] Enforce coherent provider draft verdicts and deterministic issue ownership/order.
+- [ ] Validate evidence line/excerpt/hash claims through one bounded shared implementation.
+- [ ] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
+- [ ] Run provider-free selected-run audit before the first canonical write.
+- [ ] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
+
+### Non-goals
+
+- New provider/model defaults, semantic invention, hosted validation or required live network tests.
+- Epic 24G mechanical-envelope reduction before its metric entry condition.
+- Global recovery-budget implementation and conformance-corpus closure from 24H/24I.
+- Changes to canonical live matrices, curated repos or release taxonomy.
+
+### Approach
+
+1. Deliver 24A–24D as separate focused PRs with shared typed issues and provider-free fixtures.
+2. Build the internal technical candidate only from ordered deterministic issues after assembly and
+   allowed deterministic repairs.
+3. Reuse the exact artifact auditor scanner/options as a fail-closed pre-promotion gate for candidate
+   PASS, preserving its read-only/bounded behavior.
+4. Persist the versioned effective verdict after audit and migrate promotion/public diagnostics to
+   that authority while preserving historical provider verdict reads.
+5. Synchronize contracts/specs/fixtures/ADR rationale and run full deterministic DoD before 24H/24I
+   or any trusted-machine diagnostic.
+
+### Files expected to change
+
+- `schemas/validator-verdict.schema.json`, semantic schemas and a new effective-verdict schema.
+- `internal/contracts`, `internal/artifactquality`, `internal/artifactaudit`.
+- `internal/runtime/providercommon`, `internal/orchestrator` validation/repair/promotion.
+- `internal/runtime/fakeruntime`, incident-shaped fixtures and adapter parity tests.
+- `docs/spec/PIPELINE_SPEC.md`, `docs/spec/API_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`,
+  `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`.
+
+### Acceptance criteria
+
+- [ ] Foreign run/path and contradictory provider verdicts fail before semantic merge.
+- [ ] All evidence consumers return the same normalized locator identity and typed issue codes.
+- [ ] Unknown semantic fields are never silently dropped and every promoted edge resolves.
+- [ ] Audit error produces zero canonical writes and leaves prior generation/Git bytes unchanged.
+- [ ] Provider PASS/FAIL cannot override the effective deterministic result.
+- [ ] Historical provider verdicts remain readable as legacy/unavailable effective authority.
+- [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
+
+### Risks
+
+- Audit and effective-verdict authority can become circular unless the internal pre-audit candidate
+  remains distinct from the final persisted verdict.
+- Tightening v1 semantic schemas may require a v2 writer with explicit historical v1 dual-read.
+- Evidence normalization must be byte-identical across CRLF/LF fixtures without trimming whitespace
+  or Unicode content.
+
+### Progress log
+
+- 2026-08-11: Owner accepted the draft/candidate/audit/effective authority chain, exact issue
+  consistency rules, evidence normalization and runtime-unit recovery-budget terminology. Added the
+  accepted ADR/spec/backlog package; implementation has not started.
+
+### Plan ID
 EP-20260805-live-runtime-safety-fixes
 
 ### Context

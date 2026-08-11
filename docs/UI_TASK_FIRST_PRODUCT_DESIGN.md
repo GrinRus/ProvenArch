@@ -197,7 +197,9 @@ Selected Task, Attempt, artifact/entity, evidence authority, viewer mode и filt
 
 Task сохраняет immutable effective runner snapshot для каждого Attempt. Изменение workspace preset
 не меняет историю. Если fake/headless остаётся process-scoped, UI обязан честно показывать restart
-requirement; целевой seamless picker требует отдельного backend contract decision в `23A`.
+requirement. Accepted target decision — per-Attempt admission из
+`ADR-20260811-per-attempt-runner-admission.md`; seamless picker не считается реализованным до
+backend acceptance `23A`.
 
 ## 8. Artifact and file workbench
 
