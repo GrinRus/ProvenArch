@@ -1580,3 +1580,24 @@ Native SCM webhook listener/hosted control plane остаются вне MVP; re
 - GitHub/GitLab hooks/manual jobs для required CI/CD должны использовать CLI batch mode с deterministic defaults (`--runtime fake`).
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.
 - Exact CLI flags, run log retention knobs, env precedence и local runbook examples намеренно не дублируются здесь; canonical source of truth — CLI help, `README.md` quickstart и профильные runbook docs.
+
+## 10) Planned Task-first API boundary (Epic 23; not implemented)
+
+Accepted Task/Attempt identity, persistence, lifecycle, admission and publication decisions are
+specified in `docs/spec/TASK_SPEC.md`. No `/api/tasks*` endpoint is part of the implemented v0 API
+until the schema-first 23A slice lands.
+
+The planned boundary adds create/list/read/update/archive operations for durable Tasks and exact
+nested Attempt admission/read/retry operations. Writes use server-generated opaque identities,
+optimistic Task revision checks and idempotent Attempt-start tokens. One Attempt maps to one exact
+pipeline run and snapshots effective runner/scope configuration at admission. Explicit Task,
+Attempt, run and publication identities never fall back to latest/current state.
+
+Current `/api/pipeline/runs*` remains authoritative for implemented execution lifecycle and legacy
+run history during migration. Pre-contract runs remain readable but are not synthesized into Tasks.
+The exact JSON schemas, typed errors and pagination cursors must be added together with validators,
+fixtures and API tests in 23A; frontend code cannot invent an interim wire shape.
+
+Planned publication linkage extends successful Git mutation responses with server-authored
+Task/Attempt/run context and the exact confirmed full-workspace inventory fingerprint. It does not
+change the existing full-workspace mutation scope or infer `Published` from a clean worktree.

@@ -33,69 +33,81 @@ Architecture authority и full-workspace Git publication.
 При конфликте PNG не может переопределить automatic promotion, evidence authority, full-workspace
 Git scope или read-only source repository boundary.
 
-## 4. Required contract decisions before shell cutover
+## 4. Accepted contract decisions before implementation
 
 ### 4.1 Task persistence
 
-Нужно определить public shape и storage для:
+Task является отдельным durable product aggregate, а Attempt — immutable admitted execution,
+связанный ровно с одним pipeline run. Public target shape, lifecycle, legacy-run policy и planned
+API зафиксированы в [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md).
 
-- `task_id`, title, goal/context;
-- repository/scope selection;
-- runner preset reference и immutable effective Attempt snapshot;
-- attempts/parent-child lineage;
-- result/review/publication linkage;
-- created/updated/archived lifecycle.
-
-Contract должен быть Git/local-first compatible, но Task history не должна загрязнять promoted
-Architecture или анализируемые repositories. Schema-first slice синхронизирует spec, schema,
-validators, fixtures, API and examples.
+MVP registry planned под `reports/taskruns/task-history.json` + `.last-good`: он Git/local-first
+compatible, но исключён из promoted Architecture, provider/QA context и анализируемых repositories.
+Run retention не удаляет Task identity/Attempt terminal summary; автоматического Task deletion нет.
+Schema-first 23A slice всё ещё обязан добавить schemas, validators, fixtures, API и examples до UI.
+Decision rationale: [`ADR-20260811-task-attempt-authority-and-persistence.md`](adr/ADR-20260811-task-attempt-authority-and-persistence.md).
 
 ### 4.2 Runner admission
 
-Нужно решить, является ли fake/headless mode:
+Принят per-Attempt admission. Task хранит desired preset, а Attempt immutable snapshot-ит effective
+runtime mode/provider/model/effort/permissions/timeouts/execution/per-step overrides и sources.
+Settings/env/workspace changes действуют только на следующий Attempt.
 
-- per-Attempt admission config; либо
-- immutable service-session mode с честным restart/re-attach flow.
-
-Target UX предпочитает per-Attempt snapshot. До backend поддержки frontend показывает реальное
-ограничение и не имитирует seamless switch. Per-step providers и provider model/effort остаются
-workspace profile inputs и копируются в Attempt snapshot.
+MVP сохраняет одну global active и максимум одну queued pipeline Attempt под общей admission lease;
+следующий start получает typed conflict, а чужой queued Attempt не supersede-ится молча. До backend
+поддержки frontend показывает реальное ограничение и не имитирует seamless switch. Decision
+rationale: [`ADR-20260811-per-attempt-runner-admission.md`](adr/ADR-20260811-per-attempt-runner-admission.md).
 
 ### 4.3 Task-to-change/publication identity
 
-Current workspace promotion остаётся automatic. Task outcome может ссылаться на semantic promoted
-snapshot/run comparison, но `Published` нельзя выводить без authoritative task/run-to-commit
-association. До такого контракта UI использует `Workspace has unpublished changes`.
+Current workspace promotion остаётся automatic. Semantic review и full-workspace Git publication
+являются отдельными authorities. Успешная Git mutation создаёт server-authored association с
+Task/Attempt/run context, action, branch/base/head, exact inventory fingerprint и resulting
+commit/branch identity; она не утверждает exclusive ownership смешанного workspace commit одной
+Task. До такой association UI использует `Workspace has unpublished changes`, а не inferred
+`Published`. Decision rationale:
+[`ADR-20260811-task-change-publication-linkage.md`](adr/ADR-20260811-task-change-publication-linkage.md).
+
+### 4.4 Legacy run policy
+
+Pre-contract runs остаются exact read-only execution/snapshot evidence и не превращаются в
+synthetic Tasks. Task Inbox содержит только настоящие persisted Tasks. До удаления `/runs` shell
+должен появиться explicit legacy read/migration surface: visible migration notice или deliberate
+`Create Task from this run`, который создаёт новую identity и не переписывает history.
 
 ## 5. Delivery order
 
 ```mermaid
 flowchart LR
-  A["23A Task and runner contracts"] --> B["23B Task-first shell"]
+  A["23A Task and runner contracts"] --> B1["23B1 typed routes and target containers"]
   A --> C["23C New Task"]
   C --> D["23D Task Inbox and attempts"]
   D --> E["23E Outcome-first Task detail"]
   D --> F["23F Pipeline Studio"]
-  B --> G["23G Architecture Map"]
-  B --> H["23H Document Workbench"]
+  B1 --> G["23G Architecture Map"]
+  B1 --> H["23H Document Workbench"]
   H --> I["23I Model and schema workbench"]
   H --> J["23J Mermaid and evidence"]
   E --> K["23K Findings and decisions"]
   K --> L["23L Changes and Publish"]
-  B --> M["23M Ask and Settings"]
+  B1 --> M["23M Ask and Settings"]
   F --> N["23N Responsive and accessibility"]
   G --> N
   H --> N
   L --> N
   M --> N
-  N --> O["23O deterministic closure and cutover"]
+  N --> B2["23B2 primary shell cutover and old-route removal"]
+  B2 --> O["23O deterministic closure"]
   O -.-> P["Epic 25 Task-first live E2E alignment"]
 ```
 
 `23A` может быть разделён на contract-only PRs, если Task и runner admission затрагивают разные
-schemas. Остальные slices не должны начинать с invented frontend types. Epic 25 остаётся отдельной
-release-gate задачей: frontend migration начинается после `23O`, а assertions по hardened runtime
-evidence добавляются только после стабилизации публичных diagnostics в `24I`.
+schemas. `23B` выполняется двумя reviewable PR: `23B1` вводит typed routes/target containers без
+ложного cutover claim, а `23B2` делает Tasks primary и удаляет old routes/selectors только после
+готовности Tasks, Architecture and Changes. Остальные slices не должны начинать с invented frontend
+types. Epic 25 остаётся отдельной release-gate задачей: frontend migration начинается после `23O`,
+а assertions по hardened runtime evidence добавляются только после стабилизации публичных
+diagnostics в `24I`.
 
 ## 6. Target module ownership
 

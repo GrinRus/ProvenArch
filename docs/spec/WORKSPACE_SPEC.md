@@ -298,3 +298,23 @@ Manifest считается невалидным, если:
 - `workspace.repo.ref.invalid` (error): `ref` не резолвится ни локально, ни через origin-tracking fallback
 - `workspace.repo.ref.resolved_via_remote` (warning): `ref` был разрешён через remote-tracking ref
 - `workspace.repo.ref.head_mismatch` (warning): `ref` и текущий `HEAD` указывают на разные коммиты
+
+## 8) Planned Task control-plane persistence (Epic 23; not implemented)
+
+The accepted Task-first target adds fixed workspace-owned files:
+
+```text
+reports/taskruns/task-history.json
+reports/taskruns/task-history.json.last-good
+```
+
+These files do not add fields to `workspace.yaml` and cannot be relocated through the manifest.
+They store versioned product Task/Attempt identity and admitted snapshots using atomic persistence
+and bounded last-good recovery. They are run-control history, not promoted Architecture, imported
+documents or provider/QA context. Automatic run-artifact retention must not delete Task identity or
+the bounded terminal Attempt summary.
+
+The machine-readable Task/Attempt/registry schemas and layout creation are part of the future 23A
+schema-first implementation. Until that slice is accepted, these paths are planned/reserved only
+and current workspace validation must not require them. See `docs/spec/TASK_SPEC.md` and
+`docs/adr/ADR-20260811-task-attempt-authority-and-persistence.md`.
