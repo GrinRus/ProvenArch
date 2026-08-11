@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -115,6 +116,31 @@ func (b *ProviderInvocationBudget) Snapshot() ProviderInvocationReservation {
 		Transition: b.last,
 		Exhausted:  b.exhaust,
 	}
+}
+
+// ProviderInvocationP95 returns the nearest-rank p95 for a deterministic set
+// of runtime-unit invocation counts. Empty and non-positive samples are
+// ignored; callers use this for provider-free conformance evidence, not for
+// changing the hard process-start limit.
+func ProviderInvocationP95(samples []int) int {
+	values := make([]int, 0, len(samples))
+	for _, sample := range samples {
+		if sample > 0 {
+			values = append(values, sample)
+		}
+	}
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Ints(values)
+	index := (95*len(values) + 99) / 100
+	if index < 1 {
+		index = 1
+	}
+	if index > len(values) {
+		index = len(values)
+	}
+	return values[index-1]
 }
 
 type ProviderInvocationBudgetError struct {

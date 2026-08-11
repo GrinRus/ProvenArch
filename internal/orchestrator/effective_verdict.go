@@ -116,6 +116,9 @@ func persistEffectiveVerdict(e *pipelineExecution, candidate contracts.Validator
 	}
 	e.effectiveVerdict = &parsed
 	e.addArtifacts(Artifact{Path: runtimeEffectiveVerdictPath(runID), Kind: "taskrun", Label: "Effective Technical Verdict"})
+	e.recordConformanceDiagnostic(map[string]any{
+		"effective_verdict_source": "orchestrator",
+	})
 	return parsed, nil
 }
 

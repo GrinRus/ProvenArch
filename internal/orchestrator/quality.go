@@ -40,31 +40,36 @@ type runtimeStepQuality struct {
 }
 
 type runQualityTotals struct {
-	Steps                        int    `json:"steps"`
-	SemanticEntities             int    `json:"semantic_entities"`
-	SemanticEdges                int    `json:"semantic_edges"`
-	FindingsCount                int    `json:"findings_count"`
-	QuestionsCount               int    `json:"questions_count"`
-	CoverageObserved             int    `json:"coverage_observed"`
-	CoverageMissing              int    `json:"coverage_missing"`
-	WarningsCount                int    `json:"warnings_count"`
-	SignalScore                  int    `json:"signal_score"`
-	RepairAttempts               int    `json:"repair_attempts"`
-	RepairExhausted              int    `json:"repair_exhausted"`
-	FreshRetries                 int    `json:"fresh_retries"`
-	FocusedRepairs               int    `json:"focused_repairs"`
-	StallCount                   int    `json:"stall_count"`
-	PreArtifactStalls            int    `json:"pre_artifact_stalls"`
-	PostArtifactStalls           int    `json:"post_artifact_stalls"`
-	ValidArtifactControlledStops int    `json:"valid_artifact_controlled_stops"`
-	ZeroOutputPreArtifactStalls  int    `json:"zero_output_pre_artifact_stalls"`
-	PartialFailureCount          int    `json:"partial_failure_count"`
-	ProviderInvocations          int    `json:"provider_invocations"`
-	ProviderInvocationBudgetMax  int    `json:"provider_invocation_budget_max"`
-	ProviderInvocationRemaining  int    `json:"provider_invocation_remaining"`
-	ProviderBudgetExhausted      int    `json:"provider_budget_exhausted"`
-	ProviderLastTransition       string `json:"provider_last_transition,omitempty"`
-	ProviderTerminalExhaustion   string `json:"provider_terminal_exhaustion_reason,omitempty"`
+	Steps                        int            `json:"steps"`
+	SemanticEntities             int            `json:"semantic_entities"`
+	SemanticEdges                int            `json:"semantic_edges"`
+	FindingsCount                int            `json:"findings_count"`
+	QuestionsCount               int            `json:"questions_count"`
+	CoverageObserved             int            `json:"coverage_observed"`
+	CoverageMissing              int            `json:"coverage_missing"`
+	WarningsCount                int            `json:"warnings_count"`
+	SignalScore                  int            `json:"signal_score"`
+	RepairAttempts               int            `json:"repair_attempts"`
+	RepairExhausted              int            `json:"repair_exhausted"`
+	FreshRetries                 int            `json:"fresh_retries"`
+	FocusedRepairs               int            `json:"focused_repairs"`
+	StallCount                   int            `json:"stall_count"`
+	PreArtifactStalls            int            `json:"pre_artifact_stalls"`
+	PostArtifactStalls           int            `json:"post_artifact_stalls"`
+	ValidArtifactControlledStops int            `json:"valid_artifact_controlled_stops"`
+	ZeroOutputPreArtifactStalls  int            `json:"zero_output_pre_artifact_stalls"`
+	PartialFailureCount          int            `json:"partial_failure_count"`
+	ProviderInvocations          int            `json:"provider_invocations"`
+	ProviderInvocationBudgetMax  int            `json:"provider_invocation_budget_max"`
+	ProviderInvocationRemaining  int            `json:"provider_invocation_remaining"`
+	ProviderBudgetExhausted      int            `json:"provider_budget_exhausted"`
+	ProviderLastTransition       string         `json:"provider_last_transition,omitempty"`
+	ProviderTerminalExhaustion   string         `json:"provider_terminal_exhaustion_reason,omitempty"`
+	ValidationFirstPassValid     int            `json:"validation_first_pass_valid"`
+	ValidationFirstPassInvalid   int            `json:"validation_first_pass_invalid"`
+	ValidationIssueClasses       map[string]int `json:"validation_issue_classes,omitempty"`
+	EffectiveVerdictSource       string         `json:"effective_verdict_source,omitempty"`
+	PromotionAuditResult         string         `json:"promotion_audit_result,omitempty"`
 }
 
 type runtimeRecoveryCounters struct {
@@ -83,6 +88,11 @@ type runtimeRecoveryCounters struct {
 	ProviderBudgetExhausted      int
 	ProviderLastTransition       string
 	ProviderTerminalExhaustion   string
+	ValidationFirstPassValid     int
+	ValidationFirstPassInvalid   int
+	ValidationIssueClasses       map[string]int
+	EffectiveVerdictSource       string
+	PromotionAuditResult         string
 }
 
 type runFailureClassification struct {
@@ -199,6 +209,11 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	totals.ProviderBudgetExhausted = e.runtimeRecoveryCounters.ProviderBudgetExhausted
 	totals.ProviderLastTransition = e.runtimeRecoveryCounters.ProviderLastTransition
 	totals.ProviderTerminalExhaustion = e.runtimeRecoveryCounters.ProviderTerminalExhaustion
+	totals.ValidationFirstPassValid = e.runtimeRecoveryCounters.ValidationFirstPassValid
+	totals.ValidationFirstPassInvalid = e.runtimeRecoveryCounters.ValidationFirstPassInvalid
+	totals.ValidationIssueClasses = cloneIssueClassCounts(e.runtimeRecoveryCounters.ValidationIssueClasses)
+	totals.EffectiveVerdictSource = e.runtimeRecoveryCounters.EffectiveVerdictSource
+	totals.PromotionAuditResult = e.runtimeRecoveryCounters.PromotionAuditResult
 	totals.PartialFailureCount = len(e.partialFailures)
 
 	runWarnings := append([]string(nil), e.warnings...)
@@ -258,6 +273,11 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		"provider_budget_exhausted":           totals.ProviderBudgetExhausted,
 		"provider_last_transition":            totals.ProviderLastTransition,
 		"provider_terminal_exhaustion_reason": totals.ProviderTerminalExhaustion,
+		"validation_first_pass_valid":         totals.ValidationFirstPassValid,
+		"validation_first_pass_invalid":       totals.ValidationFirstPassInvalid,
+		"validation_issue_classes":            totals.ValidationIssueClasses,
+		"effective_verdict_source":            totals.EffectiveVerdictSource,
+		"promotion_audit_result":              totals.PromotionAuditResult,
 		"partial_failure_count":               totals.PartialFailureCount,
 	})
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
@@ -343,6 +363,24 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 	if diagnosticFieldBool(fields, "provider_invocation_budget_exhausted") {
 		e.runtimeRecoveryCounters.ProviderBudgetExhausted++
 	}
+	if diagnosticFieldBool(fields, "validation_first_pass_valid") {
+		e.runtimeRecoveryCounters.ValidationFirstPassValid++
+	}
+	if diagnosticFieldBool(fields, "validation_first_pass_invalid") {
+		e.runtimeRecoveryCounters.ValidationFirstPassInvalid++
+	}
+	if issueClass := diagnosticFieldString(fields, "validation_issue_class"); issueClass != "" {
+		if e.runtimeRecoveryCounters.ValidationIssueClasses == nil {
+			e.runtimeRecoveryCounters.ValidationIssueClasses = map[string]int{}
+		}
+		e.runtimeRecoveryCounters.ValidationIssueClasses[issueClass]++
+	}
+	if source := diagnosticFieldString(fields, "effective_verdict_source"); source != "" {
+		e.runtimeRecoveryCounters.EffectiveVerdictSource = source
+	}
+	if result := diagnosticFieldString(fields, "promotion_audit_result"); result != "" {
+		e.runtimeRecoveryCounters.PromotionAuditResult = result
+	}
 	if isValidArtifactControlledStopDiagnostic(message, fields) {
 		e.runtimeRecoveryCounters.ValidArtifactControlledStops++
 		return
@@ -360,6 +398,71 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 		e.runtimeRecoveryCounters.StallCount++
 		e.runtimeRecoveryCounters.PostArtifactStalls++
 	}
+}
+
+// recordConformanceDiagnostic records bounded, provider-independent closure
+// counters for validation and promotion. It intentionally accepts only the
+// small typed field set used by the run quality summary; raw provider text is
+// never promoted into these counters.
+func (e *pipelineExecution) recordConformanceDiagnostic(fields map[string]any) {
+	e.recordRuntimeDiagnosticCounters(acpruntime.DiagnosticEvent{
+		Message: "conformance diagnostic",
+		Fields:  fields,
+	})
+}
+
+func validationIssueClass(code string) string {
+	normalized := strings.ToLower(strings.TrimSpace(code))
+	switch {
+	case normalized == "":
+		return "unknown"
+	case strings.Contains(normalized, "audit"):
+		return "audit"
+	case strings.Contains(normalized, "evidence") || strings.Contains(normalized, "citation") || strings.Contains(normalized, "line") || strings.Contains(normalized, "excerpt") || strings.Contains(normalized, "hash"):
+		return "evidence"
+	case strings.Contains(normalized, "graph") || strings.Contains(normalized, "semantic") || strings.Contains(normalized, "edge") || strings.Contains(normalized, "collision"):
+		return "graph"
+	case strings.Contains(normalized, "identity") || strings.Contains(normalized, "run_") || strings.Contains(normalized, "path") || strings.Contains(normalized, "contain"):
+		return "identity"
+	case strings.Contains(normalized, "verdict") || strings.Contains(normalized, "technical"):
+		return "verdict"
+	case strings.Contains(normalized, "schema") || strings.Contains(normalized, "unknown") || strings.Contains(normalized, "invalid"):
+		return "schema"
+	case strings.Contains(normalized, "repair") || strings.Contains(normalized, "stale"):
+		return "repair"
+	default:
+		return "contract"
+	}
+}
+
+func recordValidationIssueClasses(e *pipelineExecution, issues []contracts.ValidatorIssue) {
+	if e == nil {
+		return
+	}
+	if len(issues) == 0 {
+		e.recordConformanceDiagnostic(map[string]any{"validation_issue_class": "none"})
+		return
+	}
+	seen := map[string]struct{}{}
+	for _, issue := range issues {
+		class := validationIssueClass(issue.Code)
+		if _, ok := seen[class]; ok {
+			continue
+		}
+		seen[class] = struct{}{}
+		e.recordConformanceDiagnostic(map[string]any{"validation_issue_class": class})
+	}
+}
+
+func cloneIssueClassCounts(counts map[string]int) map[string]int {
+	if len(counts) == 0 {
+		return nil
+	}
+	cloned := make(map[string]int, len(counts))
+	for key, value := range counts {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func isActualRuntimeStallDiagnostic(message string, fields map[string]any) bool {

@@ -187,6 +187,10 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 ) (runtimeTaskExecution, error) {
 	providerVerdict, providerRaw, err := loadValidatorVerdictFromRoot(task.WriteRoot)
 	if err != nil {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "schema",
+		})
 		e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
 			"task_id": task.TaskID,
 			"error":   strings.TrimSpace(err.Error()),
@@ -194,6 +198,10 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		return runtimeTaskExecution{}, err
 	}
 	if err := artifactquality.ValidateValidatorVerdict(providerVerdict, e.finalRunIndex, e.citationIndex, false, false); err != nil {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "verdict",
+		})
 		e.logError(stepID, domainID, "validator verdict consistency failed", map[string]any{
 			"task_id": task.TaskID,
 			"error":   strings.TrimSpace(err.Error()),
@@ -210,11 +218,20 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 	if err := e.assembleStagedDocFlow(); err != nil {
 		return runtimeTaskExecution{}, err
 	}
-	if _, err := e.applyValidatorRepairStage(stepID, domainID, task.TaskID, &verdict); err != nil {
+	repairResult, err := e.applyValidatorRepairStage(stepID, domainID, task.TaskID, &verdict)
+	if err != nil {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "repair",
+		})
 		return runtimeTaskExecution{}, err
 	}
 	issues := e.validateStagedArtifacts()
 	if len(issues) > 0 {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+		})
+		recordValidationIssueClasses(e, issues)
 		e.validatorVerdict = &verdict
 		failedAudit := artifactaudit.Report{Version: artifactaudit.Version, RunID: e.runID, Scope: "selected_run", Status: artifactaudit.StatusFail, Issues: []artifactaudit.Issue{{Code: issues[0].Code, Severity: "error", Path: issues[0].Path, Message: issues[0].Message}}, Summary: artifactaudit.Summary{Error: len(issues)}}
 		if _, persistErr := persistEffectiveVerdict(e, verdict, providerRaw, issues, failedAudit); persistErr != nil {
@@ -223,7 +240,21 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
 	}
 	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, false, true); err != nil {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "verdict",
+		})
 		return runtimeTaskExecution{}, fmt.Errorf("technical validator candidate is invalid: %w", err)
+	}
+	if repairResult.Changed {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "repair",
+		})
+	} else {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_valid": true,
+		})
 	}
 
 	e.validatorVerdict = &verdict
@@ -245,9 +276,10 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		WarningsCount:    len(execution.Warnings),
 	})
 	e.logInfo(stepID, domainID, "validator verdict accepted", map[string]any{
-		"task_id":     task.TaskID,
-		"checked":     len(verdict.CheckedPaths),
-		"fixed_paths": len(verdict.FixedPaths),
+		"task_id":                  task.TaskID,
+		"checked":                  len(verdict.CheckedPaths),
+		"fixed_paths":              len(verdict.FixedPaths),
+		"effective_verdict_source": "orchestrator",
 	})
 	e.logInfo(stepID, domainID, "runtime task completed", map[string]any{
 		"task_id":         task.TaskID,

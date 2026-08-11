@@ -150,13 +150,15 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - [x] Run provider-free selected-run audit before the first canonical write.
 - [x] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
 - [x] Bound provider process starts to three per runtime execution unit across normal and recovery transitions.
-- [ ] Complete the follow-up recovery-budget and provider-free conformance closure in W24G–W24I.
+- [x] Complete the provider-free recovery-budget and conformance closure in W24H–W24I; keep W24G
+  conditional until its entry metric is recorded.
+- [ ] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted.
 
 ### Non-goals
 
 - New provider/model defaults, semantic invention, hosted validation or required live network tests.
 - Epic 24G mechanical-envelope reduction before its metric entry condition.
-- Provider-free conformance-corpus closure from 24I.
+- Trusted-machine live validation and any provider/model canary.
 - Changes to canonical live matrices, curated repos or release taxonomy.
 
 ### Approach
@@ -168,8 +170,8 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
    PASS, preserving its read-only/bounded behavior.
 4. Persist the versioned effective verdict after audit and migrate promotion/public diagnostics to
    that authority while preserving historical provider verdict reads.
-5. Synchronize contracts/specs/fixtures/ADR rationale and run full deterministic DoD before 24H/24I
-   or any trusted-machine diagnostic.
+5. Synchronize contracts/specs/fixtures/ADR rationale and run full deterministic DoD before any
+   trusted-machine diagnostic.
 6. Apply one shared runtime-unit invocation budget at the provider process-start seam, persist its
    counters in quality diagnostics, and keep 24G conditional until its entry metric is recorded.
 
@@ -179,16 +181,17 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - `internal/contracts`, `internal/artifactquality`, `internal/artifactaudit`.
 - `internal/evidence` owns the provider-free CRLF/LF, line-range, exact excerpt and SHA-256 validator.
 - `internal/runtime/providercommon`, `internal/orchestrator` validation/repair/promotion.
-- `internal/runtime/fakeruntime`, incident-shaped fixtures and adapter parity tests.
+- `internal/runtime/fakeruntime`, `internal/conformance`, incident-shaped fixtures and adapter parity
+  tests.
 - `docs/spec/PIPELINE_SPEC.md`, `docs/spec/API_SPEC.md`, `docs/APPENDIX_SCHEMAS.md`,
   `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`.
 
 ### Acceptance criteria
 
-- [ ] Foreign run/path and contradictory provider verdicts fail before semantic merge.
-- [ ] All evidence consumers return the same normalized locator identity and typed issue codes.
-- [ ] Unknown semantic fields are never silently dropped and every promoted edge resolves.
-- [ ] Audit error produces zero canonical writes and leaves prior generation/Git bytes unchanged.
+- [x] Foreign run/path and contradictory provider verdicts fail before semantic merge.
+- [x] All evidence consumers return the same normalized locator identity and typed issue codes.
+- [x] Unknown semantic fields are never silently dropped and every promoted edge resolves.
+- [x] Audit error produces zero canonical writes and leaves prior generation/Git bytes unchanged.
 - [x] Provider PASS/FAIL cannot override the effective deterministic result.
 - [x] Historical provider verdicts remain readable as legacy/unavailable effective authority.
 - [x] Provider starts are bounded and provider-parity tested without live binaries.
@@ -210,13 +213,14 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
   implemented; W24B coherent verdict admission, W24C shared bounded evidence validation and W24D
   semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
   implemented; W24F effective verdict persistence, public authority selection and retry rebinding
-  are implemented; W24H shared three-start runtime-unit budget and quality counters are implemented;
-  W24G metric entry and W24I conformance corpus remain pending.
+  are implemented; W24H shared three-start runtime-unit budget and W24I conformance corpus/closure
+  counters are implemented; W24G metric entry remains pending.
 - 2026-08-11: W24H process-start enforcement is provider-adapter agnostic: the same budget context
   counts normal, transport-retry and focused-repair starts, denies the next process before spawn,
   and persists used/remaining counters, last transition and explicit exhaustion reason in runtime
   diagnostics and the run quality summary. Provider-free Claude/Qwen/Codex parity and concurrent
-  reservation tests pass; W24I will add the incident corpus and p95 measurement.
+  reservation tests pass; W24I adds the provider-free incident corpus, adapter issue-code parity,
+  closure counters and deterministic p95 invocation measurement (two).
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

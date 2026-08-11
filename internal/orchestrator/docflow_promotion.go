@@ -71,12 +71,15 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 
 func (e *pipelineExecution) auditSelectedRunBeforePromotion() (artifactaudit.Report, error) {
 	if !e.prePromotionAuditRequired {
+		e.recordConformanceDiagnostic(map[string]any{"promotion_audit_result": "not_requested"})
 		return artifactaudit.Report{Version: artifactaudit.Version, RunID: e.runID, Scope: "selected_run", Status: artifactaudit.StatusPass, Issues: []artifactaudit.Issue{}, Artifacts: []artifactaudit.Artifact{}, Summary: artifactaudit.Summary{}}, nil
 	}
 	report := artifactaudit.ScanSelectedRunWithCandidate(e.workspace, e.promotionRunID(), *e.validatorVerdict)
 	if report.Status != artifactaudit.StatusFail {
+		e.recordConformanceDiagnostic(map[string]any{"promotion_audit_result": string(report.Status)})
 		return report, nil
 	}
+	e.recordConformanceDiagnostic(map[string]any{"promotion_audit_result": "fail", "validation_issue_class": "audit"})
 	codes := make([]string, 0, len(report.Issues))
 	for _, issue := range report.Issues {
 		if code := strings.TrimSpace(issue.Code); code != "" {
