@@ -1033,6 +1033,8 @@ export default function App() {
 	    onFiltersChange={(filters) => navigateRoute({ destination: "tasks", taskView: "inbox", taskFilters: filters, invalid: [] })}
 	    onSelectTask={(taskId, filters) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: filters, invalid: [] })}
 	    onSelectAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
+	    onOpenStudio={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: filters, invalid: [] })}
+	    onBackToAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
 	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
 	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", taskId, invalid: [] })}
 	  /> : null}

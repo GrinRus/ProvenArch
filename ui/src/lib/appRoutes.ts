@@ -4,7 +4,7 @@ import type { WorkflowDestination } from "./workflowState";
 export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
 export type KnowledgeView = "documents" | "diagrams" | "model" | "findings" | "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
-export type TaskRouteView = "inbox" | "new" | "detail" | "attempt";
+export type TaskRouteView = "inbox" | "new" | "detail" | "attempt" | "studio";
 export type TaskLifecycleFilter = "open" | "archived";
 export type TaskFilters = {
   search?: string;
@@ -102,7 +102,7 @@ export function formatAppRoute(route: AppRoute): string {
   if (route.destination === "tasks") {
     const path = route.taskView === "new" ? "/tasks/new"
       : route.taskView === "detail" && validTaskRouteId(route.taskId) ? `/tasks/${encodeURIComponent(route.taskId)}`
-      : route.taskView === "attempt" && validTaskRouteId(route.taskId) && validTaskRouteId(route.attemptId) ? `/tasks/${encodeURIComponent(route.taskId)}/attempts/${encodeURIComponent(route.attemptId)}`
+      : (route.taskView === "attempt" || route.taskView === "studio") && validTaskRouteId(route.taskId) && validTaskRouteId(route.attemptId) ? `/tasks/${encodeURIComponent(route.taskId)}/attempts/${encodeURIComponent(route.attemptId)}${route.taskView === "studio" ? "/studio" : ""}`
       : "/tasks";
     const params = new URLSearchParams();
     const filters = route.taskFilters;
@@ -196,11 +196,12 @@ function parseTaskRoute(segments: string[], route: AppRoute, invalid: string[]):
     invalid.push("task");
     return;
   }
-  if (segments.length === 4 && segments[2] === "attempts") {
+  if ((segments.length === 4 || segments.length === 5) && segments[2] === "attempts") {
     if (!validTaskRouteId(segments[1])) invalid.push("task");
     if (!validTaskRouteId(segments[3])) invalid.push("attempt");
     if (invalid.includes("task") || invalid.includes("attempt")) return;
-    route.taskView = "attempt";
+    if (segments.length === 5 && segments[4] !== "studio") { invalid.push("task_route"); return; }
+    route.taskView = segments.length === 5 ? "studio" : "attempt";
     route.taskId = segments[1];
     route.attemptId = segments[3];
     return;

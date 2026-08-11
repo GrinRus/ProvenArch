@@ -2142,6 +2142,12 @@ Acceptance:
 - active/retrying/stalled/permission-required/failed/canceled rendered scenarios pass;
 - raw output cannot expand the document into an unbounded scrolling wall.
 
+Implementation status (2026-08-11): the additive Attempt route now exposes an exact
+`/tasks/<task_id>/attempts/<attempt_id>/studio` Pipeline Studio. It reads the public Attempt and
+run review-summary identities, renders canonical structured steps, shows a bounded selected blocker
+and diagnostics disclosure, and explicitly avoids deriving progress percentages from provider output
+or selecting a latest/global run. Retry and runner mutation remain later admission-owned work.
+
 ### 23G — Architecture Map as current knowledge home
 
 **Goal:** открывать продукт на понятной текущей архитектуре, а не на runtime dashboard.

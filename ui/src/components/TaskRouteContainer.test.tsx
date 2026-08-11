@@ -65,4 +65,12 @@ describe("TaskRouteContainer", () => {
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("2 added · 1 changed · 0 removed");
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("Current validator-approved Architecture remains available");
   });
+
+  it("opens Pipeline Studio only for the exact Attempt and keeps diagnostics bounded", async () => {
+    render(<TaskRouteContainer view="studio" taskId="task-1" attemptId="attempt-2" filters={{}} />);
+    await waitFor(() => expect(screen.getByTestId("task-pipeline-studio")).toHaveTextContent("run-1"));
+    expect(screen.getByTestId("task-pipeline-studio")).toHaveTextContent("init.step0.constitution");
+    expect(screen.getByTestId("pipeline-blocker")).toHaveTextContent("Attempt stopped");
+    expect(screen.getByTestId("task-pipeline-studio")).not.toHaveTextContent("latest run");
+  });
 });

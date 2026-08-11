@@ -23,6 +23,8 @@ type TaskRouteContainerProps = {
   onFiltersChange?: (filters: TaskFilters) => void;
   onSelectTask?: (taskId: string, filters: TaskFilters) => void;
   onSelectAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void;
+  onOpenStudio?: (taskId: string, attemptId: string, filters: TaskFilters) => void;
+  onBackToAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void;
   onNewTask?: () => void;
   onOpenArchitecture?: (taskId: string) => void;
 };
@@ -45,7 +47,10 @@ export function TaskRouteContainer(props: TaskRouteContainerProps) {
     return <TaskDetail taskId={props.taskId} filters={props.filters ?? {}} onSelectAttempt={props.onSelectAttempt} onBack={() => props.onFiltersChange?.(props.filters ?? {})} onOpenArchitecture={props.onOpenArchitecture} />;
   }
   if (props.view === "attempt" && props.taskId && props.attemptId) {
-    return <AttemptDetail taskId={props.taskId} attemptId={props.attemptId} filters={props.filters ?? {}} onSelectTask={props.onSelectTask} />;
+    return <AttemptDetail taskId={props.taskId} attemptId={props.attemptId} filters={props.filters ?? {}} onSelectTask={props.onSelectTask} onOpenStudio={(taskId, attemptId) => props.onOpenStudio?.(taskId, attemptId, props.filters ?? {})} />;
+  }
+  if (props.view === "studio" && props.taskId && props.attemptId) {
+    return <PipelineStudio taskId={props.taskId} attemptId={props.attemptId} onBack={() => props.onBackToAttempt?.(props.taskId!, props.attemptId!, props.filters ?? {})} />;
   }
   return <InvalidTaskRoute invalid={["task"]} />;
 }
@@ -221,7 +226,7 @@ function AttemptRow({ attempt, onSelect }: { attempt: TaskAttempt; onSelect: () 
   return <button type="button" className="task-attempt-row" data-testid={`attempt-row-${attempt.attempt_id}`} onClick={onSelect}><span><strong>{attempt.status}</strong><small>{attempt.attempt_id}</small></span><span>{runnerLabelFromAttempt(attempt)}</span><span>{duration}</span><span>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</span></button>;
 }
 
-function AttemptDetail({ taskId, attemptId, filters, onSelectTask }: { taskId: string; attemptId: string; filters: TaskFilters; onSelectTask?: (taskId: string, filters: TaskFilters) => void }) {
+function AttemptDetail({ taskId, attemptId, filters, onSelectTask, onOpenStudio }: { taskId: string; attemptId: string; filters: TaskFilters; onSelectTask?: (taskId: string, filters: TaskFilters) => void; onOpenStudio?: (taskId: string, attemptId: string) => void }) {
   const [attempt, setAttempt] = useState<TaskAttempt | null>(null);
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
@@ -231,7 +236,34 @@ function AttemptDetail({ taskId, attemptId, filters, onSelectTask }: { taskId: s
     void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => { if (!controller.signal.aborted) { setAttempt(nextAttempt); setState("loaded"); } }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Attempt could not be loaded"); setState("error"); } });
     return () => controller.abort();
   }, [taskId, attemptId]);
-  return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<Button density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
+  return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<div className="actions"><Button density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>{attempt ? <Button density="compact" onClick={() => onOpenStudio?.(taskId, attempt.attempt_id)} data-testid="attempt-open-studio">Open Pipeline Studio</Button> : null}</div>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
+}
+
+function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attemptId: string; onBack: () => void }) {
+  const [attempt, setAttempt] = useState<TaskAttempt | null>(null);
+  const [review, setReview] = useState<RunReviewSummaryResponse | null>(null);
+  const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    setState("loading");
+    void getTaskAttempt(taskId, attemptId, controller.signal).then(async (nextAttempt) => {
+      if (controller.signal.aborted) return;
+      setAttempt(nextAttempt);
+      setReview(await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal }));
+      setState("loaded");
+    }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Pipeline Studio could not be loaded"); setState("error"); } });
+    return () => controller.abort();
+  }, [taskId, attemptId]);
+  const steps = review?.steps.length ? review.steps : fallbackStudioSteps(attempt?.pipeline);
+  const active = attempt?.status === "queued" || attempt?.status === "running";
+  const blocker = review?.recovery || (attempt && ["failed", "canceled", "timeout"].includes(attempt.status) ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.message || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null);
+  return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{steps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
+}
+
+function fallbackStudioSteps(pipeline?: string): Array<{ step_id: string; key: string; label: string; state: "done" | "active" | "failed" | "pending"; artifact_count: number; artifact_paths: string[]; taskrun_paths: string[]; warnings_count: number; errors_count: number; last_message?: string }> {
+  const keys = pipeline === "refresh" ? ["refresh.step1.collect", "refresh.step2.asis_docs", "refresh.step3.findings", "refresh.step4.proposals"] : ["init.step0.constitution", "init.step1.collect", "init.step2.asis_docs", "init.step3.findings", "init.step4.proposals"];
+  return keys.map((key) => ({ step_id: key, key, label: key, state: "pending", artifact_count: 0, artifact_paths: [], taskrun_paths: [], warnings_count: 0, errors_count: 0 }));
 }
 
 function taskGroup(task: ProductTask): TaskGroup {
