@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 
 import type { GuidedRepo } from "../lib/appContracts";
-import { createTask, type TaskScope } from "../lib/taskApi";
+import { admitTaskAttempt, createTask, type TaskScope } from "../lib/taskApi";
 import { Button, PageHeader } from "./SemanticPrimitives";
 
 type TaskComposerProps = {
@@ -10,6 +10,7 @@ type TaskComposerProps = {
   runtimeMode: string;
   runtimeProvider: string;
   onCreated: (taskId: string) => void;
+  onStarted?: (taskId: string, attemptId: string) => void;
 };
 
 type RunnerMode = "fake" | "headless";
@@ -21,7 +22,7 @@ const providers: Array<{ id: RunnerProvider; label: string }> = [
   { id: "codex-code", label: "Codex" },
 ];
 
-export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvider, onCreated }: TaskComposerProps) {
+export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvider, onCreated, onStarted }: TaskComposerProps) {
   const normalizedMode = runtimeMode === "fake" || runtimeMode === "headless" ? runtimeMode : "";
   const normalizedProvider = providers.some((item) => item.id === runtimeProvider) ? runtimeProvider as RunnerProvider : "claude-code";
   const [title, setTitle] = useState("");
@@ -31,6 +32,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
   const [provider, setProvider] = useState<RunnerProvider>(normalizedProvider);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [createdTaskId, setCreatedTaskId] = useState("");
   const scope = useMemo(() => taskScope(repos), [repos]);
   const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode, runtimeProvider: normalizedProvider });
   const canSubmit = title.trim().length > 0 && goal.trim().length > 0 && readiness.ok && !busy;
@@ -53,7 +55,15 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
         },
       });
       if (!task.task_id) throw new Error("Task API returned no Task identity");
-      onCreated(task.task_id);
+      setCreatedTaskId(task.task_id);
+      let attempt: Awaited<ReturnType<typeof admitTaskAttempt>>;
+      try {
+        attempt = await admitTaskAttempt(task.task_id, { pipeline: "init", intent: "start" });
+      } catch (requestError) {
+        throw new Error(`Task created, but Attempt admission failed: ${requestError instanceof Error ? requestError.message : "unknown admission error"}`);
+      }
+      if (onStarted) onStarted(task.task_id, attempt.attempt_id);
+      else onCreated(task.task_id);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Task creation failed");
     } finally {
@@ -105,6 +115,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
         </section>
         <div className="actions">
           <Button tone="primary" type="submit" data-testid="task-create-submit" disabled={!canSubmit}>{busy ? "Creating Task…" : "Create Task"}</Button>
+          {createdTaskId && error ? <Button type="button" onClick={() => onCreated(createdTaskId)} data-testid="task-open-created">Open created Task</Button> : null}
         </div>
       </form>
     </section>

@@ -12,9 +12,9 @@ const ready: WorkflowStateInput = {
 describe("deriveWorkflowState", () => {
   it.each([
     [{ ...ready, workspace: "invalid" as const }, "setup", "blocked"],
-    [{ ...ready, execution: "active" as const }, "runs", "available"],
-    [{ ...ready, execution: "pending" as const }, "runs", "available"],
-    [{ ...ready, evidence: "unavailable" as const }, "runs", "blocked"],
+    [{ ...ready, execution: "active" as const }, "tasks", "available"],
+    [{ ...ready, execution: "pending" as const }, "tasks", "available"],
+    [{ ...ready, evidence: "unavailable" as const }, "tasks", "blocked"],
     [{ ...ready, evidence: "partial" as const }, "knowledge", "needs_review"],
     [{ ...ready, publication: "loading" as const }, "changes", "available"],
     [{ ...ready, publication: "unknown" as const }, "changes", "blocked"],

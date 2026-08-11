@@ -1945,8 +1945,8 @@ Follow-up note (2026-04-22):
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
 Status (2026-08-12): **target design and pre-implementation authority decisions accepted; 23B1
-through 23N additive slices and the Tasks-primary navigation cutover are implemented; explicit
-legacy route/component removal and final deterministic closure remain W23O work.**
+through 23N additive slices, the Tasks-primary navigation cutover and W23O legacy route/component
+closure are implemented; final deterministic closure remains tracked by the DoD.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2036,8 +2036,8 @@ optional Task context on Architecture/Changes. The target container is explicit 
 it does not query or mutate Task data and never substitutes a legacy/latest run. The first `23B2`
 navigation cutover now exposes only Tasks, Architecture and Changes in the Workspace group and
 removes Home/Analyze links and selectors from the ProductShell; unknown/root console paths resolve
-to Task Inbox. Explicit `/home` and `/runs` compatibility routes remain read-only diagnostic
-surfaces until their legacy components are removed in W23O.
+to Task Inbox. Old `/home` and `/runs/<run_id>` links canonicalize to the explicit `/tasks/legacy`
+read-only migration surface; no synthetic Task is created and no legacy shell remains.
 
 ### 23C — New Task composer and inline runner readiness
 

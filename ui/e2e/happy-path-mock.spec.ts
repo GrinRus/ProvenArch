@@ -337,8 +337,8 @@ test("happy path mock: init -> architecture -> refresh -> review -> full workspa
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   const { commitMessages } = await installHappyPathMock(page);
 
-  await page.goto("/runs");
-  await expect(page.getByTestId("runs-page")).toBeVisible();
+  await page.goto("/tasks/legacy");
+  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
   await expect(page.getByTestId("run-init-btn")).toBeEnabled();
   await page.getByTestId("run-init-btn").click();
   await expect(page.getByTestId("run-status-run-id")).toHaveText(initRunID);

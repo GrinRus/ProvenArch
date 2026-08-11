@@ -74,11 +74,10 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         for selector in [
-            "home-panel",
-            "home-primary-action",
+            "task-route-inbox",
+            "legacy-run-page",
             "readiness-summary-cards",
             "readiness-runtime-summary",
-            "runs-page",
             "analysis-run-progress",
             "analysis-run-timeline",
             "runs-diagnostics-drawer",
@@ -108,9 +107,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         spec_path = self.repo_root / "ui" / "e2e" / "live-flow.spec.ts"
         body = spec_path.read_text(encoding="utf-8")
         for name in [
-            "frontend-home-desktop.png",
+            "frontend-tasks-desktop.png",
             "frontend-setup-desktop.png",
-            "frontend-runs-desktop.png",
+            "frontend-legacy-diagnostics-desktop.png",
             "frontend-knowledge-desktop.png",
             "frontend-changes-evidence-desktop.png",
             "frontend-changes-publish-desktop.png",
@@ -168,9 +167,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         screenshots = result["diagnostic_refs"]["screenshots"]
         self.assertEqual(9, len(screenshots))
         for name in [
-            "frontend-home-desktop.png",
+            "frontend-tasks-desktop.png",
             "frontend-setup-desktop.png",
-            "frontend-runs-desktop.png",
+            "frontend-legacy-diagnostics-desktop.png",
             "frontend-knowledge-desktop.png",
             "frontend-changes-evidence-desktop.png",
             "frontend-changes-publish-desktop.png",
@@ -413,9 +412,9 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
                 output_dir = Path(os.environ.get("UI_E2E_OUTPUT_DIR", ""))
                 output_dir.mkdir(parents=True, exist_ok=True)
                 for name in [
-                    "frontend-home-desktop.png",
+                    "frontend-tasks-desktop.png",
                     "frontend-setup-desktop.png",
-                    "frontend-runs-desktop.png",
+                    "frontend-legacy-diagnostics-desktop.png",
                     "frontend-knowledge-desktop.png",
                     "frontend-changes-evidence-desktop.png",
                     "frontend-changes-publish-desktop.png",

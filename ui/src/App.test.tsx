@@ -995,7 +995,7 @@ describe("App", () => {
   it("supports stage navigation and settings relocation without compatibility controls", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 	fireEvent.click(screen.getByRole("link", { name: "Setup" }));
 
     expect(screen.getByTestId("workspace-panel")).toBeInTheDocument();
@@ -1408,7 +1408,7 @@ describe("App", () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/workspace/validate")).toBe(true));
     fireEvent.click(screen.getByRole("link", { name: "Setup" }));
@@ -1512,9 +1512,10 @@ describe("App", () => {
   it("renders the path-based shell without hidden legacy shell surfaces", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 
-    expect(await screen.findByTestId("home-panel")).toBeInTheDocument();
+    expect(await screen.findByTestId("task-route-inbox")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/tasks");
     expect(screen.getByTestId("product-shell")).toBeInTheDocument();
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
     expect(screen.queryByTestId("right-inspector")).not.toBeInTheDocument();
@@ -1579,17 +1580,15 @@ describe("App", () => {
     expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
   });
 
-  it("routes Home empty-evidence next action to Runs", async () => {
+  it("opens the explicit legacy diagnostics surface from Tasks", async () => {
     const fetchMock = createFetchMock({ runID: "run-review-recovery" });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 
-    const action = screen.getByRole("button", { name: "Open diagnostics" });
-    expect(action).not.toBeDisabled();
-    fireEvent.click(action);
-    expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/runs");
+    fireEvent.click(screen.getByTestId("diagnostics-nav"));
+    expect(await screen.findByTestId("legacy-run-page")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/tasks/legacy");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/pipeline/init")).toBe(false);
   });
 
@@ -1616,11 +1615,11 @@ describe("App", () => {
       artifactText: { "reports/as-is/overview.md": "# Architecture Home\n" },
     }));
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 
-    expect(await screen.findByTestId("home-panel")).toBeInTheDocument();
-    await waitFor(() => expect(window.location.pathname).toBe("/home"));
-    expect(window.location.pathname).toBe("/home");
+    expect(await screen.findByTestId("task-route-inbox")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks"));
+    expect(window.location.pathname).toBe("/tasks");
   });
 
   it("does not invent a historical review when promoted architecture has no run identity", async () => {
@@ -1629,15 +1628,11 @@ describe("App", () => {
     delete authority.source_run_id;
     vi.stubGlobal("fetch", createFetchMock({ architectureResponse: architecture }));
 
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
 
-    const action = await screen.findByTestId("home-primary-action");
-    expect(action).toHaveTextContent("Explore architecture");
-    fireEvent.click(action);
-    await screen.findByTestId("knowledge-panel", {}, { timeout: 5000 });
-    expect(window.location.pathname).toBe("/architecture");
-    expect(window.location.search).toContain("view=documents");
-    expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("task-route-inbox")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/tasks");
+    expect(screen.queryByTestId("home-primary-action")).not.toBeInTheDocument();
   });
 
   it("renders the Source V2 repo table with guided analysis scope summary", async () => {
@@ -1809,7 +1804,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("analysis");
-    expect(window.location.pathname).toBe("/runs");
+    expect(window.location.pathname).toBe("/tasks/legacy");
     expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
     window.history.pushState({}, "", "/setup");
     fireEvent.popState(window);
@@ -3244,7 +3239,7 @@ describe("App", () => {
 
   it("keeps global Ask in an accessible read-only modal and returns focus on Escape", async () => {
     vi.stubGlobal("fetch", createFetchMock());
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
     const askButton = screen.getByTestId("stage-ask");
     askButton.focus();
     fireEvent.click(askButton);
@@ -3270,14 +3265,14 @@ describe("App", () => {
       },
       artifactText: { "model/entities/svc.payments.yaml": "# Payments\nOwner: Platform" },
     }));
-    await renderConsoleApp("/home");
+    await renderConsoleApp("/tasks");
     navigateToStage("ask");
     fireEvent.click(await screen.findByRole("button", { name: /model\/entities\/svc\.payments\.yaml/i }));
     expect(await screen.findByTestId("current-workspace-evidence")).toHaveTextContent("Current workspace");
     expect(window.location.search).toContain("source=current");
     fireEvent.click(screen.getByRole("button", { name: "Return to Ask" }));
     expect(await screen.findByRole("dialog", { name: "Ask current workspace" })).toHaveTextContent("Platform owns payments.");
-    expect(window.location.pathname).toBe("/home");
+    expect(window.location.pathname).toBe("/tasks");
   });
 
   it("renders the Ask workbench with history, selected answer, audit safety, and citation drilldown", async () => {
@@ -3371,7 +3366,7 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Start without a saved analysis brief?" })).toHaveTextContent("reduces evidence quality");
     fireEvent.click(screen.getByRole("button", { name: "Start with quality warning" }));
     await screen.findByTestId("analysis-run-progress");
-    expect(window.location.pathname).toMatch(/^\/runs/);
+    expect(window.location.pathname).toMatch(/^\/tasks\/legacy/);
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
@@ -3922,8 +3917,8 @@ describe("App", () => {
       }),
     );
 
-    await renderConsoleApp(`/runs/${runID}`);
-    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
+    await renderConsoleApp(`/tasks/legacy/${runID}`);
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/tasks\/legacy/));
 
     await waitFor(
       () => expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent(runID),
@@ -4114,7 +4109,7 @@ describe("App", () => {
     await screen.findByTestId("product-shell");
 
     navigateToStage("analysis");
-    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/tasks\/legacy/));
 
     expect(screen.queryByTestId("analysis-failure-recovery")).not.toBeInTheDocument();
     const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
@@ -4889,7 +4884,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("analysis");
-    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/tasks\/legacy/));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -4908,7 +4903,7 @@ describe("App", () => {
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
-    expect(window.location.pathname).toMatch(/^\/runs/);
+    expect(window.location.pathname).toMatch(/^\/tasks\/legacy/);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 
@@ -4982,7 +4977,7 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp(`/runs/${runID}`);
+    await renderConsoleApp(`/tasks/legacy/${runID}`);
     await screen.findByTestId("run-status-panel");
 
     const recovery = screen.getByTestId("analysis-failure-recovery");

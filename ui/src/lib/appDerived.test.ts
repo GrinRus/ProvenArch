@@ -19,7 +19,7 @@ describe("app-derived selectors", () => {
       publication: "unknown",
       openQuestions: "",
     });
-    expect(workflow.nextAction.destination).toBe("runs");
+    expect(workflow.nextAction.destination).toBe("tasks");
     expect(workflow.attention).toBe("Analysis is running.");
   });
 

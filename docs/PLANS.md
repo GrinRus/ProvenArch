@@ -125,11 +125,15 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 
 ### Progress log
 
+- 2026-08-12: W23O closure passed contracts, Go and Python suites (267 tests), UI unit tests
+  (47 files/255 tests), all eight deterministic mock E2E scenarios, lint, production build and
+  embedded UI parity. The local Node override is only required because this machine has 22.22.3
+  while the repository pins 22.21.1; resolver tests pass without the override.
 - 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,
   single-active/single-queued coordination, legacy-run and publication-linkage decisions. Added the
   ADR/spec package and implemented W23A1 schemas, semantic Go contracts, examples and provider-free
   fixtures. W23A2 persistence, W23A3 Task APIs and W23A4 admission/linkage are now implemented;
-  frontend and later Epic 24/25 slices remain pending.
+  W23B1–N and W23O route closure are implemented; W24G and Epic 25 remain pending.
 
 ### Plan ID
 EP-20260811-task-first-ui
@@ -139,7 +143,8 @@ EP-20260811-task-first-ui
 The accepted Task-first target must enter the current shell additively. W23B1 establishes typed
 route/history authority and truthful containers before any primary-navigation cutover; later
 slices own Task data loading, composer, Attempt outcome, Architecture/Changes workbenches and
-the final removal of Home/Analyze routes.
+the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/tasks/legacy`
+  diagnostics for pre-Task evidence.
 
 ### Goals (must have)
 
@@ -155,14 +160,18 @@ the final removal of Home/Analyze routes.
       review, including explicit semantic partial state and independent current Architecture status.
 - [x] Implement the additive W23F Attempt-bound Pipeline Studio with structured steps, bounded
       blocker/diagnostics disclosure and no provider-output percentage inference.
-- [ ] Implement the remaining W23O closure. W23G Task-scoped Architecture context, W23H
+- [x] Implement W23O closure. W23G Task-scoped Architecture context, W23H
       allowlisted Markdown reader/editor, W23I model inspector, W23J Mermaid Evidence Studio,
       W23K findings queue, W23L Changes context, W23M Ask/Runner authority boundaries and W23N
       Task state/accessibility coverage are implemented additively.
+- [x] Complete the full deterministic DoD after W23O (contracts, backend/UI tests, lint, build and
+      embedded UI parity) on the clean implementation branch before declaring Epic 23 closed.
 - [x] Complete the 23B2 primary navigation cutover: ProductShell now exposes only
       Tasks/Architecture/Changes plus utilities, and no longer renders Home/Analyze links or
-      selectors. Explicit `/home` and `/runs` compatibility routes remain until W23O removes the
-      legacy route components.
+      selectors. W23O now exposes only the explicit `/tasks/legacy` read-only migration surface for
+      pre-Task runs and removes the legacy shell components.
+- [ ] Merge the W23O route-closure implementation branch and record the post-merge verification;
+      W24G and Epic 25 remain owned by their separate active plans.
 
 ### Non-goals
 
@@ -201,8 +210,8 @@ the final removal of Home/Analyze routes.
   desired/effective/source boundary explicit, including provider-outage behavior. W23N now covers
   Task Inbox empty/error recovery, keyboard row activation, 44px filter/Attempt targets and explicit
   status semantics. The 23B2 navigation cutover now makes Tasks primary and removes Home/Analyze
-  links/selectors; unknown/root console paths now resolve to Task Inbox. Final Home/Analyze route
-      component removal remains in W23O.
+  links/selectors; unknown/root console paths now resolve to Task Inbox. W23O closes the legacy
+  shell by canonicalizing old run links to `/tasks/legacy` read-only diagnostics.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

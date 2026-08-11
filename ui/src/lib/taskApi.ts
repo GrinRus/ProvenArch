@@ -73,6 +73,7 @@ export type TaskAttemptListResponse = {
 };
 
 export type CreateTaskRequest = Pick<ProductTask, "title" | "goal" | "scope" | "desired_runner"> & { context?: string };
+export type AdmitTaskAttemptRequest = { pipeline?: string; intent?: "start" | "queue" };
 
 export async function createTask(request: CreateTaskRequest): Promise<ProductTask> {
   const response = await fetchJSON<{ task: ProductTask }>("/api/tasks", {
@@ -81,6 +82,20 @@ export async function createTask(request: CreateTaskRequest): Promise<ProductTas
     body: JSON.stringify(request),
   });
   return response.task;
+}
+
+export async function admitTaskAttempt(taskId: string, request: AdmitTaskAttemptRequest = {}): Promise<TaskAttempt> {
+  const response = await fetchJSON<{ attempt: TaskAttempt }>(`/api/tasks/${encodeURIComponent(taskId)}/attempts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idempotency_key: newIdempotencyKey(),
+      pipeline: request.pipeline ?? "init",
+      intent: request.intent ?? "start",
+    }),
+  });
+  if (!response.attempt?.attempt_id) throw new Error("Attempt API returned no Attempt identity");
+  return response.attempt;
 }
 
 export async function listTasks(filters: TaskFilters = {}, cursor = "", signal?: AbortSignal): Promise<TaskListResponse> {
@@ -115,4 +130,10 @@ export async function setTaskArchive(taskId: string, expectedRevision: number, a
     body: JSON.stringify({ expected_revision: expectedRevision }),
   });
   return response.task;
+}
+
+function newIdempotencyKey(): string {
+  const cryptoAPI = globalThis.crypto as Crypto & { randomUUID?: () => string } | undefined;
+  if (cryptoAPI?.randomUUID) return cryptoAPI.randomUUID();
+  return `attempt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

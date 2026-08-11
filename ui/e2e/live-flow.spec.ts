@@ -174,7 +174,7 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
 }
 
 async function captureRunFailureScreenshot(page: Page): Promise<void> {
-  await page.goto("/runs").catch(() => undefined);
+  await page.goto("/tasks/legacy").catch(() => undefined);
   await captureEvidenceScreenshot(page, "frontend-runs-failed-desktop.png").catch(() => undefined);
 }
 
@@ -281,7 +281,7 @@ async function expectHiddenCompatibilityControlsAbsent(page: Page): Promise<void
 
 async function expectProductShellNavigation(page: Page): Promise<void> {
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  for (const destination of ["home", "runs", "knowledge", "changes"]) {
+  for (const destination of ["tasks", "knowledge", "changes"]) {
     await expect(page.getByTestId(`destination-${destination}`)).toBeVisible();
   }
   await expect(page.getByTestId("setup-utility")).toBeVisible();
@@ -336,19 +336,9 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/home");
+  await page.goto("/tasks");
   await expectProductShellNavigation(page);
-  await expect(page.getByTestId("home-panel")).toBeVisible();
-  await expect(page.getByTestId("home-primary-action")).toHaveCount(1);
-  // A snapshot-backed live run may open on the promoted architecture outcome
-  // instead of the pre-analysis attention list. Both are valid first-viewport
-  // states; assert the appropriate actionable content for the rendered state.
-  const homeAttentionReason = page.getByTestId("home-attention-reason");
-  if (await homeAttentionReason.count() > 0) {
-    await expect(homeAttentionReason).not.toBeEmpty();
-  } else {
-    await expect(page.locator(".home-hero, .home-map-card").first()).toBeVisible();
-  }
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await expect(page.getByTestId("top-status-bar")).toContainText("ProvenArch");
   const brandVersion = page.getByTestId("brand-version");
   if (await brandVersion.count() === 0) {
@@ -358,7 +348,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(brandVersion).not.toHaveText(/v0\.1\.1 beta/i);
   await expect(brandVersion).toHaveText(/^(dev|v?\d|\w)/);
   await expectNoDocumentOverflow(page);
-  await captureEvidenceScreenshot(page, "frontend-home-desktop.png");
+  await captureEvidenceScreenshot(page, "frontend-tasks-desktop.png");
 
   await page.goto("/setup?step=runner");
   await expect(page.getByTestId("guided-setup-page")).toBeVisible();
@@ -381,15 +371,15 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await expect(resolvedRepoRows).toHaveCount(expectedRepoCount);
   await captureEvidenceScreenshot(page, "frontend-setup-desktop.png");
 
-  await page.goto("/runs");
-  await expect(page.getByTestId("runs-page")).toBeVisible();
-  await expect(page.getByTestId("runs-page")).toBeVisible();
+  await page.goto("/tasks/legacy");
+  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
+  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   let runID = "";
   if (artifactSource === "snapshot") {
     runID = await resolveSnapshotRunID(request);
-    await page.goto(`/runs/${encodeURIComponent(runID)}`);
-    await expect(page.getByTestId("runs-page")).toBeVisible();
+    await page.goto(`/tasks/legacy/${encodeURIComponent(runID)}`);
+    await expect(page.getByTestId("legacy-run-page")).toBeVisible();
     const snapshotObservation = await fetchRunObservation(request, runID);
     expect(snapshotObservation.status, `snapshot run ${runID} should be succeeded`).toBe("succeeded");
   } else {
@@ -405,11 +395,11 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   });
   if (artifactSource !== "snapshot") {
     await waitForInitInspectRun(request, page, runID);
-    await page.goto(`/runs/${encodeURIComponent(runID)}`);
+    await page.goto(`/tasks/legacy/${encodeURIComponent(runID)}`);
   }
 
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
+  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
   await expect(page.getByTestId("run-status-run-id")).toHaveText(runID);
   await expect(page.getByTestId("analysis-run-timeline")).toBeVisible();
   await expect(page.getByTestId("analysis-step-review-panel")).toBeVisible();
@@ -421,16 +411,16 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   }
   await openRunsDiagnostics(page);
   await expectNoDocumentOverflow(page);
-  await captureEvidenceScreenshot(page, "frontend-runs-desktop.png");
+  await captureEvidenceScreenshot(page, "frontend-legacy-diagnostics-desktop.png");
 
   await page.reload();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
-  await page.goto("/home");
-  await expect(page.getByTestId("home-panel")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await page.goBack();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
+  await expect(page).toHaveURL(new RegExp(`/tasks/legacy/${runID}$`));
 
   await page.goto("/knowledge?view=documents&source=current");
   await expect(page.getByTestId("knowledge-panel")).toBeVisible();
