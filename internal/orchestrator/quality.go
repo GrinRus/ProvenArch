@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,25 +40,31 @@ type runtimeStepQuality struct {
 }
 
 type runQualityTotals struct {
-	Steps                        int `json:"steps"`
-	SemanticEntities             int `json:"semantic_entities"`
-	SemanticEdges                int `json:"semantic_edges"`
-	FindingsCount                int `json:"findings_count"`
-	QuestionsCount               int `json:"questions_count"`
-	CoverageObserved             int `json:"coverage_observed"`
-	CoverageMissing              int `json:"coverage_missing"`
-	WarningsCount                int `json:"warnings_count"`
-	SignalScore                  int `json:"signal_score"`
-	RepairAttempts               int `json:"repair_attempts"`
-	RepairExhausted              int `json:"repair_exhausted"`
-	FreshRetries                 int `json:"fresh_retries"`
-	FocusedRepairs               int `json:"focused_repairs"`
-	StallCount                   int `json:"stall_count"`
-	PreArtifactStalls            int `json:"pre_artifact_stalls"`
-	PostArtifactStalls           int `json:"post_artifact_stalls"`
-	ValidArtifactControlledStops int `json:"valid_artifact_controlled_stops"`
-	ZeroOutputPreArtifactStalls  int `json:"zero_output_pre_artifact_stalls"`
-	PartialFailureCount          int `json:"partial_failure_count"`
+	Steps                        int    `json:"steps"`
+	SemanticEntities             int    `json:"semantic_entities"`
+	SemanticEdges                int    `json:"semantic_edges"`
+	FindingsCount                int    `json:"findings_count"`
+	QuestionsCount               int    `json:"questions_count"`
+	CoverageObserved             int    `json:"coverage_observed"`
+	CoverageMissing              int    `json:"coverage_missing"`
+	WarningsCount                int    `json:"warnings_count"`
+	SignalScore                  int    `json:"signal_score"`
+	RepairAttempts               int    `json:"repair_attempts"`
+	RepairExhausted              int    `json:"repair_exhausted"`
+	FreshRetries                 int    `json:"fresh_retries"`
+	FocusedRepairs               int    `json:"focused_repairs"`
+	StallCount                   int    `json:"stall_count"`
+	PreArtifactStalls            int    `json:"pre_artifact_stalls"`
+	PostArtifactStalls           int    `json:"post_artifact_stalls"`
+	ValidArtifactControlledStops int    `json:"valid_artifact_controlled_stops"`
+	ZeroOutputPreArtifactStalls  int    `json:"zero_output_pre_artifact_stalls"`
+	PartialFailureCount          int    `json:"partial_failure_count"`
+	ProviderInvocations          int    `json:"provider_invocations"`
+	ProviderInvocationBudgetMax  int    `json:"provider_invocation_budget_max"`
+	ProviderInvocationRemaining  int    `json:"provider_invocation_remaining"`
+	ProviderBudgetExhausted      int    `json:"provider_budget_exhausted"`
+	ProviderLastTransition       string `json:"provider_last_transition,omitempty"`
+	ProviderTerminalExhaustion   string `json:"provider_terminal_exhaustion_reason,omitempty"`
 }
 
 type runtimeRecoveryCounters struct {
@@ -70,6 +77,12 @@ type runtimeRecoveryCounters struct {
 	PostArtifactStalls           int
 	ValidArtifactControlledStops int
 	ZeroOutputPreArtifactStalls  int
+	ProviderInvocations          int
+	ProviderInvocationBudgetMax  int
+	ProviderInvocationRemaining  int
+	ProviderBudgetExhausted      int
+	ProviderLastTransition       string
+	ProviderTerminalExhaustion   string
 }
 
 type runFailureClassification struct {
@@ -180,6 +193,12 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 	totals.PostArtifactStalls = e.runtimeRecoveryCounters.PostArtifactStalls
 	totals.ValidArtifactControlledStops = e.runtimeRecoveryCounters.ValidArtifactControlledStops
 	totals.ZeroOutputPreArtifactStalls = e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls
+	totals.ProviderInvocations = e.runtimeRecoveryCounters.ProviderInvocations
+	totals.ProviderInvocationBudgetMax = e.runtimeRecoveryCounters.ProviderInvocationBudgetMax
+	totals.ProviderInvocationRemaining = e.runtimeRecoveryCounters.ProviderInvocationRemaining
+	totals.ProviderBudgetExhausted = e.runtimeRecoveryCounters.ProviderBudgetExhausted
+	totals.ProviderLastTransition = e.runtimeRecoveryCounters.ProviderLastTransition
+	totals.ProviderTerminalExhaustion = e.runtimeRecoveryCounters.ProviderTerminalExhaustion
 	totals.PartialFailureCount = len(e.partialFailures)
 
 	runWarnings := append([]string(nil), e.warnings...)
@@ -221,19 +240,25 @@ func (e *pipelineExecution) writeRunQualitySummary(status RunStatus, errorCode s
 		return Artifact{}, err
 	}
 	e.logInfo(e.stepStatus.CurrentStep, "", "run quality summary persisted", map[string]any{
-		"path":                            path,
-		"signal_score":                    totals.SignalScore,
-		"quality_alerts":                  len(qualitySignals),
-		"repair_attempts":                 totals.RepairAttempts,
-		"repair_exhausted":                totals.RepairExhausted,
-		"fresh_retries":                   totals.FreshRetries,
-		"focused_repairs":                 totals.FocusedRepairs,
-		"stall_count":                     totals.StallCount,
-		"pre_artifact_stalls":             totals.PreArtifactStalls,
-		"post_artifact_stalls":            totals.PostArtifactStalls,
-		"valid_artifact_controlled_stops": totals.ValidArtifactControlledStops,
-		"zero_output_pre_artifact_stalls": totals.ZeroOutputPreArtifactStalls,
-		"partial_failure_count":           totals.PartialFailureCount,
+		"path":                                path,
+		"signal_score":                        totals.SignalScore,
+		"quality_alerts":                      len(qualitySignals),
+		"repair_attempts":                     totals.RepairAttempts,
+		"repair_exhausted":                    totals.RepairExhausted,
+		"fresh_retries":                       totals.FreshRetries,
+		"focused_repairs":                     totals.FocusedRepairs,
+		"stall_count":                         totals.StallCount,
+		"pre_artifact_stalls":                 totals.PreArtifactStalls,
+		"post_artifact_stalls":                totals.PostArtifactStalls,
+		"valid_artifact_controlled_stops":     totals.ValidArtifactControlledStops,
+		"zero_output_pre_artifact_stalls":     totals.ZeroOutputPreArtifactStalls,
+		"provider_invocations":                totals.ProviderInvocations,
+		"provider_invocation_budget_max":      totals.ProviderInvocationBudgetMax,
+		"provider_invocation_remaining":       totals.ProviderInvocationRemaining,
+		"provider_budget_exhausted":           totals.ProviderBudgetExhausted,
+		"provider_last_transition":            totals.ProviderLastTransition,
+		"provider_terminal_exhaustion_reason": totals.ProviderTerminalExhaustion,
+		"partial_failure_count":               totals.PartialFailureCount,
 	})
 	return Artifact{Path: path, Kind: "taskrun", Label: "Run Quality Summary"}, nil
 }
@@ -301,6 +326,22 @@ func (e *pipelineExecution) recordRuntimeDiagnosticCounters(event acpruntime.Dia
 	}
 	if diagnosticFieldBool(fields, "zero_output_pre_artifact_stall") {
 		e.runtimeRecoveryCounters.ZeroOutputPreArtifactStalls++
+	}
+	if diagnosticFieldInt(fields, "provider_invocation_index") > 0 {
+		e.runtimeRecoveryCounters.ProviderInvocations++
+	}
+	if budgetMax := diagnosticFieldInt(fields, "provider_invocation_budget_max"); budgetMax > 0 {
+		e.runtimeRecoveryCounters.ProviderInvocationBudgetMax = budgetMax
+		e.runtimeRecoveryCounters.ProviderInvocationRemaining = diagnosticFieldInt(fields, "provider_invocation_budget_remaining")
+	}
+	if transition := diagnosticFieldString(fields, "recovery_transition"); transition != "" {
+		e.runtimeRecoveryCounters.ProviderLastTransition = transition
+	}
+	if reason := diagnosticFieldString(fields, "terminal_exhaustion_reason"); reason != "" {
+		e.runtimeRecoveryCounters.ProviderTerminalExhaustion = reason
+	}
+	if diagnosticFieldBool(fields, "provider_invocation_budget_exhausted") {
+		e.runtimeRecoveryCounters.ProviderBudgetExhausted++
 	}
 	if isValidArtifactControlledStopDiagnostic(message, fields) {
 		e.runtimeRecoveryCounters.ValidArtifactControlledStops++
@@ -402,6 +443,48 @@ func diagnosticFieldBool(fields map[string]any, key string) bool {
 		return strings.EqualFold(strings.TrimSpace(typed), "true") || strings.TrimSpace(typed) == "1"
 	default:
 		return false
+	}
+}
+
+func diagnosticFieldInt(fields map[string]any, key string) int {
+	if len(fields) == 0 {
+		return 0
+	}
+	value, ok := fields[key]
+	if !ok || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int8:
+		return int(typed)
+	case int16:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case uint:
+		return int(typed)
+	case uint8:
+		return int(typed)
+	case uint16:
+		return int(typed)
+	case uint32:
+		return int(typed)
+	case uint64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		parsed, _ := strconv.Atoi(string(typed))
+		return parsed
+	case string:
+		parsed, _ := strconv.Atoi(strings.TrimSpace(typed))
+		return parsed
+	default:
+		return 0
 	}
 }
 

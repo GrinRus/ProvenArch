@@ -12,6 +12,9 @@ import (
 
 func classifyCommandFailure(adapter ProviderAdapter, task acpruntime.Task, result acpruntime.Result, err error) error {
 	message, rawOutputRefs := buildEngineFailureMessage(adapter, task, "exec", err, result)
+	if errors.Is(err, ErrProviderInvocationBudgetExceeded) {
+		return acpruntime.WrapRunnerErrorWithDiagnostics(adapter.Provider(), acpruntime.ErrorCodeRuntimeContract, message, result.Stdout, result.Stderr, rawOutputRefs, err)
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return acpruntime.WrapRunnerErrorWithDiagnostics(adapter.Provider(), acpruntime.ErrorCodeRuntimeTimeout, message, result.Stdout, result.Stderr, rawOutputRefs, err)
 	}

@@ -139,7 +139,7 @@ EP-20260811-weak-model-validation-authority
 Epic 24 must close false-accept and repair-loop classes without weakening sparse truthful output or
 making provider opinion the promotion authority. The accepted chain is provider draft → deterministic
 technical candidate → mandatory provider-free selected-run audit → persisted effective verdict.
-This plan covers reviewable slices 24A–24F only; budget/corpus closure remains 24H/24I.
+This plan covers reviewable slices 24A–24I; 24G remains conditional on the recorded entry metric.
 
 ### Goals (must have)
 
@@ -149,13 +149,14 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - [x] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
 - [x] Run provider-free selected-run audit before the first canonical write.
 - [x] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
+- [x] Bound provider process starts to three per runtime execution unit across normal and recovery transitions.
 - [ ] Complete the follow-up recovery-budget and provider-free conformance closure in W24G–W24I.
 
 ### Non-goals
 
 - New provider/model defaults, semantic invention, hosted validation or required live network tests.
 - Epic 24G mechanical-envelope reduction before its metric entry condition.
-- Global recovery-budget implementation and conformance-corpus closure from 24H/24I.
+- Provider-free conformance-corpus closure from 24I.
 - Changes to canonical live matrices, curated repos or release taxonomy.
 
 ### Approach
@@ -169,6 +170,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
    that authority while preserving historical provider verdict reads.
 5. Synchronize contracts/specs/fixtures/ADR rationale and run full deterministic DoD before 24H/24I
    or any trusted-machine diagnostic.
+6. Apply one shared runtime-unit invocation budget at the provider process-start seam, persist its
+   counters in quality diagnostics, and keep 24G conditional until its entry metric is recorded.
 
 ### Files expected to change
 
@@ -188,7 +191,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - [ ] Audit error produces zero canonical writes and leaves prior generation/Git bytes unchanged.
 - [x] Provider PASS/FAIL cannot override the effective deterministic result.
 - [x] Historical provider verdicts remain readable as legacy/unavailable effective authority.
-- [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
+- [x] Provider starts are bounded and provider-parity tested without live binaries.
+- [x] `make contracts`, `make test`, `make lint` and `make build` pass.
 
 ### Risks
 
@@ -206,7 +210,13 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
   implemented; W24B coherent verdict admission, W24C shared bounded evidence validation and W24D
   semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
   implemented; W24F effective verdict persistence, public authority selection and retry rebinding
-  are implemented; W24G–I remain pending.
+  are implemented; W24H shared three-start runtime-unit budget and quality counters are implemented;
+  W24G metric entry and W24I conformance corpus remain pending.
+- 2026-08-11: W24H process-start enforcement is provider-adapter agnostic: the same budget context
+  counts normal, transport-retry and focused-repair starts, denies the next process before spawn,
+  and persists used/remaining counters, last transition and explicit exhaustion reason in runtime
+  diagnostics and the run quality summary. Provider-free Claude/Qwen/Codex parity and concurrent
+  reservation tests pass; W24I will add the incident corpus and p95 measurement.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

@@ -1882,7 +1882,7 @@ EOF
 	}
 }
 
-func TestRunHeadlessProviderRetriesStreamOnlyNoFreshCollectPairRepairWithStallFocusedPrompt(t *testing.T) {
+func TestRunHeadlessProviderRespectsGlobalInvocationBudget(t *testing.T) {
 	task := newCollectTask(t, "run-collect-pair-repair-stream-only-retry")
 	docRel := steppolicy.SuggestedCollectDocumentPath(task)
 	manifest := strings.Replace(collectManifestJSON(task), `"path": "overview.md"`, `"path": "`+docRel+`"`, 1)
@@ -1947,19 +1947,38 @@ printf '%s\n' 'initial provider diagnostics without artifacts'
 	ctx, cancel := context.WithTimeout(context.Background(), successfulCollectPairRecoveryTimeout)
 	defer cancel()
 	result, err := RunHeadlessProvider(ctx, task, runner)
-	if err != nil {
-		t.Fatalf("expected stream-only collect pair repair retry to succeed, got %v", err)
+	starts := 0
+	for _, event := range diagnostics {
+		if event.Message == "provider command started" {
+			starts++
+		}
 	}
-	if result.Execution.Status != "succeeded" {
-		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	if err == nil {
+		if starts > DefaultProviderInvocationBudget {
+			t.Fatalf("provider process starts = %d, exceeds hard budget %d", starts, DefaultProviderInvocationBudget)
+		}
+		if result.Execution.Status != "succeeded" {
+			t.Fatalf("unexpected successful execution: %+v", result.Execution)
+		}
+		return
 	}
-	if runner.pairRepairCalls != 2 {
-		t.Fatalf("pair repair calls = %d, want 2", runner.pairRepairCalls)
+	if !errors.Is(err, ErrProviderInvocationBudgetExceeded) {
+		t.Fatalf("expected provider invocation budget exhaustion, got %v", err)
+	}
+	var runnerErr acpruntime.RunnerError
+	if !errors.As(err, &runnerErr) || runnerErr.Code != acpruntime.ErrorCodeRuntimeContract {
+		t.Fatalf("budget exhaustion must be a terminal runtime contract failure, got %T %v", err, err)
+	}
+	if !hasDiagnostic(diagnostics, "provider invocation budget exhausted", "") {
+		t.Fatalf("expected explicit budget exhaustion diagnostic, got %#v", diagnostics)
+	}
+	if starts != DefaultProviderInvocationBudget {
+		t.Fatalf("provider process starts = %d, want hard budget %d", starts, DefaultProviderInvocationBudget)
 	}
 	if len(runner.pairRepairErrors) != 2 ||
 		!strings.Contains(runner.pairRepairErrors[1], ErrStalledBeforeArtifacts.Error()) ||
 		!strings.Contains(runner.pairRepairErrors[1], "collect_pair_repair_stream_retry") {
-		t.Fatalf("expected retry validation error to request compact stall recovery, got %#v", runner.pairRepairErrors)
+		t.Fatalf("expected second repair spec to be built but not started, got %#v", runner.pairRepairErrors)
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair retry scheduled", "recovery_mode", "collect_pair_repair") {
 		t.Fatalf("expected stream-only collect pair repair retry diagnostic, got %#v", diagnostics)

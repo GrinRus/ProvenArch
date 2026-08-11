@@ -648,13 +648,18 @@ counts, partial/failed scope counts, previous baseline and promotion decision. P
 includes unit breakdown, repair attempt/limit and stall deadline; the UI never derives a percentage
 from stdout or heartbeat activity.
 
-### Planned global recovery budget clarification (Epic 24H; not implemented)
+### Global recovery budget clarification (Epic 24H)
 
 `per-task provider invocation budget` means one runtime provider task envelope (one concrete
 step/shard/target execution unit), not the durable product Task introduced by Epic 23 and not the
 entire multi-step pipeline Attempt. The accepted target permits at most three provider process
 starts for that runtime unit: normal execution, one typed focused repair and one transport retry
 only for silent/unavailable execution. Deterministic repairs do not consume provider starts but
-must retain transition code and before/after digests. Attempt/run diagnostics aggregate used and
-remaining counters across their runtime units. A new product Attempt receives new runtime-unit
-budgets; cancellation or valid-artifact controlled stop cannot create an extra repair process.
+must retain transition code and before/after digests. The shared provider process-start seam enforces
+the hard maximum and emits `provider_invocation_index`, `provider_invocation_budget_max`,
+`provider_invocation_budget_remaining`, `recovery_transition` and
+`terminal_exhaustion_reason=provider_invocation_budget_exhausted` when exhausted. Attempt/run
+diagnostics aggregate used and remaining counters across their runtime units. A new product Attempt
+receives new runtime-unit budgets; cancellation or valid-artifact controlled stop cannot create an
+extra repair process. The provider-free incident corpus and p95 conformance measurement remain
+the `24I` closure responsibility.

@@ -2318,7 +2318,7 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **authority decision accepted; W24A–W24F implemented; W24G–W24I pending.**
+Status (2026-08-11): **authority decision accepted; W24A–W24F and W24H runtime-unit budget implemented; W24G and W24I pending.**
 This epic extends the completed `22G` typed recovery state machine and `22H`
 provider-free auditor. It does not reopen or replace those slices.
 
@@ -2372,8 +2372,9 @@ input and never bypass deterministic validation.
 `24A -> 24B -> 24C -> 24D -> 24E -> 24F -> 24H -> 24I`
 
 `24G` is conditional and starts after `24F` only when the recorded first-pass/repair metrics meet its
-entry condition. Each slice is a separate reviewable implementation unit with its own ExecPlan,
-focused tests and documentation synchronization.
+entry condition. `24H` records a shared hard budget at the provider process-start seam; `24I` still
+owns the incident corpus and final conformance closure. Each slice is a separate reviewable
+implementation unit with its own ExecPlan, focused tests and documentation synchronization.
 
 ### Cross-slice invariants
 
@@ -2733,6 +2734,12 @@ What:
 - require fresh target mutation for repair success and reject unchanged, stale, wrong-target or
   out-of-write-set output;
 - persist attempts used/remaining, selected transition and terminal exhaustion reason.
+
+Implementation status (2026-08-11): the shared provider process-start seam now enforces the default
+three-start budget per runtime execution unit, including normal, focused-repair and transport-retry
+transitions. Diagnostics and `reports/taskruns/<run_id>-quality.json` persist used/remaining counts,
+the last transition and an explicit exhaustion reason. The conformance corpus and p95 measurement
+remain part of `24I`.
 
 Tests:
 
