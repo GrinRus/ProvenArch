@@ -174,10 +174,12 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
       pre-Task runs and removes the legacy shell components.
 - [x] Merge the W23O route-closure implementation branch and record the post-merge verification;
       W24G and Epic 25 remain owned by their separate active plans.
-- [ ] Re-run the combined deterministic closure after the W25A/B release-gate changes, including
+- [x] Re-run the combined deterministic closure after the W25A/B release-gate changes, including
       embedded UI parity and the public Task/Attempt evidence boundary.
 - [x] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
       implementation plan.
+- [ ] Close this UI ExecPlan after the W25 release-gate evidence confirms the Task-first frontend
+      journey on a trusted machine.
 
 ### Non-goals
 
@@ -237,7 +239,7 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - [x] Keep historical v1 report fields readable and preserve existing failure taxonomy.
 - [ ] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
       identities, then run canonical live validation on a trusted host.
-- [ ] Complete full deterministic DoD and embedded UI parity after the W25 changes.
+- [x] Complete full deterministic DoD and embedded UI parity after the W25 changes.
 
 ### Non-goals
 
@@ -259,7 +261,7 @@ identity is evidence failure, not permission to synthesize a Task from historica
       latest run or `/tasks/legacy` as a release fallback.
 - [x] Report TSV/Markdown contains effective authority, audit result, invocation budget and first-pass
       validation evidence sourced from public JSON only.
-- [ ] `make contracts`, `make test`, `make lint`, `make build` and embedded UI parity pass.
+- [x] `make contracts`, `make test`, `make lint`, `make build` and embedded UI parity pass.
 - [ ] Canonical live gate has fresh public Task/Attempt evidence and no second analysis.
 
 ### Progress log
@@ -271,6 +273,10 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
   boundary. Trusted harness seeding and the final release gate remain open until a product-authored
   Task/Attempt history is present.
+- 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (270 Python,
+  47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
+  The trusted preflight remains blocked on exact Node 22.21.1 (host has 22.22.3) and the current CLI
+  backend cycle still does not author Task/Attempt identity for snapshot runs.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority
@@ -296,8 +302,10 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - [x] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted;
       the provider-free corpus is 100% first-pass-valid, 0% repair-entry and p95=2, so W24G is
       deferred without changing the public envelope.
-- [ ] Re-run the combined deterministic DoD after downstream W25 public-report integration so the
+- [x] Re-run the combined deterministic DoD after downstream W25 public-report integration so the
       Epic 24 authority remains verified at the release boundary.
+- [ ] Close the Epic 24 authority plan after W25 consumes fresh public audit/verdict evidence on the
+      trusted release gate.
 
 ### Non-goals
 
