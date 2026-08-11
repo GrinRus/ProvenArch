@@ -1,6 +1,8 @@
 package artifactquality
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -660,6 +662,52 @@ func TestValidateCollectManifestRejectsMissingCitationRepoPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `citations[0] repo evidence path "pom.xml" is missing`) {
 		t.Fatalf("expected missing citation path error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestUsesExactSharedEvidenceBytes(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	repoRoot := t.TempDir()
+	writeDoc(t, writeRoot, "overview.md", "# Payments Overview\n\n## Observations\n- `README.md` describes payments.\n")
+	writeRepoFile(t, repoRoot, "README.md", "# Payments\n")
+
+	payload := validCollectManifestPayload()
+	selected := "# Payments"
+	digest := sha256.Sum256([]byte(selected))
+	metadata := map[string]any{
+		"lines":        map[string]any{"start": float64(1), "end": float64(1)},
+		"excerpt":      selected,
+		"excerpt_hash": hex.EncodeToString(digest[:]),
+	}
+	citation := payload["citations"].([]any)[0].(map[string]any)
+	for key, value := range metadata {
+		citation[key] = value
+	}
+	for _, item := range []map[string]any{semanticSliceItem(payload, "entities", 0), semanticSliceItem(payload, "edges", 0), semanticSliceItem(payload, "findings", 0)} {
+		for key, value := range metadata {
+			item["provenance"].(map[string]any)["evidence"].([]any)[0].(map[string]any)[key] = value
+		}
+	}
+	writePayload := func() {
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePayload()
+	if err := ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot}); err != nil {
+		t.Fatalf("expected exact evidence to pass collect validation: %v", err)
+	}
+
+	citation["excerpt"] = "Payments"
+	writePayload()
+	if err := ValidateCollectManifestInRootWithRepoRoots(writeRoot, map[string]string{"payments-service": repoRoot}); err == nil || !strings.Contains(err.Error(), "evidence.excerpt_mismatch") {
+		t.Fatalf("expected shared excerpt issue, got %v", err)
 	}
 }
 

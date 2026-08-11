@@ -58,13 +58,14 @@ This planned chain resolves audit/final-verdict circularity through the pre-audi
 candidate. The implemented baseline above remains on-demand/read-only until slices 24E/24F land.
 See `docs/adr/ADR-20260811-validation-audit-effective-verdict-authority.md`.
 
-Planned Epic 24 evidence normalization (accepted decision, not implemented): line ranges are
-1-based inclusive and require valid UTF-8. Normalize CRLF to LF but do not trim whitespace or apply
-Unicode normalization. Canonical excerpt bytes are the selected logical line contents joined by LF
-with no synthetic trailing LF; `excerpt_hash` is SHA-256 of those same bytes. Excerpt/hash requires
-an explicit range, and whole-file excerpt mode is outside the MVP. Collect admission, staged
-validation, validator findings and provider-free audit must share this one bounded implementation
-and issue taxonomy.
+Epic 24 evidence normalization (W24C implemented): line ranges are 1-based inclusive and require
+valid UTF-8. Normalize CRLF to LF but do not trim whitespace or apply Unicode normalization.
+Canonical excerpt bytes are the selected logical line contents joined by LF with no synthetic
+trailing LF; `excerpt_hash` is SHA-256 of those same bytes. Excerpt/hash requires an explicit range,
+and whole-file excerpt mode is outside the MVP. The provider-free `internal/evidence` validator
+enforces bounded source/line/excerpt sizes and exposes one stable issue taxonomy. Collect admission,
+staged validation, validator findings and provider-free audit must call this implementation; the
+selected-run audit integration is read-only and fail-closed.
 
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
