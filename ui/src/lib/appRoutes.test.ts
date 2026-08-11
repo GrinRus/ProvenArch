@@ -19,6 +19,48 @@ describe("application route codec", () => {
     expect(formatAppRoute(parseAppRoute(location("/runs/run-1"), true))).toBe("/runs/run-1");
   });
 
+  it("preserves optional Task context on Architecture and Changes targets", () => {
+    const changes = parseAppRoute(location("/changes?task=task-1&run=run-1&view=evidence&source=snapshot"), true);
+    expect(changes).toMatchObject({ destination: "changes", taskId: "task-1", runId: "run-1" });
+    expect(formatAppRoute(changes)).toBe("/changes?task=task-1&run=run-1&view=evidence&source=snapshot&mode=rendered");
+    const architecture = parseAppRoute(location("/architecture?task=task-1&view=documents&source=current"), true);
+    expect(architecture).toMatchObject({ destination: "knowledge", taskId: "task-1" });
+    expect(formatAppRoute(architecture)).toBe("/architecture?view=documents&source=current&task=task-1");
+  });
+
+  it("drops unsafe Task context instead of treating it as an authority", () => {
+    const route = parseAppRoute(location("/changes?task=task%2Fforeign&view=overview"), true);
+    expect(route.taskId).toBeUndefined();
+    expect(route.invalid).toContain("task");
+    expect(formatAppRoute(route)).toBe("/changes?view=overview&source=snapshot&mode=rendered");
+  });
+
+  it("round-trips typed Task and Attempt identities without run fallback", () => {
+    expect(parseAppRoute(location("/tasks"), true)).toMatchObject({ destination: "tasks", taskView: "inbox" });
+    expect(parseAppRoute(location("/tasks/new"), true)).toMatchObject({ destination: "tasks", taskView: "new" });
+    const task = parseAppRoute(location("/tasks/task-opaque"), true);
+    expect(task).toMatchObject({ destination: "tasks", taskView: "detail", taskId: "task-opaque" });
+    expect(formatAppRoute(task)).toBe("/tasks/task-opaque");
+    const attempt = parseAppRoute(location("/tasks/task-opaque/attempts/attempt-opaque"), true);
+    expect(attempt).toMatchObject({ destination: "tasks", taskView: "attempt", taskId: "task-opaque", attemptId: "attempt-opaque" });
+    expect(formatAppRoute(attempt)).toBe("/tasks/task-opaque/attempts/attempt-opaque");
+  });
+
+  it("rejects ambiguous Task identities and never chooses another item", () => {
+    const malformed = parseAppRoute(location("/tasks/task%2Fwith-slash"), true);
+    expect(malformed).toMatchObject({ destination: "tasks", taskView: "inbox" });
+    expect(malformed.taskId).toBeUndefined();
+    expect(malformed.invalid).toContain("task");
+    expect(formatAppRoute(malformed)).toBe("/tasks");
+    const malformedAttempt = parseAppRoute(location("/tasks/task-1/attempts/"), true);
+    expect(malformedAttempt.taskId).toBeUndefined();
+    expect(malformedAttempt.invalid).toContain("task_route");
+    expect(formatAppRoute(malformedAttempt)).toBe("/tasks");
+    const reservedAttempt = parseAppRoute(location("/tasks/new/attempts/attempt-1"), true);
+    expect(reservedAttempt.taskId).toBeUndefined();
+    expect(reservedAttempt.invalid).toContain("task");
+  });
+
   it("sanitizes unsupported values without changing source", () => {
     const route = parseAppRoute(location("/changes?run=missing&view=magic&source=snapshot&mode=html"), true);
     expect(route.invalid).toEqual(["view", "mode"]);

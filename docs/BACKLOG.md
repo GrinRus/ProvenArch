@@ -1944,8 +1944,9 @@ Follow-up note (2026-04-22):
 
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
-Status (2026-08-11): **target design, delivery backlog and pre-implementation authority decisions
-accepted; implementation not started.**
+Status (2026-08-11): **target design and pre-implementation authority decisions accepted; 23B1
+typed routes and truthful target containers implemented; the remaining UI wave and shell cutover
+are pending.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2028,6 +2029,13 @@ Acceptance:
 - mobile uses bottom nav and safe-area; desktop supports collapsed semantic nav;
 - old Home/Analyze route components/selectors are removed in the accepted cutover diff;
 - route/component/rendered tests cover 1440/1024/390 widths and keyboard navigation.
+
+Implementation status (2026-08-11): `23B1` is implemented on the additive UI route surface. The
+codec now preserves `/tasks`, `/tasks/new`, exact Task detail and Task/Attempt identities, plus
+optional Task context on Architecture/Changes. The target container is explicit and read-only:
+it does not query or mutate Task data and never substitutes a legacy/latest run. `23B2`, the
+primary-navigation cutover and removal of Home/Analyze routes, remain pending until the vertical
+Task, Architecture and Changes slices are ready.
 
 ### 23C — New Task composer and inline runner readiness
 

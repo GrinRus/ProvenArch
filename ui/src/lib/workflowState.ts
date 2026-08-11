@@ -1,5 +1,5 @@
 export type WorkflowStatus = "available" | "needs_review" | "blocked" | "complete";
-export type WorkflowDestination = "setup" | "home" | "runs" | "knowledge" | "changes" | "settings";
+export type WorkflowDestination = "setup" | "home" | "runs" | "tasks" | "knowledge" | "changes" | "settings";
 export type PublicationState = "clean" | "dirty" | "stale" | "blocked" | "loading" | "unknown";
 
 export type WorkflowStateInput = {

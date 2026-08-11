@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProductShell } from "./components/ProductShell";
+import { TaskRouteContainer } from "./components/TaskRouteContainer";
 import { AppOverlays } from "./components/AppOverlays";
 import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
 import { HomePage, RunsPage } from "./components/ProductPages";
@@ -1021,6 +1022,7 @@ export default function App() {
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
+	  {destination === "tasks" ? <TaskRouteContainer view={route.taskView ?? "inbox"} taskId={route.taskId} attemptId={route.attemptId} invalid={route.invalid} /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace
 		  view={route.changesView ?? "overview"}
