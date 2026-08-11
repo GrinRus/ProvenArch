@@ -75,6 +75,17 @@ describe("KnowledgePage", () => {
     expect(screen.getByText(/Workspace health: warn/)).toHaveTextContent("2 warnings");
   });
 
+  it("keeps Architecture explicitly scoped to the selected Task", () => {
+    const onOpenTask = vi.fn();
+    render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="overview" taskId="task-opaque-1" onOpenTask={onOpenTask} onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
+    const context = screen.getByTestId("task-architecture-context");
+    expect(context).toHaveTextContent("task-opaque-1");
+    expect(context).toHaveTextContent("current promoted workspace authority");
+    expect(context).toHaveTextContent("does not infer state from the latest run");
+    fireEvent.click(within(context).getByRole("button", { name: "Back to Task" }));
+    expect(onOpenTask).toHaveBeenCalledWith("task-opaque-1");
+  });
+
   it("filters the map and mobile fallback by canonical owner and domain tags", () => {
     const filteredKnowledge: KnowledgeResponse = {
       ...partialKnowledge,

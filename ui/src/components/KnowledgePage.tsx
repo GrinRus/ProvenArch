@@ -27,6 +27,8 @@ export function KnowledgePage({
   onDocumentChange,
   onOpenArtifact,
   onOpenRuns,
+  taskId,
+  onOpenTask,
 }: {
   architecture?: ArchitectureResponse | null;
   knowledge: KnowledgeResponse | null;
@@ -41,6 +43,8 @@ export function KnowledgePage({
   onDocumentChange?: (path?: string) => void;
   onOpenArtifact: (path: string) => void;
   onOpenRuns?: () => void;
+  taskId?: string;
+  onOpenTask?: (taskId: string) => void;
 }) {
 	const architecture = providedArchitecture ?? (knowledge ? architectureFromKnowledge(knowledge) : null);
 	const activePageView: KnowledgeView = view === "atlas" ? "map" : view === "entities" ? "catalog" : view === "artifacts" ? "evidence" : view;
@@ -90,6 +94,16 @@ export function KnowledgePage({
           <span>Current workspace</span>
         </div>
       </header>
+
+      {taskId ? <aside className="task-architecture-context" data-testid="task-architecture-context" aria-label="Task Architecture context">
+        <div>
+          <p className="eyebrow">Task context</p>
+          <strong>Architecture for the selected Task</strong>
+          <p><code>{taskId}</code> · current promoted workspace authority</p>
+          <span className="hint">This surface is read-only and does not infer state from the latest run.</span>
+        </div>
+        {onOpenTask ? <button type="button" className="ui-button tone-neutral" onClick={() => onOpenTask(taskId)}>Back to Task</button> : null}
+      </aside> : null}
 
       <nav className="destination-tabs architecture-tabs" aria-label="Architecture views">
         {views.map((item) => <button key={item.id} type="button" aria-current={activePageView === item.id ? "page" : undefined} onClick={() => onViewChange(item.id)}>{item.label}</button>)}
