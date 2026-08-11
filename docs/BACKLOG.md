@@ -2903,10 +2903,11 @@ ambiguous identity remains intentionally fail-closed and is never synthesized fr
 
 Latest gate evidence (2026-08-11): canonical `release fast` was run with exact Node/npm 22.21.1,
 writable `/tmp/provenarch-live-e2e` and sufficient free space. All four required profile/sweep
-records stopped at provider readiness because Qwen returned `quota_or_permission`; no provider run
-or Task/Attempt evidence was created. The resulting `RELEASE BLOCKED` verdict is an operational
-host/account blocker, not a reason to weaken the public Task/Attempt boundary or change canonical
-matrices. Rerun on a trusted host/account with Qwen quota and permission.
+records stopped at provider readiness: Claude and Qwen both returned `quota_or_permission` from the
+configured Kimi billing-cycle account, while Codex readiness passed. No provider run or Task/Attempt
+evidence was created. The resulting `RELEASE BLOCKED` verdict is an operational host/account
+blocker, not a reason to weaken the public Task/Attempt boundary or change canonical matrices. Rerun
+on a trusted host/account with Claude and Qwen quota/permission.
 
 ### Goal
 
