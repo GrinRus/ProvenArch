@@ -96,3 +96,13 @@ it("keeps failed runs in Run Studio instead of presenting a publishable review",
   expect(screen.getByTestId("changes-open-run-studio")).toBeInTheDocument();
   expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
 });
+
+it("keeps Changes scoped to the exact Task identity without latest-run fallback", () => {
+  const onOpenTask = vi.fn();
+  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" view="overview" taskId="task-opaque-23" onOpenTask={onOpenTask} onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
+  const context = screen.getByTestId("task-changes-context");
+  expect(context).toHaveTextContent("task-opaque-23");
+  expect(context).toHaveTextContent("No latest-run fallback");
+  fireEvent.click(screen.getByRole("button", { name: "Back to Task" }));
+  expect(onOpenTask).toHaveBeenCalledWith("task-opaque-23");
+});

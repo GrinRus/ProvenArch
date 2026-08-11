@@ -205,6 +205,8 @@ Baseline scenario set:
     layout wording and canonical relation-evidence navigation through the accessible list;
   - W23K fixtures cover findings/questions/gaps separation, search filtering, bounded selected
     detail, linked-reference counts and the explicit no-approval/proposal-mutation boundary;
+  - W23L fixtures cover exact Task identity in Changes, current-vs-snapshot authority wording,
+    selected run/Attempt guardrails and return navigation without latest-run fallback;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
