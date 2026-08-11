@@ -1581,12 +1581,12 @@ Native SCM webhook listener/hosted control plane остаются вне MVP; re
 - API-trigger не должен превращаться в hosted control plane в рамках MVP.
 - Exact CLI flags, run log retention knobs, env precedence и local runbook examples намеренно не дублируются здесь; canonical source of truth — CLI help, `README.md` quickstart и профильные runbook docs.
 
-## 10) Task-first API boundary (Epic 23; W23A1–A3 partial)
+## 10) Task-first API boundary (Epic 23; W23A1–A4 foundation)
 
 Accepted Task/Attempt identity, persistence, lifecycle, admission and publication decisions are
-specified in `docs/spec/TASK_SPEC.md`. W23A1 machine-readable contracts and W23A2 registry
-persistence are implemented, together with the read/write Task surface below. Attempt admission,
-retry and run linkage remain W23A4 work; existing `/api/pipeline/runs*` behavior is unchanged.
+specified in `docs/spec/TASK_SPEC.md`. W23A1 machine-readable contracts, W23A2 registry persistence,
+W23A3 Task CRUD and W23A4 Attempt admission/retry linkage are implemented; existing
+`/api/pipeline/runs*` behavior is unchanged.
 
 The implemented W23A3 boundary currently exposes:
 
@@ -1601,14 +1601,21 @@ The implemented W23A3 boundary currently exposes:
   `GET /api/tasks/<task_id>/attempts/<attempt_id>`; both require an exact Task identity and never
   fall back to another Task or latest run.
 
-Attempt admission, retry and idempotent start tokens are still W23A4 work. One admitted Attempt
-will map to one exact pipeline run and snapshot effective runner/scope configuration at admission.
-Explicit Task, Attempt, run and publication identities never fall back to latest/current state.
+`POST /api/tasks/<task_id>/attempts` requires `idempotency_key` and optionally accepts `pipeline`
+(`init|refresh`) and `intent` (`start|queue`). It returns an immutable effective runtime snapshot,
+server-generated Attempt identity and an exact requested `run_id`. Repeating the same key and
+fingerprint returns the same identity; reusing it for different options returns
+`409 idempotency_conflict`. `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` requires a
+terminal parent and creates a child Attempt with `parent_attempt_id` and `retry_reason`.
+Admission validates repository scope and runner before provider start, uses the shared admission
+lease, and returns `run_active`/`attempt_queue_full` instead of replacing another Task's queued
+Attempt. The Attempt registry watcher mirrors queued/running/terminal run state and retains the
+exact Task/Attempt/run join.
 
 Current `/api/pipeline/runs*` remains authoritative for implemented execution lifecycle and legacy
 run history during migration. Pre-contract runs remain readable but are not synthesized into Tasks.
 The Task/Attempt JSON schemas, typed errors, pagination cursors, fixtures and API tests are now
-covered by the W23A1–A3 slice; frontend code cannot invent a parallel wire shape.
+covered by the W23A1–A4 foundation; frontend code cannot invent a parallel wire shape.
 
 Planned publication linkage extends successful Git mutation responses with server-authored
 Task/Attempt/run context and the exact confirmed full-workspace inventory fingerprint. It does not

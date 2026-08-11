@@ -2055,6 +2055,8 @@ func formatOptionalString(value string) any {
 func formatRunInfoPayload(runInfo orchestrator.RunInfo) map[string]any {
 	return map[string]any{
 		"run_id":               runInfo.RunID,
+		"task_id":              formatOptionalString(runInfo.TaskID),
+		"attempt_id":           formatOptionalString(runInfo.AttemptID),
 		"pipeline":             runInfo.Pipeline,
 		"status":               runInfo.Status,
 		"started_at":           runInfo.StartedAt.UTC().Format(time.RFC3339),

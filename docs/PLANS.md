@@ -75,7 +75,7 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 - [x] Add schema-validated public Task, Attempt and registry contracts with full schema-guardian sync.
 - [x] Implement crash-safe `task-history.json` current/last-good persistence and restart diagnostics.
 - [x] Add create/list/read/update/archive/unarchive Task APIs with stable pagination and revision checks.
-- [ ] Add idempotent per-Attempt admission with immutable scope/runner snapshots and exact run linkage.
+- [x] Add idempotent per-Attempt admission with immutable scope/runner snapshots and exact run linkage.
 - [ ] Preserve pre-contract runs as explicit read-only legacy evidence without synthetic Tasks.
 - [ ] Expose unknown/unavailable result and publication linkage without inferred `Published` state.
 
@@ -107,10 +107,10 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 
 ### Acceptance criteria
 
-- [ ] Task survives restart and remains the same aggregate across child retry/rerun Attempts.
-- [ ] Admitted Attempt config cannot change after Settings/workspace/env updates.
-- [ ] Invalid identity/scope/runner and queue overflow fail before provider execution.
-- [ ] Duplicate start token returns the same Attempt and cannot create a second run.
+- [x] Task survives restart and remains the same aggregate across child retry/rerun Attempts.
+- [x] Admitted Attempt config cannot change after Settings/workspace/env updates.
+- [x] Invalid identity/scope/runner and queue overflow fail before provider execution.
+- [x] Duplicate start token returns the same Attempt and cannot create a second run.
 - [ ] Primary/last-good write faults never publish partial Task state in memory.
 - [ ] Legacy runs remain readable and never appear as fabricated Task rows.
 - [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
@@ -128,7 +128,8 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 - 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,
   single-active/single-queued coordination, legacy-run and publication-linkage decisions. Added the
   ADR/spec package and implemented W23A1 schemas, semantic Go contracts, examples and provider-free
-  fixtures. W23A2 persistence and subsequent API/admission slices remain pending.
+  fixtures. W23A2 persistence, W23A3 Task APIs and W23A4 admission/linkage are now implemented;
+  frontend and later Epic 24/25 slices remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

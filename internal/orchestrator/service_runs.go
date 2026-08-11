@@ -37,18 +37,39 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	if err != nil {
 		return "", err
 	}
+	if request.ProviderOverride != "" {
+		provider, parseErr := acpruntime.ParseProvider(string(request.ProviderOverride))
+		if parseErr != nil {
+			return "", parseErr
+		}
+		for key := range resolvedStepProviders.Effective {
+			resolvedStepProviders.Effective[key] = provider
+			resolvedStepProviders.Source[key] = acpruntime.ProviderSourceOverride
+		}
+	}
 	resolvedProviderModels, err := s.ResolveProviderModelProfile(request.Workspace.Manifest)
 	if err != nil {
 		return "", err
 	}
-	request.ProviderModels = &resolvedProviderModels
-	runID := s.nextRunID()
+	if request.ProviderModels == nil {
+		request.ProviderModels = &resolvedProviderModels
+	} else {
+		resolvedProviderModels = *request.ProviderModels
+	}
+	runID := strings.TrimSpace(request.RequestedRunID)
+	if runID == "" {
+		runID = s.nextRunID()
+	}
 	now := s.clock().UTC()
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return "", ErrServiceClosed
+	}
+	if _, exists := s.runs[runID]; exists {
+		s.mu.Unlock()
+		return "", fmt.Errorf("run %q already exists", runID)
 	}
 	queuedRecord := func() runRecord {
 		progress := newRunProgress(request.Pipeline, now, strings.TrimSpace(request.ResumeFromStep))
@@ -60,6 +81,8 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		return runRecord{
 			info: RunInfo{
 				RunID:                runID,
+				TaskID:               strings.TrimSpace(request.TaskID),
+				AttemptID:            strings.TrimSpace(request.AttemptID),
 				Pipeline:             string(request.Pipeline),
 				Status:               RunStatusQueued,
 				StartedAt:            now,
@@ -717,6 +740,8 @@ func (s *Service) addHistoryDiagnosticLocked(message string) {
 func runRecordToHistoryItem(record runRecord) runHistoryItem {
 	item := runHistoryItem{
 		RunID:                record.info.RunID,
+		TaskID:               record.info.TaskID,
+		AttemptID:            record.info.AttemptID,
 		Pipeline:             record.info.Pipeline,
 		Status:               record.info.Status,
 		StartedAt:            record.info.StartedAt.UTC().Format(time.RFC3339),
@@ -759,6 +784,8 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 	return runRecord{
 		info: RunInfo{
 			RunID:                item.RunID,
+			TaskID:               item.TaskID,
+			AttemptID:            item.AttemptID,
 			Pipeline:             item.Pipeline,
 			Status:               item.Status,
 			StartedAt:            startedAt.UTC(),

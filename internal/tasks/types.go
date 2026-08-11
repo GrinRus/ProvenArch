@@ -147,24 +147,27 @@ type TerminalSummary struct {
 }
 
 type Attempt struct {
-	Version          int              `json:"version"`
-	AttemptID        string           `json:"attempt_id"`
-	TaskID           string           `json:"task_id"`
-	RunID            string           `json:"run_id"`
-	ParentAttemptID  *string          `json:"parent_attempt_id"`
-	RetryReason      string           `json:"retry_reason,omitempty"`
-	TaskRevision     int              `json:"task_revision"`
-	IntentSnapshot   IntentSnapshot   `json:"intent_snapshot"`
-	EffectiveRuntime EffectiveRuntime `json:"effective_runtime"`
-	Status           AttemptStatus    `json:"status"`
-	AdmittedAt       string           `json:"admitted_at"`
-	QueuedAt         *string          `json:"queued_at"`
-	StartedAt        *string          `json:"started_at"`
-	FinishedAt       *string          `json:"finished_at"`
-	TerminalSummary  *TerminalSummary `json:"terminal_summary"`
-	RetainedEvidence RetainedEvidence `json:"retained_evidence"`
-	Outcome          Outcome          `json:"outcome"`
-	Publication      Publication      `json:"publication"`
+	Version            int              `json:"version"`
+	AttemptID          string           `json:"attempt_id"`
+	TaskID             string           `json:"task_id"`
+	RunID              string           `json:"run_id"`
+	ParentAttemptID    *string          `json:"parent_attempt_id"`
+	RetryReason        string           `json:"retry_reason,omitempty"`
+	Pipeline           string           `json:"pipeline,omitempty"`
+	IdempotencyKey     string           `json:"idempotency_key,omitempty"`
+	RequestFingerprint string           `json:"request_fingerprint,omitempty"`
+	TaskRevision       int              `json:"task_revision"`
+	IntentSnapshot     IntentSnapshot   `json:"intent_snapshot"`
+	EffectiveRuntime   EffectiveRuntime `json:"effective_runtime"`
+	Status             AttemptStatus    `json:"status"`
+	AdmittedAt         string           `json:"admitted_at"`
+	QueuedAt           *string          `json:"queued_at"`
+	StartedAt          *string          `json:"started_at"`
+	FinishedAt         *string          `json:"finished_at"`
+	TerminalSummary    *TerminalSummary `json:"terminal_summary"`
+	RetainedEvidence   RetainedEvidence `json:"retained_evidence"`
+	Outcome            Outcome          `json:"outcome"`
+	Publication        Publication      `json:"publication"`
 }
 
 type Outcome struct {
@@ -297,6 +300,15 @@ func (value Attempt) Validate() error {
 	}
 	if value.ParentAttemptID == nil && strings.TrimSpace(value.RetryReason) != "" {
 		problems = append(problems, "retry_reason requires parent_attempt_id")
+	}
+	if value.Pipeline != "" && value.Pipeline != "init" && value.Pipeline != "refresh" {
+		problems = append(problems, "pipeline must be init or refresh")
+	}
+	if len(value.IdempotencyKey) > 256 {
+		problems = append(problems, "idempotency_key must be at most 256 characters")
+	}
+	if value.RequestFingerprint != "" && !regexp.MustCompile(`^[a-fA-F0-9]{64}$`).MatchString(value.RequestFingerprint) {
+		problems = append(problems, "request_fingerprint must be a SHA-256 fingerprint")
 	}
 	if value.TaskRevision < 1 {
 		problems = append(problems, "task_revision must be positive")
