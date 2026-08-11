@@ -8,6 +8,7 @@
 - `final-run-index.schema.json` — canonical staged final set index.
 - `citation-index.schema.json` — citation graph for promoted reports.
 - `validator-verdict.schema.json` — validator/findings primary verdict surface.
+- `effective-verdict.schema.json` — orchestrator-owned technical promotion authority.
 - `qa-answer.schema.json` — async Ask runtime answer artifact.
 - `source-qa-answer.schema.json` — immutable provenance record for an explicit Ask-to-Proposal draft.
 - `task.schema.json` — durable product Task intent and explicit unavailable/linkage states.

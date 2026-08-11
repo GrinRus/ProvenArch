@@ -1009,6 +1009,7 @@ type pipelineSemanticDocflowState struct {
 	finalRunIndex    *contracts.FinalRunIndex
 	citationIndex    *contracts.CitationIndex
 	validatorVerdict *contracts.ValidatorVerdict
+	effectiveVerdict *contracts.EffectiveVerdict
 	semanticBase     *contracts.SemanticSnapshot
 }
 

@@ -199,15 +199,16 @@ func TestDocFirstOwnerGapOnlyValidatorFailDowngradesToPass(t *testing.T) {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	verdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
-	if verdict.Verdict != "PASS" {
-		t.Fatalf("expected reconciled PASS verdict, got %q", verdict.Verdict)
+	providerVerdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
+	if providerVerdict.Verdict != "FAIL" {
+		t.Fatalf("expected immutable provider FAIL draft, got %q", providerVerdict.Verdict)
 	}
-	if len(verdict.Findings) == 0 || len(verdict.Questions) == 0 {
-		t.Fatalf("expected owner-gap findings/questions to remain visible, got %+v", verdict)
+	effective := readRunEffectiveVerdict(t, ws.Path, info.RunID)
+	if effective.Verdict != "PASS" {
+		t.Fatalf("expected effective PASS verdict, got %q", effective.Verdict)
 	}
-	if !strings.Contains(strings.ToLower(verdict.Summary), "owner-gap") {
-		t.Fatalf("expected summary to mention owner-gap reconciliation, got %q", verdict.Summary)
+	if len(effective.Findings) == 0 || len(effective.Questions) == 0 {
+		t.Fatalf("expected owner-gap findings/questions to remain visible, got %+v", effective)
 	}
 }
 
@@ -237,15 +238,16 @@ func TestDocFirstSourceEvidenceValidatorFailRemainsAdvisory(t *testing.T) {
 		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
-	verdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
-	if verdict.Verdict != "PASS" {
-		t.Fatalf("expected reconciled PASS verdict, got %q", verdict.Verdict)
+	providerVerdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
+	if providerVerdict.Verdict != "FAIL" {
+		t.Fatalf("expected immutable provider FAIL draft, got %q", providerVerdict.Verdict)
 	}
-	if len(verdict.Issues) != 1 || verdict.Issues[0].Severity != "warning" {
-		t.Fatalf("expected source-evidence issue to remain visible as warning, got %+v", verdict.Issues)
+	effective := readRunEffectiveVerdict(t, ws.Path, info.RunID)
+	if effective.Verdict != "PASS" {
+		t.Fatalf("expected effective PASS verdict, got %q", effective.Verdict)
 	}
-	if !strings.Contains(verdict.Summary, "source-evidence observations remain advisory") {
-		t.Fatalf("expected source-evidence reconciliation note, got %q", verdict.Summary)
+	if len(effective.AdvisoryIssues) != 1 || effective.AdvisoryIssues[0].Severity != "warning" {
+		t.Fatalf("expected source-evidence issue to remain advisory warning, got %+v", effective.AdvisoryIssues)
 	}
 }
 
@@ -1105,6 +1107,21 @@ func readRunValidatorVerdict(t *testing.T, workspacePath string, runID string) c
 	verdict, err := contracts.ParseValidatorVerdict(raw)
 	if err != nil {
 		t.Fatalf("parse validator verdict %q: %v", verdictPath, err)
+	}
+	return verdict
+}
+
+func readRunEffectiveVerdict(t *testing.T, workspacePath string, runID string) contracts.EffectiveVerdict {
+	t.Helper()
+
+	verdictPath := filepath.Join(workspacePath, "reports", "taskruns", runID, "validator", "effective-verdict.json")
+	raw, err := os.ReadFile(verdictPath)
+	if err != nil {
+		t.Fatalf("read effective verdict %q: %v", verdictPath, err)
+	}
+	verdict, err := contracts.ParseEffectiveVerdict(raw)
+	if err != nil {
+		t.Fatalf("parse effective verdict %q: %v", verdictPath, err)
 	}
 	return verdict
 }

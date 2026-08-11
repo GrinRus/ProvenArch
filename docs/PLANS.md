@@ -148,7 +148,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - [x] Validate evidence line/excerpt/hash claims through one bounded shared implementation.
 - [x] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
 - [x] Run provider-free selected-run audit before the first canonical write.
-- [ ] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
+- [x] Persist/expose a separately versioned orchestrator-owned effective technical verdict.
+- [ ] Complete the follow-up recovery-budget and provider-free conformance closure in W24G–W24I.
 
 ### Non-goals
 
@@ -185,8 +186,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - [ ] All evidence consumers return the same normalized locator identity and typed issue codes.
 - [ ] Unknown semantic fields are never silently dropped and every promoted edge resolves.
 - [ ] Audit error produces zero canonical writes and leaves prior generation/Git bytes unchanged.
-- [ ] Provider PASS/FAIL cannot override the effective deterministic result.
-- [ ] Historical provider verdicts remain readable as legacy/unavailable effective authority.
+- [x] Provider PASS/FAIL cannot override the effective deterministic result.
+- [x] Historical provider verdicts remain readable as legacy/unavailable effective authority.
 - [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
 
 ### Risks
@@ -204,7 +205,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
   accepted ADR/spec/backlog package. W24A exact run/citation/final containment checks are
   implemented; W24B coherent verdict admission, W24C shared bounded evidence validation and W24D
   semantic envelope/graph checks and the provider-free selected-run pre-promotion audit are
-  implemented; W24F remains pending.
+  implemented; W24F effective verdict persistence, public authority selection and retry rebinding
+  are implemented; W24G–I remain pending.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

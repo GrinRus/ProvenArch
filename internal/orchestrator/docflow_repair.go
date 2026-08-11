@@ -85,9 +85,6 @@ func (e *pipelineExecution) repairValidatorScopedArtifacts(verdict *contracts.Va
 	if err != nil {
 		return validatorRepairStageResult{}, fmt.Errorf("parse repaired validator verdict: %w", err)
 	}
-	if err := e.workspace.WriteFile(runtimeValidatorVerdictPath(e.runID), verdictRaw); err != nil {
-		return validatorRepairStageResult{}, fmt.Errorf("write repaired validator verdict: %w", err)
-	}
 	e.citationIndex = &repairedCitationIndex
 	*verdict = repairedVerdict
 	return validatorRepairStageResult{
@@ -308,9 +305,6 @@ func (e *pipelineExecution) reconcileOwnerGapOnlyVerdict(verdict *contracts.Vali
 	if err != nil {
 		return false, fmt.Errorf("parse owner-gap-reconciled validator verdict: %w", err)
 	}
-	if err := e.workspace.WriteFile(runtimeValidatorVerdictPath(e.runID), verdictRaw); err != nil {
-		return false, fmt.Errorf("write owner-gap-reconciled validator verdict: %w", err)
-	}
 	*verdict = repairedVerdict
 	return true, nil
 }
@@ -347,9 +341,6 @@ func (e *pipelineExecution) reconcileEvidenceAdvisoryOnlyVerdict(verdict *contra
 	repairedVerdict, err := contracts.ParseValidatorVerdict(verdictRaw)
 	if err != nil {
 		return false, fmt.Errorf("parse evidence-advisory validator verdict: %w", err)
-	}
-	if err := e.workspace.WriteFile(runtimeValidatorVerdictPath(e.runID), verdictRaw); err != nil {
-		return false, fmt.Errorf("write evidence-advisory validator verdict: %w", err)
 	}
 	*verdict = repairedVerdict
 	return true, nil

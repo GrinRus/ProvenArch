@@ -105,6 +105,20 @@ func TestRetryHydratesReboundAggregateAndValidatorInputs(t *testing.T) {
 	if err := ws.WriteFile("reports/taskruns/parent/validator/validator-verdict.json", verdictRaw); err != nil {
 		t.Fatal(err)
 	}
+	effective := contracts.EffectiveVerdict{
+		Version: 1, Kind: "effective", Authority: "orchestrator", RunID: "parent", GeneratedAt: verdict.GeneratedAt,
+		ProviderVerdictPath:   "reports/taskruns/parent/validator/validator-verdict.json",
+		ProviderVerdictSHA256: strings.Repeat("0", 64), Verdict: "PASS", CheckedPaths: verdict.CheckedPaths,
+		FixedPaths: []string{}, TechnicalIssues: []contracts.ValidatorIssue{}, AdvisoryIssues: []contracts.AdvisoryValidatorIssue{},
+		Audit: contracts.EffectiveAuditSummary{Status: "pass", IssueCodes: []string{}},
+	}
+	effectiveRaw, err := json.Marshal(effective)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFile("reports/taskruns/parent/validator/effective-verdict.json", effectiveRaw); err != nil {
+		t.Fatal(err)
+	}
 	if err := copyRetryStaging(ws, "parent", "child", "init.step4.proposals", nil); err != nil {
 		t.Fatal(err)
 	}

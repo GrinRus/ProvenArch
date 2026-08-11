@@ -169,23 +169,47 @@ func copyReusableValidatorInput(ws workspace.Root, parentRunID, childRunID, resu
 	if err != nil {
 		return err
 	}
-	return ws.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", childRunID, "validator", "validator-verdict.json")), raw)
+	if err := ws.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", childRunID, "validator", "validator-verdict.json")), raw); err != nil {
+		return err
+	}
+	effectiveRaw, err := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", parentRunID, "validator", effectiveVerdictFile)))
+	if err != nil {
+		return fmt.Errorf("parent effective verdict is unavailable: %w", err)
+	}
+	effective, err := contracts.ParseEffectiveVerdict(effectiveRaw)
+	if err != nil {
+		return err
+	}
+	effective.RunID = childRunID
+	effective.ProviderVerdictPath = replaceRetryRunPath(effective.ProviderVerdictPath, parentRunID, childRunID)
+	effective.ProviderVerdictSHA256 = sha256Hex(raw)
+	for i := range effective.CheckedPaths {
+		effective.CheckedPaths[i] = replaceRetryRunPath(effective.CheckedPaths[i], parentRunID, childRunID)
+	}
+	for i := range effective.FixedPaths {
+		effective.FixedPaths[i] = replaceRetryRunPath(effective.FixedPaths[i], parentRunID, childRunID)
+	}
+	effectiveRaw, err = marshalRetryJSON(effective)
+	if err != nil {
+		return err
+	}
+	return ws.WriteFile(filepath.ToSlash(filepath.Join("reports", "taskruns", childRunID, "validator", effectiveVerdictFile)), effectiveRaw)
 }
 
 func validateReusableValidatorInput(ws workspace.Root, parentRunID, resumeStep string) error {
 	if !strings.Contains(strings.ToLower(resumeStep), "proposals") {
 		return nil
 	}
-	raw, err := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", parentRunID, "validator", "validator-verdict.json")))
+	raw, err := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", parentRunID, "validator", effectiveVerdictFile)))
 	if err != nil {
-		return fmt.Errorf("parent validator retry input is unavailable: %w", err)
+		return fmt.Errorf("parent effective verdict retry input is unavailable: %w", err)
 	}
-	verdict, err := contracts.ParseValidatorVerdict(raw)
+	verdict, err := contracts.ParseEffectiveVerdict(raw)
 	if err != nil {
 		return fmt.Errorf("parent validator retry input is invalid: %w", err)
 	}
 	if strings.TrimSpace(verdict.RunID) != parentRunID || verdict.Verdict != "PASS" {
-		return fmt.Errorf("parent validator retry input is not a matching PASS verdict")
+		return fmt.Errorf("parent effective retry input is not a matching PASS verdict")
 	}
 	return nil
 }
@@ -342,20 +366,31 @@ func (e *pipelineExecution) hydrateRetryInputs() error {
 		e.coverage = mergeCoverage(nil, &finalIndex.Semantic.Coverage)
 	}
 	if strings.Contains(resume, "proposals") {
-		verdictRaw, readErr := e.workspace.ReadFile(runtimeValidatorVerdictPath(e.runID))
+		verdictRaw, readErr := e.workspace.ReadFile(runtimeEffectiveVerdictPath(e.runID))
 		if readErr != nil {
 			return readErr
 		}
-		verdict, parseErr := contracts.ParseValidatorVerdict(verdictRaw)
+		effective, parseErr := contracts.ParseEffectiveVerdict(verdictRaw)
 		if parseErr != nil {
 			return parseErr
 		}
-		if verdict.RunID != e.runID || verdict.Verdict != "PASS" {
-			return fmt.Errorf("retry validator input was not rebound to a matching PASS verdict")
+		if effective.RunID != e.runID || effective.Verdict != "PASS" {
+			return fmt.Errorf("retry effective input was not rebound to a matching PASS verdict")
 		}
+		e.effectiveVerdict = &effective
+		verdict := effectiveAsValidatorVerdict(effective)
 		e.validatorVerdict = &verdict
 	}
 	return nil
+}
+
+func effectiveAsValidatorVerdict(effective contracts.EffectiveVerdict) contracts.ValidatorVerdict {
+	return contracts.ValidatorVerdict{
+		Version: effective.Version, RunID: effective.RunID, GeneratedAt: effective.GeneratedAt,
+		Verdict: effective.Verdict, Summary: effective.Summary, CheckedPaths: append([]string(nil), effective.CheckedPaths...),
+		FixedPaths: append([]string(nil), effective.FixedPaths...), Findings: append([]contracts.Finding(nil), effective.Findings...),
+		Questions: append([]contracts.Question(nil), effective.Questions...), Issues: append([]contracts.ValidatorIssue(nil), effective.TechnicalIssues...),
+	}
 }
 
 func validateReusableFinalInputs(stagingRoot, parentRunID, resumeStep string) error {

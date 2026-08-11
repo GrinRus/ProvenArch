@@ -187,8 +187,8 @@ no synthetic trailing LF, and SHA-256 over the selected bytes. Excerpt/hash fiel
 explicit line range; oversized, invalid-UTF-8 or out-of-range sources fail closed.
 
 W24B admission keeps provider `fixed_paths` empty, rejects `PASS` with technical errors, requires
-an effective `FAIL` to carry a technical error, and enforces unique deterministic issue identities
-and selected-run document/citation/path references.
+the orchestrator-owned effective `FAIL` to carry a technical error, and enforces unique
+deterministic issue identities and selected-run document/citation/path references.
 
 W24D adds strict semantic-envelope admission for new writes: object keys outside the documented
 entity/edge/finding/question/provenance/evidence surface are rejected, conflicting IDs across shard
@@ -207,6 +207,21 @@ Allowed `verdict` values:
 Semantic role:
 - canonical gate для promotion staged final set в стабильные `reports/*` и `proposals/*`
 - validator может фиксировать только technical/index/reference issues, а не переписывать authored смысл документов
+
+## 6a) Effective Technical Verdict Schema
+
+- **Source of truth:** `schemas/effective-verdict.schema.json`
+- Persisted at `reports/taskruns/<run_id>/validator/effective-verdict.json` after the
+  deterministic candidate and selected-run audit.
+- `validator-verdict.json` remains the immutable provider draft. The effective artifact is a
+  separately versioned (`version=1`) `authority=orchestrator` envelope and is never inferred from
+  a historical provider-only run.
+- `verdict`, `checked_paths`, `fixed_paths`, `technical_issues` and the bounded audit summary are
+  orchestrator-owned. Provider findings/questions are copied only after their existing evidence and
+  graph checks and remain advisory; unmatched provider issues are warning-level `advisory_issues`
+  with a deterministic `match_key`.
+- Any technical/audit error produces `verdict=FAIL`; provider `FAIL` cannot veto a deterministic
+  clean snapshot. A missing effective artifact is an explicit legacy/unavailable authority state.
 
 ## 7) Runtime Draft Manifests (stage-only contract)
 

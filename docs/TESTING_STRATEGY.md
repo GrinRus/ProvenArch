@@ -45,6 +45,10 @@
   endpoints while preserving unresolved finding/question references as advisory coverage gaps.
 - W24E promotion fixtures run the public selected-run scanner before activation, fail closed on
   contaminated staged output, and verify the previous canonical generation remains unchanged.
+- W24F authority fixtures keep provider `validator-verdict.json` byte-identical, persist a separate
+  effective verdict, prove provider PASS/FAIL cannot override deterministic technical status, retain
+  unmatched provider issues as warning-level advisory records, and expose legacy/unavailable status
+  when an effective artifact is absent. Retry fixtures rebind effective paths to child runs.
 - W24C provider-free evidence fixtures exercise one shared bounded implementation across collect,
   staged validation and selected-run audit: 1-based inclusive ranges, CRLF/CR-to-LF normalization,
   exact whitespace/Unicode preservation, excerpt bytes and SHA-256 identity.

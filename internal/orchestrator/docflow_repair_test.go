@@ -90,12 +90,8 @@ func TestRepairValidatorScopedArtifactsPersistsCitationRepairAndVerdictFixedPath
 		t.Fatalf("expected repaired citation index to persist renamed claim id, got %#v", repairedCitationIndex.Citations[1].ClaimIDs)
 	}
 
-	verdictRaw, err := os.ReadFile(filepath.Join(root, runtimeValidatorVerdictPath("run_bank_duplicate_claim")))
-	if err != nil {
-		t.Fatalf("read repaired validator verdict: %v", err)
-	}
-	if _, err := contracts.ParseValidatorVerdict(verdictRaw); err != nil {
-		t.Fatalf("repaired validator verdict must stay parseable: %v", err)
+	if _, err := os.Stat(filepath.Join(root, runtimeValidatorVerdictPath("run_bank_duplicate_claim"))); !os.IsNotExist(err) {
+		t.Fatalf("provider validator verdict must remain untouched, stat err=%v", err)
 	}
 }
 
@@ -249,16 +245,8 @@ func TestReconcileEvidenceAdvisoryOnlyVerdictPinsBankRefreshFailure(t *testing.T
 		t.Fatalf("expected reconciliation note, got %q", verdict.Summary)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(root, runtimeValidatorVerdictPath(verdict.RunID)))
-	if err != nil {
-		t.Fatalf("read persisted reconciled verdict: %v", err)
-	}
-	persisted, err := contracts.ParseValidatorVerdict(raw)
-	if err != nil {
-		t.Fatalf("parse persisted reconciled verdict: %v", err)
-	}
-	if persisted.Verdict != "PASS" {
-		t.Fatalf("expected persisted PASS verdict, got %q", persisted.Verdict)
+	if _, err := os.Stat(filepath.Join(root, runtimeValidatorVerdictPath(verdict.RunID))); !os.IsNotExist(err) {
+		t.Fatalf("provider verdict must remain untouched, stat err=%v", err)
 	}
 }
 

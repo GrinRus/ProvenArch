@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/artifactaudit"
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 	"github.com/GrinRus/ProvenArch/internal/doctor"
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	"github.com/GrinRus/ProvenArch/internal/proposaldraft"
@@ -1748,6 +1751,11 @@ func (s *Server) handlePipelineRunsGet(writer http.ResponseWriter, request *http
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "effective-verdict" {
+		s.handlePipelineRunEffectiveVerdict(writer, runID)
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "review-summary" {
 		s.handlePipelineRunReviewSummary(writer, runID)
 		return
@@ -1773,7 +1781,38 @@ func (s *Server) handlePipelineRunAudit(writer http.ResponseWriter, runID string
 		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
 		return
 	}
-	writeJSON(writer, http.StatusOK, artifactaudit.ScanSelectedRun(snapshot.Workspace, runID))
+	writeJSON(writer, http.StatusOK, artifactaudit.ScanSelectedRunPublic(snapshot.Workspace, runID))
+}
+
+type effectiveVerdictResponse struct {
+	Status    string                      `json:"status"`
+	Authority string                      `json:"authority"`
+	Path      string                      `json:"path"`
+	Verdict   *contracts.EffectiveVerdict `json:"verdict,omitempty"`
+}
+
+func (s *Server) handlePipelineRunEffectiveVerdict(writer http.ResponseWriter, runID string) {
+	snapshot := s.sessionSnapshot()
+	runInfo, ok := snapshot.Service.GetRun(runID)
+	if !ok || runInfo.Pipeline == string(orchestrator.PipelineQA) {
+		writeError(writer, http.StatusNotFound, "run_not_found", "run not found")
+		return
+	}
+	verdictPath := path.Join("reports", "taskruns", runID, "validator", "effective-verdict.json")
+	raw, err := snapshot.Workspace.ReadFile(verdictPath)
+	if err != nil {
+		writeJSON(writer, http.StatusOK, effectiveVerdictResponse{Status: "legacy_unavailable", Authority: "legacy", Path: verdictPath})
+		return
+	}
+	verdict, err := contracts.ParseEffectiveVerdict(raw)
+	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
+	providerRaw, providerErr := snapshot.Workspace.ReadFile(providerPath)
+	providerDigest := sha256.Sum256(providerRaw)
+	if err != nil || verdict.RunID != runID || verdict.ProviderVerdictPath != providerPath || providerErr != nil || hex.EncodeToString(providerDigest[:]) != verdict.ProviderVerdictSHA256 {
+		writeJSON(writer, http.StatusOK, effectiveVerdictResponse{Status: "invalid", Authority: "invalid", Path: verdictPath})
+		return
+	}
+	writeJSON(writer, http.StatusOK, effectiveVerdictResponse{Status: "available", Authority: "effective", Path: verdictPath, Verdict: &verdict})
 }
 
 func (s *Server) handlePipelineRunsList(writer http.ResponseWriter, request *http.Request) {

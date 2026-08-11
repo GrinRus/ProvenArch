@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/GrinRus/ProvenArch/internal/artifactaudit"
 	"github.com/GrinRus/ProvenArch/internal/artifactquality"
 	"github.com/GrinRus/ProvenArch/internal/contracts"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -184,7 +185,7 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 	runtimeName string,
 	runtimeVersion string,
 ) (runtimeTaskExecution, error) {
-	verdict, _, err := loadValidatorVerdictFromRoot(task.WriteRoot)
+	providerVerdict, providerRaw, err := loadValidatorVerdictFromRoot(task.WriteRoot)
 	if err != nil {
 		e.logError(stepID, domainID, "validator verdict load failed", map[string]any{
 			"task_id": task.TaskID,
@@ -192,7 +193,7 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		})
 		return runtimeTaskExecution{}, err
 	}
-	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, false, false); err != nil {
+	if err := artifactquality.ValidateValidatorVerdict(providerVerdict, e.finalRunIndex, e.citationIndex, false, false); err != nil {
 		e.logError(stepID, domainID, "validator verdict consistency failed", map[string]any{
 			"task_id": task.TaskID,
 			"error":   strings.TrimSpace(err.Error()),
@@ -200,37 +201,29 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		return runtimeTaskExecution{}, err
 	}
 
-	e.questions = mergeQuestions(e.questions, verdict.Questions)
-	e.findings = mergeFindings(e.findings, verdict.Findings)
+	verdict, err := cloneValidatorVerdict(providerVerdict)
+	if err != nil {
+		return runtimeTaskExecution{}, fmt.Errorf("clone provider validator verdict: %w", err)
+	}
+	e.questions = mergeQuestions(e.questions, providerVerdict.Questions)
+	e.findings = mergeFindings(e.findings, providerVerdict.Findings)
 	if err := e.assembleStagedDocFlow(); err != nil {
 		return runtimeTaskExecution{}, err
 	}
 	if _, err := e.applyValidatorRepairStage(stepID, domainID, task.TaskID, &verdict); err != nil {
 		return runtimeTaskExecution{}, err
 	}
-	if reconciled, err := e.reconcileOwnerGapOnlyVerdict(&verdict); err != nil {
-		return runtimeTaskExecution{}, err
-	} else if reconciled {
-		e.logInfo(stepID, domainID, "owner-gap verdict downgraded to pass", map[string]any{
-			"task_id": task.TaskID,
-		})
-	}
 	issues := e.validateStagedArtifacts()
 	if len(issues) > 0 {
+		e.validatorVerdict = &verdict
+		failedAudit := artifactaudit.Report{Version: artifactaudit.Version, RunID: e.runID, Scope: "selected_run", Status: artifactaudit.StatusFail, Issues: []artifactaudit.Issue{{Code: issues[0].Code, Severity: "error", Path: issues[0].Path, Message: issues[0].Message}}, Summary: artifactaudit.Summary{Error: len(issues)}}
+		if _, persistErr := persistEffectiveVerdict(e, verdict, providerRaw, issues, failedAudit); persistErr != nil {
+			return runtimeTaskExecution{}, persistErr
+		}
 		return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
 	}
-	if reconciled, err := e.reconcileEvidenceAdvisoryOnlyVerdict(&verdict); err != nil {
-		return runtimeTaskExecution{}, err
-	} else if reconciled {
-		e.logInfo(stepID, domainID, "source-evidence validator issues downgraded to advisory", map[string]any{
-			"task_id": task.TaskID,
-		})
-	}
-	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, true, true); err != nil {
-		return runtimeTaskExecution{}, err
-	}
-	if verdict.Verdict != "PASS" {
-		return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)
+	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, false, true); err != nil {
+		return runtimeTaskExecution{}, fmt.Errorf("technical validator candidate is invalid: %w", err)
 	}
 
 	e.validatorVerdict = &verdict

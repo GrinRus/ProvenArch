@@ -25,11 +25,24 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 	if e.validatorVerdict == nil {
 		return fmt.Errorf("promote validated artifacts: validator verdict is missing")
 	}
-	if e.validatorVerdict.Verdict != "PASS" {
+	if strings.TrimSpace(e.validatorVerdict.RunID) == "" && e.validatorVerdict.Verdict != "PASS" {
 		return fmt.Errorf("promote validated artifacts: validator verdict is %s", e.validatorVerdict.Verdict)
 	}
-	if err := e.auditSelectedRunBeforePromotion(); err != nil {
+	auditReport, err := e.auditSelectedRunBeforePromotion()
+	if err != nil {
+		providerRaw, _ := e.workspace.ReadFile(runtimeValidatorVerdictPath(e.runID))
+		if _, persistErr := persistEffectiveVerdict(e, *e.validatorVerdict, providerRaw, nil, auditReport); persistErr != nil {
+			return persistErr
+		}
 		return err
+	}
+	providerRaw, _ := e.workspace.ReadFile(runtimeValidatorVerdictPath(e.runID))
+	effective, err := persistEffectiveVerdict(e, *e.validatorVerdict, providerRaw, nil, auditReport)
+	if err != nil {
+		return err
+	}
+	if effective.Verdict != "PASS" {
+		return fmt.Errorf("promote validated artifacts: effective verdict is %s", effective.Verdict)
 	}
 
 	generation, err := e.buildPromotionGeneration()
@@ -56,13 +69,13 @@ func (e *pipelineExecution) promoteValidatedArtifacts() error {
 	return nil
 }
 
-func (e *pipelineExecution) auditSelectedRunBeforePromotion() error {
+func (e *pipelineExecution) auditSelectedRunBeforePromotion() (artifactaudit.Report, error) {
 	if !e.prePromotionAuditRequired {
-		return nil
+		return artifactaudit.Report{Version: artifactaudit.Version, RunID: e.runID, Scope: "selected_run", Status: artifactaudit.StatusPass, Issues: []artifactaudit.Issue{}, Artifacts: []artifactaudit.Artifact{}, Summary: artifactaudit.Summary{}}, nil
 	}
-	report := artifactaudit.ScanSelectedRun(e.workspace, e.promotionRunID())
+	report := artifactaudit.ScanSelectedRunWithCandidate(e.workspace, e.promotionRunID(), *e.validatorVerdict)
 	if report.Status != artifactaudit.StatusFail {
-		return nil
+		return report, nil
 	}
 	codes := make([]string, 0, len(report.Issues))
 	for _, issue := range report.Issues {
@@ -83,7 +96,7 @@ func (e *pipelineExecution) auditSelectedRunBeforePromotion() error {
 		"issue_count":  len(report.Issues),
 		"issue_codes":  codes,
 	})
-	return fmt.Errorf("promote validated artifacts: pre-promotion audit failed (%s)", strings.Join(codes, ", "))
+	return report, fmt.Errorf("promote validated artifacts: pre-promotion audit failed (%s)", strings.Join(codes, ", "))
 }
 
 type promotionGeneration struct {

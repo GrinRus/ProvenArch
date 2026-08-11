@@ -62,6 +62,7 @@ docs_first_contracts=(
   "schemas/final-run-index.schema.json:examples/final-run-index.example.json"
   "schemas/citation-index.schema.json:examples/citation-index.example.json"
   "schemas/validator-verdict.schema.json:examples/validator-verdict.example.json"
+  "schemas/effective-verdict.schema.json:examples/effective-verdict.example.json"
   "schemas/qa-answer.schema.json:examples/qa-answer.example.json"
   "schemas/source-qa-answer.schema.json:examples/source-qa-answer.example.json"
   "schemas/source-qa-answer.schema.json:fixtures/api/source-qa-answer.json"

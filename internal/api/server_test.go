@@ -3234,6 +3234,24 @@ repos:
 	if auditPayload.Version != 1 || auditPayload.RunID != runInfo.RunID || auditPayload.Status == "" || len(auditPayload.Artifacts) == 0 {
 		t.Fatalf("unexpected read-only audit payload: %+v", auditPayload)
 	}
+	effectiveResp, err := http.Get(httpServer.URL + "/api/pipeline/runs/" + runInfo.RunID + "/effective-verdict")
+	if err != nil {
+		t.Fatalf("GET effective verdict: %v", err)
+	}
+	defer effectiveResp.Body.Close()
+	if effectiveResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 for effective verdict, got %d", effectiveResp.StatusCode)
+	}
+	var effectivePayload struct {
+		Status    string `json:"status"`
+		Authority string `json:"authority"`
+	}
+	if err := json.NewDecoder(effectiveResp.Body).Decode(&effectivePayload); err != nil {
+		t.Fatalf("decode effective verdict payload: %v", err)
+	}
+	if effectivePayload.Status != "available" || effectivePayload.Authority != "effective" {
+		t.Fatalf("unexpected effective verdict payload: %+v", effectivePayload)
+	}
 }
 
 func TestWorkspaceManifestRoundTrip(t *testing.T) {
