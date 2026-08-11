@@ -1,7 +1,7 @@
-# Task and Attempt contract (W23A1 schema/domain slice)
+# Task and Attempt contract (W23A1–W23A4 foundation)
 
-Status: **W23A1 schemas, semantic Go contracts, examples and provider-free fixtures are implemented.**
-Persistence, public Task APIs, Attempt admission and the task-first UI remain pending W23A2–W23O.
+Status: **W23A1–W23A4 schemas, durable registry, public Task APIs and Attempt admission are implemented.**
+The task-first UI and later W23/W24/W25 release slices remain pending.
 
 This document fixes the product identity and persistence boundary that must exist before the
 Task-first shell can replace the implemented run-first UI only after the remaining W23A slices are
@@ -84,6 +84,7 @@ Every Attempt includes at least:
 
 - opaque server-generated `attempt_id`, exact `task_id` and exact one-to-one `run_id`;
 - optional `parent_attempt_id` plus retry/rerun reason;
+- immutable `pipeline`, client `idempotency_key` and canonical request fingerprint;
 - admitted Task revision and immutable goal/context/scope snapshot;
 - desired runner preset plus immutable effective runtime mode, provider, model, effort,
   permissions, timeouts, execution settings, per-step overrides and resolution sources;
@@ -109,7 +110,7 @@ retention. A retry/rerun always creates a new child Attempt.
 
 ## 8) Planned API surface
 
-The 23A implementation is expected to add versioned JSON contracts for:
+The implemented 23A surface exposes versioned JSON contracts for:
 
 - `POST /api/tasks` — create Task intent;
 - `GET /api/tasks` — stable cursor pagination and filters;
@@ -119,6 +120,13 @@ The 23A implementation is expected to add versioned JSON contracts for:
 - `POST /api/tasks/<task_id>/attempts` — admit/start an Attempt idempotently;
 - `GET /api/tasks/<task_id>/attempts/<attempt_id>` — exact Attempt detail;
 - `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` — create an explicit child Attempt.
+
+Attempt admission accepts `{idempotency_key, pipeline?: init|refresh, intent?: start|queue}`. Retry
+accepts the same fields plus an optional `reason`; a retry requires a terminal parent and always
+creates a new child identity. Duplicate keys with the same canonical request fingerprint return the
+existing Attempt, while a reused key for a different Task revision/options returns
+`409 idempotency_conflict`. Capacity errors are typed (`run_active` or `attempt_queue_full`) and
+never supersede another Task's queued Attempt.
 
 There is no Task delete endpoint in the MVP. List ordering is stable by
 `(last_activity_at desc, task_id)`; pagination cursors must not be offset-only. Filters and explicit

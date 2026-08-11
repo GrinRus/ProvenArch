@@ -287,8 +287,12 @@ Output mapping rules:
 - `Task` is durable user intent with a server-generated opaque `task_id`, monotonic revision,
   explicit repository/path scope, desired runner preset and explicit outcome/publication states.
 - `Attempt` is an immutable admitted snapshot with its own opaque id, exact `task_id`/`run_id`
-  linkage, parent retry lineage, effective provider/model/permission/scope snapshot and terminal
-  evidence summary.
+  linkage, parent retry lineage, immutable pipeline/idempotency key and request fingerprint,
+  effective provider/model/permission/scope snapshot and terminal evidence summary.
+- Admission records the client token against the canonical Task revision/options request. Repeating
+  the same token returns the same Attempt/run identity; a different fingerprint is a typed conflict.
+  The shared lease permits one active and one queued pipeline Attempt and never supersedes another
+  Task's queued identity.
 - `task-history.json` is a versioned registry. Its semantic validator checks unique identities,
   task-to-attempt membership, exact run/revision/status summary joins and same-task parent lineage.
 - Historical pipeline runs are not synthesized as Tasks; legacy run identity remains outside this

@@ -116,6 +116,8 @@ type runRecord struct {
 
 type RunInfo struct {
 	RunID                string                          `json:"run_id"`
+	TaskID               string                          `json:"task_id,omitempty"`
+	AttemptID            string                          `json:"attempt_id,omitempty"`
 	Pipeline             string                          `json:"pipeline"`
 	Status               RunStatus                       `json:"status"`
 	StartedAt            time.Time                       `json:"started_at"`
@@ -188,9 +190,13 @@ type Artifact struct {
 type RunRequest struct {
 	Workspace            workspace.Root
 	Pipeline             Pipeline
+	TaskID               string
+	AttemptID            string
+	RequestedRunID       string
 	NonInteractive       bool
 	Question             string
 	Intent               RunIntent
+	ProviderOverride     acpruntime.Provider
 	ResumeFromStep       string
 	RetryParentRunID     string
 	RetryReason          string
@@ -218,6 +224,8 @@ type runHistorySnapshot struct {
 
 type runHistoryItem struct {
 	RunID                string                          `json:"run_id"`
+	TaskID               string                          `json:"task_id,omitempty"`
+	AttemptID            string                          `json:"attempt_id,omitempty"`
 	Pipeline             string                          `json:"pipeline"`
 	Status               RunStatus                       `json:"status"`
 	StartedAt            string                          `json:"started_at"`
@@ -451,6 +459,8 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	initialInfo := RunInfo{
 		RunID:         runID,
+		TaskID:        strings.TrimSpace(request.TaskID),
+		AttemptID:     strings.TrimSpace(request.AttemptID),
 		Pipeline:      string(request.Pipeline),
 		Status:        RunStatusRunning,
 		StartedAt:     startedAt,

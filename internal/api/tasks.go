@@ -75,7 +75,15 @@ func (s *Server) handleTasks(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	if len(parts) == 3 {
+		if strings.TrimSpace(parts[2]) == "retry" {
+			s.handleTaskAttemptRetry(writer, request, taskID, "")
+			return
+		}
 		s.handleTaskAttempts(writer, request, taskID, strings.TrimSpace(parts[2]))
+		return
+	}
+	if len(parts) == 4 && strings.TrimSpace(parts[3]) == "retry" {
+		s.handleTaskAttemptRetry(writer, request, taskID, strings.TrimSpace(parts[2]))
 		return
 	}
 	writeError(writer, http.StatusNotFound, "task_route_not_found", "task route not found")
@@ -327,40 +335,6 @@ func (s *Server) handleTaskArchive(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"task": updated})
-}
-
-func (s *Server) handleTaskAttempts(writer http.ResponseWriter, request *http.Request, taskID, attemptID string) {
-	if request.Method != http.MethodGet {
-		writeMethodNotAllowed(writer, http.MethodGet)
-		return
-	}
-	registry, err := s.taskRegistrySnapshot()
-	if err != nil {
-		writeTaskHistoryUnavailable(writer, err)
-		return
-	}
-	history := registry.Snapshot()
-	if _, ok := findTask(history, taskID); !ok {
-		writeError(writer, http.StatusNotFound, "task_not_found", "task not found")
-		return
-	}
-	if attemptID == "" {
-		items := make([]producttasks.Attempt, 0)
-		for _, attempt := range history.Attempts {
-			if attempt.TaskID == taskID {
-				items = append(items, producttasks.CloneAttempt(attempt))
-			}
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{"items": items, "diagnostics": registry.Diagnostics()})
-		return
-	}
-	for _, attempt := range history.Attempts {
-		if attempt.TaskID == taskID && attempt.AttemptID == attemptID {
-			writeJSON(writer, http.StatusOK, map[string]any{"attempt": producttasks.CloneAttempt(attempt)})
-			return
-		}
-	}
-	writeError(writer, http.StatusNotFound, "attempt_not_found", "attempt not found for task")
 }
 
 var errTaskNotFound = errors.New("task not found")
