@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
 import { KnowledgePage } from "./KnowledgePage";
@@ -86,6 +87,29 @@ describe("KnowledgePage", () => {
     expect(onOpenTask).toHaveBeenCalledWith("task-opaque-1");
   });
 
+  it("edits only allowlisted workspace Markdown and keeps promoted reports read-only", async () => {
+    const editableKnowledge: KnowledgeResponse = { ...partialKnowledge, artifacts: [...partialKnowledge.artifacts, { path: "charter/readme.md", kind: "document", name: "readme.md" }] };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+      ? new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } })
+      : new Response("# Editable charter\n\nKeep this exact text", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    function Harness() {
+      const [selectedPath, setSelectedPath] = useState<string>();
+      return <KnowledgePage knowledge={editableKnowledge} loading={false} error="" view="documents" selectedArtifactPath={selectedPath} onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={setSelectedPath} onOpenArtifact={vi.fn()} />;
+    }
+    render(<Harness />);
+    await screen.findByTestId("evidence-viewer");
+    fireEvent.click(screen.getByRole("button", { name: "Edit Markdown" }));
+    const editor = await screen.findByTestId("markdown-editor");
+    fireEvent.change(editor, { target: { value: "# Updated charter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved to the editable workspace surface.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/artifacts/write", expect.objectContaining({ method: "POST" }));
+    fireEvent.click(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/ }));
+    expect(await screen.findByText(/Promoted Architecture documents are read-only evidence/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Markdown" })).not.toBeInTheDocument();
+  });
+
   it("filters the map and mobile fallback by canonical owner and domain tags", () => {
     const filteredKnowledge: KnowledgeResponse = {
       ...partialKnowledge,
@@ -105,5 +129,24 @@ describe("KnowledgePage", () => {
     fireEvent.change(screen.getByLabelText("Filter by domain or tag"), { target: { value: "domain:identity" } });
     expect(within(mobileList).getByRole("button", { name: /Users/ })).toBeInTheDocument();
     expect(within(mobileList).queryByRole("button", { name: /Payments/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the structured model inspector read-only and exposes source diagnostics", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("id: svc.payments\ntype: service\n", { status: 200 })));
+    const onOpenArtifact = vi.fn();
+    function Harness() {
+      const [selectedID, setSelectedID] = useState<string>();
+      return <KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="map" selectedEntityID={selectedID} onViewChange={vi.fn()} onEntityChange={setSelectedID} onOpenArtifact={onOpenArtifact} />;
+    }
+    render(<Harness />);
+    fireEvent.click(within(screen.getByLabelText("Architecture elements")).getByRole("button", { name: /Payments/ }));
+    const inspector = await screen.findByTestId("structured-model-inspector");
+    expect(inspector).toHaveTextContent("architecture.entity v1");
+    expect(inspector).toHaveTextContent("Structured editing is unavailable until comments");
+    expect(inspector).not.toHaveTextContent("Save");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Source (Advanced)" }));
+    expect(await within(inspector).findByText(/0001 \| id: svc\.payments/)).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole("button", { name: "Open source artifact" }));
+    expect(onOpenArtifact).toHaveBeenCalledWith("model/entities/svc.payments.yaml");
   });
 });

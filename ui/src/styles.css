@@ -3111,7 +3111,7 @@ code {
   overflow: auto;
 }
 
-.diagram-svg svg {
+.diagram-svg img {
   width: max-content;
   height: auto;
   min-width: 44rem;
@@ -4885,7 +4885,7 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .diagram-svg svg {
+  .diagram-svg img {
     min-width: 36rem;
   }
 }
@@ -5019,6 +5019,15 @@ code {
 .task-architecture-context p { margin: var(--space-1) 0 0; }
 .task-architecture-context .eyebrow { margin: 0; }
 .task-architecture-context .hint { display: block; margin-top: var(--space-1); }
+.markdown-editor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; }
+.markdown-editor-toolbar > div { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.markdown-editor { width: 100%; min-height: 34rem; resize: vertical; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); color: var(--ink); font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.markdown-read-only-note { margin: 0 0 var(--space-2); }
+.structured-model-inspector { display: grid; gap: var(--space-3); margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line-soft); }
+.structured-model-inspector > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.structured-source { display: grid; gap: var(--space-2); }
+.structured-source pre { max-height: 22rem; margin: 0; overflow: auto; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: #101828; color: #e5edf7; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+.model-logical-id { overflow-wrap: anywhere; word-break: break-word; }
 @media (max-width: 640px) { .task-architecture-context { align-items: stretch; flex-direction: column; } .task-architecture-context .ui-button { width: 100%; } }
 .architecture-page.is-map-fullscreen .architecture-map-layout, .architecture-page.is-map-fullscreen .architecture-canvas { min-height: calc(100dvh - 9rem); }
 

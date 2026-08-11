@@ -1945,8 +1945,8 @@ Follow-up note (2026-04-22):
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
 Status (2026-08-11): **target design and pre-implementation authority decisions accepted; 23B1
-typed routes and truthful target containers implemented; the remaining UI wave and shell cutover
-are pending.**
+through 23I additive slices are implemented without shell cutover; the remaining UI wave and
+Tasks-primary closure are pending.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2174,6 +2174,11 @@ context, labels the current promoted workspace authority, exposes a return path 
 states that it is read-only without latest-run inference. Remaining map/workbench parity and
 responsive closure continue in W23H–W23O.
 
+Implementation status (2026-08-11, W23H): Architecture Documents now provide a bounded Markdown
+reader/editor. Only backend-allowlisted `charter/*` and `skills/*` Markdown can be edited and saved;
+promoted reports remain explicitly read-only evidence, preserving snapshot authority and lossless
+text until save.
+
 ### 23H — Markdown Document Workbench
 
 **Goal:** сделать Architecture Home и authored docs первоклассным читаемым продуктом.
@@ -2215,6 +2220,13 @@ Acceptance:
 - invalid YAML/JSON never destroys last valid rendered state or draft;
 - entity IDs/relations remain exact and long bounded filenames display full logical ID;
 - fixtures cover comments, aliases, unknown keys, invalid types, large files and conflicts.
+
+Implementation status (2026-08-11, W23I): the Model view now exposes a structured read-only
+entity/edge inspector with canonical logical identity, `architecture.entity|edge` schema/version,
+promoted validation status, path-linked issues and an Advanced line-numbered source view. It
+explicitly withholds structured Save until comments, unknown keys, ordering and multiline scalars
+have a proven lossless round trip; malformed or unavailable source keeps the last valid promoted
+structure visible.
 
 ### 23J — Mermaid and shared Evidence Studio
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
+import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeIssue, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
-import { architectureFromKnowledge, loadArtifactText } from "../lib/workspaceApi";
+import { architectureFromKnowledge, loadArtifactText, saveEditableArtifact } from "../lib/workspaceApi";
 import { ArchitectureMap, levelLabel } from "./ArchitectureMap";
 import { EvidenceViewer } from "./EvidenceViewer";
 
@@ -131,7 +131,7 @@ export function KnowledgePage({
           <div className="architecture-map-layout">
             <ArchitectureMap view={activeView} level={level} selectedID={selectedEntityID} query={query} typeFilter={typeFilter} repositoryFilter={repositoryFilter} ownerFilter={ownerFilter} tagFilter={tagFilter} onSelect={onEntityChange} />
             <aside className="architecture-inspector" aria-label="Architecture inspector">
-              {selectedNode ? <NodeInspector node={selectedNode} currentLevel={level} onOpenArtifact={onOpenArtifact} onDrillDown={(next) => setLevel(next)} /> : selectedEdge ? <EdgeInspector edge={selectedEdge} nodes={allNodes} onOpenArtifact={onOpenArtifact} /> : <div className="inspector-empty"><strong>Select a node or relationship</strong><p>Inspect ownership, confidence and exact repository evidence. Use Tab and Enter to navigate the map without a mouse.</p></div>}
+              {selectedNode ? <NodeInspector node={selectedNode} currentLevel={level} issues={architecture.issues} onOpenArtifact={onOpenArtifact} onDrillDown={(next) => setLevel(next)} /> : selectedEdge ? <EdgeInspector edge={selectedEdge} nodes={allNodes} issues={architecture.issues} onOpenArtifact={onOpenArtifact} /> : <div className="inspector-empty"><strong>Select a node or relationship</strong><p>Inspect ownership, confidence and exact repository evidence. Use Tab and Enter to navigate the map without a mouse.</p></div>}
             </aside>
           </div>
           <div className="architecture-mobile-list" aria-label="Architecture elements">
@@ -164,14 +164,20 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
   const documents = architecture.artifacts.filter((artifact) => mode === "diagrams" ? artifact.path.endsWith(".mmd") : artifact.path.endsWith(".md")).sort((left, right) => left.path.localeCompare(right.path));
   const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : documents[0]?.path;
   const [content, setContent] = useState("");
+  const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [editMode, setEditMode] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const editable = mode === "documents" && isEditableMarkdownPath(selectedPath);
   useEffect(() => {
     if (selectedPath && selectedPath !== selectedArtifactPath) onDocumentChange?.(selectedPath);
   }, [onDocumentChange, selectedArtifactPath, selectedPath]);
   useEffect(() => {
     if (!selectedPath) {
       setContent("");
+      setDraft("");
       setStatus("idle");
+      setEditMode(false);
       return;
     }
     let active = true;
@@ -179,7 +185,10 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
     void loadArtifactText(selectedPath).then((value) => {
       if (!active) return;
       setContent(value ?? "");
+      setDraft(value ?? "");
       setStatus(value === null ? "error" : "loaded");
+      setEditMode(false);
+      setSaveStatus("");
     });
     return () => { active = false; };
   }, [selectedPath]);
@@ -189,7 +198,17 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
       {documents.length === 0 ? <p className="empty-state">No promoted {mode} are available yet.</p> : <ul>{documents.map((artifact) => <li key={artifact.path}><button type="button" aria-current={selectedPath === artifact.path ? "page" : undefined} onClick={() => onDocumentChange?.(artifact.path)}><strong>{artifact.name}</strong><code>{artifact.path}</code></button></li>)}</ul>}
     </aside>
     <section className="architecture-document-reader" aria-label="Architecture document reader">
-      {selectedPath && status === "loaded" ? <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} /> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
+      {selectedPath && status === "loaded" ? <>
+        {editable ? <div className="markdown-editor-toolbar" aria-label="Markdown editor controls">
+          <span className="hint">Editable workspace Markdown · lossless text is preserved until save.</span>
+          <div>
+            <button type="button" className="ui-button tone-neutral" onClick={() => { if (editMode) setDraft(content); setEditMode((value) => !value); setSaveStatus(""); }}>{editMode ? "Cancel" : "Edit Markdown"}</button>
+            {editMode ? <button type="button" className="ui-button tone-primary" disabled={draft === content || saveStatus === "Saving…"} onClick={() => void (async () => { setSaveStatus("Saving…"); try { await saveEditableArtifact(selectedPath, draft); setContent(draft); setEditMode(false); setSaveStatus("Saved to the editable workspace surface."); } catch (error) { setSaveStatus(error instanceof Error ? error.message : "Markdown save failed."); } })()}>Save</button> : null}
+          </div>
+        </div> : <p className="status info markdown-read-only-note">Promoted Architecture documents are read-only evidence. Edit is available only for editable workspace Markdown under <code>charter/</code> or <code>skills/</code>.</p>}
+        {editMode ? <textarea className="markdown-editor" data-testid="markdown-editor" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Edit ${selectedPath}`} rows={24} /> : <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} />}
+        {saveStatus ? <p className={saveStatus.startsWith("Saved") ? "status ok" : saveStatus === "Saving…" ? "status info" : "status err"} role="status">{saveStatus}</p> : null}
+      </> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
     </section>
     <aside className="architecture-document-context" aria-label="Document context">
       <h2>Document context</h2>
@@ -201,6 +220,11 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
   </div>;
 }
 
+function isEditableMarkdownPath(path?: string): boolean {
+  if (!path || !path.endsWith(".md")) return false;
+  return path === "charter" || path.startsWith("charter/") || path === "skills" || path.startsWith("skills/");
+}
+
 function FindingsView({ architecture, onOpenArtifact }: { architecture: ArchitectureResponse; onOpenArtifact: (path: string) => void }) {
   const findings = architecture.review?.findings ?? [];
   const questions = architecture.review?.questions ?? [];
@@ -208,17 +232,37 @@ function FindingsView({ architecture, onOpenArtifact }: { architecture: Architec
   return <section className="architecture-findings" data-testid="architecture-findings"><header><div><p className="eyebrow">Review queue</p><h2>Findings and open questions</h2><p className="hint">Only selected-run semantic findings and explicit coverage gaps are shown.</p></div><button type="button" onClick={() => onOpenArtifact("reports/findings/findings.md")}>Open findings document</button></header><div className="architecture-findings-grid"><article><h3>Findings <span>{findings.length}</span></h3>{findings.length === 0 ? <p className="empty-state">No findings in the promoted snapshot.</p> : <ul className="compact-list">{findings.map((finding) => <li key={finding.id}><strong>{finding.title}</strong><span>{finding.severity}</span><code>{finding.id}</code></li>)}</ul>}</article><article><h3>Questions <span>{questions.length}</span></h3>{questions.length === 0 ? <p className="empty-state">No open questions in the promoted snapshot.</p> : <ul className="compact-list">{questions.map((question) => <li key={question.id}><strong>{question.text}</strong><span>{question.priority || "open"}</span></li>)}</ul>}</article><article><h3>Coverage gaps <span>{gaps.length}</span></h3>{gaps.length === 0 ? <p className="empty-state">No named coverage gaps.</p> : <ul className="compact-list">{gaps.map((gap) => <li key={gap}><strong>{gap}</strong><span>coverage</span></li>)}</ul>}</article></div></section>;
 }
 
-function NodeInspector({ node, currentLevel, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; currentLevel: ArchitectureLevel; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {
+function NodeInspector({ node, currentLevel, issues, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; currentLevel: ArchitectureLevel; issues: KnowledgeIssue[]; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {
   const levels = node.child_levels ?? [];
   const order = ["context", "container", "component", "code"] as ArchitectureLevel[];
   const next = order.find((level) => order.indexOf(level) > order.indexOf(currentLevel) && levels.includes(level));
-  return <div data-testid="knowledge-entity-detail"><p className="eyebrow">{node.type}</p><h2>{node.name}</h2><code>{node.id}</code><dl className="compact-defs"><div><dt>Confidence</dt><dd>{Math.round(node.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{node.provenance_kind}</dd></div><div><dt>Owner</dt><dd>{node.owner_team_id || "Not established"}</dd></div><div><dt>Repositories</dt><dd>{node.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(node.related_findings?.length ?? 0)} findings · {(node.related_questions?.length ?? 0)} questions</dd></div></dl>{(node.related_findings?.length ?? 0) + (node.related_questions?.length ?? 0) > 0 ? <ul className="compact-list">{node.related_findings?.map((id) => <li key={id}><strong>Finding</strong><code>{id}</code></li>)}{node.related_questions?.map((id) => <li key={id}><strong>Question</strong><code>{id}</code></li>)}</ul> : null}<h3>Repository evidence</h3>{(node.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{node.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this node.</p>}<div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(node.path)}>Open model YAML</button>{next ? <button type="button" onClick={() => onDrillDown(next)}>Drill down to {levelLabel(next)}</button> : <span className="disabled-reason">{node.detail_unavailable_reason || "No validated lower-level detail is available."}</span>}</div></div>;
+  return <div data-testid="knowledge-entity-detail"><p className="eyebrow">{node.type}</p><h2>{node.name}</h2><code className="model-logical-id">{node.id}</code><dl className="compact-defs"><div><dt>Confidence</dt><dd>{Math.round(node.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{node.provenance_kind}</dd></div><div><dt>Owner</dt><dd>{node.owner_team_id || "Not established"}</dd></div><div><dt>Repositories</dt><dd>{node.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(node.related_findings?.length ?? 0)} findings · {(node.related_questions?.length ?? 0)} questions</dd></div></dl>{(node.related_findings?.length ?? 0) + (node.related_questions?.length ?? 0) > 0 ? <ul className="compact-list">{node.related_findings?.map((id) => <li key={id}><strong>Finding</strong><code>{id}</code></li>)}{node.related_questions?.map((id) => <li key={id}><strong>Question</strong><code>{id}</code></li>)}</ul> : null}<h3>Repository evidence</h3>{(node.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{node.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this node.</p>}<StructuredArtifactInspector path={node.path} kind="entity" issues={issues} onOpenArtifact={onOpenArtifact} /><div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(node.path)}>Open model YAML</button>{next ? <button type="button" onClick={() => onDrillDown(next)}>Drill down to {levelLabel(next)}</button> : <span className="disabled-reason">{node.detail_unavailable_reason || "No validated lower-level detail is available."}</span>}</div></div>;
 }
 
-function EdgeInspector({ edge, nodes, onOpenArtifact }: { edge: ArchitectureEdge; nodes: ReturnType<typeof uniqueNodes>; onOpenArtifact: (path: string) => void }) {
+function EdgeInspector({ edge, nodes, issues, onOpenArtifact }: { edge: ArchitectureEdge; nodes: ReturnType<typeof uniqueNodes>; issues: KnowledgeIssue[]; onOpenArtifact: (path: string) => void }) {
   const from = nodes.find((node) => node.id === edge.from);
   const to = nodes.find((node) => node.id === edge.to);
-  return <div data-testid="knowledge-edge-detail"><p className="eyebrow">{edge.type}</p><h2>{edge.name || `${from?.name ?? edge.from} → ${to?.name ?? edge.to}`}</h2><code>{edge.id}</code><dl className="compact-defs"><div><dt>From</dt><dd>{from?.name ?? edge.from}</dd></div><div><dt>To</dt><dd>{to?.name ?? edge.to}</dd></div><div><dt>Confidence</dt><dd>{Math.round(edge.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{edge.provenance_kind}</dd></div><div><dt>Repositories</dt><dd>{edge.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(edge.related_findings?.length ?? 0)} findings · {(edge.related_questions?.length ?? 0)} questions</dd></div></dl><h3>Repository evidence</h3>{(edge.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{edge.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this relationship.</p>}<div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(edge.path)}>Open relationship YAML</button></div></div>;
+  return <div data-testid="knowledge-edge-detail"><p className="eyebrow">{edge.type}</p><h2>{edge.name || `${from?.name ?? edge.from} → ${to?.name ?? edge.to}`}</h2><code className="model-logical-id">{edge.id}</code><dl className="compact-defs"><div><dt>From</dt><dd>{from?.name ?? edge.from}</dd></div><div><dt>To</dt><dd>{to?.name ?? edge.to}</dd></div><div><dt>Confidence</dt><dd>{Math.round(edge.confidence * 100)}%</dd></div><div><dt>Authority</dt><dd>{edge.provenance_kind}</dd></div><div><dt>Repositories</dt><dd>{edge.repositories?.join(", ") || "Not established"}</dd></div><div><dt>Related review</dt><dd>{(edge.related_findings?.length ?? 0)} findings · {(edge.related_questions?.length ?? 0)} questions</dd></div></dl><h3>Repository evidence</h3>{(edge.evidence ?? []).length > 0 ? <ul className="evidence-ref-list">{edge.evidence!.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><strong>{item.repo}</strong><code>{item.path}</code>{item.lines ? <span>lines {item.lines.start}–{item.lines.end}</span> : null}</li>)}</ul> : <p className="status warn">No direct evidence reference is attached to this relationship.</p>}<StructuredArtifactInspector path={edge.path} kind="edge" issues={issues} onOpenArtifact={onOpenArtifact} /><div className="inspector-actions"><button type="button" onClick={() => onOpenArtifact(edge.path)}>Open relationship YAML</button></div></div>;
+}
+
+function StructuredArtifactInspector({ path, kind, issues, onOpenArtifact }: { path: string; kind: "entity" | "edge"; issues: KnowledgeIssue[]; onOpenArtifact: (path: string) => void }) {
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [source, setSource] = useState<string>();
+  const [sourceStatus, setSourceStatus] = useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
+  const artifactIssues = issues.filter((issue) => issue.path === path || issue.path?.startsWith(`${path}#`));
+  useEffect(() => {
+    if (!sourceOpen) return;
+    let active = true;
+    setSourceStatus("loading");
+    void loadArtifactText(path).then((value) => {
+      if (!active) return;
+      if (value === null) setSourceStatus("unavailable");
+      else { setSource(value); setSourceStatus("loaded"); }
+    });
+    return () => { active = false; };
+  }, [path, sourceOpen]);
+  const schema = kind === "entity" ? "architecture.entity" : "architecture.edge";
+  return <section className="structured-model-inspector" data-testid="structured-model-inspector"><header><div><p className="eyebrow">Structured inspector</p><strong>{schema} v1</strong></div><span className={`status ${artifactIssues.length > 0 ? "warn" : "ok"}`}>{artifactIssues.length > 0 ? `${artifactIssues.length} validation issue${artifactIssues.length === 1 ? "" : "s"}` : "Validated structure"}</span></header><p className="hint">Canonical identity: <code className="model-logical-id">{path}</code></p>{artifactIssues.length > 0 ? <ul className="compact-list">{artifactIssues.map((issue) => <li key={`${issue.code}:${issue.path ?? issue.message}`}><strong>{issue.code}</strong><span>{issue.message}</span></li>)}</ul> : <p className="status ok">Schema and semantic checks passed for the promoted snapshot.</p>}<p className="markdown-read-only-note">Structured editing is unavailable until comments, unknown keys, ordering and multiline scalars have a proven lossless round trip. This inspector is read-only.</p><div className="inspector-actions"><button type="button" onClick={() => setSourceOpen((value) => !value)}>{sourceOpen ? "Hide source" : "Source (Advanced)"}</button><button type="button" onClick={() => onOpenArtifact(path)}>Open source artifact</button></div>{sourceOpen ? <div className="structured-source"><p className="eyebrow">Exact source bytes, line numbered for diagnostics</p>{sourceStatus === "loading" ? <p className="status info">Loading source…</p> : sourceStatus === "unavailable" ? <p className="status warn">Source is unavailable; the last valid promoted structure remains visible.</p> : <pre data-testid="structured-source">{(source ?? "").split("\n").map((line, index) => `${String(index + 1).padStart(4, "0")} | ${line}`).join("\n")}</pre>}</div> : null}</section>;
 }
 
 function Catalog({ nodes, selectedID, query, onQuery, onSelect, onOpenArtifact }: { nodes: ReturnType<typeof uniqueNodes>; selectedID?: string; query: string; onQuery: (value: string) => void; onSelect: (id?: string) => void; onOpenArtifact: (path: string) => void }) {

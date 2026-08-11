@@ -155,8 +155,8 @@ the final removal of Home/Analyze routes.
       review, including explicit semantic partial state and independent current Architecture status.
 - [x] Implement the additive W23F Attempt-bound Pipeline Studio with structured steps, bounded
       blocker/diagnostics disclosure and no provider-output percentage inference.
-- [ ] Implement the remaining W23H–M workbenches and 23N–O closure. W23G Task-scoped Architecture
-      context is implemented additively.
+- [ ] Implement the remaining W23I–M workbenches and 23N–O closure. W23G Task-scoped Architecture
+      context and W23H allowlisted Markdown reader/editor are implemented additively.
 - [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
 
 ### Non-goals
@@ -184,7 +184,11 @@ the final removal of Home/Analyze routes.
   archive/read-only evidence semantics. W23E now renders exact-run outcome and semantic deltas with
   explicit missing-comparison state. W23F now adds the exact Attempt-bound Pipeline Studio route
   with bounded structured diagnostics. W23G now adds an explicit Task-scoped current Architecture
-  context and return path without latest-run fallback. W23H–O remain pending.
+  context and return path without latest-run fallback. W23H now adds an allowlisted, lossless
+  Markdown reader/editor while promoted reports remain read-only. W23I now adds a structured,
+  read-only entity/edge inspector with schema/version labels, path-linked validation issues and
+  an advanced line-numbered source view; structured save remains gated on a future lossless
+  round-trip proof. W23J–O remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

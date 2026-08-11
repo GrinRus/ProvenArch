@@ -22,6 +22,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
     const currentRequest = requestRef.current + 1;
     requestRef.current = currentRequest;
     let disposed = false;
+    let objectURL = "";
 
     void (async () => {
       try {
@@ -47,7 +48,8 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           setError("Mermaid reported a diagram syntax error.");
           return;
         }
-        setSVG(rendered.svg);
+        objectURL = URL.createObjectURL(new Blob([rendered.svg], { type: "image/svg+xml" }));
+        setSVG(objectURL);
         setError("");
       } catch (renderErr) {
         if (disposed || requestRef.current !== currentRequest) {
@@ -60,6 +62,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
 
     return () => {
       disposed = true;
+      if (objectURL) URL.revokeObjectURL(objectURL);
     };
   }, [source]);
 
@@ -69,7 +72,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
   if (!svg) {
     return <p className="hint">Rendering {title}...</p>;
   }
-  return <div className="diagram-svg" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div className="diagram-svg"><img src={svg} alt={title} /></div>;
 }
 
 const mermaidGraphStartPattern =
