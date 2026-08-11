@@ -1,4 +1,5 @@
 import { fetchJSON } from "./api";
+import type { TaskFilters } from "./appRoutes";
 
 export type TaskRepositoryScope = { name: string; paths: string[] };
 export type TaskScope = { repositories: TaskRepositoryScope[] };
@@ -29,6 +30,48 @@ export type ProductTask = {
   publication: { state: "linked" | "unavailable"; unavailable_reason?: string };
 };
 
+export type TaskAttempt = {
+  version: number;
+  attempt_id: string;
+  task_id: string;
+  run_id: string;
+  parent_attempt_id?: string;
+  retry_reason?: string;
+  pipeline: string;
+  status: string;
+  task_revision: number;
+  goal_snapshot?: string;
+  context_snapshot?: string;
+  scope_snapshot?: TaskScope;
+  desired_runner?: TaskRunnerPreset;
+  effective_runtime?: {
+    mode?: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
+    permissions?: string;
+  };
+  admitted_at: string;
+  queued_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  terminal_summary?: { state?: string; message?: string; error_code?: string };
+  outcome?: ProductTask["outcome"];
+  retained_evidence?: string;
+};
+
+export type TaskListResponse = {
+  items: ProductTask[];
+  next_cursor: string;
+  has_more: boolean;
+  diagnostics?: { state?: string; message?: string };
+};
+
+export type TaskAttemptListResponse = {
+  items: TaskAttempt[];
+  diagnostics?: { state?: string; message?: string };
+};
+
 export type CreateTaskRequest = Pick<ProductTask, "title" | "goal" | "scope" | "desired_runner"> & { context?: string };
 
 export async function createTask(request: CreateTaskRequest): Promise<ProductTask> {
@@ -36,6 +79,40 @@ export async function createTask(request: CreateTaskRequest): Promise<ProductTas
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
+  });
+  return response.task;
+}
+
+export async function listTasks(filters: TaskFilters = {}, cursor = "", signal?: AbortSignal): Promise<TaskListResponse> {
+  const params = new URLSearchParams({ limit: "100" });
+  if (cursor) params.set("cursor", cursor);
+  if (filters.lifecycle) params.set("lifecycle", filters.lifecycle);
+  if (filters.runner) params.set("runner", filters.runner);
+  if (filters.repository) params.set("repository", filters.repository);
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+  return fetchJSON<TaskListResponse>(`/api/tasks?${params.toString()}`, { signal });
+}
+
+export async function getTask(taskId: string, signal?: AbortSignal): Promise<ProductTask> {
+  const response = await fetchJSON<{ task: ProductTask }>(`/api/tasks/${encodeURIComponent(taskId)}`, { signal });
+  return response.task;
+}
+
+export async function listTaskAttempts(taskId: string, signal?: AbortSignal): Promise<TaskAttemptListResponse> {
+  return fetchJSON<TaskAttemptListResponse>(`/api/tasks/${encodeURIComponent(taskId)}/attempts`, { signal });
+}
+
+export async function getTaskAttempt(taskId: string, attemptId: string, signal?: AbortSignal): Promise<TaskAttempt> {
+  const response = await fetchJSON<{ attempt: TaskAttempt }>(`/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}`, { signal });
+  return response.attempt;
+}
+
+export async function setTaskArchive(taskId: string, expectedRevision: number, archived: boolean): Promise<ProductTask> {
+  const response = await fetchJSON<{ task: ProductTask }>(`/api/tasks/${encodeURIComponent(taskId)}/${archived ? "archive" : "unarchive"}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: expectedRevision }),
   });
   return response.task;
 }

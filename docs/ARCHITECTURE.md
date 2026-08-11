@@ -51,8 +51,10 @@
      зафиксированы отдельно в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md)
      и accepted target contract [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md). W23A1 machine-readable
      schemas, semantic Go contracts, durable registry, Task APIs and Attempt admission are now
-     present; W23B1 additive typed Task routes and truthful target containers are now present, while
-     the Task-first shell cutover remains gated by the subsequent Epic 23 slices.
+     present; W23B1 additive typed Task routes, W23C composer and W23D public Inbox/detail/history
+     reads are now present, while the Task-first shell cutover remains gated by the subsequent Epic
+     23 slices. Inbox state is derived only from authoritative Task/Attempt summaries and never from
+     legacy run recency.
    - Dev: `npm run dev` с proxy на backend
    - Prod: `npm run build` → deterministic `ui/dist` встраивается в Go бинарь как
      versioned `internal/api/ui_dist`; CI verifies same-commit build determinism and rejects

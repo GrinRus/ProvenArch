@@ -184,6 +184,9 @@ Baseline scenario set:
     legacy/latest-run fallback;
   - W23C component tests cover displayed scope submission, exact created Task identity routing and
     fail-closed runner mode/provider readiness;
+  - W23D component/route tests cover public Task/Attempt loading, five derived Inbox groups,
+    URL-restorable lifecycle/runner/repository/time filters, keyboard-safe row activation, exact
+    detail/history identities and explicit empty/error recovery without legacy/latest-run fallback;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage

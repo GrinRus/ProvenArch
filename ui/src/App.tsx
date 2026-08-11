@@ -1023,8 +1023,18 @@ export default function App() {
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
-	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer workspaceReady={validateResult?.ok === true} repos={guidedRepos} runtimeMode={effectiveRuntimeMode} runtimeProvider={effectiveRuntimeProvider} onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] })} /> : null}
-	  {destination === "tasks" && route.taskView !== "new" ? <TaskRouteContainer view={route.taskView ?? "inbox"} taskId={route.taskId} attemptId={route.attemptId} invalid={route.invalid} /> : null}
+	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer workspaceReady={validateResult?.ok === true} repos={guidedRepos} runtimeMode={effectiveRuntimeMode} runtimeProvider={effectiveRuntimeProvider} onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })} /> : null}
+	  {destination === "tasks" && route.taskView !== "new" ? <TaskRouteContainer
+	    view={route.taskView ?? "inbox"}
+	    taskId={route.taskId}
+	    attemptId={route.attemptId}
+	    invalid={route.invalid}
+	    filters={route.taskFilters}
+	    onFiltersChange={(filters) => navigateRoute({ destination: "tasks", taskView: "inbox", taskFilters: filters, invalid: [] })}
+	    onSelectTask={(taskId, filters) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: filters, invalid: [] })}
+	    onSelectAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
+	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
+	  /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace
 		  view={route.changesView ?? "overview"}
