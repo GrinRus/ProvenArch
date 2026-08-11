@@ -396,7 +396,7 @@ test("provider stream mock: Analysis diagnostics remain readable", async ({ page
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/runs");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("runs-page")).toBeVisible();
   await page.getByRole("button", { name: runID }).click();
   await expect(page).toHaveURL(`/runs/${runID}`);
 

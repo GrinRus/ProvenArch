@@ -469,10 +469,9 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await installFailedShardMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/home");
+  await page.goto("/runs");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await page.getByTestId("destination-runs").click();
-  await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("runs-page")).toBeVisible();
   await page.getByRole("button", { name: runID }).click();
   await expect(page).toHaveURL(`/runs/${runID}`);
 

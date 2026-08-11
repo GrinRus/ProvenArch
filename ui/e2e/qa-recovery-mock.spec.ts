@@ -429,7 +429,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "knowledge-empty-mobile.png");
 
-  await page.getByTestId("destination-home").click();
+  await page.goto("/home");
   await expect(page.getByTestId("home-panel")).toBeVisible();
   await captureEvidenceScreenshot(page, "home-mobile.png");
 
@@ -524,7 +524,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "architecture-map-mobile.png");
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.getByTestId("destination-home").click();
+  await page.goto("/home");
   await expect(page.locator(".home-map-visual")).toContainText("Checkout");
   await captureEvidenceScreenshot(page, "home-architecture-desktop.png");
 	await page.goto("/runs/run-analysis-succeeded");

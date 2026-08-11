@@ -92,15 +92,15 @@ The core pipeline is:
 3. Assemble the as-is Architecture Home, coverage report, and derived model.
 4. Validate citations, identities, findings, and the final artifact graph.
 5. Promote validator-approved artifacts and prepare proposal packages.
-6. Review the result in `Home`, `Analyze`, `Architecture`, and `Changes`, then publish through an explicit
-   Git action.
+6. Review the result in `Tasks`, `Architecture`, and `Changes`, then publish through an explicit
+   Git action; open `/runs` only for runtime diagnostics and legacy evidence.
 
 The UI treats the validator-promoted architecture as the product outcome. `Architecture` provides
 Documents as the default read-only reader with Diagrams, Model and Findings sibling modes; the
 existing Context/Container/Component explorer remains available as Model, with service-scoped
 advanced Code view, structured findings/questions and evidence drill-down. `Settings` exposes
 workspace, repository, runtime, scope, Git and diagnostics controls, while
-`Analyze` separates provider activity from durable step/shard progress and offers dependency-aware
+Runtime diagnostics at `/runs` separate provider activity from durable step/shard progress and offer dependency-aware
 child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
 runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
 revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain

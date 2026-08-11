@@ -212,8 +212,9 @@ Baseline scenario set:
     desired draft, effective/source resolution, readiness and immutable admitted Attempt history;
   - W23N fixtures cover Task Inbox loading/empty/error/retry states, keyboard row activation,
     explicit status/alert semantics and 44px filter/Attempt control targets;
-  - W23B2 route fixtures cover Tasks-first navigation and root/unknown path canonicalization to
-    the Task Inbox while explicit legacy deep links remain compatibility-only;
+  - W23B2 route fixtures cover Tasks-first navigation with no Home/Analyze primary links and
+    root/unknown path canonicalization to the Task Inbox while explicit legacy deep links remain
+    compatibility-only;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
@@ -513,7 +514,7 @@ Release workflow hardening:
 - `scripts/frontend-live-e2e.sh` и `npm run e2e:live --prefix ui` используют Playwright:
   - local wrapper поддерживает `claude-code`, `qwen-code`, `codex-code`
   - canonical toggles: `UI_E2E_EXPECTED_REPO_COUNT`, `UI_E2E_SCENARIO=init-inspect`, `UI_E2E_ARTIFACT_SOURCE=snapshot`, `UI_E2E_SNAPSHOT_RUN_ID`, `UI_E2E_OUTPUT_DIR`
-  - release-facing `init-inspect` validates the current ProductShell over the copied backend refresh snapshot: contextual Setup, `Home / Runs / Knowledge / Changes`, run deep-link reload/Back restoration, snapshot-isolated Evidence/Publish and global Ask citation return
+  - release-facing `init-inspect` validates the current ProductShell over the copied backend refresh snapshot: contextual Setup, `Tasks / Architecture / Changes`, explicit runtime-diagnostics deep links, run deep-link reload/Back restoration, snapshot-isolated Evidence/Publish and global Ask citation return
   - rendered acceptance covers `1440`, `1280`, `1024`, `390x844`, global overflow, first-viewport state/action, keyboard focus/Escape/return focus, critical axe results and browser console errors
   - durable ProductShell screenshot refs are diagnostic evidence only: `frontend-home-desktop.png`, `frontend-setup-desktop.png`, `frontend-runs-desktop.png`, `frontend-knowledge-desktop.png`, `frontend-changes-evidence-desktop.png`, `frontend-changes-publish-desktop.png`, default Ask evidence `frontend-ask-desktop.png`, `frontend-changes-publish-mobile.png`, and `frontend-changes-evidence-mobile.png`
   - cancellation/page-close behavior проверяется deterministic fake-runtime UI/API tests, а не live provider release gate

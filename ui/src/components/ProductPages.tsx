@@ -38,7 +38,7 @@ export function HomePage({
   const reviewCount = (architecture?.review?.findings.length ?? 0) + (architecture?.review?.questions.length ?? 0);
   const attentionItems: Array<{ label: string; detail: string; tone: string }> = [
     !workspaceReady ? { label: "Finish workspace setup", detail: "Validate the workspace and at least one repository source.", tone: "blocked" } : null,
-    coordination.active_run_id || coordination.pending ? { label: "Analysis is in progress", detail: "Open Analyze to follow execution and review any intervention request.", tone: "active" } : null,
+    coordination.active_run_id || coordination.pending ? { label: "Analysis is in progress", detail: "Open runtime diagnostics to follow execution and review any intervention request.", tone: "active" } : null,
     evidenceStatus !== "available" ? { label: workflow.nextAction.label, detail: workflow.attention, tone: workflow.status } : null,
     workflow.publication === "dirty" ? { label: "Review unpublished workspace changes", detail: `${gitChanges} change${gitChanges === 1 ? "" : "s"} can be inspected before an explicit Git action.`, tone: "review" } : null,
     workflow.publication === "loading" ? { label: "Checking publication state", detail: "The full workspace Git inventory is loading before publication can be declared clean.", tone: "active" } : null,

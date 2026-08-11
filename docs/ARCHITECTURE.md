@@ -56,10 +56,10 @@
      Architecture context, W23H bounded allowlisted Markdown reader/editor, W23I read-only
      schema-aware model inspection, W23J non-authoritative Mermaid Evidence Studio and W23K
      filtered review queue, W23L exact Task-scoped Changes context and W23M Ask/Runner authority
-     boundaries, W23N Task state/accessibility coverage and the first W23B2 Tasks-primary nav slice
-     are now
-     present, while
-     the Task-first shell cutover remains gated by the subsequent Epic 23 slices. Inbox state,
+     boundaries, W23N Task state/accessibility coverage and the W23B2 Tasks-primary nav cutover
+     are now present; the primary shell exposes only Tasks, Architecture and Changes plus utilities.
+     Explicit `/home` and `/runs` diagnostic routes remain compatibility-only until the final W23O
+     route/component removal. Inbox state,
      semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and
      public run-review identities, never from legacy run recency or provider-output heuristics.
    - Dev: `npm run dev` с proxy на backend
@@ -68,7 +68,7 @@
      stale embedded assets.
    - Live browser e2e: Playwright optional smoke (`ui/e2e/live-flow.spec.ts`, `npm run e2e:live --prefix ui`)
    - UI first-run entrypoint использует Guided Setup `Workspace -> Sources -> Analysis brief -> Runner & readiness -> Review & start`; запуск без brief требует отдельного quality-warning confirmation
-   - UI shell использует native History API и six direct-load путей: `/setup`, `/home`, `/runs`, `/architecture`, `/changes`, `/settings`. Deep context кодируется без router dependency: setup step, `/runs/<run_id>`, Architecture view/entity/document и Changes run/source/view/artifact/viewer mode; explicit stale identity sanitizes with notice and never falls back to another run/source. Primary navigation: `Home / Analyze / Architecture / Changes`; Setup contextual, Settings and Ask global utilities.
+   - UI shell использует native History API и direct-load пути: `/setup`, `/home`, `/runs`, `/tasks`, `/architecture`, `/changes`, `/settings`. Deep context кодируется без router dependency: setup step, `/runs/<run_id>`, Task/Attempt identity, Architecture view/entity/document и Changes run/source/view/artifact/viewer mode; explicit stale identity sanitizes with notice and never falls back to another run/source. Primary navigation: `Tasks / Architecture / Changes`; Setup, Settings, Ask and runtime diagnostics are utilities, while `/home` and `/runs` remain explicit compatibility routes until W23O removal.
    - Один pure workflow selector интерпретирует workspace readiness, active/pending execution, run-pinned evidence snapshot и publication state; он возвращает ровно одну primary next action. Внутренняя taskrun telemetry не является product publication gate.
    - Architecture читает `promoted_current` прежде всего через read-only `GET /api/architecture` и
      исключает `reports/taskruns/**`; legacy `GET /api/knowledge` используется только как
@@ -125,7 +125,7 @@
    - runtime profile patch validation/merge/manifest rewrite живёт в shared internal package `internal/runtimeprofile`, а API handlers остаются только HTTP adapter layer
    - live e2e poll timeout-ы берутся из effective config (`/api/runtime/timeouts`) с env override
    - Критичные UI-контролы для live e2e снабжены стабильными `data-testid` (`validate/run/status/artifacts/logs`)
-   - Product shell использует четыре primary destinations `Home / Analyze / Architecture / Changes`; Settings доступен отдельным `/settings` экраном с Workspace, Repositories, Analysis runtime, Scope and rules, Git/publication, Appearance и Diagnostics секциями. Setup остаётся guided lifecycle flow, Ask global, desktop navigation collapsible, а на tablet/phone primary navigation закреплена снизу. Context drawer становится modal/fullscreen ниже wide desktop breakpoint.
+   - Product shell использует три primary destinations `Tasks / Architecture / Changes`; Settings доступен отдельным `/settings` экраном с Workspace, Repositories, Analysis runtime, Scope and rules, Git/publication, Appearance и Diagnostics секциями. Setup остаётся guided lifecycle flow, Ask и runtime diagnostics — utilities, desktop navigation collapsible, а на tablet/phone primary navigation закреплена снизу. Context drawer становится modal/fullscreen ниже wide desktop breakpoint.
    - Fixed mobile navigation, header/content clearance and fullscreen sheets include device safe
      areas; phone controls keep 44 px targets. Focusable breakpoint-hidden controls are removed from
      layout, while non-comparison Run/Knowledge tables become labeled cards below 680 px.

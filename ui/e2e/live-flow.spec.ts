@@ -174,7 +174,7 @@ function observationShowsProductiveProgress(previous: RunObservation | null, cur
 }
 
 async function captureRunFailureScreenshot(page: Page): Promise<void> {
-  await page.getByTestId("destination-runs").click().catch(() => undefined);
+  await page.goto("/runs").catch(() => undefined);
   await captureEvidenceScreenshot(page, "frontend-runs-failed-desktop.png").catch(() => undefined);
 }
 
@@ -383,7 +383,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
 
   await page.goto("/runs");
   await expect(page.getByTestId("runs-page")).toBeVisible();
-  await expect(page.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("runs-page")).toBeVisible();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   let runID = "";
   if (artifactSource === "snapshot") {
@@ -426,7 +426,7 @@ test("live ui flow: validate -> run init -> inspect artifacts", async ({ page, r
   await page.reload();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/runs/${runID}$`));
-  await page.getByTestId("destination-home").click();
+  await page.goto("/home");
   await expect(page.getByTestId("home-panel")).toBeVisible();
   await page.goBack();
   await expect(page.getByTestId("analysis-run-progress")).toBeVisible();

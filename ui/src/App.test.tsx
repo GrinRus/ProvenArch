@@ -893,16 +893,16 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
     fireEvent.click(screen.getByTestId("stage-ask"));
     return;
   }
-  const destination = stage === "analysis" ? "Analyze" : stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
+  if (stage === "analysis") {
+    fireEvent.click(screen.getByTestId("diagnostics-nav"));
+    const runButtons = Array.from(screen.queryByTestId("runs-history-table")?.querySelectorAll<HTMLButtonElement>("tbody button") ?? []);
+    if (runButtons.length === 1) fireEvent.click(runButtons[0]);
+    return;
+  }
+  const destination = stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
   const destinationLink = screen.getByRole("link", { name: destination });
   if (destinationLink.getAttribute("aria-current") !== "page") fireEvent.click(destinationLink);
-  if (stage === "analysis") {
-    const selectedRun = screen.queryByTestId("runs-history-table")?.querySelector<HTMLButtonElement>("tbody button");
-    if (selectedRun) fireEvent.click(selectedRun);
-  }
-  if (stage !== "analysis") {
-    fireEvent.click(screen.getByTestId(`stage-${stage}`));
-  }
+  fireEvent.click(screen.getByTestId(`stage-${stage}`));
 }
 
 describe("App", () => {
@@ -1485,11 +1485,13 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    for (const destination of ["Tasks", "Home", "Analyze", "Architecture", "Changes", "Settings", "Setup"]) {
+    for (const destination of ["Tasks", "Architecture", "Changes", "Settings", "Setup"]) {
       expect(screen.getByRole("link", { name: destination })).toBeInTheDocument();
     }
     expect(screen.getByTestId("destination-tasks")).toHaveTextContent("Tasks");
-    expect(screen.getByText("Legacy diagnostics")).toBeInTheDocument();
+    expect(screen.queryByText("Legacy diagnostics")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Analyze" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("stage-rail")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("settings-utility"));
@@ -1583,11 +1585,11 @@ describe("App", () => {
 
     await renderConsoleApp("/home");
 
-    const action = screen.getByRole("button", { name: "Open Analyze" });
+    const action = screen.getByRole("button", { name: "Open diagnostics" });
     expect(action).not.toBeDisabled();
     fireEvent.click(action);
     expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
-    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+    expect(window.location.pathname).toBe("/runs");
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/pipeline/init")).toBe(false);
   });
 
@@ -1618,7 +1620,7 @@ describe("App", () => {
 
     expect(await screen.findByTestId("home-panel")).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/home"));
-    expect(screen.getByTestId("destination-home")).toHaveAttribute("aria-current", "page");
+    expect(window.location.pathname).toBe("/home");
   });
 
   it("does not invent a historical review when promoted architecture has no run identity", async () => {
@@ -1806,7 +1808,7 @@ describe("App", () => {
 
     await renderConsoleApp();
 
-    fireEvent.click(screen.getByRole("link", { name: "Analyze" }));
+    navigateToStage("analysis");
     expect(window.location.pathname).toBe("/runs");
     expect(await screen.findByTestId("runs-control-panel")).toBeInTheDocument();
     window.history.pushState({}, "", "/setup");
@@ -1891,7 +1893,7 @@ describe("App", () => {
     await renderConsoleApp("/setup?step=sources");
 
     fireEvent.change(await screen.findByLabelText("workspace.yaml content"), { target: { value: "version: 1\nrepos: []\n" } });
-    fireEvent.click(screen.getByRole("link", { name: "Analyze" }));
+    navigateToStage("analysis");
 
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Unsaved workspace or editor changes"));
     expect(window.location.pathname).toBe("/setup");
@@ -3369,7 +3371,7 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "Start without a saved analysis brief?" })).toHaveTextContent("reduces evidence quality");
     fireEvent.click(screen.getByRole("button", { name: "Start with quality warning" }));
     await screen.findByTestId("analysis-run-progress");
-    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+    expect(window.location.pathname).toMatch(/^\/runs/);
     expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
@@ -3921,7 +3923,7 @@ describe("App", () => {
     );
 
     await renderConsoleApp(`/runs/${runID}`);
-    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
 
     await waitFor(
       () => expect(screen.getByTestId("analysis-run-progress")).toHaveTextContent(runID),
@@ -4112,7 +4114,7 @@ describe("App", () => {
     await screen.findByTestId("product-shell");
 
     navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
 
     expect(screen.queryByTestId("analysis-failure-recovery")).not.toBeInTheDocument();
     const liveDiagnostics = await screen.findByTestId("analysis-live-diagnostics");
@@ -4576,8 +4578,7 @@ describe("App", () => {
     });
 
     navigateToStage("analysis");
-    fireEvent.click(screen.getByTestId("destination-runs"));
-    fireEvent.click(screen.getByRole("button", { name: "run-new" }));
+    fireEvent.click(await screen.findByRole("button", { name: "run-new" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
@@ -4750,8 +4751,7 @@ describe("App", () => {
     });
 
     navigateToStage("analysis");
-    fireEvent.click(screen.getByTestId("destination-runs"));
-    fireEvent.click(screen.getByRole("button", { name: "run-new" }));
+    fireEvent.click(await screen.findByRole("button", { name: "run-new" }));
 
     await waitFor(() => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-new");
@@ -4889,7 +4889,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("analysis");
-    await waitFor(() => expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page"));
+    await waitFor(() => expect(window.location.pathname).toMatch(/^\/runs/));
 
     await screen.findByTestId("run-status-panel");
     expect(screen.getByTestId("run-status-value").textContent).toBe("failed");
@@ -4908,7 +4908,7 @@ describe("App", () => {
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
-    expect(screen.getByTestId("destination-runs")).toHaveAttribute("aria-current", "page");
+    expect(window.location.pathname).toMatch(/^\/runs/);
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("analysis-failed-shard-details")));
   });
 
@@ -5142,8 +5142,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
     expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
-    fireEvent.click(screen.getByTestId("destination-runs"));
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    fireEvent.click(screen.getByTestId("diagnostics-nav"));
+    expect(await screen.findByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
     expect(screen.getByTestId("runs-history-table")).toHaveTextContent("canceled");
   });
@@ -5262,8 +5262,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
     expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
     expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
-    fireEvent.click(screen.getByTestId("destination-runs"));
-    expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
+    fireEvent.click(screen.getByTestId("diagnostics-nav"));
+    expect(await screen.findByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
   });
 
