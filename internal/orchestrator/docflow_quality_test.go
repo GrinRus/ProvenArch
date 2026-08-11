@@ -154,6 +154,59 @@ func TestRuntimeDiagnosticCountersPersistProviderInvocationBudget(t *testing.T) 
 	}
 }
 
+func TestRuntimeDiagnosticCountersPersistConformanceClosure(t *testing.T) {
+	t.Parallel()
+
+	execution := &pipelineExecution{}
+	execution.recordConformanceDiagnostic(map[string]any{
+		"validation_first_pass_valid": true,
+		"validation_issue_class":      "none",
+	})
+	execution.recordConformanceDiagnostic(map[string]any{
+		"validation_first_pass_invalid": true,
+		"validation_issue_class":        "evidence",
+	})
+	execution.recordConformanceDiagnostic(map[string]any{
+		"validation_first_pass_invalid": true,
+		"validation_issue_class":        "audit",
+		"effective_verdict_source":      "orchestrator",
+		"promotion_audit_result":        "fail",
+	})
+
+	counters := execution.runtimeRecoveryCounters
+	if counters.ValidationFirstPassValid != 1 || counters.ValidationFirstPassInvalid != 2 {
+		t.Fatalf("unexpected first-pass counters: %+v", counters)
+	}
+	if counters.ValidationIssueClasses["none"] != 1 || counters.ValidationIssueClasses["evidence"] != 1 || counters.ValidationIssueClasses["audit"] != 1 {
+		t.Fatalf("unexpected issue-class counters: %+v", counters.ValidationIssueClasses)
+	}
+	if counters.EffectiveVerdictSource != "orchestrator" || counters.PromotionAuditResult != "fail" {
+		t.Fatalf("unexpected authority counters: %+v", counters)
+	}
+
+	execution.runID = "run-conformance-quality"
+	execution.pipeline = PipelineInit
+	execution.workspace = workspace.Root{Path: t.TempDir()}
+	execution.clock = func() time.Time { return time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC) }
+	artifact, err := execution.writeRunQualitySummary(RunStatusFailed, "runtime_contract_failed", "incident corpus failure", runFailureClassification{})
+	if err != nil {
+		t.Fatalf("write quality summary: %v", err)
+	}
+	raw, err := execution.workspace.ReadFile(artifact.Path)
+	if err != nil {
+		t.Fatalf("read quality summary: %v", err)
+	}
+	var summary struct {
+		Totals runQualityTotals `json:"totals"`
+	}
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		t.Fatalf("decode quality summary: %v", err)
+	}
+	if summary.Totals.ValidationFirstPassInvalid != 2 || summary.Totals.ValidationIssueClasses["evidence"] != 1 || summary.Totals.EffectiveVerdictSource != "orchestrator" || summary.Totals.PromotionAuditResult != "fail" {
+		t.Fatalf("quality summary lost conformance counters: %+v", summary.Totals)
+	}
+}
+
 func TestRuntimeDiagnosticCountersIgnoreValidArtifactControlledStop(t *testing.T) {
 	t.Parallel()
 

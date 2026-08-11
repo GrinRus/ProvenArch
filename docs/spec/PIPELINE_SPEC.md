@@ -661,5 +661,9 @@ the hard maximum and emits `provider_invocation_index`, `provider_invocation_bud
 `terminal_exhaustion_reason=provider_invocation_budget_exhausted` when exhausted. Attempt/run
 diagnostics aggregate used and remaining counters across their runtime units. A new product Attempt
 receives new runtime-unit budgets; cancellation or valid-artifact controlled stop cannot create an
-extra repair process. The provider-free incident corpus and p95 conformance measurement remain
-the `24I` closure responsibility.
+extra repair process. W24I closes this boundary with a provider-free incident corpus covering
+identity/schema/evidence/graph/verdict/repair/audit failures, Claude/Qwen/Codex adapter issue-code
+parity and a deterministic p95 invocation trace. `reports/taskruns/<run_id>-quality.json.totals`
+also exposes `validation_first_pass_valid`, `validation_first_pass_invalid`, bounded
+`validation_issue_classes`, `effective_verdict_source` and `promotion_audit_result`; provider text
+remains secondary diagnostic evidence.

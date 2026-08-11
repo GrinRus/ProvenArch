@@ -2318,7 +2318,7 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **authority decision accepted; W24A–W24F and W24H runtime-unit budget implemented; W24G and W24I pending.**
+Status (2026-08-11): **authority decision accepted; W24A–W24F, W24H and W24I implemented; metric-gated W24G remains pending.**
 This epic extends the completed `22G` typed recovery state machine and `22H`
 provider-free auditor. It does not reopen or replace those slices.
 
@@ -2372,8 +2372,8 @@ input and never bypass deterministic validation.
 `24A -> 24B -> 24C -> 24D -> 24E -> 24F -> 24H -> 24I`
 
 `24G` is conditional and starts after `24F` only when the recorded first-pass/repair metrics meet its
-entry condition. `24H` records a shared hard budget at the provider process-start seam; `24I` still
-owns the incident corpus and final conformance closure. Each slice is a separate reviewable
+entry condition. `24H` records a shared hard budget at the provider process-start seam and `24I`
+closes the incident corpus and conformance evidence. Each slice is a separate reviewable
 implementation unit with its own ExecPlan, focused tests and documentation synchronization.
 
 ### Cross-slice invariants
@@ -2739,7 +2739,7 @@ Implementation status (2026-08-11): the shared provider process-start seam now e
 three-start budget per runtime execution unit, including normal, focused-repair and transport-retry
 transitions. Diagnostics and `reports/taskruns/<run_id>-quality.json` persist used/remaining counts,
 the last transition and an explicit exhaustion reason. The conformance corpus and p95 measurement
-remain part of `24I`.
+are recorded by `24I`.
 
 Tests:
 
@@ -2780,6 +2780,14 @@ What:
   defaults automatically;
 - synchronize README/ARCHITECTURE/PIPELINE_SPEC/TESTING_STRATEGY/runbooks after implemented behavior,
   then run full deterministic DoD before any trusted-machine live diagnostic.
+
+Implementation status (2026-08-11): `internal/conformance` now runs provider-free incident-shaped
+tables for foreign identity, schema drift, missing evidence, invalid ranges/hashes, graph collisions,
+contradictory verdicts, stale provider repairs and audit failures. The same semantic payload is wrapped
+for Claude/Qwen/Codex adapter identities without starting a provider; ordered issue-code parity and
+zero false accepts are asserted. Runtime quality totals persist first-pass validity, issue-class
+counts, effective-verdict source and promotion-audit result alongside the W24H invocation counters;
+the deterministic conformance trace records p95 provider starts at two.
 
 Acceptance:
 
