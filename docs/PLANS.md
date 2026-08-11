@@ -273,11 +273,17 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
   boundary. Trusted harness seeding and the final release gate remain open until a product-authored
   Task/Attempt history is present.
-- 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (270 Python,
+- 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (271 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
--  The trusted preflight remains blocked on exact Node 22.21.1 (host has 22.22.3); the backend cycle
-  now has a public-API Task/Attempt helper so future snapshots carry product-authored identity without
-  synthesizing legacy runs.
+-  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
+  identity without synthesizing legacy runs.
+- 2026-08-11: Canonical `release fast` was attempted through
+  `scripts/full-run-batch-matrix.sh` with exact Node/npm 22.21.1, writable trusted-gate roots and
+  32.7 GB free space. All four profile/sweep records failed closed during provider readiness because
+  `qwen` returned `quota_or_permission` (`0.19.11`); no provider-backed run, Task/Attempt snapshot or
+  frontend evidence was produced. Release verdict `release-fast-20260811T233300Z` is
+  `RELEASE BLOCKED`. The next action is an unchanged canonical rerun on a host/account with Qwen
+  quota and permission; matrices, providers and release taxonomy remain untouched.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

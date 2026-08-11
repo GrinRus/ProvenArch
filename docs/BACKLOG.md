@@ -2896,10 +2896,17 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-12): **25A/25B implementation complete; 25C trusted gate pending.** The release
+Status (2026-08-12): **25A/25B implementation complete; 25C trusted gate operationally blocked.** The release
 boundary is accepted; Task-first frontend assertions, public authority report consumption and
 public-API Task/Attempt admission in the backend cycle are implemented provider-free. Missing or
 ambiguous identity remains intentionally fail-closed and is never synthesized from legacy runs.
+
+Latest gate evidence (2026-08-11): canonical `release fast` was run with exact Node/npm 22.21.1,
+writable `/tmp/provenarch-live-e2e` and sufficient free space. All four required profile/sweep
+records stopped at provider readiness because Qwen returned `quota_or_permission`; no provider run
+or Task/Attempt evidence was created. The resulting `RELEASE BLOCKED` verdict is an operational
+host/account blocker, not a reason to weaken the public Task/Attempt boundary or change canonical
+matrices. Rerun on a trusted host/account with Qwen quota and permission.
 
 ### Goal
 
