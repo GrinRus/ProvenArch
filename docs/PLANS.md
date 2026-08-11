@@ -190,7 +190,8 @@ the final removal of Home/Analyze routes.
   an advanced line-numbered source view; structured save remains gated on a future lossless
   round-trip proof. W23J now adds a read-only Mermaid Evidence Studio with Raw source fallback
   and an accessible validated relation list that never treats diagram layout as semantic truth.
-  W23K–O remain pending.
+  W23K now adds a filtered findings/questions/gaps queue, bounded detail and an explicit no-approval
+  boundary. W23L–O remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority

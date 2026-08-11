@@ -1945,7 +1945,7 @@ Follow-up note (2026-04-22):
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
 Status (2026-08-11): **target design and pre-implementation authority decisions accepted; 23B1
-through 23J additive slices are implemented without shell cutover; the remaining UI wave and
+through 23K additive slices are implemented without shell cutover; the remaining UI wave and
 Tasks-primary closure are pending.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
@@ -2274,6 +2274,11 @@ Acceptance:
 - proposal links exact findings/evidence or shows disconnected state;
 - empty/partial/error/filtered states and keyboard list/detail flow pass;
 - no runtime logs required to understand any operator-facing finding.
+
+Implementation status (2026-08-11, W23K): the Findings view now separates findings, questions and
+coverage gaps with search/severity filtering, bounded selected-item detail, linked-reference counts
+and explicit unresolved status. It does not invent `Approved` or mutate proposals before a
+persisted human decision contract exists.
 
 ### 23L — Changes truth and full-workspace Publish
 

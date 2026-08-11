@@ -54,7 +54,8 @@
      present; W23B1 additive typed Task routes, W23C composer, W23D public Inbox/detail/history reads,
      W23E exact-run outcome rendering, W23F Attempt-bound Pipeline Studio, W23G Task-scoped
      Architecture context, W23H bounded allowlisted Markdown reader/editor, W23I read-only
-     schema-aware model inspection and W23J non-authoritative Mermaid Evidence Studio are now
+     schema-aware model inspection, W23J non-authoritative Mermaid Evidence Studio and W23K
+     filtered review queue are now
      present, while
      the Task-first shell cutover remains gated by the subsequent Epic 23 slices. Inbox state,
      semantic outcome display and diagnostics are derived only from authoritative Task/Attempt and

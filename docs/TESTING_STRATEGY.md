@@ -203,6 +203,8 @@ Baseline scenario set:
     guard until a lossless YAML/JSON round-trip proof exists;
   - W23J fixtures cover Mermaid Rendered/Raw fallback, explicit render errors, non-authoritative
     layout wording and canonical relation-evidence navigation through the accessible list;
+  - W23K fixtures cover findings/questions/gaps separation, search filtering, bounded selected
+    detail, linked-reference counts and the explicit no-approval/proposal-mutation boundary;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage
