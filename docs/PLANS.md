@@ -144,7 +144,7 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 ### Goals (must have)
 
 - [x] Bind validator identity and checked paths to the exact current runtime task/run snapshot.
-- [ ] Enforce coherent provider draft verdicts and deterministic issue ownership/order.
+- [x] Enforce coherent provider draft verdicts and deterministic issue ownership/order.
 - [x] Validate evidence line/excerpt/hash claims through one bounded shared implementation.
 - [ ] Reject unknown semantic drift and dangling/colliding cross-shard graph identities.
 - [ ] Run provider-free selected-run audit before the first canonical write.
@@ -202,8 +202,8 @@ This plan covers reviewable slices 24A–24F only; budget/corpus closure remains
 - 2026-08-11: Owner accepted the draft/candidate/audit/effective authority chain, exact issue
   consistency rules, evidence normalization and runtime-unit recovery-budget terminology. Added the
   accepted ADR/spec/backlog package. W24A exact run/citation/final containment checks are
-  implemented; W24C shared bounded evidence validation is implemented; W24B and W24D–W24F remain
-  pending.
+  implemented; W24B coherent verdict admission and W24C shared bounded evidence validation are
+  implemented; W24D–W24F remain pending.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

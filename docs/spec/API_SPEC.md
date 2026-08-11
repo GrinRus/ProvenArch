@@ -1205,6 +1205,11 @@ fallback. Для run обязательны matching `final-run-index.json`, `ci
 checked paths и `fixed_paths[]` за пределами selected run — ошибки. Evidence line ranges/excerpts/hashes
 проходят shared bounded normalization из `internal/evidence`.
 
+Validator admission separately rejects contradictory provider drafts (`PASS` with technical errors),
+provider-authored `fixed_paths`, duplicate/conflicting issue identities and non-deterministic issue
+ordering. After advisory reconciliation, an effective `FAIL` requires at least one technical error;
+issue document/citation/path references must resolve against the selected-run inventory.
+
 **200**
 ```json
 {

@@ -192,6 +192,13 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		})
 		return runtimeTaskExecution{}, err
 	}
+	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, false, false); err != nil {
+		e.logError(stepID, domainID, "validator verdict consistency failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
+		return runtimeTaskExecution{}, err
+	}
 
 	e.questions = mergeQuestions(e.questions, verdict.Questions)
 	e.findings = mergeFindings(e.findings, verdict.Findings)
@@ -208,7 +215,6 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 			"task_id": task.TaskID,
 		})
 	}
-
 	issues := e.validateStagedArtifacts()
 	if len(issues) > 0 {
 		return runtimeTaskExecution{}, fmt.Errorf("validator detected staged artifact issues: %s", issues[0].Message)
@@ -219,6 +225,9 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		e.logInfo(stepID, domainID, "source-evidence validator issues downgraded to advisory", map[string]any{
 			"task_id": task.TaskID,
 		})
+	}
+	if err := artifactquality.ValidateValidatorVerdict(verdict, e.finalRunIndex, e.citationIndex, true, true); err != nil {
+		return runtimeTaskExecution{}, err
 	}
 	if verdict.Verdict != "PASS" {
 		return runtimeTaskExecution{}, fmt.Errorf("validator verdict is %s", verdict.Verdict)

@@ -37,6 +37,10 @@
 - deterministic canonicalization top-level `questions/coverage`
 - stable ID normalization и collision rules
 - ownership/card linkage constraints
+- W24B verdict fixtures reject `PASS` plus technical errors, provider-authored `fixed_paths`, empty
+  effective `FAIL`, duplicate/conflicting issue identities, unstable issue order and dangling
+  selected-run document/citation/path references while preserving advisory owner/source gaps until
+  explicit reconciliation.
 - W24C provider-free evidence fixtures exercise one shared bounded implementation across collect,
   staged validation and selected-run audit: 1-based inclusive ranges, CRLF/CR-to-LF normalization,
   exact whitespace/Unicode preservation, excerpt bytes and SHA-256 identity.
