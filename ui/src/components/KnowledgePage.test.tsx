@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import type { KnowledgeResponse } from "../lib/appContracts";
+import { architectureFromKnowledge } from "../lib/workspaceApi";
 import { KnowledgePage } from "./KnowledgePage";
 
 const partialKnowledge: KnowledgeResponse = {
@@ -162,5 +163,25 @@ describe("KnowledgePage", () => {
     expect(await screen.findByTestId("evidence-raw")).toHaveTextContent("flowchart TD");
     fireEvent.click(within(studio).getByRole("button", { name: "Open relation evidence" }));
     expect(onOpenArtifact).toHaveBeenCalledWith("model/edges/edge.payments.calls.users.yaml");
+  });
+
+  it("keeps findings and questions actionable without inventing approval state", () => {
+    const reviewKnowledge = {
+      ...partialKnowledge,
+      review: {
+        findings: [{ id: "finding-1", severity: "high", title: "Missing owner", description: "The service has no canonical owner.", related_ids: ["svc.payments"] }, { id: "finding-2", severity: "low", title: "Stale tag", description: "Tag needs review." }],
+        questions: [{ id: "question-1", text: "Which team owns this boundary?", priority: "high", related_ids: ["finding-1"] }],
+      },
+      coverage: { missing: ["service ownership"] },
+    };
+    const architecture = { ...architectureFromKnowledge(reviewKnowledge), review: reviewKnowledge.review, coverage: reviewKnowledge.coverage };
+    render(<KnowledgePage architecture={architecture} knowledge={reviewKnowledge} loading={false} error="" view="findings" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
+    expect(screen.getByTestId("proposal-decision-boundary")).toHaveTextContent("No Approved status");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "owner" } });
+    expect(screen.getByRole("button", { name: /Missing owner/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Stale tag/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Missing owner/ }));
+    expect(screen.getByText("The service has no canonical owner.")).toBeInTheDocument();
+    expect(screen.getByText(/linked references: 1/)).toBeInTheDocument();
   });
 });
