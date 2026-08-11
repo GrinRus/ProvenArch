@@ -186,6 +186,10 @@ Evidence locators with `lines`, `excerpt` or `excerpt_hash` use the shared bound
 no synthetic trailing LF, and SHA-256 over the selected bytes. Excerpt/hash fields require an
 explicit line range; oversized, invalid-UTF-8 or out-of-range sources fail closed.
 
+W24B admission keeps provider `fixed_paths` empty, rejects `PASS` with technical errors, requires
+an effective `FAIL` to carry a technical error, and enforces unique deterministic issue identities
+and selected-run document/citation/path references.
+
 Allowed `verdict` values:
 - `PASS`
 - `FAIL`

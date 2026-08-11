@@ -86,8 +86,11 @@ func ValidateValidatorArtifacts(task acpruntime.Task) error {
 	if err != nil {
 		return err
 	}
-	_, err = contracts.ParseValidatorVerdict(raw)
-	return err
+	verdict, err := contracts.ParseValidatorVerdict(raw)
+	if err != nil {
+		return err
+	}
+	return artifactquality.ValidateValidatorVerdict(verdict, nil, nil, false, false)
 }
 
 func ValidateQAArtifacts(task acpruntime.Task) error {
