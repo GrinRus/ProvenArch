@@ -2059,6 +2059,12 @@ Acceptance:
 - create/start/error/queued/offline states pass component and mock E2E tests;
 - scope is submitted exactly as displayed and never inferred from UI-only filters.
 
+Implementation status (2026-08-11): `23C` is implemented as an additive New Task composer. It
+submits the displayed repository scope to the authoritative Task API, snapshots the selected
+runtime mode/provider in the desired runner preset, blocks mode/provider/scope mismatches with an
+adjacent reason, and routes to the exact created Task identity. Attempt admission and Task Inbox
+remain in later slices.
+
 ### 23D — Task Inbox, filters and Attempt history
 
 **Goal:** сделать ежедневную работу с несколькими задачами быстрой и сканируемой.

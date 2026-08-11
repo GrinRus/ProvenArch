@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import { ProductShell } from "./components/ProductShell";
 import { TaskRouteContainer } from "./components/TaskRouteContainer";
+import { TaskComposer } from "./components/TaskComposer";
 import { AppOverlays } from "./components/AppOverlays";
 import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
 import { HomePage, RunsPage } from "./components/ProductPages";
@@ -1022,7 +1023,8 @@ export default function App() {
         onDiagnostics={() => { handleDestinationChange("runs"); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
       >
-	  {destination === "tasks" ? <TaskRouteContainer view={route.taskView ?? "inbox"} taskId={route.taskId} attemptId={route.attemptId} invalid={route.invalid} /> : null}
+	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer workspaceReady={validateResult?.ok === true} repos={guidedRepos} runtimeMode={effectiveRuntimeMode} runtimeProvider={effectiveRuntimeProvider} onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] })} /> : null}
+	  {destination === "tasks" && route.taskView !== "new" ? <TaskRouteContainer view={route.taskView ?? "inbox"} taskId={route.taskId} attemptId={route.attemptId} invalid={route.invalid} /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace
 		  view={route.changesView ?? "overview"}

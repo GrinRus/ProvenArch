@@ -182,6 +182,8 @@ Baseline scenario set:
   - W23B1 route codec tests cover Task Inbox/New/Detail/Attempt deep links, optional Task context on
     Architecture/Changes and fail-closed unsafe identities; the target container is tested to avoid
     legacy/latest-run fallback;
+  - W23C component tests cover displayed scope submission, exact created Task identity routing and
+    fail-closed runner mode/provider readiness;
     authority matrix coverage separates `promoted_current`, `run_snapshot`, `qa_snapshot` and
     `qa_audit`, rejects selected-QA fallback and prevents `reports/taskruns/**` from entering
     Knowledge; ProductShell, semantic primitives and ContextDrawer have focused component coverage

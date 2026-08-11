@@ -148,7 +148,8 @@ the final removal of Home/Analyze routes.
 - [x] Preserve optional Task context on Architecture and Changes routes.
 - [x] Fail closed on malformed or unsafe Task identities without selecting another run/result.
 - [x] Add an explicit read-only W23B1 target container with focused component coverage.
-- [ ] Implement Task Inbox/composer/detail/outcome and Attempt history vertical slices.
+- [x] Implement the W23C New Task composer with displayed scope and inline runner readiness.
+- [ ] Implement Task Inbox/detail/outcome and Attempt history vertical slices.
 - [ ] Complete 23B2 primary shell cutover and remove Home/Analyze routes/selectors.
 
 ### Non-goals
@@ -163,14 +164,15 @@ the final removal of Home/Analyze routes.
       round-trips.
 - [x] Invalid Task path/query identity produces an explicit notice and canonical safe route.
 - [x] W23B1 target container exposes no fabricated Task/Attempt/run data.
+- [x] W23C composer submits only displayed scope and routes to the exact created Task identity.
 - [ ] Back/Forward/reload and rendered responsive/keyboard state matrix pass after cutover.
 - [ ] Full deterministic DoD passes for each merged UI slice.
 
 ### Progress log
 
 - 2026-08-11: Implemented W23B1 typed route codec, Task-aware Architecture/Changes context and
-  truthful target container; focused and full UI unit/component tests and UI build pass. W23C–O
-  remain pending.
+  truthful target container, then W23C New Task composer with inline runner readiness and
+  authoritative create call. Focused UI tests/typecheck pass; W23D–O remain pending.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority
