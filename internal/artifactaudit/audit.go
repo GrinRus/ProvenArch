@@ -53,33 +53,93 @@ type Summary struct {
 }
 
 type Report struct {
-	Version   int        `json:"version"`
-	RunID     string     `json:"run_id"`
-	Scope     string     `json:"scope"`
-	Status    Status     `json:"status"`
-	Summary   Summary    `json:"summary"`
-	Issues    []Issue    `json:"issues"`
-	Artifacts []Artifact `json:"artifacts"`
-	Truncated bool       `json:"truncated"`
+	Version              int        `json:"version"`
+	RunID                string     `json:"run_id"`
+	Scope                string     `json:"scope"`
+	Status               Status     `json:"status"`
+	ProviderVerdictPath  string     `json:"provider_verdict_path,omitempty"`
+	EffectiveVerdictPath string     `json:"effective_verdict_path,omitempty"`
+	EffectiveAuthority   string     `json:"effective_authority"`
+	Summary              Summary    `json:"summary"`
+	Issues               []Issue    `json:"issues"`
+	Artifacts            []Artifact `json:"artifacts"`
+	Truncated            bool       `json:"truncated"`
 }
 
 func ScanSelectedRun(ws workspace.Root, runID string) Report {
-	return scan(ws, runID, "selected_run")
+	return scan(ws, runID, "selected_run", nil)
+}
+
+// ScanSelectedRunPublic is the public authority surface. New runs must carry
+// an effective verdict; provider-only historical runs are explicit legacy /
+// unavailable states and never get an inferred PASS.
+func ScanSelectedRunPublic(ws workspace.Root, runID string) Report {
+	runID = strings.TrimSpace(runID)
+	effectivePath := path.Join("reports", "taskruns", runID, "validator", "effective-verdict.json")
+	raw, err := ws.ReadFileLimit(effectivePath, MaxArtifactBytes)
+	if err != nil {
+		report := ScanSelectedRun(ws, runID)
+		report.EffectiveVerdictPath = effectivePath
+		report.EffectiveAuthority = "legacy_unavailable"
+		report.Issues = append(report.Issues, Issue{Code: "audit.effective_verdict.unavailable", Severity: "error", Path: effectivePath, RelatedPaths: []string{}, Message: "effective technical verdict is unavailable; provider-only history is legacy evidence"})
+		finalizeReport(&report)
+		return report
+	}
+	effective, err := contracts.ParseEffectiveVerdict(raw)
+	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
+	providerRaw, providerErr := ws.ReadFileLimit(providerPath, MaxArtifactBytes)
+	providerDigestMatches := providerErr == nil && sha256Hex(providerRaw) == effective.ProviderVerdictSHA256
+	if err != nil || effective.RunID != runID || effective.ProviderVerdictPath != providerPath || !providerDigestMatches {
+		report := ScanSelectedRun(ws, runID)
+		report.EffectiveVerdictPath = effectivePath
+		report.EffectiveAuthority = "invalid"
+		report.Issues = append(report.Issues, Issue{Code: "audit.effective_verdict.invalid", Severity: "error", Path: effectivePath, RelatedPaths: []string{}, Message: "effective technical verdict is invalid or belongs to another run"})
+		finalizeReport(&report)
+		return report
+	}
+	candidate := contracts.ValidatorVerdict{
+		Version: 1, RunID: effective.RunID, GeneratedAt: effective.GeneratedAt, Verdict: effective.Verdict,
+		Summary: effective.Summary, CheckedPaths: append([]string(nil), effective.CheckedPaths...),
+		FixedPaths: append([]string(nil), effective.FixedPaths...), Findings: append([]contracts.Finding(nil), effective.Findings...),
+		Questions: append([]contracts.Question(nil), effective.Questions...), Issues: append([]contracts.ValidatorIssue(nil), effective.TechnicalIssues...),
+	}
+	report := scan(ws, runID, "selected_run", &candidate)
+	report.EffectiveVerdictPath = effectivePath
+	report.EffectiveAuthority = "effective"
+	if len(report.Artifacts) < MaxArtifacts {
+		sum := sha256.Sum256(raw)
+		report.Artifacts = append(report.Artifacts, Artifact{Path: effectivePath, Size: len(raw), SHA256: hex.EncodeToString(sum[:])})
+	}
+	finalizeReport(&report)
+	return report
+}
+
+func sha256Hex(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// ScanSelectedRunWithCandidate uses the same provider-free scanner against an
+// in-memory orchestrator technical candidate before effective-verdict
+// persistence. This keeps audit authority acyclic.
+func ScanSelectedRunWithCandidate(ws workspace.Root, runID string, candidate contracts.ValidatorVerdict) Report {
+	return scan(ws, runID, "selected_run", &candidate)
 }
 
 func ScanPromotedRun(ws workspace.Root, runID string) Report {
-	return scan(ws, runID, "promoted_current")
+	return scan(ws, runID, "promoted_current", nil)
 }
 
-func scan(ws workspace.Root, runID string, scope string) Report {
+func scan(ws workspace.Root, runID string, scope string, candidate *contracts.ValidatorVerdict) Report {
 	runID = strings.TrimSpace(runID)
 	audit := auditor{
 		ws:          ws,
 		runID:       runID,
-		report:      Report{Version: Version, RunID: runID, Scope: scope, Status: StatusPass, Issues: []Issue{}, Artifacts: []Artifact{}},
+		report:      Report{Version: Version, RunID: runID, Scope: scope, Status: StatusPass, EffectiveAuthority: "not_requested", Issues: []Issue{}, Artifacts: []Artifact{}},
 		documents:   map[string]contracts.FinalRunDocument{},
 		citations:   map[string]contracts.DocumentCitation{},
 		repoSources: map[string]workspace.RepoSource{},
+		candidate:   candidate,
 	}
 	for _, source := range ws.Manifest.Repos {
 		audit.repoSources[source.Name] = source
@@ -99,6 +159,7 @@ type auditor struct {
 	documents   map[string]contracts.FinalRunDocument
 	citations   map[string]contracts.DocumentCitation
 	repoSources map[string]workspace.RepoSource
+	candidate   *contracts.ValidatorVerdict
 }
 
 func (a *auditor) scan() {
@@ -144,17 +205,30 @@ func (a *auditor) scan() {
 		a.citations[citation.ID] = citation
 	}
 	verdictPath := path.Join("reports", "taskruns", a.runID, "validator", "validator-verdict.json")
+	a.report.ProviderVerdictPath = verdictPath
 	verdictRaw, err := a.ws.ReadFileLimit(verdictPath, MaxArtifactBytes)
-	if err != nil {
-		a.add("audit.validator.unavailable", "error", verdictPath, nil, "validator verdict is unavailable or oversized")
+	var verdict contracts.ValidatorVerdict
+	if a.candidate != nil {
+		verdict = *a.candidate
+		if err == nil {
+			a.record(verdictPath, verdictRaw)
+		}
+	} else {
+		if err != nil {
+			a.add("audit.validator.unavailable", "error", verdictPath, nil, "validator verdict is unavailable or oversized")
+			return
+		}
+		verdict, err = contracts.ParseValidatorVerdict(verdictRaw)
+		if err != nil || verdict.RunID != a.runID || strings.ToUpper(verdict.Verdict) != "PASS" {
+			a.add("audit.validator.not_promoted", "error", verdictPath, nil, "validator verdict is invalid, foreign or not PASS")
+			return
+		}
+		a.record(verdictPath, verdictRaw)
+	}
+	if verdict.RunID != a.runID {
+		a.add("audit.validator.run_identity_foreign", "error", verdictPath, nil, "technical candidate belongs to a different run")
 		return
 	}
-	verdict, err := contracts.ParseValidatorVerdict(verdictRaw)
-	if err != nil || verdict.RunID != a.runID || strings.ToUpper(verdict.Verdict) != "PASS" {
-		a.add("audit.validator.not_promoted", "error", verdictPath, nil, "validator verdict is invalid, foreign or not PASS")
-		return
-	}
-	a.record(verdictPath, verdictRaw)
 	a.scanValidatorPaths(verdict, finalRoot, finalPath, citationPath)
 
 	for _, document := range index.CanonicalDocuments {
@@ -387,8 +461,12 @@ func (a *auditor) add(code, severity, filePath string, related []string, message
 }
 
 func (a *auditor) finish() {
-	sort.Slice(a.report.Issues, func(i, j int) bool {
-		left, right := a.report.Issues[i], a.report.Issues[j]
+	finalizeReport(&a.report)
+}
+
+func finalizeReport(report *Report) {
+	sort.Slice(report.Issues, func(i, j int) bool {
+		left, right := report.Issues[i], report.Issues[j]
 		if left.Code != right.Code {
 			return left.Code < right.Code
 		}
@@ -397,22 +475,24 @@ func (a *auditor) finish() {
 		}
 		return left.Message < right.Message
 	})
-	sort.Slice(a.report.Artifacts, func(i, j int) bool { return a.report.Artifacts[i].Path < a.report.Artifacts[j].Path })
-	a.report.Summary.Artifact = len(a.report.Artifacts)
-	for _, issue := range a.report.Issues {
+	sort.Slice(report.Artifacts, func(i, j int) bool { return report.Artifacts[i].Path < report.Artifacts[j].Path })
+	report.Summary.Artifact = len(report.Artifacts)
+	report.Summary.Error = 0
+	report.Summary.Warning = 0
+	for _, issue := range report.Issues {
 		if issue.Severity == "error" {
-			a.report.Summary.Error++
+			report.Summary.Error++
 		} else {
-			a.report.Summary.Warning++
+			report.Summary.Warning++
 		}
 	}
 	switch {
-	case a.report.Summary.Error > 0:
-		a.report.Status = StatusFail
-	case a.report.Summary.Warning > 0:
-		a.report.Status = StatusWarn
+	case report.Summary.Error > 0:
+		report.Status = StatusFail
+	case report.Summary.Warning > 0:
+		report.Status = StatusWarn
 	default:
-		a.report.Status = StatusPass
+		report.Status = StatusPass
 	}
 }
 

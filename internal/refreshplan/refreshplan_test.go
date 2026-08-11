@@ -248,11 +248,13 @@ func TestLoadLatestValidBaselineSkipsLegacyRunWithoutRevisionArtifact(t *testing
 	for _, runID := range []string{"legacy", "run-123"} {
 		final := strings.ReplaceAll(string(readExample("final-run-index.example.json")), "run-123", runID)
 		verdict := strings.ReplaceAll(string(readExample("validator-verdict.example.json")), "run-123", runID)
+		effective := strings.ReplaceAll(string(readExample("effective-verdict.example.json")), "run-123", runID)
 		citation := strings.ReplaceAll(string(readExample("citation-index.example.json")), "run-123", runID)
 		for rel, raw := range map[string][]byte{
 			filepath.Join("reports/taskruns", runID, "staging/final/final-run-index.json"): []byte(final),
 			filepath.Join("reports/taskruns", runID, "staging/final/citation-index.json"):  []byte(citation),
 			filepath.Join("reports/taskruns", runID, "validator/validator-verdict.json"):   []byte(verdict),
+			filepath.Join("reports/taskruns", runID, "validator/effective-verdict.json"):   []byte(effective),
 		} {
 			if err := ws.WriteFile(filepath.ToSlash(rel), raw); err != nil {
 				t.Fatal(err)

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "kind": "effective",
+  "authority": "orchestrator",
+  "run_id": "run-123",
+  "generated_at": "2026-04-16T12:00:03Z",
+  "provider_verdict_path": "reports/taskruns/run-123/validator/validator-verdict.json",
+  "provider_verdict_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "verdict": "PASS",
+  "summary": "Deterministic staged validation and selected-run audit passed.",
+  "checked_paths": [
+    "reports/taskruns/run-123/staging/final/final-run-index.json",
+    "reports/taskruns/run-123/staging/final/citation-index.json"
+  ],
+  "fixed_paths": [],
+  "findings": [],
+  "questions": [],
+  "technical_issues": [],
+  "advisory_issues": [],
+  "audit": {
+    "status": "pass",
+    "error_count": 0,
+    "warning_count": 0,
+    "issue_codes": []
+  }
+}

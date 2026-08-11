@@ -106,6 +106,47 @@ type ValidatorVerdict struct {
 	Issues       []ValidatorIssue `json:"issues,omitempty"`
 }
 
+// EffectiveVerdict is the orchestrator-owned technical authority persisted
+// after deterministic validation and the provider-free selected-run audit.
+// The provider-authored ValidatorVerdict is deliberately kept separate and
+// immutable; findings/questions are copied only as advisory semantic input.
+type EffectiveVerdict struct {
+	Version               int                      `json:"version"`
+	Kind                  string                   `json:"kind"`
+	Authority             string                   `json:"authority"`
+	RunID                 string                   `json:"run_id"`
+	GeneratedAt           string                   `json:"generated_at"`
+	ProviderVerdictPath   string                   `json:"provider_verdict_path"`
+	ProviderVerdictSHA256 string                   `json:"provider_verdict_sha256"`
+	Verdict               string                   `json:"verdict"`
+	Summary               string                   `json:"summary,omitempty"`
+	CheckedPaths          []string                 `json:"checked_paths"`
+	FixedPaths            []string                 `json:"fixed_paths"`
+	Findings              []Finding                `json:"findings,omitempty"`
+	Questions             []Question               `json:"questions,omitempty"`
+	TechnicalIssues       []ValidatorIssue         `json:"technical_issues"`
+	AdvisoryIssues        []AdvisoryValidatorIssue `json:"advisory_issues"`
+	Audit                 EffectiveAuditSummary    `json:"audit"`
+}
+
+type AdvisoryValidatorIssue struct {
+	Source     string `json:"source"`
+	MatchKey   string `json:"match_key"`
+	Code       string `json:"code"`
+	Severity   string `json:"severity"`
+	Message    string `json:"message"`
+	Path       string `json:"path,omitempty"`
+	DocumentID string `json:"document_id,omitempty"`
+	CitationID string `json:"citation_id,omitempty"`
+}
+
+type EffectiveAuditSummary struct {
+	Status       string   `json:"status"`
+	ErrorCount   int      `json:"error_count"`
+	WarningCount int      `json:"warning_count"`
+	IssueCodes   []string `json:"issue_codes"`
+}
+
 func ParseShardPackManifest(raw []byte) (ShardPackManifest, error) {
 	if err := validation.ValidateRawJSON(validation.ShardPackManifestSchema, raw); err != nil {
 		return ShardPackManifest{}, fmt.Errorf("shard pack manifest is invalid: %w", err)
@@ -158,6 +199,20 @@ func ParseValidatorVerdict(raw []byte) (ValidatorVerdict, error) {
 	}
 	if err := validateValidatorVerdict(verdict); err != nil {
 		return ValidatorVerdict{}, err
+	}
+	return verdict, nil
+}
+
+func ParseEffectiveVerdict(raw []byte) (EffectiveVerdict, error) {
+	if err := validation.ValidateRawJSON(validation.EffectiveVerdictSchema, raw); err != nil {
+		return EffectiveVerdict{}, fmt.Errorf("effective verdict is invalid: %w", err)
+	}
+	var verdict EffectiveVerdict
+	if err := json.Unmarshal(raw, &verdict); err != nil {
+		return EffectiveVerdict{}, fmt.Errorf("decode effective verdict: %w", err)
+	}
+	if err := validateEffectiveVerdict(verdict); err != nil {
+		return EffectiveVerdict{}, err
 	}
 	return verdict, nil
 }
@@ -306,6 +361,69 @@ func validateValidatorVerdict(verdict ValidatorVerdict) error {
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("validator verdict is invalid: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+func validateEffectiveVerdict(verdict EffectiveVerdict) error {
+	problems := []string{}
+	if verdict.RunID == "" {
+		problems = append(problems, "run_id is required")
+	}
+	if verdict.Kind != "effective" {
+		problems = append(problems, "kind must be effective")
+	}
+	if verdict.Authority != "orchestrator" {
+		problems = append(problems, "authority must be orchestrator")
+	}
+	if verdict.ProviderVerdictPath == "" {
+		problems = append(problems, "provider_verdict_path is required")
+	}
+	if verdict.ProviderVerdictSHA256 == "" {
+		problems = append(problems, "provider_verdict_sha256 is required")
+	}
+	if verdict.Verdict != "PASS" && verdict.Verdict != "FAIL" {
+		problems = append(problems, "verdict must be PASS or FAIL")
+	}
+	if len(verdict.CheckedPaths) == 0 {
+		problems = append(problems, "checked_paths is required")
+	}
+	if verdict.Audit.Status != "pass" && verdict.Audit.Status != "warn" && verdict.Audit.Status != "fail" {
+		problems = append(problems, "audit.status must be pass, warn or fail")
+	}
+	for idx, issue := range verdict.TechnicalIssues {
+		if issue.Code == "" || issue.Message == "" || (issue.Severity != "error" && issue.Severity != "warning") {
+			problems = append(problems, fmt.Sprintf("technical_issues[%d] has invalid code, severity or message", idx))
+		}
+	}
+	for idx, issue := range verdict.AdvisoryIssues {
+		if issue.Source != "provider" || issue.MatchKey == "" || issue.Code == "" || issue.Message == "" || issue.Severity != "warning" {
+			problems = append(problems, fmt.Sprintf("advisory_issues[%d] has invalid source, match_key, severity or message", idx))
+		}
+	}
+	if verdict.Verdict == "PASS" {
+		for _, issue := range verdict.TechnicalIssues {
+			if issue.Severity == "error" {
+				problems = append(problems, "PASS effective verdict cannot contain technical error issues")
+				break
+			}
+		}
+	}
+	if verdict.Verdict == "FAIL" {
+		hasError := false
+		for _, issue := range verdict.TechnicalIssues {
+			if issue.Severity == "error" {
+				hasError = true
+				break
+			}
+		}
+		if !hasError {
+			problems = append(problems, "FAIL effective verdict must contain a technical error")
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("effective verdict is invalid: %s", strings.Join(problems, "; "))
 	}
 	return nil
 }

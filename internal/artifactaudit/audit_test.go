@@ -45,6 +45,42 @@ func TestScanSelectedRunPassesDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestScanSelectedRunPublicRequiresEffectiveAuthority(t *testing.T) {
+	ws, runID := writeAuditFixture(t, false)
+	legacy := ScanSelectedRunPublic(ws, runID)
+	if legacy.Status != StatusFail || !hasIssue(legacy, "audit.effective_verdict.unavailable") || legacy.EffectiveAuthority != "legacy_unavailable" {
+		t.Fatalf("expected explicit legacy/unavailable authority, got %+v", legacy)
+	}
+	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
+	providerRaw, err := ws.ReadFile(providerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := contracts.ValidatorVerdict{}
+	if err := json.Unmarshal(providerRaw, &provider); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(providerRaw)
+	effective := contracts.EffectiveVerdict{
+		Version: 1, Kind: "effective", Authority: "orchestrator", RunID: runID, GeneratedAt: provider.GeneratedAt,
+		ProviderVerdictPath: providerPath, ProviderVerdictSHA256: hex.EncodeToString(sum[:]), Verdict: "PASS",
+		CheckedPaths: provider.CheckedPaths, FixedPaths: []string{}, Findings: provider.Findings, Questions: provider.Questions,
+		TechnicalIssues: []contracts.ValidatorIssue{}, AdvisoryIssues: []contracts.AdvisoryValidatorIssue{},
+		Audit: contracts.EffectiveAuditSummary{Status: "pass", IssueCodes: []string{}},
+	}
+	effectiveRaw, err := json.MarshalIndent(effective, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFileAtomic(path.Join("reports", "taskruns", runID, "validator", "effective-verdict.json"), append(effectiveRaw, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	public := ScanSelectedRunPublic(ws, runID)
+	if public.Status != StatusPass || public.EffectiveAuthority != "effective" {
+		t.Fatalf("expected effective public PASS authority, got %+v", public)
+	}
+}
+
 func TestScanPromotedRunDetectsCanonicalDigestMismatch(t *testing.T) {
 	ws, runID := writeAuditFixture(t, false)
 	stagedPath := path.Join("reports", "taskruns", runID, "staging", "final", "reports", "as-is", "overview.md")

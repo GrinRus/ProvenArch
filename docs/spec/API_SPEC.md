@@ -925,6 +925,31 @@ generation и durable service registration, поэтому switch не може�
 **404**
 - `run_not_found`
 
+### GET `/api/pipeline/runs/<run_id>/effective-verdict`
+
+Returns the selected run's orchestrator-owned effective technical verdict. The response is
+read-only and never infers authority from provider `validator-verdict.json`: a historical run
+without the separate artifact returns `status=legacy_unavailable`, while malformed or foreign
+content returns `status=invalid`.
+
+```json
+{
+  "status": "available",
+  "authority": "effective",
+  "path": "reports/taskruns/run_20260403_001/validator/effective-verdict.json",
+  "verdict": {
+    "version": 1,
+    "kind": "effective",
+    "authority": "orchestrator",
+    "run_id": "run_20260403_001",
+    "verdict": "PASS",
+    "technical_issues": [],
+    "advisory_issues": [],
+    "audit": {"status": "pass", "error_count": 0, "warning_count": 0, "issue_codes": []}
+  }
+}
+```
+
 **409**
 - `run_not_cancelable` (run уже terminal: `succeeded|failed|canceled`)
 
@@ -1192,8 +1217,11 @@ normalized staged containment, persisted inventory membership и однозна�
 
 Выполняет provider-free read-only аудит exact selected-run snapshot. Endpoint не изменяет
 workspace и source repositories, не читает raw provider logs и не использует current workspace как
-fallback. Для run обязательны matching `final-run-index.json`, `citation-index.json` и
-`validator-verdict.json` с `verdict=PASS`.
+fallback. Для новых run обязательны matching `final-run-index.json`, `citation-index.json` и
+orchestrator-owned `effective-verdict.json` с `verdict=PASS`. Provider
+`validator-verdict.json` остаётся отдельным immutable draft. Historical run без effective artifact
+возвращает explicit `audit.effective_verdict.unavailable` и `effective_authority=legacy_unavailable`;
+provider-only PASS не используется как fallback.
 
 Ответ детерминирован и bounded: не более 200 issues, 2000 artifact digest entries, 1 MiB на один
 прочитанный artifact и 320 bytes на message. `truncated=true` означает, что один из budget исчерпан.
@@ -1219,10 +1247,13 @@ dangling edge endpoints; unresolved finding/question references remain explicit 
   "run_id": "run_20260403_001",
   "scope": "selected_run",
   "status": "pass",
+  "provider_verdict_path": "reports/taskruns/run_20260403_001/validator/validator-verdict.json",
+  "effective_verdict_path": "reports/taskruns/run_20260403_001/validator/effective-verdict.json",
+  "effective_authority": "effective",
   "summary": {
     "error": 0,
     "warning": 0,
-    "artifact": 4
+    "artifact": 5
   },
   "issues": [],
   "artifacts": [

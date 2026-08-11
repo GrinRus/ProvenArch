@@ -25,11 +25,11 @@ func LoadLatestValidBaseline(ws workspace.Root, candidateRunIDs []string) (*Sour
 		if err != nil || index.RunID != runID {
 			continue
 		}
-		verdictRaw, err := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")))
+		verdictRaw, err := ws.ReadFile(filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "validator", "effective-verdict.json")))
 		if err != nil {
 			continue
 		}
-		verdict, err := contracts.ParseValidatorVerdict(verdictRaw)
+		verdict, err := contracts.ParseEffectiveVerdict(verdictRaw)
 		if err != nil || verdict.RunID != runID || strings.ToUpper(verdict.Verdict) != "PASS" {
 			continue
 		}

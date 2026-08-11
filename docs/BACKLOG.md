@@ -2318,8 +2318,8 @@ Acceptance:
 
 ## Epic 24 — Weak-model runtime validation and promotion hardening
 
-Status (2026-08-11): **pre-implementation validation authority decision accepted; implementation
-not started.** This epic extends the completed `22G` typed recovery state machine and `22H`
+Status (2026-08-11): **authority decision accepted; W24A–W24F implemented; W24G–W24I pending.**
+This epic extends the completed `22G` typed recovery state machine and `22H`
 provider-free auditor. It does not reopen or replace those slices.
 
 ### Goal

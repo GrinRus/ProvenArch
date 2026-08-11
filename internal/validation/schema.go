@@ -18,6 +18,7 @@ const (
 	FinalRunIndexSchema          Schema = "final-run-index.schema.json"
 	CitationIndexSchema          Schema = "citation-index.schema.json"
 	ValidatorVerdictSchema       Schema = "validator-verdict.schema.json"
+	EffectiveVerdictSchema       Schema = "effective-verdict.schema.json"
 	QAAnswerSchema               Schema = "qa-answer.schema.json"
 	SourceQAAnswerSchema         Schema = "source-qa-answer.schema.json"
 	SourceRevisionsSchema        Schema = "source-revisions.schema.json"

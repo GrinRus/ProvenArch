@@ -28,7 +28,9 @@ Staged write model:
 - runtime шаги пишут только в step-local `write_root` и `draft_final_root`
 - shard analysts пишут только в `reports/taskruns/<run_id>/staging/shards/<shard_id>/`
 - aggregator/orchestrator materialize-ит staged final set в `reports/taskruns/<run_id>/staging/final/`
-- validator пишет только в `reports/taskruns/<run_id>/validator/`
+- validator пишет только в `reports/taskruns/<run_id>/validator/`; provider owns the draft
+  `validator-verdict.json`, while ACP writes the separate orchestrator-owned
+  `effective-verdict.json`
 - promotion копирует только approved final set в стабильные `reports/*` и `proposals/*`
 
 Post-validation audit:
@@ -41,7 +43,7 @@ Post-validation audit:
 - output is deterministic, bounded, redacted and transient; scanning writes neither workspace nor
   source repositories.
 
-Planned Epic 24 authority chain (accepted decision, not implemented):
+Epic 24 authority chain:
 - provider-authored `validator-verdict.json` remains immutable draft evidence;
 - task-aware admission and deterministic assembly/repair produce an internal orchestrator technical
   candidate; any candidate error fails before audit;
@@ -54,8 +56,9 @@ Planned Epic 24 authority chain (accepted decision, not implemented):
 - historical provider verdicts without an effective-verdict artifact remain readable as
   legacy/unavailable authority and are never rewritten or inferred.
 
-This planned chain resolves audit/final-verdict circularity through the pre-audit technical
-candidate. The implemented baseline above remains on-demand/read-only until slices 24E/24F land.
+The chain resolves audit/final-verdict circularity through an internal pre-audit technical
+candidate. Historical provider-only runs remain readable as legacy evidence but do not imply an
+effective PASS.
 See `docs/adr/ADR-20260811-validation-audit-effective-verdict-authority.md`.
 
 Epic 24 evidence normalization (W24C implemented): line ranges are 1-based inclusive and require
@@ -80,6 +83,11 @@ Before the first canonical promotion write, the orchestrator runs the same read-
 validator repair/reconciliation. Any audit error fails closed before promotion-generation or
 canonical activation begins; the prior canonical generation therefore remains byte-identical.
 Audit warnings are retained as diagnostics and do not block promotion.
+
+W24F persists `reports/taskruns/<run_id>/validator/effective-verdict.json` only after candidate
+assembly/repair and selected-run audit. Provider verdict bytes are never rewritten. The effective
+technical issue set is deterministic and independent of provider PASS/FAIL prose; provider
+findings/questions and unmatched provider issues are advisory only.
 
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
@@ -268,7 +276,7 @@ Canonical MVP runtime shape:
 
 ## Source revision and advisory impact artifacts
 
-Before every non-QA pipeline execution, ACP writes `reports/taskruns/<run_id>/source-revisions.json` using `schemas/source-revisions.schema.json`. The baseline is the newest prior successful `init|refresh` whose matching final index and PASS validator verdict are valid and whose source revision artifact is valid. Legacy runs without the artifact are not inferred. The SHA-256 input fingerprint covers configured repo source/scope, `docs.imports_path` content, `charter/**` and `skills/**`; generated reports/model/proposals/taskruns and process-level provider settings are excluded. Resolved absolute checkout paths are never persisted.
+Before every non-QA pipeline execution, ACP writes `reports/taskruns/<run_id>/source-revisions.json` using `schemas/source-revisions.schema.json`. The baseline is the newest prior successful `init|refresh` whose matching final index and PASS effective verdict are valid and whose source revision artifact is valid. Legacy runs without the artifact are not inferred. The SHA-256 input fingerprint covers configured repo source/scope, `docs.imports_path` content, `charter/**` and `skills/**`; generated reports/model/proposals/taskruns and process-level provider settings are excluded. Resolved absolute checkout paths are never persisted.
 
 Before `refresh.step1.collect`, ACP writes immutable advisory `refresh-impact-plan.json` and factual `refresh-execution.json`. Git changes come from `git diff --name-status -z -M -C <baseline>..<current>` and preserve rename/copy identity. Planning accepts at most 10,000 complete changed paths; larger, dirty, unavailable, diverged, unreadable or unmapped input requires full refresh. Safe unchanged/out-of-scope candidates succeed without provider execution or canonical rewrites. Every successful collect shard has an internal orchestrator-owned `baseline-integrity.json` sidecar containing run/source provenance, collect contract identity, domain/shard/repo/path scopes, source revision ranges and a sorted SHA-256/size inventory of every regular shard file. Selective execution replays only validator-promoted baseline shard packs whose sidecar, manifest, successful runtime execution, current full shard identity and baseline source revisions all agree; legacy/missing sidecars, collisions, symlinks, special files, missing files or digest mismatches switch to full before the first provider call. Preserved canonical documents are read from the baseline final index's contained staged paths, never from mutable current canonical files. Collect prompts receive bounded affected paths and at most 20 commit subjects per repo (200 characters each, 64 KiB total); source evidence is authoritative over Git intent text. `refresh-materialization.json` records publication decisions and content hashes.
 
@@ -441,7 +449,7 @@ Step 2 policy:
   Duplicate claim repair remains deterministic for identical index input.
 - staged semantic assembly нормализует `evidence.repo` к логическому repo scope, сводит generated checkout-dir aliases и дедуплицирует entity aliases/related references до validator
 - derived `model/entities/*.yaml` и `model/edges/*.yaml` используют deterministic bounded filenames; при длинном canonical id filename обрезается с hash suffix, а полный `id` сохраняется внутри YAML
-- если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без validator `PASS`
+- если evidence incomplete, staged reports materialize-ятся с incomplete banner, но не promote-ятся без effective technical `PASS`
 - run quality summary (`reports/taskruns/<run_id>-quality.json`) строит fresh artifact inventory по текущему promoted workspace + `reports/taskruns/<run_id>/staging/**`: expected/produced surfaces, final semantic counts, missing model files, placeholder reports/proposals, gap-only C4, empty findings при critical coverage gaps, proposals/findings disconnect (`artifact_quality.proposals_findings_disconnected`), low-actionability proposals for medium/high findings (`artifact_quality.proposals_low_actionability`) и hidden provider/tool document refs фиксируются как `artifact_quality:*` signals для succeeded normal runs. C4 `Context` считается gap-only blocker, если semantic model non-empty, но диаграмма не смогла показать ни external/team relation, ни bounded evidence-backed internal service/datastore relation.
 - если collect status = `unusable`, live runtime для `step2.asis_docs`, `step3.findings` и `step4.proposals` не запускается; orchestrator детерминированно пересобирает triage-only staged docflow только из persisted collect artifacts, а terminal/root cause остаётся collect failure
 - non-collect runtime шаги не стартуют из workspace root: `step2` использует `draft_final_root` как cwd, а live harness разводит headless и baseline workspaces по разным temp roots, чтобы sibling baseline artifacts не были implicit template source
@@ -457,20 +465,21 @@ Inputs:
 
 Primary runtime output:
 - `validator-verdict.json`
+- orchestrator-owned `effective-verdict.json` is persisted after deterministic repair and audit
 - `validator-verdict.json` обязан содержать canonical metadata trio `version=1`, `run_id`, `generated_at` вместе с `verdict` и `checked_paths`
 - validator findings сохраняют canonical `title + description + provenance`; observation evidence внутри `findings[*].provenance.evidence[]` обязано содержать `repo/path`
 
 Orchestrator applies:
 - для sharded runtime replay-ит persisted `succeeded/checkpointed` shard taskruns без повторного provider execution; `checkpointed` shard повторно `apply`-ится, `succeeded` shard только восстанавливает orchestrator in-memory state
-- пересобирает staged final set после validator verdict
-- валидирует `validator-verdict.json`
-- блокирует promotion при verdict != `PASS` или при broken staged indexes
-- validator может править только index/reference/technical issues внутри validator scope; смысл authored docs не переписывается wholesale
-- duplicate `claim_id` внутри `citation-index.json` считаются validator-scope technical drift: orchestrator repair-ит поздние коллизии по правилу `<claim_id>.<shard_slug>[.<n>]` и фиксирует это в `validator-verdict.json.fixed_paths`
+- пересобирает staged final set после provider draft и deterministic repair
+- валидирует provider `validator-verdict.json`, затем writes `effective-verdict.json`
+- блокирует promotion при effective verdict != `PASS` или при broken staged indexes
+- orchestrator может править только index/reference/technical issues внутри validator scope; смысл authored docs не переписывается wholesale
+- duplicate `claim_id` внутри `citation-index.json` считаются validator-scope technical drift: orchestrator repair-ит поздние коллизии по правилу `<claim_id>.<shard_slug>[.<n>]` и фиксирует это в `effective-verdict.json.fixed_paths`
 - обновляет `reports/findings/*`
 - обновляет `reports/agent-outputs/architect/summary.md` через детерминированную агрегацию фактических domain outputs
 - materializes critical unknowns как findings, если отсутствуют owner/integration/database/CI-CD evidence
-- owner-gap остаётся surfaced через `coverage/findings/questions`, но owner-only residual без технических validator issues не должен сам по себе держать `validator-verdict = FAIL`; после repair stages orchestrator может детерминированно reconcile-ить такой verdict в `PASS`, не скрывая сам gap
+- owner-gap остаётся surfaced через `coverage/findings/questions`, но owner-only residual без технических deterministic/audit issues не держит effective verdict в `FAIL`; provider draft остаётся byte-identical и gap не скрывается
 
 ### Step 4 — Promotion / Proposals
 Inputs:
@@ -478,6 +487,7 @@ Inputs:
 - `final-run-index.json`
 - `citation-index.json`
 - `validator-verdict.json`
+- `effective-verdict.json`
 - `skills/templates/*`
 
 Outputs:
@@ -575,9 +585,9 @@ Primary runtime output:
 - `validator-verdict.json`
 
 Publish policy:
-- validator остаётся единственным schema/semantic gate для staged final set;
-- richer synthesis/ranking/evidence shaping разрешены, но итог проходит через validator verdict и compile checks.
-- terminal technical `validator verdict is FAIL` трактуется как completed runtime flow failure, а не как draft/runtime-contract failure; owner-gap-only verdict после technical repairs может быть downgraded в `PASS` при сохранении findings/questions. Provider `FAIL`, основанный только на exact current-run repository-evidence observations, после чистой deterministic staged validation становится `PASS`, сохраняя issues как advisory warnings; это не ослабляет staged artifact validation.
+- provider validator остаётся schema/semantic input, а effective verdict — единственный technical gate для staged final set;
+- richer synthesis/ranking/evidence shaping разрешены, но итог проходит через effective verdict and compile checks.
+- terminal technical `effective verdict is FAIL` трактуется как completed runtime flow failure, а не как draft/runtime-contract failure. Provider `FAIL`, основанный только на exact current-run repository-evidence observations, не меняет effective `PASS`; исходный draft и advisory issue остаются отдельными.
 
 ### Step 4 — Proposals (agent-first + auto-publish)
 
