@@ -149,4 +149,18 @@ describe("KnowledgePage", () => {
     fireEvent.click(within(inspector).getByRole("button", { name: "Open source artifact" }));
     expect(onOpenArtifact).toHaveBeenCalledWith("model/entities/svc.payments.yaml");
   });
+
+  it("keeps Mermaid layout non-authoritative and exposes raw source plus relation navigation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("flowchart TD\n  Payments --> Users\n", { status: 200 })));
+    const onOpenArtifact = vi.fn();
+    const diagramKnowledge: KnowledgeResponse = { ...partialKnowledge, artifacts: [...partialKnowledge.artifacts, { path: "reports/diagrams/context.mmd", kind: "report", name: "context.mmd" }] };
+    render(<KnowledgePage knowledge={diagramKnowledge} loading={false} error="" view="diagrams" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={onOpenArtifact} />);
+    const studio = await screen.findByTestId("mermaid-evidence-context");
+    expect(studio).toHaveTextContent("Mermaid layout and arrows are visual aids only");
+    expect(studio).toHaveTextContent("Open relation evidence");
+    fireEvent.click(screen.getByRole("tab", { name: "Raw" }));
+    expect(await screen.findByTestId("evidence-raw")).toHaveTextContent("flowchart TD");
+    fireEvent.click(within(studio).getByRole("button", { name: "Open relation evidence" }));
+    expect(onOpenArtifact).toHaveBeenCalledWith("model/edges/edge.payments.calls.users.yaml");
+  });
 });

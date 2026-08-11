@@ -206,8 +206,9 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
             {editMode ? <button type="button" className="ui-button tone-primary" disabled={draft === content || saveStatus === "Saving…"} onClick={() => void (async () => { setSaveStatus("Saving…"); try { await saveEditableArtifact(selectedPath, draft); setContent(draft); setEditMode(false); setSaveStatus("Saved to the editable workspace surface."); } catch (error) { setSaveStatus(error instanceof Error ? error.message : "Markdown save failed."); } })()}>Save</button> : null}
           </div>
         </div> : <p className="status info markdown-read-only-note">Promoted Architecture documents are read-only evidence. Edit is available only for editable workspace Markdown under <code>charter/</code> or <code>skills/</code>.</p>}
-        {editMode ? <textarea className="markdown-editor" data-testid="markdown-editor" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Edit ${selectedPath}`} rows={24} /> : <EvidenceViewer path={selectedPath} content={content} sourceMode="promoted_current" mode="rendered" onOpenArtifact={onOpenArtifact} />}
+        {editMode ? <textarea className="markdown-editor" data-testid="markdown-editor" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Edit ${selectedPath}`} rows={24} /> : <EvidenceViewer key={selectedPath} path={selectedPath} content={content} sourceMode="promoted_current" onOpenArtifact={onOpenArtifact} />}
         {saveStatus ? <p className={saveStatus.startsWith("Saved") ? "status ok" : saveStatus === "Saving…" ? "status info" : "status err"} role="status">{saveStatus}</p> : null}
+        {mode === "diagrams" ? <MermaidEvidenceContext architecture={architecture} onOpenArtifact={onOpenArtifact} /> : null}
       </> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
     </section>
     <aside className="architecture-document-context" aria-label="Document context">
@@ -218,6 +219,11 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
       <button type="button" className="ui-button tone-primary" onClick={() => selectedPath && onOpenArtifact(selectedPath)} disabled={!selectedPath}>Open source artifact</button>
     </aside>
   </div>;
+}
+
+function MermaidEvidenceContext({ architecture, onOpenArtifact }: { architecture: ArchitectureResponse; onOpenArtifact: (path: string) => void }) {
+  const relations = uniqueEdges(Object.values(architecture.views).flatMap((view) => view.edges));
+  return <section className="mermaid-evidence-context" data-testid="mermaid-evidence-context"><p className="eyebrow">Evidence Studio</p><h2>Validated relations</h2><p className="hint">This list is the accessible relation authority. Mermaid layout and arrows are visual aids only and never create semantic relations.</p><p className="status info mermaid-source-note">Promoted Mermaid source is read-only. Use Raw in the Source tab for bounded inspection; source diff remains the only supported comparison until deterministic visual diff exists.</p>{relations.length === 0 ? <p className="empty-state">No validated relations are available for this diagram.</p> : <ul className="mermaid-relation-list">{relations.map((relation) => <li key={relation.id}><span className="flow-type">{relation.type}</span><code className="model-logical-id">{relation.from} → {relation.to}</code><button type="button" onClick={() => onOpenArtifact(relation.path)}>Open relation evidence</button></li>)}</ul>}</section>;
 }
 
 function isEditableMarkdownPath(path?: string): boolean {

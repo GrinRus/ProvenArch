@@ -1945,7 +1945,7 @@ Follow-up note (2026-04-22):
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
 Status (2026-08-11): **target design and pre-implementation authority decisions accepted; 23B1
-through 23I additive slices are implemented without shell cutover; the remaining UI wave and
+through 23J additive slices are implemented without shell cutover; the remaining UI wave and
 Tasks-primary closure are pending.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
@@ -2240,6 +2240,11 @@ What:
 - evidence drawer: authority, claim, repo/path/ref, confidence and coverage issue;
 - Markdown/YAML/Mermaid citations use one shared identity/navigation model;
 - Mermaid source diff only until deterministic visual diff contract exists.
+
+Implementation status (2026-08-11, W23J): the Diagrams surface now exposes Rendered/Raw source
+tabs, actionable render-error fallback and an accessible validated relation list. Promoted Mermaid
+source remains read-only; relation navigation uses canonical model edge IDs and explicitly does not
+derive semantics from layout or arrow placement.
 
 Acceptance:
 
