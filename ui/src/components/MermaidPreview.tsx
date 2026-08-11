@@ -47,7 +47,13 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           setError("Mermaid reported a diagram syntax error.");
           return;
         }
-        setSVG(rendered.svg);
+        const safeSVG = sanitizeMermaidSVG(rendered.svg);
+        if (!safeSVG) {
+          setSVG("");
+          setError("Mermaid returned an unsafe or invalid SVG.");
+          return;
+        }
+        setSVG(safeSVG);
         setError("");
       } catch (renderErr) {
         if (disposed || requestRef.current !== currentRequest) {
@@ -69,7 +75,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
   if (!svg) {
     return <p className="hint">Rendering {title}...</p>;
   }
-  return <div className="diagram-svg" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div className="diagram-svg"><img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} alt={title} /></div>;
 }
 
 const mermaidGraphStartPattern =
@@ -90,6 +96,24 @@ function isSupportedMermaidGraph(graph: string): boolean {
 
 function isMermaidErrorSVG(svg: string): boolean {
   return /aria-roledescription=["']error["']/.test(svg) || svg.includes("Syntax error in text");
+}
+
+function sanitizeMermaidSVG(svg: string): string {
+  if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") return "";
+  const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const root = document.documentElement;
+  if (!root || root.tagName.toLowerCase() !== "svg" || document.querySelector("parsererror")) return "";
+  document.querySelectorAll("script, foreignObject").forEach((node) => node.remove());
+  document.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+      if (name.startsWith("on") || ((name === "href" || name.endsWith(":href")) && value.startsWith("javascript:"))) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  });
+  return new XMLSerializer().serializeToString(root);
 }
 
 function cleanupMermaidScratch(renderID: string) {

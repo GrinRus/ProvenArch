@@ -3111,7 +3111,7 @@ code {
   overflow: auto;
 }
 
-.diagram-svg svg {
+.diagram-svg img {
   width: max-content;
   height: auto;
   min-width: 44rem;
@@ -4885,7 +4885,7 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .diagram-svg svg {
+  .diagram-svg img {
     min-width: 36rem;
   }
 }
