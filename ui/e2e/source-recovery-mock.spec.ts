@@ -235,7 +235,7 @@ test("source recovery mock: validation blockers stay actionable and readable", a
   await installSourceRecoveryMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/");
+  await page.goto("/home");
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await page.getByRole("link", { name: "Setup" }).click();
   await page.getByTestId("setup-step-sources").click();

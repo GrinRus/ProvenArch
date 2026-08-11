@@ -2035,7 +2035,8 @@ codec now preserves `/tasks`, `/tasks/new`, exact Task detail and Task/Attempt i
 optional Task context on Architecture/Changes. The target container is explicit and read-only:
 it does not query or mutate Task data and never substitutes a legacy/latest run. The first `23B2`
 navigation slice now puts Tasks, Architecture and Changes in the Workspace group and labels Home /
-Analyze as Legacy diagnostics; final removal of those legacy routes/components remains a W23O gate.
+Analyze as Legacy diagnostics; unknown/root console paths resolve to Task Inbox; final removal of
+those legacy routes/components remains a W23O gate.
 
 ### 23C — New Task composer and inline runner readiness
 

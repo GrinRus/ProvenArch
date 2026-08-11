@@ -410,7 +410,7 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   const { postedQuestions } = await installQARecoveryMock(page);
 
   await page.setViewportSize({ width: 1440, height: 980 });
-  await page.goto("/");
+  await page.goto("/home");
   await expect(page.getByTestId("product-shell")).toBeVisible();
   await expect(page.getByTestId("home-panel")).toBeVisible();
   await expectNoHorizontalOverflow(page);

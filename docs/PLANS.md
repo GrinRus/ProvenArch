@@ -200,7 +200,8 @@ the final removal of Home/Analyze routes.
   desired/effective/source boundary explicit, including provider-outage behavior. W23N now covers
   Task Inbox empty/error recovery, keyboard row activation, 44px filter/Attempt targets and explicit
   status semantics. The first 23B2 navigation slice now makes Tasks primary and labels legacy
-  diagnostics; final Home/Analyze removal remains in W23O.
+      diagnostics; unknown/root console paths now resolve to Task Inbox; final Home/Analyze removal
+      remains in W23O.
 
 ### Plan ID
 EP-20260811-weak-model-validation-authority
