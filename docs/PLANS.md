@@ -174,8 +174,10 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
       pre-Task runs and removes the legacy shell components.
 - [x] Merge the W23O route-closure implementation branch and record the post-merge verification;
       W24G and Epic 25 remain owned by their separate active plans.
-- [ ] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
-      implementation plans.
+- [ ] Re-run the combined deterministic closure after the W25A/B release-gate changes, including
+      embedded UI parity and the public Task/Attempt evidence boundary.
+- [x] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
+      implementation plan.
 
 ### Non-goals
 
@@ -218,6 +220,59 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
   shell by canonicalizing old run links to `/tasks/legacy` read-only diagnostics.
 
 ### Plan ID
+EP-20260812-task-first-live-evidence-alignment
+
+### Context
+
+W25 must preserve the canonical trusted-machine release boundary after the Task-first UI and Epic 24
+authority changes. The release frontend may inspect only one exact public Task/Attempt/run snapshot;
+the batch reporter may consume only persisted public audit/verdict/budget fields. A missing product
+identity is evidence failure, not permission to synthesize a Task from historical runs.
+
+### Goals (must have)
+
+- [x] Cut `init-inspect` over to exact public Task/Attempt admission and identity-bound Pipeline Studio.
+- [x] Remove latest-run and legacy-shell fallback from the release-facing Playwright flow.
+- [x] Add public-only promotion-audit, effective-verdict and recovery-budget fields to batch reports.
+- [x] Keep historical v1 report fields readable and preserve existing failure taxonomy.
+- [ ] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
+      identities, then run canonical live validation on a trusted host.
+- [ ] Complete full deterministic DoD and embedded UI parity after the W25 changes.
+
+### Non-goals
+
+- No new providers, canonical matrices, curated repositories, release taxonomy or live CI workflow.
+- No internal Go validator/orchestrator imports in the harness and no second provider analysis.
+- No synthetic Task/Attempt rows for legacy runs.
+
+### Approach
+
+1. Update the frontend scenario and contract tests to resolve exact public Task/Attempt identities.
+2. Consume only persisted quality-summary authority fields in batch reports and fail closed on audit or
+   recovery-budget violations.
+3. Synchronize the runbook, testing strategy and backlog; run focused checks and the deterministic DoD.
+4. Use `acp-e2e-live-gate` for any later trusted-machine run; do not alter the canonical harness.
+
+### Acceptance criteria
+
+- [x] Frontend snapshot flow rejects missing/ambiguous public Task/Attempt identity and never selects
+      latest run or `/tasks/legacy` as a release fallback.
+- [x] Report TSV/Markdown contains effective authority, audit result, invocation budget and first-pass
+      validation evidence sourced from public JSON only.
+- [ ] `make contracts`, `make test`, `make lint`, `make build` and embedded UI parity pass.
+- [ ] Canonical live gate has fresh public Task/Attempt evidence and no second analysis.
+
+### Progress log
+
+- 2026-08-12: Implemented W25A Playwright Task/Attempt admission and exact snapshot joins; updated
+  frontend contract tests. Snapshot mode now fails closed instead of materializing synthetic identity.
+- 2026-08-12: Implemented W25B public-authority extraction and report/TSV fields; audit failure and
+  provider-budget exhaustion are hard gates while historical missing fields retain legacy semantics.
+- 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
+  boundary. Trusted harness seeding and the final release gate remain open until a product-authored
+  Task/Attempt history is present.
+
+### Plan ID
 EP-20260811-weak-model-validation-authority
 
 ### Context
@@ -241,6 +296,8 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
 - [x] Record the W24G entry metric and decide whether mechanical-envelope reduction is warranted;
       the provider-free corpus is 100% first-pass-valid, 0% repair-entry and p95=2, so W24G is
       deferred without changing the public envelope.
+- [ ] Re-run the combined deterministic DoD after downstream W25 public-report integration so the
+      Epic 24 authority remains verified at the release boundary.
 
 ### Non-goals
 

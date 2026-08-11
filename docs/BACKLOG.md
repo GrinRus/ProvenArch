@@ -2896,9 +2896,10 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-11): **release boundary accepted; implementation not started.** This is a cross-epic
-release-gate alignment task. The Task-first frontend migration starts only after `23O`; hardened
-runtime evidence assertions start only after the public diagnostics from `24I` are stable.
+Status (2026-08-12): **25A/25B implementation in progress.** The release boundary is accepted;
+Task-first frontend assertions and public authority report consumption are implemented provider-free.
+The trusted harness still needs a product-authored Task/Attempt history for snapshot runs; missing or
+ambiguous identity is intentionally fail-closed and is not synthesized from legacy runs.
 
 ### Goal
 
@@ -2966,6 +2967,10 @@ Acceptance:
 - existing `active_run_timeout`, `runtime_run_failed`, `browser_closed`, `api_unreachable`,
   `server_exited` and `playwright_failed` classifications remain distinguishable.
 
+Implementation status (2026-08-12): `live-flow.spec.ts` now admits/reads public Task/Attempt
+identities, pins exact Task → Attempt → run joins, and rejects latest-run or legacy fallback. The
+snapshot path fails closed when the copied workspace lacks a matching product-authored identity.
+
 ### 25B — Epic 24 public evidence consumption
 
 **Depends on:** `24I` deterministic closure and stable public diagnostic fields.
@@ -3004,6 +3009,11 @@ Acceptance:
 - recovery-budget exhaustion is visible and cannot be hidden by a terminal provider success;
 - no product-internal package, selector or validation helper is imported by the harness;
 - required CI remains deterministic/provider-free; trusted live execution remains manual.
+
+Implementation status (2026-08-12): `e2e_batch_report.py` consumes only persisted public quality
+summary fields for effective verdict source, promotion-audit result, recovery budget and first-pass
+validation counters; audit failure and budget exhaustion block hard pass while historical v1 fields
+retain their documented read behavior.
 
 ### 25C — Closure and optional Task-start diagnostic decision
 

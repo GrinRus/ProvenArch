@@ -56,6 +56,19 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
         self.assertIn("matrix_result_${MATRIX_ID}.json", matrix_script)
         self.assertIn("release_verdict_${MATRIX_ID}.json", matrix_script)
 
+    def test_batch_report_reads_public_epic24_authority_fields_only(self) -> None:
+        report_script = (self.repo_root / "scripts" / "e2e_batch_report.py").read_text(encoding="utf-8")
+        for token in (
+            "extract_public_authority_evidence",
+            "effective_verdict_source",
+            "promotion_audit_result",
+            "provider_budget_exhausted",
+            "validation_first_pass_valid",
+        ):
+            self.assertIn(token, report_script)
+        self.assertNotIn("internal.artifact", report_script)
+        self.assertNotIn("internal.orchestrator", report_script)
+
     def test_unwanted_live_e2e_public_surfaces_are_absent(self) -> None:
         for rel in (
             "scripts/full-run-ai-advent.sh",
