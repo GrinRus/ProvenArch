@@ -129,6 +129,8 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   (47 files/255 tests), all eight deterministic mock E2E scenarios, lint, production build and
   embedded UI parity. The local Node override is only required because this machine has 22.22.3
   while the repository pins 22.21.1; resolver tests pass without the override.
+- 2026-08-12: W23O route-closure PR #249 merged to `main` as squash commit `3699f03b` after all
+  required GitHub checks passed.
 - 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,
   single-active/single-queued coordination, legacy-run and publication-linkage decisions. Added the
   ADR/spec package and implemented W23A1 schemas, semantic Go contracts, examples and provider-free
@@ -170,8 +172,10 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
       Tasks/Architecture/Changes plus utilities, and no longer renders Home/Analyze links or
       selectors. W23O now exposes only the explicit `/tasks/legacy` read-only migration surface for
       pre-Task runs and removes the legacy shell components.
-- [ ] Merge the W23O route-closure implementation branch and record the post-merge verification;
+- [x] Merge the W23O route-closure implementation branch and record the post-merge verification;
       W24G and Epic 25 remain owned by their separate active plans.
+- [ ] Record the W24G entry metric and hand off the Epic 25 release-gate slices to their follow-up
+      implementation plans.
 
 ### Non-goals
 
