@@ -41,6 +41,8 @@
   effective `FAIL`, duplicate/conflicting issue identities, unstable issue order and dangling
   selected-run document/citation/path references while preserving advisory owner/source gaps until
   explicit reconciliation.
+- W24D semantic fixtures reject unknown nested fields, conflicting cross-shard ID collisions and dangling edge
+  endpoints while preserving unresolved finding/question references as advisory coverage gaps.
 - W24C provider-free evidence fixtures exercise one shared bounded implementation across collect,
   staged validation and selected-run audit: 1-based inclusive ranges, CRLF/CR-to-LF normalization,
   exact whitespace/Unicode preservation, excerpt bytes and SHA-256 identity.

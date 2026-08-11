@@ -26,6 +26,9 @@ func ValidateCollectManifestInRootWithRepoRoots(writeRoot string, repoRoots map[
 	if err != nil {
 		return err
 	}
+	if err := ValidateSemanticEnvelopeJSON(raw); err != nil {
+		return err
+	}
 	manifest, err := contracts.ParseShardPackManifest(raw)
 	if err != nil {
 		return err
@@ -43,6 +46,9 @@ func ValidateCollectManifestInRootWithRepoRoots(writeRoot string, repoRoots map[
 }
 
 func ValidateCollectManifestBytes(raw []byte) error {
+	if err := ValidateSemanticEnvelopeJSON(raw); err != nil {
+		return err
+	}
 	_, err := contracts.ParseShardPackManifest(raw)
 	return err
 }

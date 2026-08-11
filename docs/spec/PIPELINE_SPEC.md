@@ -67,6 +67,14 @@ enforces bounded source/line/excerpt sizes and exposes one stable issue taxonomy
 staged validation, validator findings and provider-free audit must call this implementation; the
 selected-run audit integration is read-only and fail-closed.
 
+W24D semantic admission is strict for the typed envelope: unknown semantic object fields, duplicate
+conflicting IDs across shard snapshots, dangling edge endpoints and missing owner-team entities fail
+closed. Repeated observations of the same core entity/edge/finding identity are allowed so long as
+their non-provenance fields agree; provenance evidence is merged rather than treated as a new node.
+Finding/question related IDs remain advisory when they describe an unresolved coverage gap; they do
+not invent graph nodes. Historical v1 artifacts remain parseable through the compatibility reader,
+while new collect/staged admission applies the strict writer policy.
+
 Runtime write policy:
 - `workspace root` больше не трактуется как implicit write target
 - runtime получает explicit `artifact_root`, `write_root`, `draft_final_root`, `read_context_roots[]`, `step_contract`, `expected_artifacts[]`

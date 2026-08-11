@@ -1870,6 +1870,16 @@ func (e *pipelineExecution) validateStagedArtifacts() []contracts.ValidatorIssue
 			Path:     e.finalRunIndex.CitationIndexPath,
 		})
 	}
+	if err := artifactquality.ValidateSemanticEnvelope(e.finalRunIndex.Semantic); err != nil {
+		issues = append(issues, contracts.ValidatorIssue{Code: "semantic_envelope_invalid", Severity: "error", Message: err.Error()})
+	}
+	shardSemantics := make([]contracts.SemanticSnapshot, 0, len(e.shardPacks))
+	for _, manifest := range e.shardPacks {
+		shardSemantics = append(shardSemantics, manifest.Semantic)
+	}
+	if err := artifactquality.ValidateSemanticIDCollisions(shardSemantics...); err != nil {
+		issues = append(issues, contracts.ValidatorIssue{Code: "semantic_id_collision", Severity: "error", Message: err.Error()})
+	}
 
 	citationIDs := map[string]struct{}{}
 	citationsByID := map[string]contracts.DocumentCitation{}

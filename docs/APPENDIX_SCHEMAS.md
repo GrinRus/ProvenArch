@@ -190,6 +190,12 @@ W24B admission keeps provider `fixed_paths` empty, rejects `PASS` with technical
 an effective `FAIL` to carry a technical error, and enforces unique deterministic issue identities
 and selected-run document/citation/path references.
 
+W24D adds strict semantic-envelope admission for new writes: object keys outside the documented
+entity/edge/finding/question/provenance/evidence surface are rejected, conflicting IDs across shard
+snapshots are rejected, and graph edge endpoints resolve to entities. Repeated shard observations
+may reuse an ID only when core identity fields agree; provenance evidence remains mergeable.
+Historical v1 reads remain compatible.
+
 Allowed `verdict` values:
 - `PASS`
 - `FAIL`
