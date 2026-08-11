@@ -96,6 +96,13 @@ export function RuntimeProfileSettingsPanel({
 }: RuntimeProfileSettingsPanelProps) {
   return (
     <>
+      <section className="runtime-settings-authority" data-testid="runtime-settings-authority">
+        <strong>Runner Settings are draft configuration for the next admission.</strong>
+        <p className="hint">
+          Desired values are the editable fields below. Effective values and their source are shown after resolution; an admitted Attempt keeps its immutable snapshot even if Settings or environment values change.
+        </p>
+        <p className="hint">Run <em>Check readiness</em> in Setup → Runner for the latest provider check. A provider outage blocks new Ask/Attempt admission, while existing evidence remains available for review.</p>
+      </section>
       <section className="panel" data-testid="runtime-provider-models-panel">
         <h2>Settings: Provider Models</h2>
         <p className="hint">

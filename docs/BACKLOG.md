@@ -2328,6 +2328,14 @@ Acceptance:
 - unsupported effort/provider values fail inline before save;
 - modal/sheet focus trap, return context and mobile fullscreen tests pass.
 
+Implementation status (2026-08-11, W23M): the global Ask surface now repeats its current-workspace
+read-only authority inside the panel, records that Q&A cannot mutate canonical architecture or an
+admitted Attempt, and explains that provider outage blocks only new Ask/Attempt admission while
+existing evidence remains reviewable. Runner Settings now labels editable fields as desired draft
+configuration, keeps effective/source resolution and immutable admitted Attempt history explicit,
+and routes the latest readiness check to Setup → Runner. Proposal creation remains a separate,
+digest-bound confirmation action.
+
 ### 23N — Responsive, accessibility and complete state coverage
 
 **Goal:** закрыть quality bar до release, не после visual polish.

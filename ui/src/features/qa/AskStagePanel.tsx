@@ -316,6 +316,12 @@ export function AskStagePanel({
         <StatusBadge tone={runOutcomeTone(qaRun)}>{qaRunProviderLabel(qaRun)}</StatusBadge>
       </div>
 
+      <aside className="qa-authority-boundary" data-testid="qa-authority-boundary">
+        <strong>Current workspace · read-only</strong>
+        <span>Ask reads the current evidence and retained Q&amp;A history. It never changes canonical architecture or an admitted Attempt.</span>
+        <span>Provider outage blocks a new Ask run (and a new Attempt), but it does not block review of existing Architecture evidence.</span>
+      </aside>
+
       <div className="qa-workbench">
         <aside className="qa-run-history" data-testid="qa-run-history">
           <div className="panel-subheader">
