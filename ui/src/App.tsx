@@ -1052,6 +1052,8 @@ export default function App() {
 			architectureComparison: selectedArchitectureComparison,
 			architectureComparisonMismatch,
 			runReview: runReviewSummary?.review,
+			taskId: route.taskId,
+			onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
 		  }}
 		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
 		  proposals={{

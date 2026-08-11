@@ -17,6 +17,8 @@ export function ChangesPage({
   architectureComparison,
   architectureComparisonMismatch = false,
   runReview,
+  taskId,
+  onOpenTask,
   children,
 }: {
   runs: RunListItem[];
@@ -30,6 +32,8 @@ export function ChangesPage({
   architectureComparison?: ArchitectureComparison;
   architectureComparisonMismatch?: boolean;
   runReview?: RunReviewContract;
+  taskId?: string;
+  onOpenTask?: (taskId: string) => void;
   children: ReactNode;
 }) {
   const reviewCandidates = buildChangeReviewModel(runs, selectedRunID, selectedEvidenceStatus);
@@ -48,6 +52,7 @@ export function ChangesPage({
         source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? `Run snapshot · ${selectedRunID}` : "Choose a review package"}
         action={readOnlyWorkspace ? <span className="status info" data-testid="changes-read-only-badge">Read-only workspace</span> : !canPublish && selectedRunID ? <Button data-testid="changes-open-run-studio" onClick={() => onOpenRunStudio(selectedRunID)}>Open Run Studio</Button> : <Button tone="primary" data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>{view === "publish" ? "Publication review" : "Continue to publish"}</Button>}
       />
+      {taskId ? <aside className="task-changes-context" data-testid="task-changes-context" aria-label="Task Changes context"><div><p className="eyebrow">Task context</p><strong>Changes for the selected Task</strong><p><code>{taskId}</code> · exact selected run/attempt identity only</p><span className="hint">No latest-run fallback; Current workspace evidence and historical snapshot publication stay distinct.</span></div>{onOpenTask ? <button type="button" className="ui-button tone-neutral" onClick={() => onOpenTask(taskId)}>Back to Task</button> : null}</aside> : null}
       <RouteTabs
         label="Change Review views"
         value={view}
