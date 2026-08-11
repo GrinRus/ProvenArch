@@ -20,3 +20,24 @@
 - No Task schema/API/backend/frontend implementation was added.
 - No current ProductShell, provider/runtime policy or release matrix behavior changed.
 - No live provider or release gate was executed.
+
+## EP-20260811-weak-model-validation-backlog
+
+### Result
+
+- Fetched `origin/main` at `64b42251` and created the planning branch from that exact main commit.
+- Reconciled the proposed hardening with completed Epic 22 typed recovery/auditor work and current
+  runtime, schema and pipeline behavior.
+- Added Epic 24 slices `24A`–`24I` for task-bound validator admission, verdict consistency,
+  evidence/graph integrity, mandatory pre-promotion audit, orchestrator-owned effective verdict,
+  conditional mechanical-envelope reduction, bounded recovery and provider-free conformance.
+- Recorded goals, non-goals, dependencies, expected modules, focused tests, compatibility boundaries
+  and measurable acceptance for every slice.
+- `git diff --check` and the focused `internal/docsync` test passed after archiving this completed
+  plan outside the active-plan surface.
+
+### Non-goals preserved
+
+- No runtime, schema, provider, UI or release-matrix implementation was added.
+- No default model/provider change and no live E2E execution occurred.
+- No incomplete historical live run was reinterpreted as acceptance evidence.
