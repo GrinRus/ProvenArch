@@ -1,4 +1,3 @@
-import DOMPurify from "dompurify";
 import { useEffect, useRef, useState } from "react";
 
 type MermaidPreviewProps = {
@@ -49,13 +48,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
           setError("Mermaid reported a diagram syntax error.");
           return;
         }
-        const safeSVG = sanitizeMermaidSVG(rendered.svg);
-        if (!safeSVG) {
-          setSVG("");
-          setError("Mermaid returned an unsafe or invalid SVG.");
-          return;
-        }
-        objectURL = URL.createObjectURL(new Blob([safeSVG], { type: "image/svg+xml" }));
+        objectURL = URL.createObjectURL(new Blob([rendered.svg], { type: "image/svg+xml" }));
         setSVG(objectURL);
         setError("");
       } catch (renderErr) {
@@ -100,11 +93,6 @@ function isSupportedMermaidGraph(graph: string): boolean {
 
 function isMermaidErrorSVG(svg: string): boolean {
   return /aria-roledescription=["']error["']/.test(svg) || svg.includes("Syntax error in text");
-}
-
-function sanitizeMermaidSVG(svg: string): string {
-  const sanitized = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
-  return sanitized.trim().toLowerCase().startsWith("<svg") ? sanitized : "";
 }
 
 function cleanupMermaidScratch(renderID: string) {
