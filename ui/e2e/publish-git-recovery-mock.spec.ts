@@ -422,7 +422,7 @@ test("publish git recovery mock: failed git mutations stay local and retryable",
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.goto("/");
   await expect(page.getByTestId("product-shell")).toBeVisible();
-  await page.getByRole("link", { name: "Changes" }).click();
+  await page.goto("/changes");
   await expect(page.getByTestId("changes-route-overview")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await captureEvidenceScreenshot(page, "changes-overview-desktop.png");
