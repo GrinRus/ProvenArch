@@ -1,12 +1,11 @@
 # Task and Attempt contract (W23A1–W23A4 foundation)
 
-Status: **W23A1–W23A4 schemas, durable registry, public Task APIs and Attempt admission are implemented.**
-The task-first UI and later W23/W24/W25 release slices remain pending.
+Status: **W23A1–W23A4 schemas, durable registry, public Task APIs, Attempt admission and W23
+Task-first surfaces are implemented. W24 authority and W25 trusted live evidence remain gated.**
 
-This document fixes the product identity and persistence boundary that must exist before the
-Task-first shell can replace the implemented run-first UI only after the remaining W23A slices are
-accepted. Current `/api/pipeline/runs*` behavior remains authoritative until the Task API and
-admission boundary are wired into the service.
+This document fixes the product identity and persistence boundary for the Task-first shell. Current
+`/api/pipeline/runs*` behavior remains readable for runtime lifecycle and legacy evidence, while
+new Task/Attempt and publication identity is authoritative through the Task registry.
 
 ## 1) Goals
 

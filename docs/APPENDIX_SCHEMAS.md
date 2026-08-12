@@ -333,6 +333,10 @@ Output mapping rules:
   task-to-attempt membership, exact run/revision/status summary joins and same-task parent lineage.
 - Historical pipeline runs are not synthesized as Tasks; legacy run identity remains outside this
   registry and is read-only until an explicit user action creates a Task.
+- A linked publication carries the exact initiating Attempt/run identity, action, branch,
+  `base_ref/base_oid`, resulting `head_oid`/commit and the confirmed full-workspace inventory
+  fingerprint. An unavailable publication carries only an explicit reason; it is never inferred from
+  a clean worktree or latest commit.
 
 ## 9) Source Revisions Schema
 

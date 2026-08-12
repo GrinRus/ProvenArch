@@ -92,6 +92,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
     route.changesView = enumParam(params, "view", changesViews, "overview", invalid);
     route.source = enumParam(params, "source", sources, "snapshot", invalid);
     route.taskId = taskParam(params, invalid);
+    route.attemptId = attemptParam(params, invalid);
     route.runId = textParam(params, "run");
     route.runRequested = params.has("run");
     route.artifact = textParam(params, "artifact");
@@ -129,6 +130,7 @@ export function formatAppRoute(route: AppRoute): string {
   }
   if (route.destination === "changes") {
     if (route.taskId) params.set("task", route.taskId);
+    if (route.attemptId) params.set("attempt", route.attemptId);
     if (route.runId) params.set("run", route.runId);
     params.set("view", route.changesView ?? "overview");
     params.set("source", route.source ?? "snapshot");
@@ -178,6 +180,13 @@ function taskParam(params: URLSearchParams, invalid: string[]): string | undefin
   const value = textParam(params, "task");
   if (!value || validTaskRouteId(value)) return value;
   invalid.push("task");
+  return undefined;
+}
+
+function attemptParam(params: URLSearchParams, invalid: string[]): string | undefined {
+  const value = textParam(params, "attempt");
+  if (!value || validTaskRouteId(value)) return value;
+  invalid.push("attempt");
   return undefined;
 }
 

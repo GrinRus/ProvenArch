@@ -1154,6 +1154,9 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 		Message             string `json:"message"`
 		ExpectedFingerprint string `json:"expected_fingerprint"`
 		ExpectedHeadOID     string `json:"expected_head_oid"`
+		TaskID              string `json:"task_id,omitempty"`
+		AttemptID           string `json:"attempt_id,omitempty"`
+		RunID               string `json:"run_id,omitempty"`
 	}
 	if err := decodeStrictJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
@@ -1170,6 +1173,24 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 	s.admissionMu.Lock()
 	defer s.admissionMu.Unlock()
 	snapshot := s.sessionSnapshot()
+	publicationContext := taskPublicationContext{TaskID: payload.TaskID, AttemptID: payload.AttemptID, RunID: payload.RunID}
+	var registry *producttasks.Registry
+	if publicationContext.provided() {
+		var err error
+		registry, err = s.taskRegistrySnapshot()
+		if err != nil {
+			writeTaskHistoryUnavailable(writer, err)
+			return
+		}
+		if _, _, err := validateTaskPublicationContext(registry.Snapshot(), publicationContext); err != nil {
+			if strings.Contains(err.Error(), "was not found") {
+				writeError(writer, http.StatusNotFound, "publication_context_not_found", err.Error())
+			} else {
+				writeError(writer, http.StatusBadRequest, "publication_context_invalid", err.Error())
+			}
+			return
+		}
+	}
 	if snapshot.Service != nil && snapshot.Service.HasInFlightRun() {
 		writeError(writer, http.StatusConflict, "run_active", "Git mutation is blocked while a run is active or queued")
 		return
@@ -1195,19 +1216,34 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "nothing to commit") {
 			writeJSON(writer, http.StatusOK, map[string]any{
-				"ok":      true,
-				"status":  "no_changes",
-				"message": "nothing to commit",
+				"ok":          true,
+				"status":      "no_changes",
+				"message":     "nothing to commit",
+				"publication": publicationUnavailable("Git commit did not create a new publication"),
 			})
 			return
 		}
 		writeError(writer, http.StatusBadRequest, "git_commit_failed", err.Error())
 		return
 	}
+	publication := publicationUnavailable("no exact Task/Attempt/run context was supplied")
+	if publicationContext.provided() {
+		after, stateErr := collectWorkspaceGitState(request.Context(), ws)
+		if stateErr != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_state_unavailable", stateErr.Error())
+			return
+		}
+		publication = buildTaskPublication("commit", publicationContext, state, after)
+		if err := recordTaskPublication(registry, publicationContext, publication); err != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_linkage_failed", err.Error())
+			return
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"ok":     true,
-		"status": "committed",
-		"output": output,
+		"ok":          true,
+		"status":      "committed",
+		"output":      output,
+		"publication": publication,
 	})
 }
 
@@ -1223,6 +1259,9 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 		ExpectedBaseRef      string `json:"expected_base_ref"`
 		ExpectedBaseOID      string `json:"expected_base_oid"`
 		ExpectedHeadOID      string `json:"expected_head_oid"`
+		TaskID               string `json:"task_id,omitempty"`
+		AttemptID            string `json:"attempt_id,omitempty"`
+		RunID                string `json:"run_id,omitempty"`
 	}
 	if err := decodeStrictJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid request body")
@@ -1241,6 +1280,24 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 	s.admissionMu.Lock()
 	defer s.admissionMu.Unlock()
 	snapshot := s.sessionSnapshot()
+	publicationContext := taskPublicationContext{TaskID: payload.TaskID, AttemptID: payload.AttemptID, RunID: payload.RunID}
+	var registry *producttasks.Registry
+	if publicationContext.provided() {
+		var err error
+		registry, err = s.taskRegistrySnapshot()
+		if err != nil {
+			writeTaskHistoryUnavailable(writer, err)
+			return
+		}
+		if _, _, err := validateTaskPublicationContext(registry.Snapshot(), publicationContext); err != nil {
+			if strings.Contains(err.Error(), "was not found") {
+				writeError(writer, http.StatusNotFound, "publication_context_not_found", err.Error())
+			} else {
+				writeError(writer, http.StatusBadRequest, "publication_context_invalid", err.Error())
+			}
+			return
+		}
+	}
 	if snapshot.Service != nil && snapshot.Service.HasInFlightRun() {
 		writeError(writer, http.StatusConflict, "run_active", "Git mutation is blocked while a run is active or queued")
 		return
@@ -1268,10 +1325,23 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 			return
 		}
 	}
-
+	publication := publicationUnavailable("no exact Task/Attempt/run context was supplied")
+	if publicationContext.provided() {
+		after, stateErr := collectWorkspaceGitState(request.Context(), ws)
+		if stateErr != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_state_unavailable", stateErr.Error())
+			return
+		}
+		publication = buildTaskPublication("branch", publicationContext, state, after)
+		if err := recordTaskPublication(registry, publicationContext, publication); err != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_linkage_failed", err.Error())
+			return
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"ok":     true,
-		"branch": branch,
+		"ok":          true,
+		"branch":      branch,
+		"publication": publication,
 	})
 }
 

@@ -184,6 +184,9 @@ type Publication struct {
 	RunID                string           `json:"run_id,omitempty"`
 	Action               string           `json:"action,omitempty"`
 	Branch               string           `json:"branch,omitempty"`
+	BaseRef              string           `json:"base_ref,omitempty"`
+	BaseOID              string           `json:"base_oid,omitempty"`
+	HeadOID              string           `json:"head_oid,omitempty"`
 	Commit               string           `json:"commit,omitempty"`
 	InventoryFingerprint string           `json:"inventory_fingerprint,omitempty"`
 	UnavailableReason    string           `json:"unavailable_reason,omitempty"`
@@ -673,6 +676,9 @@ func validatePublication(value Publication, label string, includeAttempt bool) [
 		}
 		if strings.TrimSpace(value.Branch) == "" || strings.TrimSpace(value.Commit) == "" {
 			problems = append(problems, label+".branch and commit are required when linked")
+		}
+		if strings.TrimSpace(value.BaseRef) == "" || strings.TrimSpace(value.BaseOID) == "" || strings.TrimSpace(value.HeadOID) == "" {
+			problems = append(problems, label+".base_ref, base_oid and head_oid are required when linked")
 		}
 		if !regexp.MustCompile(`^[a-fA-F0-9]{64}$`).MatchString(value.InventoryFingerprint) {
 			problems = append(problems, label+".inventory_fingerprint must be a SHA-256 fingerprint when linked")

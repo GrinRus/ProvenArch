@@ -77,7 +77,8 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 - [x] Add create/list/read/update/archive/unarchive Task APIs with stable pagination and revision checks.
 - [x] Add idempotent per-Attempt admission with immutable scope/runner snapshots and exact run linkage.
 - [x] Preserve pre-contract runs as explicit read-only legacy evidence without synthetic Tasks.
-- [ ] Expose unknown/unavailable result and publication linkage without inferred `Published` state.
+- [x] Expose unknown/unavailable result and publication linkage without inferred `Published` state.
+- [ ] Close this W23A foundation plan after W25 consumes fresh trusted public Task/Attempt evidence.
 
 ### Non-goals
 
@@ -140,6 +141,13 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   22.21.1: contracts valid, Go/Python (271 tests) and UI (47 files/255 tests) suites green, all eight
   mock E2E scenarios green, lint/build green, and `ui/dist` byte-identical to embedded `ui_dist`
   (excluding its README).
+- 2026-08-12: Closed the W23A publication-linkage gap. Task-bound Changes routes now carry an exact
+  Task/Attempt/run context into full-workspace Git commit/proposal-branch mutations. The server
+  validates the join before mutation and, only after success, records an immutable publication
+  association on both Task and Attempt with action, branch/base/head identity, resulting commit and
+  the confirmed inventory fingerprint. Missing or partial context remains explicitly unavailable;
+  no latest-run, clean-worktree or legacy fallback is used. Focused API, schema, route and UI tests
+  cover linked, unavailable and fail-closed paths.
 - 2026-08-12: W23O route-closure PR #249 merged to `main` as squash commit `3699f03b` after all
   required GitHub checks passed.
 - 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,

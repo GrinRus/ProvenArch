@@ -481,7 +481,7 @@ test("live ui flow: validate -> admit Task Attempt -> inspect exact outcome", as
   await expectNoDocumentOverflow(page);
   await captureEvidenceScreenshot(page, "frontend-knowledge-desktop.png");
 
-  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&attempt=${encodeURIComponent(attemptID)}&run=${encodeURIComponent(runID)}&view=evidence&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("changes-page")).toBeVisible();
   await expect(page.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("changes-page")).toContainText(`Run snapshot · ${runID}`);
@@ -600,7 +600,7 @@ test("live ui flow: validate -> admit Task Attempt -> inspect exact outcome", as
     await page.keyboard.press("Escape");
   }
 
-  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&run=${encodeURIComponent(runID)}&view=publish&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${encodeURIComponent(taskID)}&attempt=${encodeURIComponent(attemptID)}&run=${encodeURIComponent(runID)}&view=publish&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("stage-publish")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("publish-diff-summary")).toBeVisible();

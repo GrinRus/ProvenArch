@@ -128,6 +128,7 @@ export default function App() {
   const workspaceSetup = useWorkspaceSetup({
     setBusy,
     setError,
+    publicationContext: destination === "changes" && route.source === "snapshot" ? { taskId: route.taskId, attemptId: route.attemptId, runId: route.runId } : undefined,
   });
 
   const {
@@ -1041,6 +1042,7 @@ export default function App() {
 			architectureComparisonMismatch,
 			runReview: runReviewSummary?.review,
 			taskId: route.taskId,
+			attemptId: route.attemptId,
 			onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
 		  }}
 		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}

@@ -27,7 +27,7 @@ export type ProductTask = {
   last_activity_at: string;
   attempts: Array<{ attempt_id: string; run_id: string; status: string; updated_at: string }>;
   outcome: { state: "available" | "unavailable"; unavailable_reason?: string; attempt_id?: string; run_id?: string; snapshot_path?: string };
-  publication: { state: "linked" | "unavailable"; unavailable_reason?: string };
+  publication: { state: "linked" | "unavailable"; attempt_id?: string; run_id?: string; action?: "commit" | "branch" | "pull_request"; branch?: string; base_ref?: string; base_oid?: string; head_oid?: string; commit?: string; inventory_fingerprint?: string; unavailable_reason?: string };
 };
 
 export type TaskAttempt = {
@@ -58,6 +58,7 @@ export type TaskAttempt = {
   terminal_summary?: { state?: string; message?: string; error_code?: string };
   outcome?: ProductTask["outcome"];
   retained_evidence?: string;
+  publication?: ProductTask["publication"];
 };
 
 export type TaskListResponse = {

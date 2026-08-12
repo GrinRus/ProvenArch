@@ -92,15 +92,27 @@ export type GitConfirmationIdentity = {
   baseOID: string;
 };
 
-export async function commitWorkspaceArtifacts(message: string, confirmation: GitConfirmationIdentity): Promise<{ status: string; message?: string; output?: string }> {
-  return fetchJSON<{ status: string; message?: string; output?: string }>("/api/git/commit", {
+export type GitPublicationContext = {
+  taskId?: string;
+  attemptId?: string;
+  runId?: string;
+};
+
+function publicationContextPayload(context?: GitPublicationContext): Record<string, string> {
+  return context?.taskId && context.attemptId && context.runId
+    ? { task_id: context.taskId, attempt_id: context.attemptId, run_id: context.runId }
+    : {};
+}
+
+export async function commitWorkspaceArtifacts(message: string, confirmation: GitConfirmationIdentity, context?: GitPublicationContext): Promise<{ status: string; message?: string; output?: string; publication?: { state: "linked" | "unavailable"; attempt_id?: string; unavailable_reason?: string } }> {
+  return fetchJSON<{ status: string; message?: string; output?: string; publication?: { state: "linked" | "unavailable"; attempt_id?: string; unavailable_reason?: string } }>("/api/git/commit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, expected_fingerprint: confirmation.fingerprint, expected_head_oid: confirmation.headOID }),
+    body: JSON.stringify({ message, expected_fingerprint: confirmation.fingerprint, expected_head_oid: confirmation.headOID, ...publicationContextPayload(context) }),
   });
 }
 
-export async function createProposalBranch(name: string, confirmation: GitConfirmationIdentity): Promise<{ branch: string }> {
+export async function createProposalBranch(name: string, confirmation: GitConfirmationIdentity, context?: GitPublicationContext): Promise<{ branch: string; publication?: { state: "linked" | "unavailable"; attempt_id?: string; unavailable_reason?: string } }> {
   return fetchJSON<{ branch: string }>("/api/git/proposal-branch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -111,6 +123,7 @@ export async function createProposalBranch(name: string, confirmation: GitConfir
       expected_base_ref: confirmation.baseRef,
       expected_base_oid: confirmation.baseOID,
       expected_head_oid: confirmation.headOID,
+      ...publicationContextPayload(context),
     }),
   });
 }

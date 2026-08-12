@@ -74,6 +74,9 @@
         "run_id": {"type": "string", "minLength": 1},
         "action": {"type": "string", "enum": ["commit", "branch", "pull_request"]},
         "branch": {"type": "string", "minLength": 1},
+        "base_ref": {"type": "string", "minLength": 1},
+        "base_oid": {"type": "string", "minLength": 1},
+        "head_oid": {"type": "string", "minLength": 1},
         "commit": {"type": "string", "minLength": 1},
         "inventory_fingerprint": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
         "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}

@@ -2016,6 +2016,12 @@ queue and cancel actions are absent for pre-Task evidence; status, outcome, boun
 technical recovery details remain readable. This does not synthesize a Task or alter the existing
 `/api/pipeline/runs*` contracts.
 
+Implementation note (2026-08-12): W23A publication linkage is now server-authoritative. Task-bound
+Changes routes pass an exact Task/Attempt/run join to full-workspace commit and proposal-branch
+mutations; successful mutations persist action, branch/base/head identity, resulting commit and the
+confirmed inventory fingerprint on both Task and Attempt. Missing or partial context stays explicitly
+unavailable, with no latest-run, clean-worktree or legacy inference.
+
 ### 23B — Task-first shell and navigation cutover
 
 **Goal:** единственный shell `Tasks / Architecture / Changes`, global Ask and contextual Settings.

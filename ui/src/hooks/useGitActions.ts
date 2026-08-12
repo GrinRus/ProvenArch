@@ -2,14 +2,15 @@ import { useState } from "react";
 
 import type { GitDiffResponse } from "../lib/appContracts";
 import { loadWorkspaceGitDiff } from "../lib/gitDiffApi";
-import { commitWorkspaceArtifacts, createProposalBranch } from "../lib/workspaceApi";
+import { commitWorkspaceArtifacts, createProposalBranch, type GitPublicationContext } from "../lib/workspaceApi";
 
 type UseGitActionsOptions = {
   setBusy: (busy: boolean) => void;
   setError: (message: string | null) => void;
+  publicationContext?: GitPublicationContext;
 };
 
-export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
+export function useGitActions({ setBusy, setError, publicationContext }: UseGitActionsOptions) {
   const [gitMessage, setGitMessage] = useState("chore: update ACP workspace artifacts");
   const [proposalBranch, setProposalBranch] = useState("proposal/beta-refresh");
   const [gitStatus, setGitStatus] = useState<string>("");
@@ -70,10 +71,13 @@ export function useGitActions({ setBusy, setError }: UseGitActionsOptions) {
         baseOID: gitConfirmation.diff.base_oid ?? "",
       };
       if (gitConfirmation.action === "commit") {
-        const payload = await commitWorkspaceArtifacts(gitMessage, identity);
-        setGitStatus(payload.output ?? payload.message ?? payload.status);
+        const payload = await commitWorkspaceArtifacts(gitMessage, identity, publicationContext);
+        const publicationLabel = payload.publication?.state === "linked"
+          ? `Task publication linked to Attempt ${payload.publication.attempt_id ?? "unknown"}`
+          : payload.publication?.unavailable_reason;
+        setGitStatus([payload.output ?? payload.message ?? payload.status, publicationLabel].filter(Boolean).join(" · "));
       } else {
-        const payload = await createProposalBranch(proposalBranch, identity);
+        const payload = await createProposalBranch(proposalBranch, identity, publicationContext);
         setGitStatus(`checked out ${payload.branch}`);
       }
       setGitConfirmation(null);
