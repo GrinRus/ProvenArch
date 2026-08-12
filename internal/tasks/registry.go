@@ -67,7 +67,9 @@ func (r *Registry) Snapshot() History {
 func (r *Registry) Diagnostics() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return append([]string(nil), r.diagnostics...)
+	diagnostics := make([]string, len(r.diagnostics))
+	copy(diagnostics, r.diagnostics)
+	return diagnostics
 }
 
 // Replace validates and durably publishes the complete registry candidate.
@@ -188,7 +190,12 @@ func CloneHistory(value History) History {
 	for index, attempt := range value.Attempts {
 		clone.Attempts[index] = CloneAttempt(attempt)
 	}
-	clone.Diagnostics = append([]string(nil), value.Diagnostics...)
+	// Keep the JSON array shape stable even when the source is an empty,
+	// non-nil slice. append onto a nil slice turns that valid empty array into
+	// nil, which json.Marshal encodes as `null` and makes a persisted history
+	// fail the task-history schema on restart.
+	clone.Diagnostics = make([]string, len(value.Diagnostics))
+	copy(clone.Diagnostics, value.Diagnostics)
 	return clone
 }
 

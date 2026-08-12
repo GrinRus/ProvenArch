@@ -2004,6 +2004,12 @@ Acceptance:
 - API and schema round-trip fixtures cover create/list/read/archive and parent-child attempts;
 - no Task data is written to analyzed source repositories or promoted Architecture surfaces.
 
+Implementation note (2026-08-12): restart rehearsal exposed a slice-cloning bug that serialized an
+empty diagnostics array as `null`, making both current and last-good history fail schema validation.
+The registry now preserves array shape across clone/persist/restart and public Task/Attempt list
+responses keep bounded diagnostics as arrays; focused persistence/API tests and the exact-Node
+snapshot-backed Task-first UI flow pass.
+
 ### 23B — Task-first shell and navigation cutover
 
 **Goal:** единственный shell `Tasks / Architecture / Changes`, global Ask and contextual Settings.

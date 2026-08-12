@@ -38,16 +38,17 @@ func TestTaskAPICreateListPatchArchiveAndCursor(t *testing.T) {
 		t.Fatalf("list tasks: %v", err)
 	}
 	var listed struct {
-		Items      []producttasks.Task `json:"items"`
-		NextCursor string              `json:"next_cursor"`
-		HasMore    bool                `json:"has_more"`
+		Items       []producttasks.Task `json:"items"`
+		NextCursor  string              `json:"next_cursor"`
+		HasMore     bool                `json:"has_more"`
+		Diagnostics []string            `json:"diagnostics"`
 	}
 	if err := json.NewDecoder(listResponse.Body).Decode(&listed); err != nil {
 		listResponse.Body.Close()
 		t.Fatalf("decode task list: %v", err)
 	}
 	listResponse.Body.Close()
-	if listResponse.StatusCode != http.StatusOK || len(listed.Items) != 1 || listed.Items[0].TaskID != created.Task.TaskID || listed.HasMore {
+	if listResponse.StatusCode != http.StatusOK || len(listed.Items) != 1 || listed.Items[0].TaskID != created.Task.TaskID || listed.HasMore || listed.Diagnostics == nil {
 		t.Fatalf("unexpected task list: status=%d payload=%+v", listResponse.StatusCode, listed)
 	}
 
