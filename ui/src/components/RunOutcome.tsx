@@ -31,7 +31,7 @@ export function RunResultPanel({ review, onExploreArchitecture }: { review: RunR
   </section>;
 }
 
-export function TargetedRerunPanel({ runStatus, review, busy, onRetryStarted }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; onRetryStarted: (runID: string) => void }) {
+export function TargetedRerunPanel({ runStatus, review, busy, readOnly = false, onRetryStarted }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; readOnly?: boolean; onRetryStarted: (runID: string) => void }) {
   const steps = terminalRerunSteps(review?.pipeline || runStatus?.pipeline);
   const [step, setStep] = useState(steps[steps.length - 1] ?? "");
   const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
@@ -43,14 +43,14 @@ export function TargetedRerunPanel({ runStatus, review, busy, onRetryStarted }: 
   async function start() { if (!plan) return; setWorking(true); setStatus(""); try { const response = await startTargetedRetry(runStatus!.run_id, plan); onRetryStarted(response.run_id); } catch (error) { const message = error instanceof Error ? error.message : "Targeted rerun failed to start"; if (message.toLowerCase().includes("retry inputs changed")) { setPlan(null); setStatus("The rerun plan is stale because sources or parent artifacts changed. Calculate it again, or start a full run if you intended to change the source baseline."); } else { setStatus(message); } } finally { setWorking(false); } }
   return <section className="targeted-rerun" data-testid="targeted-rerun-panel">
     <div><p className="eyebrow">Selective rerun</p><h2>Repeat only the work you need</h2><p>Choose a completed pipeline step. ProvenArch will create an auditable child run and automatically include every invalidated downstream step.</p></div>
-    <label>Start from step<select value={step} onChange={(event) => { setStep(event.target.value); setPlan(null); setStatus(""); }}>{steps.map((item) => <option key={item} value={item}>{stepPurpose(item)}</option>)}</select></label>
+    {readOnly ? <p className="status info" data-testid="legacy-read-only-rerun">Selective reruns are unavailable for legacy evidence.</p> : <label>Start from step<select value={step} onChange={(event) => { setStep(event.target.value); setPlan(null); setStatus(""); }}>{steps.map((item) => <option key={item} value={item}>{stepPurpose(item)}</option>)}</select></label>}
     {plan ? <RetryPlanPreview plan={plan} /> : null}
     {status ? <p className="status err" role="status">{status}</p> : null}
-    <div className="actions"><button type="button" onClick={() => void (plan ? start() : calculate())} disabled={busy || working}>{working ? "Working…" : plan ? "Start targeted rerun" : "Review rerun plan"}</button></div>
+    {!readOnly ? <div className="actions"><button type="button" onClick={() => void (plan ? start() : calculate())} disabled={busy || working}>{working ? "Working…" : plan ? "Start targeted rerun" : "Review rerun plan"}</button></div> : null}
   </section>;
 }
 
-export function RecoveryPanel({ runStatus, review, busy, onRetryStarted, onReviewDetails }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; onRetryStarted: (runID: string) => void; onReviewDetails: () => void }) {
+export function RecoveryPanel({ runStatus, review, busy, readOnly = false, onRetryStarted, onReviewDetails }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; readOnly?: boolean; onRetryStarted: (runID: string) => void; onReviewDetails: () => void }) {
   const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
   const [status, setStatus] = useState("");
   const [working, setWorking] = useState(false);
@@ -64,7 +64,7 @@ export function RecoveryPanel({ runStatus, review, busy, onRetryStarted, onRevie
     <dl className="recovery-impact"><div><dt>Impact</dt><dd>{recovery.impact}</dd></div><div><dt>Evidence retained</dt><dd>{recovery.retained_evidence}</dd></div><div><dt>Recommended fix</dt><dd>{recovery.recommended_fix}</dd></div><div><dt>Failed step</dt><dd>{recovery.failed_step || "Not identified"}</dd></div></dl>
     {plan ? <RetryPlanPreview plan={plan} /> : null}
     {status ? <p className="status err" role="status">{status}</p> : null}
-    <div className="actions"><button type="button" data-testid="analysis-retry-run-btn" onClick={() => void (plan ? start() : calculate())} disabled={busy || working || !recovery.can_retry}>{working ? "Working…" : plan ? "Start targeted retry" : "Calculate retry plan"}</button><button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewDetails}>Open technical details</button></div>
+    {readOnly ? <p className="status info" data-testid="legacy-read-only-recovery">Retry and run mutation are unavailable for legacy evidence. Technical details remain readable.</p> : <div className="actions"><button type="button" data-testid="analysis-retry-run-btn" onClick={() => void (plan ? start() : calculate())} disabled={busy || working || !recovery.can_retry}>{working ? "Working…" : plan ? "Start targeted retry" : "Calculate retry plan"}</button><button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewDetails}>Open technical details</button></div>}
     {!recovery.can_retry ? <p className="disabled-reason">Retry is unavailable because the backend could not establish a safe dependency closure.</p> : null}
     <details><summary>Technical error</summary><code>{recovery.technical_code || runStatus.error_code || "unclassified"}</code></details>
   </section>;

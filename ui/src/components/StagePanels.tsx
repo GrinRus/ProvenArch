@@ -330,6 +330,7 @@ function CharterPromptBundleStatus({
 
 export type AnalysisStageProps = {
   detailMode?: boolean;
+  readOnly?: boolean;
   busy: boolean;
   cancelBusy: boolean;
   runId: string | null;
@@ -361,6 +362,7 @@ export type AnalysisStageProps = {
 
 export function AnalysisStagePanel({
   detailMode = false,
+  readOnly = false,
   busy,
   cancelBusy,
   runId,
@@ -448,12 +450,12 @@ export function AnalysisStagePanel({
         <StatusBadge tone={selectedRunIsActive ? "warn" : runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
 
-      {!detailMode ? <section className="analysis-launcher-hero" aria-labelledby="analysis-launcher-title">
+      {!detailMode && !readOnly ? <section className="analysis-launcher-hero" aria-labelledby="analysis-launcher-title">
         <div className="analysis-launcher-copy"><p className="eyebrow">{hasPromotedArchitecture ? "Current snapshot · refresh available" : "Setup complete · ready to run"}</p><h2 id="analysis-launcher-title">{hasPromotedArchitecture ? "Keep the shared architecture current" : "Build the first trustworthy architecture snapshot"}</h2><p>{hasPromotedArchitecture ? "A refresh compares new evidence with the promoted baseline and stops for review before anything is published." : "ProvenArch inspects repository evidence, generates the model and documentation, validates citations, then stops for review before anything is published."}</p></div>
         <div className="analysis-launcher-actions"><button type="button" className="ui-button tone-primary" onClick={() => onRunPipeline(hasPromotedArchitecture ? "refresh" : "init")} disabled={busy || Boolean(coordination.active_run_id)}>{hasPromotedArchitecture ? "Refresh analysis" : "Run initial analysis"}</button><button type="button" className="ui-button" onClick={() => onOpenArchitecture()}>Review current architecture</button></div>
       </section> : null}
 
-      <div className="actions">
+      {readOnly ? <p className="status info" data-testid="legacy-read-only-notice">Legacy run evidence is read-only. Starting, retrying, queueing and canceling runs are unavailable.</p> : <div className="actions">
         <button type="button" onClick={() => onRunPipeline("init")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-init-btn">
           Run initial analysis
         </button>
@@ -468,19 +470,19 @@ export function AnalysisStagePanel({
         <button type="button" onClick={onCancelSelectedRun} disabled={busy || cancelBusy || !runId || !selectedRunIsActive} data-testid="run-cancel-btn">
           Cancel selected run
         </button>
-      </div>
+      </div>}
       {coordination.active_run_id ? <p className="hint" data-testid="run-active-start-reason">Ordinary start is unavailable while <code>{coordination.active_run_id}</code> is active.</p> : null}
       {coordination.pending ? (
         <section className="subsection" data-testid="pending-run-summary">
           <h2>Pending refresh</h2>
           <p><code>{coordination.pending.run_id}</code> · {coordination.pending.pipeline}. A newly queued refresh replaces this pending run.</p>
-          <button type="button" onClick={() => onCancelRun(coordination.pending!.run_id)} disabled={busy || cancelBusy}>Cancel pending refresh</button>
+          {!readOnly ? <button type="button" onClick={() => onCancelRun(coordination.pending!.run_id)} disabled={busy || cancelBusy}>Cancel pending refresh</button> : null}
         </section>
       ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
       {detailMode && runStatus?.pipeline === "refresh" ? <RefreshExecutionSummary runStatus={runStatus} /> : null}
 
-      <ModalDialog
+      {!readOnly ? <ModalDialog
         open={queueConfirmationOpen}
         title={coordination.pending ? "Replace pending refresh" : "Queue refresh"}
         description={coordination.pending
@@ -490,15 +492,15 @@ export function AnalysisStagePanel({
         busy={busy}
         onCancel={() => setQueueConfirmationOpen(false)}
         onConfirm={() => { setQueueConfirmationOpen(false); onRunPipeline("refresh", "queue"); }}
-      />
+      /> : null}
 
 	  {detailMode && runStatus?.status === "succeeded" && !runReviewSummary?.result ? <AnalysisOutcomeFallback runStatus={runStatus} artifacts={artifacts} onOpenArchitecture={onOpenArchitecture} /> : null}
 	  <StructuredRunProgress runStatus={runStatus} review={runReviewSummary} onReviewDetails={handleReviewBlocker} />
       {detailMode ? (
         <div className="run-studio-body">
 		  <RunResultPanel review={runReviewSummary} onExploreArchitecture={onOpenArchitecture} />
-		  <TargetedRerunPanel runStatus={runStatus} review={runReviewSummary} busy={busy} onRetryStarted={onSelectRun} />
-		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} busy={busy} onRetryStarted={onSelectRun} onReviewDetails={handleReviewBlocker} />
+		  <TargetedRerunPanel runStatus={runStatus} review={runReviewSummary} busy={busy} readOnly={readOnly} onRetryStarted={onSelectRun} />
+		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} busy={busy} readOnly={readOnly} onRetryStarted={onSelectRun} onReviewDetails={handleReviewBlocker} />
           <AnalysisRunTimeline steps={stepTimeline} />
           <AnalysisStepReview
             steps={reviewSteps}

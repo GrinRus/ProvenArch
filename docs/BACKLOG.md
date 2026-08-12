@@ -2010,6 +2010,12 @@ The registry now preserves array shape across clone/persist/restart and public T
 responses keep bounded diagnostics as arrays; focused persistence/API tests and the exact-Node
 snapshot-backed Task-first UI flow pass.
 
+Implementation note (2026-08-12): the explicit `/tasks/legacy` migration surface now enforces the
+read-only legacy-run boundary in the rendered controls as well as in its copy. Start, retry,
+queue and cancel actions are absent for pre-Task evidence; status, outcome, bounded logs and
+technical recovery details remain readable. This does not synthesize a Task or alter the existing
+`/api/pipeline/runs*` contracts.
+
 ### 23B — Task-first shell and navigation cutover
 
 **Goal:** единственный shell `Tasks / Architecture / Changes`, global Ask and contextual Settings.

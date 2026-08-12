@@ -481,6 +481,8 @@ test("analysis failed shard mock: artifact handoff recovery remains readable", a
   await expect(recovery).toContainText("runtime_contract_failed");
   await expect(recovery).toContainText("init.step1.collect");
   await expect(recovery).toContainText("Generated artifacts did not pass validation");
+  await expect(page.getByTestId("legacy-read-only-recovery")).toBeVisible();
+  await expect(page.getByTestId("analysis-retry-run-btn")).toHaveCount(0);
 
   const liveDiagnostics = page.getByTestId("analysis-live-diagnostics");
   await expect(liveDiagnostics).toContainText("artifact handoff");

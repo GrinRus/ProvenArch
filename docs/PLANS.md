@@ -76,7 +76,7 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 - [x] Implement crash-safe `task-history.json` current/last-good persistence and restart diagnostics.
 - [x] Add create/list/read/update/archive/unarchive Task APIs with stable pagination and revision checks.
 - [x] Add idempotent per-Attempt admission with immutable scope/runner snapshots and exact run linkage.
-- [ ] Preserve pre-contract runs as explicit read-only legacy evidence without synthetic Tasks.
+- [x] Preserve pre-contract runs as explicit read-only legacy evidence without synthetic Tasks.
 - [ ] Expose unknown/unavailable result and publication linkage without inferred `Published` state.
 
 ### Non-goals
@@ -111,9 +111,11 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 - [x] Admitted Attempt config cannot change after Settings/workspace/env updates.
 - [x] Invalid identity/scope/runner and queue overflow fail before provider execution.
 - [x] Duplicate start token returns the same Attempt and cannot create a second run.
-- [ ] Primary/last-good write faults never publish partial Task state in memory.
-- [ ] Legacy runs remain readable and never appear as fabricated Task rows.
-- [ ] `make contracts`, `make test`, `make lint` and `make build` pass.
+- [x] Primary/last-good write faults never publish partial Task state in memory.
+- [x] Legacy runs remain readable and never appear as fabricated Task rows; the explicit
+      `/tasks/legacy` surface suppresses start, retry, queue and cancel mutations while retaining
+      status, outcome and diagnostics evidence.
+- [x] `make contracts`, `make test`, `make lint` and `make build` pass.
 
 ### Risks
 
@@ -129,6 +131,15 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   (47 files/255 tests), all eight deterministic mock E2E scenarios, lint, production build and
   embedded UI parity. The local Node override is only required because this machine has 22.22.3
   while the repository pins 22.21.1; resolver tests pass without the override.
+- 2026-08-12: Closed the remaining W23A legacy-surface gap. `AnalysisStagePanel`, targeted retry and
+  recovery controls now receive an explicit read-only boundary for `/tasks/legacy`; legacy evidence
+  keeps bounded diagnostics and technical details but cannot start, retry, queue or cancel a run.
+  App/component assertions and the failed-shard, QA-recovery and Task-first mock E2E paths cover the
+  boundary without synthetic Task identity or a second provider analysis.
+- 2026-08-12: Re-ran the complete deterministic DoD after the read-only change with pinned Node
+  22.21.1: contracts valid, Go/Python (271 tests) and UI (47 files/255 tests) suites green, all eight
+  mock E2E scenarios green, lint/build green, and `ui/dist` byte-identical to embedded `ui_dist`
+  (excluding its README).
 - 2026-08-12: W23O route-closure PR #249 merged to `main` as squash commit `3699f03b` after all
   required GitHub checks passed.
 - 2026-08-11: Owner accepted Task/Attempt authority, registry path, per-Attempt admission,
@@ -194,8 +205,8 @@ the final removal of Home/Analyze routes. W23O leaves only explicit read-only `/
 - [x] Invalid Task path/query identity produces an explicit notice and canonical safe route.
 - [x] W23B1 target container exposes no fabricated Task/Attempt/run data.
 - [x] W23C composer submits only displayed scope and routes to the exact created Task identity.
-- [ ] Back/Forward/reload and rendered responsive/keyboard state matrix pass after cutover.
-- [ ] Full deterministic DoD passes for each merged UI slice.
+- [x] Back/Forward/reload and rendered responsive/keyboard state matrix pass after cutover.
+- [x] Full deterministic DoD passes for each merged UI slice.
 
 ### Progress log
 
