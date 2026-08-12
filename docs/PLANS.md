@@ -310,6 +310,12 @@ identity is evidence failure, not permission to synthesize a Task from historica
   referenced a missing `overview.md` (`runtime_quality.stall_pressure=1`). This is diagnostic
   evidence that the identity boundary is wired, not trusted W25 release evidence; frontend was
   intentionally skipped and the canonical release gate remains open.
+- 2026-08-12: Snapshot-backed `init-inspect` was then run against the successful fake init snapshot
+  `run_264afe94e4d3cb67125b` with `UI_E2E_QA_SMOKE=0`. The public Task/Attempt/run join passed
+  through Pipeline Studio, Architecture/Documents, responsive/keyboard checks and the remaining
+  release-facing flow without starting a second provider analysis. The no-op fake refresh snapshot
+  remains unsuitable for this scenario because its run-specific artifact list intentionally contains
+  only refresh metadata; this is recorded as fixture behavior, not used as trusted live evidence.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
 - 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
