@@ -321,6 +321,11 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Re-ran the current clean branch deterministic DoD after the evidence updates: contracts,
   Go, Python `271/271`, UI `47/47` files/`255/255` tests, ShellCheck, UI typecheck, Vite/Go build,
   embedded `ui_dist` equality and mock E2E `8/8` all passed. No generated build changes remain.
+- 2026-08-12: Rechecked the canonical provider artifact-smoke preflight on the trusted host: Codex
+  `0.144.1` is ready and writes the sentinel, while Qwen `0.19.11` and Claude `2.1.85` both still
+  return the configured Kimi billing-cycle `403 permission_error`. The release matrix was not
+  relaunched because the unchanged operational blocker is fail-fast and cannot be bypassed by a
+  provider, matrix or taxonomy override.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
 - 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
