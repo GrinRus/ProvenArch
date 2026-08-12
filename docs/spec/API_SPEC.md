@@ -1660,6 +1660,11 @@ run history during migration. Pre-contract runs remain readable but are not synt
 The Task/Attempt JSON schemas, typed errors, pagination cursors, fixtures and API tests are now
 covered by the W23A1–A4 foundation; frontend code cannot invent a parallel wire shape.
 
-Planned publication linkage extends successful Git mutation responses with server-authored
-Task/Attempt/run context and the exact confirmed full-workspace inventory fingerprint. It does not
-change the existing full-workspace mutation scope or infer `Published` from a clean worktree.
+Git mutation responses include server-authored publication linkage when the request carries the
+complete exact context `{task_id, attempt_id, run_id}`. The server validates that the Attempt belongs
+to the Task and names the supplied run before mutating Git. A successful commit or proposal branch
+records the action, branch, base ref/OID, resulting head/commit OID and the confirmed full-workspace
+inventory fingerprint in both the Task and Attempt registry records. Without the complete context,
+the response explicitly returns `publication.state=unavailable`; no latest-run, clean-worktree,
+branch-recency or legacy fallback is allowed. Existing full-workspace mutation scope and stale
+confirmation protections are unchanged.

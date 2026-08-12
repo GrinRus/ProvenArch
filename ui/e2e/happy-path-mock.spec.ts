@@ -417,13 +417,13 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await expect(page.getByTestId("architecture-diagrams")).toBeVisible();
   await captureEvidenceScreenshot(page, "happy-path-architecture.png");
 
-  await page.goto(`/changes?task=${taskID}&run=${initRunID}&view=overview&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${taskID}&attempt=${attemptID}&run=${initRunID}&view=overview&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("semantic-changes")).toBeVisible();
   await expect(page.getByTestId("semantic-changes")).toContainText("Run-pinned initial review");
   await expect(page.getByTestId("run-pinned-review-summary")).toContainText("0");
   await captureEvidenceScreenshot(page, "happy-path-changes.png");
 
-  await page.goto(`/changes?task=${taskID}&run=${initRunID}&view=publish&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${taskID}&attempt=${attemptID}&run=${initRunID}&view=publish&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("Workspace scope");
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("2 changed");

@@ -143,6 +143,41 @@ func TestAttemptSnapshotCloneIsIndependent(t *testing.T) {
 	}
 }
 
+func TestPublicationLinkageRoundTripsExactGitIdentity(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "attempt.example.json"))
+	if err != nil {
+		t.Fatalf("read attempt fixture: %v", err)
+	}
+	attempt, err := ParseAttempt(raw)
+	if err != nil {
+		t.Fatalf("parse attempt fixture: %v", err)
+	}
+	attempt.Publication = Publication{
+		State:                PublicationLinked,
+		AttemptID:            attempt.AttemptID,
+		RunID:                attempt.RunID,
+		Action:               "commit",
+		Branch:               "main",
+		BaseRef:              "origin/main",
+		BaseOID:              strings.Repeat("a", 40),
+		HeadOID:              strings.Repeat("b", 40),
+		Commit:               strings.Repeat("b", 40),
+		InventoryFingerprint: strings.Repeat("c", 64),
+	}
+	encoded, err := MarshalAttempt(attempt)
+	if err != nil {
+		t.Fatalf("marshal linked publication: %v", err)
+	}
+	decoded, err := ParseAttempt(encoded)
+	if err != nil {
+		t.Fatalf("parse linked publication: %v", err)
+	}
+	if decoded.Publication != attempt.Publication {
+		t.Fatalf("publication identity changed across round trip: got=%+v want=%+v", decoded.Publication, attempt.Publication)
+	}
+}
+
 func TestAttemptRejectsSelfParentAndTimestampRegression(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "attempt.example.json"))

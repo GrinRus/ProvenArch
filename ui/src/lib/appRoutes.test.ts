@@ -28,9 +28,9 @@ describe("application route codec", () => {
   });
 
   it("preserves optional Task context on Architecture and Changes targets", () => {
-    const changes = parseAppRoute(location("/changes?task=task-1&run=run-1&view=evidence&source=snapshot"), true);
-    expect(changes).toMatchObject({ destination: "changes", taskId: "task-1", runId: "run-1" });
-    expect(formatAppRoute(changes)).toBe("/changes?task=task-1&run=run-1&view=evidence&source=snapshot&mode=rendered");
+    const changes = parseAppRoute(location("/changes?task=task-1&attempt=attempt-1&run=run-1&view=evidence&source=snapshot"), true);
+    expect(changes).toMatchObject({ destination: "changes", taskId: "task-1", attemptId: "attempt-1", runId: "run-1" });
+    expect(formatAppRoute(changes)).toBe("/changes?task=task-1&attempt=attempt-1&run=run-1&view=evidence&source=snapshot&mode=rendered");
     const architecture = parseAppRoute(location("/architecture?task=task-1&view=documents&source=current"), true);
     expect(architecture).toMatchObject({ destination: "knowledge", taskId: "task-1" });
     expect(formatAppRoute(architecture)).toBe("/architecture?view=documents&source=current&task=task-1");
