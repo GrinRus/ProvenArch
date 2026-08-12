@@ -1161,6 +1161,16 @@ class BatchFailureClassificationTest(unittest.TestCase):
             '"$dst/reports/taskruns/run-history.json"',
             backend_script,
         )
+        self.assertIn(
+            'copy_if_exists "$workspace_path/reports/taskruns/task-history.json" '
+            '"$dst/reports/taskruns/task-history.json"',
+            backend_script,
+        )
+        self.assertIn(
+            'copy_if_exists "$workspace_path/reports/taskruns/task-history.json.last-good" '
+            '"$dst/reports/taskruns/task-history.json.last-good"',
+            backend_script,
+        )
         self.assertIn('cp -a "$snapshot_reports"/. "$frontend_workspace/reports"/', batch_script)
 
     def test_python_report_aggregates_runtime_repair_stall_counters(self) -> None:

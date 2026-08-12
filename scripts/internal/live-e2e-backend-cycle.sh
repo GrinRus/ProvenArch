@@ -773,6 +773,11 @@ snapshot_run_artifacts() {
   copy_if_exists "$workspace_path/reports/taskruns/${run_id}-quality.json" "$dst/reports/taskruns/${run_id}-quality.json"
   copy_if_exists "$workspace_path/reports/taskruns/run-history.json" "$dst/reports/taskruns/run-history.json"
   copy_if_exists "$workspace_path/reports/taskruns/run-history.json.last-good" "$dst/reports/taskruns/run-history.json.last-good"
+  # W25 frontend snapshot inspection must consume the product-authored Task registry
+  # produced by public Task/Attempt admission. Never reconstruct identity from legacy
+  # run history when the backend workspace is copied into the frontend workspace.
+  copy_if_exists "$workspace_path/reports/taskruns/task-history.json" "$dst/reports/taskruns/task-history.json"
+  copy_if_exists "$workspace_path/reports/taskruns/task-history.json.last-good" "$dst/reports/taskruns/task-history.json.last-good"
   copy_tree_if_exists "$workspace_path/reports/taskruns/${run_id}" "$dst/reports/taskruns/${run_id}"
   for taskrun_json in "$workspace_path/reports/taskruns/${run_id}-"*.json; do
     if [[ -f "$taskrun_json" ]]; then

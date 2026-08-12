@@ -155,6 +155,8 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   ADR/spec package and implemented W23A1 schemas, semantic Go contracts, examples and provider-free
   fixtures. W23A2 persistence, W23A3 Task APIs and W23A4 admission/linkage are now implemented;
   W23B1–N and W23O route closure are implemented; W24G and Epic 25 remain pending.
+- 2026-08-12: The decision package was verified merged through PR #223 (`1d9c56bf`); subsequent
+  W23/W24 implementation and W25 release-alignment work is based on that merged authority.
 
 ### Plan ID
 EP-20260811-task-first-ui
@@ -256,8 +258,9 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - [x] Remove latest-run and legacy-shell fallback from the release-facing Playwright flow.
 - [x] Add public-only promotion-audit, effective-verdict and recovery-budget fields to batch reports.
 - [x] Keep historical v1 report fields readable and preserve existing failure taxonomy.
-- [ ] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
-      identities, then run canonical live validation on a trusted host.
+- [x] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
+      identities; the backend snapshot now preserves both product registry generations.
+- [ ] Run canonical live validation on a trusted host and obtain fresh public Task/Attempt evidence.
 - [x] Complete full deterministic DoD and embedded UI parity after the W25 changes.
 
 ### Non-goals
@@ -292,8 +295,37 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
   boundary. Trusted harness seeding and the final release gate remain open until a product-authored
   Task/Attempt history is present.
+- 2026-08-12: Snapshot preparation now preserves the product-authored `task-history.json` and
+  `.last-good` registry beside the immutable Attempt snapshot; frontend release inspection can
+  resolve the exact public Task/Attempt without synthesizing identity from legacy run history.
+- 2026-08-12: Canonical `release-fast-20260812T060000Z` was launched from clean commit
+  `d204a8cc`; host, exact Node/Go, disk and pinned path preflight passed, Codex readiness passed,
+  but Qwen and Claude failed the provider artifact smoke with the configured Kimi billing-cycle
+  `403 quota_or_permission`. The matrix fail-closed as `RELEASE BLOCKED`; no live Task/Attempt or
+  frontend evidence was produced, so trusted W25 closure remains open.
 - 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (271 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
+- 2026-08-12: Non-release `smoke-tiny-bank-20260812T062000Z` exercised the public Task/Attempt
+  admission path with Codex only. The headless workspace and fake control snapshots contained
+  product-authored `task-history.json` plus `.last-good` and exact Task → Attempt → run joins; the
+  provider run then failed closed on a real `init.step2.asis_docs` runtime stall after its draft
+  referenced a missing `overview.md` (`runtime_quality.stall_pressure=1`). This is diagnostic
+  evidence that the identity boundary is wired, not trusted W25 release evidence; frontend was
+  intentionally skipped and the canonical release gate remains open.
+- 2026-08-12: Snapshot-backed `init-inspect` was then run against the successful fake init snapshot
+  `run_264afe94e4d3cb67125b` with `UI_E2E_QA_SMOKE=0`. The public Task/Attempt/run join passed
+  through Pipeline Studio, Architecture/Documents, responsive/keyboard checks and the remaining
+  release-facing flow without starting a second provider analysis. The no-op fake refresh snapshot
+  remains unsuitable for this scenario because its run-specific artifact list intentionally contains
+  only refresh metadata; this is recorded as fixture behavior, not used as trusted live evidence.
+- 2026-08-12: Re-ran the current clean branch deterministic DoD after the evidence updates: contracts,
+  Go, Python `271/271`, UI `47/47` files/`255/255` tests, ShellCheck, UI typecheck, Vite/Go build,
+  embedded `ui_dist` equality and mock E2E `8/8` all passed. No generated build changes remain.
+- 2026-08-12: Rechecked the canonical provider artifact-smoke preflight on the trusted host: Codex
+  `0.144.1` is ready and writes the sentinel, while Qwen `0.19.11` and Claude `2.1.85` both still
+  return the configured Kimi billing-cycle `403 permission_error`. The release matrix was not
+  relaunched because the unchanged operational blocker is fail-fast and cannot be bypassed by a
+  provider, matrix or taxonomy override.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
 - 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
