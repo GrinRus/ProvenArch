@@ -303,6 +303,13 @@ identity is evidence failure, not permission to synthesize a Task from historica
   frontend evidence was produced, so trusted W25 closure remains open.
 - 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (271 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
+- 2026-08-12: Non-release `smoke-tiny-bank-20260812T062000Z` exercised the public Task/Attempt
+  admission path with Codex only. The headless workspace and fake control snapshots contained
+  product-authored `task-history.json` plus `.last-good` and exact Task → Attempt → run joins; the
+  provider run then failed closed on a real `init.step2.asis_docs` runtime stall after its draft
+  referenced a missing `overview.md` (`runtime_quality.stall_pressure=1`). This is diagnostic
+  evidence that the identity boundary is wired, not trusted W25 release evidence; frontend was
+  intentionally skipped and the canonical release gate remains open.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
 - 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
