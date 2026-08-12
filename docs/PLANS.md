@@ -295,6 +295,11 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Snapshot preparation now preserves the product-authored `task-history.json` and
   `.last-good` registry beside the immutable Attempt snapshot; frontend release inspection can
   resolve the exact public Task/Attempt without synthesizing identity from legacy run history.
+- 2026-08-12: Canonical `release-fast-20260812T060000Z` was launched from clean commit
+  `d204a8cc`; host, exact Node/Go, disk and pinned path preflight passed, Codex readiness passed,
+  but Qwen and Claude failed the provider artifact smoke with the configured Kimi billing-cycle
+  `403 quota_or_permission`. The matrix fail-closed as `RELEASE BLOCKED`; no live Task/Attempt or
+  frontend evidence was produced, so trusted W25 closure remains open.
 - 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (271 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
