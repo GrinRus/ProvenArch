@@ -155,6 +155,8 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
   ADR/spec package and implemented W23A1 schemas, semantic Go contracts, examples and provider-free
   fixtures. W23A2 persistence, W23A3 Task APIs and W23A4 admission/linkage are now implemented;
   W23B1–N and W23O route closure are implemented; W24G and Epic 25 remain pending.
+- 2026-08-12: The decision package was verified merged through PR #223 (`1d9c56bf`); subsequent
+  W23/W24 implementation and W25 release-alignment work is based on that merged authority.
 
 ### Plan ID
 EP-20260811-task-first-ui
