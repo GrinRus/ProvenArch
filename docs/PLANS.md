@@ -256,8 +256,9 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - [x] Remove latest-run and legacy-shell fallback from the release-facing Playwright flow.
 - [x] Add public-only promotion-audit, effective-verdict and recovery-budget fields to batch reports.
 - [x] Keep historical v1 report fields readable and preserve existing failure taxonomy.
-- [ ] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
-      identities, then run canonical live validation on a trusted host.
+- [x] Wire trusted snapshot preparation to product-authored Task/Attempt history without synthetic
+      identities; the backend snapshot now preserves both product registry generations.
+- [ ] Run canonical live validation on a trusted host and obtain fresh public Task/Attempt evidence.
 - [x] Complete full deterministic DoD and embedded UI parity after the W25 changes.
 
 ### Non-goals
