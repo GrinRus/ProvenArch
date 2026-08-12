@@ -516,7 +516,10 @@ test("live ui flow: validate -> admit Task Attempt -> inspect exact outcome", as
     await expect
       .poll(
         async () => {
-          const svgVisible = (await diagramPanel.locator(".diagram-svg svg").count()) > 0;
+          // MermaidPreview keeps the rendered SVG in a bounded object URL and
+          // presents it through an <img>; accept that public rendering shape
+          // as well as an inline SVG for older snapshots.
+          const svgVisible = (await diagramPanel.locator(".diagram-svg svg, .diagram-svg img").count()) > 0;
           const renderingVisible = (await diagramPanel.getByText(/Rendering/i).count()) > 0;
           const renderErrorVisible = (await diagramPanel.getByText(/Diagram render error:/i).count()) > 0;
           return svgVisible || renderingVisible || renderErrorVisible;

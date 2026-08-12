@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -23,6 +25,40 @@ func TestNewRegistryStartsEmptyWhenNoHistoryExists(t *testing.T) {
 	}
 	if diagnostics := registry.Diagnostics(); len(diagnostics) != 0 {
 		t.Fatalf("missing history should not produce recovery diagnostics: %v", diagnostics)
+	}
+}
+
+func TestRegistryPersistsEmptyDiagnosticsAsAnArrayAcrossRestart(t *testing.T) {
+	root := workspace.Root{Path: t.TempDir()}
+	registry, err := NewRegistry(root, fixedClock())
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	if err := registry.Update(func(*History) error { return nil }); err != nil {
+		t.Fatalf("persist empty history: %v", err)
+	}
+
+	for _, path := range []string{HistoryPath, HistoryPath + ".last-good"} {
+		raw, readErr := root.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", path, readErr)
+		}
+		var envelope struct {
+			Diagnostics json.RawMessage `json:"diagnostics"`
+		}
+		if unmarshalErr := json.Unmarshal(raw, &envelope); unmarshalErr != nil {
+			t.Fatalf("decode %s: %v", path, unmarshalErr)
+		}
+		if bytes.Equal(bytes.TrimSpace(envelope.Diagnostics), []byte("null")) {
+			t.Fatalf("%s persisted diagnostics as null: %s", path, raw)
+		}
+		if _, parseErr := ParseHistory(raw); parseErr != nil {
+			t.Fatalf("parse persisted %s: %v", path, parseErr)
+		}
+	}
+
+	if _, err := NewRegistry(root, fixedClock()); err != nil {
+		t.Fatalf("restart registry: %v", err)
 	}
 }
 

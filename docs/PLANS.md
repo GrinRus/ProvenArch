@@ -277,6 +277,11 @@ identity is evidence failure, not permission to synthesize a Task from historica
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
+- 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
+  task-history shape from `[]` to `null`. W23A persistence now preserves array shape in cloned history
+  and public diagnostics responses; focused registry/API coverage and the exact-Node snapshot-backed
+  `init-inspect` flow pass after restart. This remains deterministic evidence, not trusted-provider
+  release evidence.
 - 2026-08-11: Canonical `release fast` was attempted through
   `scripts/full-run-batch-matrix.sh` with exact Node/npm 22.21.1, writable trusted-gate roots and
   32.7 GB free space. All four profile/sweep records failed closed during provider readiness:
