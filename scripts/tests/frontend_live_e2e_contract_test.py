@@ -181,6 +181,7 @@ class FrontendLiveE2EContractTest(unittest.TestCase):
         ]:
             self.assertTrue(any(str(path).endswith(name) for path in screenshots))
         self.assertEqual("run_stub", result["run_id"])
+        self.assertTrue(str(result["diagnostic_refs"]["task_history"]).endswith("reports/taskruns/task-history.json"))
 
     def test_snapshot_success_result_records_snapshot_run(self) -> None:
         result = self._run_frontend_harness(

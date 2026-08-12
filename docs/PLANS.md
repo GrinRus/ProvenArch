@@ -292,6 +292,9 @@ identity is evidence failure, not permission to synthesize a Task from historica
 - 2026-08-12: Updated release runbook, testing strategy and backlog to document the public identity
   boundary. Trusted harness seeding and the final release gate remain open until a product-authored
   Task/Attempt history is present.
+- 2026-08-12: Snapshot preparation now preserves the product-authored `task-history.json` and
+  `.last-good` registry beside the immutable Attempt snapshot; frontend release inspection can
+  resolve the exact public Task/Attempt without synthesizing identity from legacy run history.
 - 2026-08-12: W25 deterministic closure passed `make contracts`, full Go/Python/UI tests (271 Python,
   47 UI files/255 tests), lint, build, eight deterministic mock E2E scenarios and embedded UI parity.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored

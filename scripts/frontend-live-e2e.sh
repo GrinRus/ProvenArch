@@ -439,6 +439,7 @@ payload = {
         "playwright_results": os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR"),
         "screenshots": [],
         "run_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "run-history.json"),
+        "task_history": os.path.join(os.environ.get("FRONTEND_E2E_WORKSPACE", ""), "reports", "taskruns", "task-history.json"),
     },
 }
 screenshots_dir = os.environ.get("FRONTEND_E2E_PLAYWRIGHT_RESULTS_DIR", "")
