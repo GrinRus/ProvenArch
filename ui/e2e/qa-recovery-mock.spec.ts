@@ -531,12 +531,8 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
 	const targetedRerun = page.getByTestId("targeted-rerun-panel");
 	await expect(targetedRerun).toBeVisible();
 	await expect(targetedRerun).toContainText("Repeat only the work you need");
-	await targetedRerun.getByLabel("Start from step").selectOption("init.step3.findings");
-	await expect(targetedRerun.getByLabel("Start from step")).toHaveValue("init.step3.findings");
-	await targetedRerun.getByRole("button", { name: "Review rerun plan" }).click();
-	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Invalidated dependency closure");
-	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("Every dependent downstream result must be rebuilt");
-	await expect(targetedRerun.getByTestId("retry-plan")).toContainText("2 estimated execution unit(s)");
+	await expect(targetedRerun.getByTestId("legacy-read-only-rerun")).toContainText("Selective reruns are unavailable");
+	await expect(targetedRerun.getByRole("button", { name: "Review rerun plan" })).toHaveCount(0);
 	await expectNoHorizontalOverflow(page);
 	await captureEvidenceScreenshot(page, "successful-targeted-rerun-desktop.png");
   await expectNoCriticalAxeViolations(page);

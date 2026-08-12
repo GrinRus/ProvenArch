@@ -1178,6 +1178,7 @@ export default function App() {
         <LegacyRunPage coordination={coordination} selectedRunID={route.runId}>
         <AnalysisStagePanel
           detailMode={Boolean(route.runId)}
+          readOnly
           busy={busy}
           cancelBusy={cancelBusy}
           runId={runId}

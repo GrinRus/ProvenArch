@@ -7,6 +7,8 @@ const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerC
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
 const initRunID = "run-happy-init";
 const refreshRunID = "run-happy-refresh";
+const taskID = "task-happy-checkout";
+const attemptID = "attempt-happy-init";
 
 type FulfillBody = { status: number; contentType: string; body: string };
 
@@ -58,6 +60,48 @@ function runStatus(runID: string, pipeline: "init" | "refresh") {
 
 function runListItem(runID: string, pipeline: "init" | "refresh") {
   return { ...runStatus(runID, pipeline), authoritative_index: true };
+}
+
+function taskPayload(attemptStarted = false) {
+  return {
+    version: 1,
+    task_id: taskID,
+    title: "Map checkout architecture",
+    goal: "Describe the checkout service and its order persistence boundary.",
+    context: "Deterministic Task-first mock flow.",
+    scope: { repositories: [{ name: "checkout", paths: [] }] },
+    desired_runner: { preset: "deterministic-demo", mode: "fake", provider: "claude-code" },
+    lifecycle: "open",
+    revision: 1,
+    created_at: "2026-08-05T11:55:00Z",
+    updated_at: "2026-08-05T12:08:00Z",
+    last_activity_at: "2026-08-05T12:08:00Z",
+    attempts: attemptStarted ? [{ attempt_id: attemptID, run_id: initRunID, status: "succeeded", updated_at: "2026-08-05T12:08:00Z" }] : [],
+    outcome: attemptStarted ? { state: "available", attempt_id: attemptID, run_id: initRunID, snapshot_path: `reports/taskruns/${initRunID}/snapshot.json` } : { state: "unavailable", unavailable_reason: "no terminal Attempt" },
+    publication: { state: "unavailable", unavailable_reason: "No publication has been recorded for this Task." },
+  };
+}
+
+function attemptPayload() {
+  return {
+    version: 1,
+    attempt_id: attemptID,
+    task_id: taskID,
+    run_id: initRunID,
+    pipeline: "init",
+    status: "succeeded",
+    task_revision: 1,
+    goal_snapshot: "Describe the checkout service and its order persistence boundary.",
+    context_snapshot: "Deterministic Task-first mock flow.",
+    scope_snapshot: { repositories: [{ name: "checkout", paths: [] }] },
+    desired_runner: { preset: "deterministic-demo", mode: "fake", provider: "claude-code" },
+    effective_runtime: { mode: "fake", provider: "claude-code", permissions: "trusted_full_access" },
+    admitted_at: "2026-08-05T11:56:00Z",
+    started_at: "2026-08-05T12:00:00Z",
+    finished_at: "2026-08-05T12:08:00Z",
+    outcome: { state: "available", attempt_id: attemptID, run_id: initRunID },
+    retained_evidence: "The immutable run snapshot is retained.",
+  };
 }
 
 const artifacts = [
@@ -243,6 +287,8 @@ function architecturePayload(sourceRunID: string | null) {
 async function installHappyPathMock(page: Page): Promise<{ commitMessages: string[] }> {
   const commitMessages: string[] = [];
   let promotedRunID: string | null = null;
+  let taskCreated = false;
+  let attemptAdmitted = false;
 
   const fullDiff = {
     ok: true,
@@ -280,6 +326,20 @@ async function installHappyPathMock(page: Page): Promise<{ commitMessages: strin
 
     if (method === "GET" && url.pathname === "/api/system/version") return route.fulfill({ ...json({ version: "dev", commit: "mock", built: "mock", ui_bundle: "vite" }) });
     if (method === "GET" && url.pathname === "/api/onboarding/status") return route.fulfill({ ...json({ ok: true, launcher_mode: false, workspace_selected: true, workspace_ready: true, workspace: "/tmp/happy-path-workspace", manifest_present: true, runtime: { selected: true, runtime: "fake", runtime_provider: "fake", provider_source: "workspace" }, can_enter_console: true, recent_workspaces: [] }) });
+    if (method === "GET" && url.pathname === "/api/tasks") return route.fulfill({ ...json({ items: taskCreated ? [taskPayload(attemptAdmitted)] : [], next_cursor: "", has_more: false }) });
+    if (method === "POST" && url.pathname === "/api/tasks") {
+      taskCreated = true;
+      return route.fulfill({ ...json({ task: taskPayload(false) }, 201) });
+    }
+    if (method === "GET" && url.pathname === `/api/tasks/${taskID}`) return route.fulfill({ ...json({ task: taskPayload(attemptAdmitted) }) });
+    if (method === "GET" && url.pathname === `/api/tasks/${taskID}/attempts`) return route.fulfill({ ...json({ items: attemptAdmitted ? [attemptPayload()] : [] }) });
+    if (method === "GET" && url.pathname === `/api/tasks/${taskID}/attempts/${attemptID}`) return route.fulfill({ ...json({ attempt: attemptPayload() }) });
+    if (method === "POST" && url.pathname === `/api/tasks/${taskID}/attempts`) {
+      taskCreated = true;
+      attemptAdmitted = true;
+      promotedRunID = initRunID;
+      return route.fulfill({ ...json({ attempt: attemptPayload() }, 202) });
+    }
     if (method === "GET" && url.pathname === "/api/pipeline/runs") return route.fulfill({ ...json({ items: runIDs.map((id) => runListItem(id, id === initRunID ? "init" : "refresh")), coordination: {} }) });
     if (method === "POST" && url.pathname === "/api/pipeline/init") {
       promotedRunID = initRunID;
@@ -308,7 +368,7 @@ async function installHappyPathMock(page: Page): Promise<{ commitMessages: strin
     if (method === "GET" && url.pathname === "/api/runtime/timeouts") return route.fulfill({ ...json({ ok: true, persisted: { step_timeout_sec: 5400 }, effective: { step_timeout_sec: 5400, heartbeat_sec: 30, pipeline_timeout_sec: 14400, pipeline_kill_grace_sec: 30, api_ready_timeout_sec: 60, api_init_timeout_sec: 120, ui_init_poll_timeout_sec: 1500, ui_cancel_poll_timeout_sec: 420 }, source: { step_timeout_sec: "workspace" } }) });
     if (method === "GET" && url.pathname === "/api/runtime/execution") return route.fulfill({ ...json({ ok: true, persisted: { strategy: "sequential", max_parallel_tasks: 1 }, effective: { strategy: "sequential", max_parallel_tasks: 1, failure_policy: "best_effort", shard_discovery_mode: "heuristics" }, source: { strategy: "workspace" } }) });
     if (method === "GET" && url.pathname === "/api/runtime/permissions") return route.fulfill({ ...json({ ok: true, persisted: { mode: "trusted_full_access", approval_channel: "fail_fast" }, effective: { mode: "trusted_full_access", approval_channel: "fail_fast" }, source: { mode: "workspace", approval_channel: "default" } }) });
-    if (method === "GET" && url.pathname === "/api/runtime/profile") return route.fulfill({ ...json({ ok: true, permissions: { persisted: { mode: "trusted_full_access", approval_channel: "fail_fast" }, effective: { mode: "trusted_full_access", approval_channel: "fail_fast" }, source: { mode: "workspace", approval_channel: "default" } }, step_providers: { persisted: {}, effective: {}, source: {} } }) });
+    if (method === "GET" && url.pathname === "/api/runtime/profile") return route.fulfill({ ...json({ ok: true, runtime_mode: "fake", runtime_provider: "claude-code", provider_source: "workspace", permissions: { persisted: { mode: "trusted_full_access", approval_channel: "fail_fast" }, effective: { mode: "trusted_full_access", approval_channel: "fail_fast" }, source: { mode: "workspace", approval_channel: "default" } }, step_providers: { persisted: {}, effective: {}, source: {} } }) });
     if (method === "GET" && url.pathname === "/api/architecture") return route.fulfill({ ...json(architecturePayload(promotedRunID)) });
     if (method === "GET" && url.pathname === "/api/knowledge") return route.fulfill({ ...json({ version: 1, generated_at: "2026-08-05T12:08:00Z", source_mode: "promoted_current", status: promotedRunID ? "available" : "unavailable", entities: [], edges: [], artifacts: promotedRunID ? artifacts.map(({ path, kind, label }) => ({ path, kind, name: label })) : [], issues: [] }) });
     if (method === "GET" && url.pathname === "/api/artifacts") {
@@ -331,28 +391,24 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   await expect.poll(async () => page.evaluate(() => Math.max(document.documentElement.scrollWidth - document.documentElement.clientWidth, document.body.scrollWidth - document.body.clientWidth))).toBeLessThanOrEqual(1);
 }
 
-test("happy path mock: init -> architecture -> refresh -> review -> full workspace publish", async ({ page }) => {
+test("Task-first mock: create Task -> immutable Attempt -> architecture -> full workspace publish", async ({ page }) => {
   test.skip(scenario !== "happy-path-mock", `scenario ${scenario} skips happy path mock`);
   const consoleErrors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   const { commitMessages } = await installHappyPathMock(page);
 
-  await page.goto("/tasks/legacy");
-  await expect(page.getByTestId("legacy-run-page")).toBeVisible();
-  await expect(page.getByTestId("run-init-btn")).toBeEnabled();
-  await page.getByTestId("run-init-btn").click();
-  await expect(page.getByTestId("run-status-run-id")).toHaveText(initRunID);
-  await expect(page.getByTestId("run-status-value")).toHaveText("succeeded");
-  await expect(page.getByTestId("run-result-panel")).toContainText("Initial analysis outcome");
-  await captureEvidenceScreenshot(page, "happy-path-initial.png");
-
-  const refreshButton = page.getByTestId("run-refresh-btn");
-  await expect(refreshButton).toBeEnabled();
-  await refreshButton.click();
-  await expect(page.getByTestId("run-status-run-id")).toHaveText(refreshRunID);
-  await expect(page.getByTestId("run-status-value")).toHaveText("succeeded");
-  await expect(page.getByTestId("refresh-execution-summary")).toBeVisible();
-  await captureEvidenceScreenshot(page, "happy-path-refresh.png");
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
+  await page.getByTestId("task-inbox-new").click();
+  await expect(page.getByTestId("task-composer")).toBeVisible();
+  await page.getByTestId("task-title").fill("Map checkout architecture");
+  await page.getByTestId("task-goal").fill("Describe the checkout service and its order persistence boundary.");
+  await page.getByTestId("task-create-submit").click();
+  await expect(page.getByTestId("task-pipeline-studio")).toBeVisible();
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(taskID);
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(attemptID);
+  await expect(page.getByTestId("task-pipeline-studio")).toContainText(initRunID);
+  await captureEvidenceScreenshot(page, "happy-path-task-attempt.png");
 
   await page.goto("/knowledge?view=documents&source=current");
   await expect(page.getByTestId("architecture-documents")).toBeVisible();
@@ -361,24 +417,23 @@ test("happy path mock: init -> architecture -> refresh -> review -> full workspa
   await expect(page.getByTestId("architecture-diagrams")).toBeVisible();
   await captureEvidenceScreenshot(page, "happy-path-architecture.png");
 
-  await page.goto(`/changes?run=${refreshRunID}&view=overview&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${taskID}&run=${initRunID}&view=overview&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("semantic-changes")).toBeVisible();
-  await expect(page.getByTestId("semantic-changes")).toContainText("What changed in the architecture");
-  await expect(page.getByTestId("run-pinned-review-summary")).toContainText("1");
-  await expect(page.getByTestId("review-delta-strip")).toContainText("Needs decision");
+  await expect(page.getByTestId("semantic-changes")).toContainText("Run-pinned initial review");
+  await expect(page.getByTestId("run-pinned-review-summary")).toContainText("0");
   await captureEvidenceScreenshot(page, "happy-path-changes.png");
 
-  await page.goto(`/changes?run=${refreshRunID}&view=publish&source=snapshot&mode=rendered`);
+  await page.goto(`/changes?task=${taskID}&run=${initRunID}&view=publish&source=snapshot&mode=rendered`);
   await expect(page.getByTestId("publish-panel")).toBeVisible();
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("Workspace scope");
   await expect(page.getByTestId("publish-readiness-summary")).toContainText("2 changed");
   await expect(page.getByTestId("publish-commit-selected-btn")).toBeEnabled();
-  await page.getByLabel("Commit message").fill("docs: publish refreshed architecture");
+  await page.getByLabel("Commit message").fill("docs: publish Task architecture");
   await page.getByTestId("publish-commit-selected-btn").click();
   await expect(page.getByRole("dialog")).toContainText("Commit all workspace changes");
   await page.getByRole("dialog").getByRole("button", { name: "Commit all workspace changes" }).click();
-  await expect(page.getByTestId("publish-commit-plan")).toContainText("committed: docs: publish refreshed architecture");
-  expect(commitMessages).toEqual(["docs: publish refreshed architecture"]);
+  await expect(page.getByTestId("publish-commit-plan")).toContainText("committed: docs: publish Task architecture");
+  expect(commitMessages).toEqual(["docs: publish Task architecture"]);
   await expectNoHorizontalOverflow(page);
   await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);

@@ -1589,6 +1589,10 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("diagnostics-nav"));
     expect(await screen.findByTestId("legacy-run-page")).toBeInTheDocument();
     expect(window.location.pathname).toBe("/tasks/legacy");
+    expect(screen.getByTestId("legacy-read-only-notice")).toHaveTextContent("Starting, retrying, queueing and canceling runs are unavailable");
+    expect(screen.queryByTestId("run-init-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-refresh-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some((call) => call[0] === "/api/pipeline/init")).toBe(false);
   });
 
@@ -3561,10 +3565,22 @@ describe("App", () => {
     expect(screen.queryByText("Local readiness passed.")).not.toBeInTheDocument();
   });
 
-  it("runs init from Runs and exposes progress plus step diff", async () => {
+  it("keeps legacy evidence read-only while exposing progress and step diff", async () => {
     const runID = "run-logs";
     const fetchMock = createFetchMock({
       runID,
+      runStarted: true,
+      runStatus: {
+        [runID]: {
+          run_id: runID,
+          pipeline: "init",
+          status: "running",
+          started_at: "2026-04-03T12:00:00Z",
+          finished_at: null,
+          current_step: "init.step1.collect",
+          warnings: [],
+        },
+      },
       runLogs: {
         [runID]: {
           run_id: runID,
@@ -3617,7 +3633,9 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("analysis");
-    fireEvent.click(screen.getByTestId("run-init-btn"));
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-init-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-refresh-btn")).not.toBeInTheDocument();
 
     const activeRunProgress = await screen.findByTestId("analysis-run-progress");
     expect(activeRunProgress).toHaveTextContent(runID);
@@ -3629,7 +3647,7 @@ describe("App", () => {
 
   });
 
-  it("keeps an accepted start run selected when the first detail GET fails and later recovers", async () => {
+  it("does not admit a new run from the legacy evidence route", async () => {
     const runID = "run-start-accepted";
     let startCalls = 0;
     let statusCalls = 0;
@@ -3677,21 +3695,13 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await renderConsoleApp();
-    navigateToStage("analysis");
-    fireEvent.click(screen.getByTestId("run-init-btn"));
+    await renderConsoleApp(`/tasks/legacy/${runID}`);
+    expect(await screen.findByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-init-btn")).not.toBeInTheDocument();
+    expect(startCalls).toBe(0);
+  });
 
-    await waitFor(() => expect(screen.getByTestId("run-status-run-id").textContent).toBe(runID));
-    expect(screen.getByTestId("run-status-value")).toHaveTextContent("queued");
-    expect(await screen.findByText(`Run ${runID} accepted; reconciling details failed: status temporarily unavailable`)).toBeInTheDocument();
-    expect(startCalls).toBe(1);
-
-    await waitFor(() => expect(screen.getByTestId("run-status-value")).toHaveTextContent("running"), { timeout: 4000 });
-    expect(screen.getByTestId("run-status-panel")).toHaveTextContent("Current step: init.step1.collect");
-    expect(startCalls).toBe(1);
-  }, 10_000);
-
-  it("disables ordinary starts and confirms explicit refresh queue replacement", async () => {
+  it("keeps active and pending legacy runs inspectable without queue mutation", async () => {
     const activeID = "run-active";
     const pendingID = "run-pending";
     const replacementID = "run-replacement";
@@ -3733,16 +3743,12 @@ describe("App", () => {
 
     await renderConsoleApp();
     navigateToStage("analysis");
-    expect(screen.getByTestId("run-init-btn")).toBeDisabled();
-    expect(screen.getByTestId("run-refresh-btn")).toBeDisabled();
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-init-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-refresh-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-queue-refresh-btn")).not.toBeInTheDocument();
     expect(screen.getByTestId("pending-run-summary")).toHaveTextContent(pendingID);
-
-    fireEvent.click(screen.getByTestId("run-queue-refresh-btn"));
-    expect(await screen.findByRole("dialog")).toHaveTextContent(`pending ${pendingID} will be canceled as run_superseded`);
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Replace pending refresh" }));
-
-    expect(await screen.findByText(`Refresh ${replacementID} queued; the selected evidence remains unchanged.`)).toBeInTheDocument();
-    expect(screen.getByTestId("pending-run-summary")).toHaveTextContent(replacementID);
+    expect(queued).toBe(false);
   });
 
   it("renders pending runtime permission requests for the selected run", async () => {
@@ -4126,7 +4132,7 @@ describe("App", () => {
     expect(liveDiagnostics).toHaveTextContent("If collect stalls or repair starts, use raw-output metadata instead of reading the full provider stream.");
   });
 
-  it("handles cancel requests with accepted, missing, and terminal responses", async () => {
+  it("does not expose cancel mutation for legacy evidence", async () => {
     const acceptedRunID = "run-cancel-accepted";
     vi.stubGlobal(
       "fetch",
@@ -4158,11 +4164,11 @@ describe("App", () => {
     await renderConsoleApp();
     navigateToStage("analysis");
     await screen.findByTestId("run-status-panel");
-    fireEvent.click(screen.getByTestId("run-cancel-btn"));
-    expect(await screen.findByText(`Cancel requested for ${acceptedRunID}`)).toBeInTheDocument();
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
   });
 
-  it("keeps an accepted cancel acknowledgement when follow-up reconciliation fails", async () => {
+  it("keeps legacy cancellation diagnostics without issuing a cancel request", async () => {
     const runID = "run-cancel-reconcile";
     let cancelCalls = 0;
     let failedListAfterCancel = false;
@@ -4203,14 +4209,13 @@ describe("App", () => {
     await renderConsoleApp();
     navigateToStage("analysis");
     await screen.findByTestId("run-status-panel");
-    fireEvent.click(screen.getByTestId("run-cancel-btn"));
-
-    expect(await screen.findByText(`Cancel requested for ${runID}; reconciling details failed: run list temporarily unavailable`)).toBeInTheDocument();
-    expect(cancelCalls).toBe(1);
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
+    expect(cancelCalls).toBe(0);
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
-  }, 10_000);
+  });
 
-  it("switches away from a missing run when cancel returns 404", async () => {
+  it("does not switch legacy evidence after a missing-run cancel attempt", async () => {
     const baseFetch = createFetchMock();
     let canceled = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -4314,15 +4319,12 @@ describe("App", () => {
       expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-stale");
     });
 
-    fireEvent.click(screen.getByTestId("run-cancel-btn"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("run-status-run-id").textContent).toBe("run-fresh");
-    });
-    expect(screen.getByText("Selected run no longer exists; switched to run-fresh.")).toBeInTheDocument();
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
+    expect(canceled).toBe(false);
   });
 
-  it("reports when cancel hits an already-terminal run", async () => {
+  it("keeps already-terminal legacy runs read-only", async () => {
     const runID = "run-cancel-terminal";
     vi.stubGlobal(
       "fetch",
@@ -4354,8 +4356,8 @@ describe("App", () => {
     await renderConsoleApp();
     navigateToStage("analysis");
     await screen.findByTestId("run-status-panel");
-    fireEvent.click(screen.getByTestId("run-cancel-btn"));
-    expect(await screen.findByText("Selected run is already terminal.")).toBeInTheDocument();
+    expect(screen.getByTestId("legacy-read-only-notice")).toBeInTheDocument();
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
   });
 
   it("saves and resets runtime timeout, execution, and permission settings", async () => {
@@ -4900,7 +4902,8 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("run_partial_failed");
     expect(recovery).toHaveTextContent("refresh.step3.findings");
     expect(recovery).toHaveTextContent("This attempt did not replace the last-good promoted architecture");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
+    expect(screen.getByTestId("legacy-read-only-recovery")).toHaveTextContent("Retry and run mutation are unavailable");
+    expect(screen.queryByTestId("analysis-retry-run-btn")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("analysis-review-blocker-btn"));
     expect(window.location.pathname).toMatch(/^\/tasks\/legacy/);
@@ -5135,8 +5138,9 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("refresh.step2.asis_docs");
     expect(recovery).toHaveTextContent("The run stopped by request");
     expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
+    expect(screen.getByTestId("legacy-read-only-recovery")).toHaveTextContent("Technical details remain readable");
+    expect(screen.queryByTestId("analysis-retry-run-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("analysis-review-recovery-btn")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("diagnostics-nav"));
     expect(await screen.findByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Canceled: 1");
@@ -5255,8 +5259,9 @@ describe("App", () => {
     expect(recovery).toHaveTextContent("Recovered after restart");
     expect(recovery).toHaveTextContent("ACP reconciled a stale run after restart");
     expect(recovery).toHaveTextContent("Validated taskrun evidence remains attached to this immutable run");
-    expect(screen.getByTestId("analysis-retry-run-btn")).toHaveTextContent("Calculate retry plan");
-    expect(screen.getByTestId("analysis-review-recovery-btn")).toHaveTextContent("Open technical details");
+    expect(screen.getByTestId("legacy-read-only-recovery")).toHaveTextContent("Technical details remain readable");
+    expect(screen.queryByTestId("analysis-retry-run-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("analysis-review-recovery-btn")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("diagnostics-nav"));
     expect(await screen.findByTestId("runs-history-panel")).toHaveTextContent("Failed: 0");
     expect(screen.getByTestId("runs-history-panel")).toHaveTextContent("Recovered: 1");
