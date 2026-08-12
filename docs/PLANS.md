@@ -316,6 +316,9 @@ identity is evidence failure, not permission to synthesize a Task from historica
   release-facing flow without starting a second provider analysis. The no-op fake refresh snapshot
   remains unsuitable for this scenario because its run-specific artifact list intentionally contains
   only refresh metadata; this is recorded as fixture behavior, not used as trusted live evidence.
+- 2026-08-12: Re-ran the current clean branch deterministic DoD after the evidence updates: contracts,
+  Go, Python `271/271`, UI `47/47` files/`255/255` tests, ShellCheck, UI typecheck, Vite/Go build,
+  embedded `ui_dist` equality and mock E2E `8/8` all passed. No generated build changes remain.
 -  The backend cycle now has a public-API Task/Attempt helper so future snapshots carry product-authored
   identity without synthesizing legacy runs.
 - 2026-08-12: A restart rehearsal found that cloning an empty diagnostics slice changed the persisted
