@@ -466,7 +466,7 @@ Inputs:
 Primary runtime output:
 - `validator-verdict.json`
 - orchestrator-owned `effective-verdict.json` is persisted after deterministic repair and audit
-- `validator-verdict.json` обязан содержать canonical metadata trio `version=1`, `run_id`, `generated_at` вместе с `verdict` и `checked_paths`
+- `validator-verdict.json` обязан содержать canonical metadata trio `version=1`, `run_id`, `generated_at` вместе с `verdict` и `checked_paths`; provider CLI может вернуть absolute `checked_paths`, но selected-run audit принимает их только при symlink-resolved containment и нормализует в logical paths
 - validator findings сохраняют canonical `title + description + provenance`; observation evidence внутри `findings[*].provenance.evidence[]` обязано содержать `repo/path`
 
 Orchestrator applies:

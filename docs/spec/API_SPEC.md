@@ -1229,7 +1229,8 @@ provider-only PASS не используется как fallback.
 сравнивает canonical bytes с exact staging snapshot.
 
 Аудит fail-closed проверяет exact run identity и containment staged document paths. `checked_paths[]`
-обязан содержать exact selected-run `final-run-index.json` и `citation-index.json`; duplicate/foreign
+обязан содержать exact selected-run `final-run-index.json` и `citation-index.json`; provider CLI может
+записать абсолютные пути, но аудит принимает их только при containment в selected run после symlink resolution и нормализует в этот канонический logical path; duplicate/foreign
 checked paths и `fixed_paths[]` за пределами selected run — ошибки. Evidence line ranges/excerpts/hashes
 проходят shared bounded normalization из `internal/evidence`.
 

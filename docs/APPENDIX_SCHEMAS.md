@@ -171,7 +171,9 @@ Semantic role:
 
 - **Source of truth:** `schemas/validator-verdict.schema.json`
 - Provider-free selected-run audit requires `checked_paths[]` to contain the exact current
-  `final-run-index.json` and `citation-index.json` paths; duplicate or foreign paths fail closed.
+  `final-run-index.json` and `citation-index.json` paths; provider-emitted absolute paths are
+  accepted only when symlink-resolved containment proves they are inside the selected run, then
+  normalized to the canonical logical paths. Duplicate or foreign paths fail closed.
 - Primary runtime output для `step3.findings` / validator phase
 
 Required fields:
