@@ -128,6 +128,15 @@ Task/Attempt ADRs; current APIs remain authoritative until this plan is implemen
 
 ### Progress log
 
+- 2026-08-13: Re-ran the provider-independent closure on `main` at `2edb83bc` with the pinned
+  Node `22.21.1` toolchain: contracts, Go tests, Python `272/272`, UI `47/47` files and `255/255`
+  tests, ShellCheck, TypeScript, production build, readable-fixture drift (`90` artifacts),
+  deterministic UI build, embedded UI parity and mock E2E `8/8` all passed. The live-flow contract
+  still requires exact public Task/Attempt identity and explicitly forbids latest-run, synthetic
+  legacy identity and second-analysis fallback. A Codex-only non-release smoke was started with
+  `gpt-5.6-luna`/high reasoning after preflight, reached real headless Task/Attempt execution, and
+  was stopped after a bounded observation while the provider remained in a long-running init shard;
+  it is diagnostic evidence only.
 - 2026-08-12: W23O closure passed contracts, Go and Python suites (267 tests), UI unit tests
   (47 files/255 tests), all eight deterministic mock E2E scenarios, lint, production build and
   embedded UI parity. The local Node override is only required because this machine has 22.22.3
@@ -443,6 +452,9 @@ This plan covers reviewable slices 24A–24I; 24G remains conditional on the rec
   has 20/20 first-pass-valid observations, no otherwise-valid repair entries and p95=2; ADR
   `ADR-20260812-w24g-entry-metric.md` defers mechanical-envelope reduction until a future metric
   crosses the accepted threshold.
+- 2026-08-13: The combined provider-free closure after W25 remains green; no new W24 code or
+  contract changes are required. Fresh public audit/effective-verdict evidence is still pending
+  because Claude and Qwen fail the trusted provider readiness gate.
 
 ### Plan ID
 EP-20260805-live-runtime-safety-fixes

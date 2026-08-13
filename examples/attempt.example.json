@@ -62,6 +62,7 @@
   "retained_evidence": "full",
   "outcome": {
     "state": "available",
+    "attempt_id": "attempt_20260811_0001",
     "run_id": "run_20260811_100000_001",
     "snapshot_path": "reports/taskruns/run_20260811_100000_001/promoted-snapshot/architecture-snapshot.json"
   },

@@ -155,8 +155,7 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace: snapshot.Workspace, Pipeline: pipeline, Intent: intent,
 		TaskID: task.TaskID, AttemptID: attempt.AttemptID, RequestedRunID: attempt.RunID,
-		ProviderOverride: acpruntime.Provider(attempt.EffectiveRuntime.Provider),
-		ProviderModels:   attemptProviderModels(snapshot, attempt), NonInteractive: true,
+		RuntimeSnapshot: attemptRuntimeSnapshot(attempt), NonInteractive: true,
 	})
 	if err != nil || runID != attempt.RunID {
 		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
@@ -230,6 +229,10 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusNotFound, "task_not_found", "task not found")
 		return
 	}
+	if task.Lifecycle == producttasks.LifecycleArchived {
+		writeError(writer, http.StatusConflict, "task_archived", "archived tasks cannot admit retry attempts")
+		return
+	}
 	parent, ok := findAttempt(history, taskID, attemptID)
 	if !ok {
 		writeError(writer, http.StatusNotFound, "attempt_not_found", "attempt not found for task")
@@ -277,8 +280,7 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace: snapshot.Workspace, Pipeline: pipeline, Intent: intent,
 		TaskID: task.TaskID, AttemptID: attempt.AttemptID, RequestedRunID: attempt.RunID,
-		ProviderOverride: acpruntime.Provider(attempt.EffectiveRuntime.Provider),
-		ProviderModels:   attemptProviderModels(snapshot, attempt), NonInteractive: true,
+		RuntimeSnapshot: attemptRuntimeSnapshot(attempt), NonInteractive: true,
 		RetryParentRunID: parent.RunID, RetryReason: reason,
 	})
 	if err != nil || runID != attempt.RunID {
@@ -312,21 +314,112 @@ func (s *Server) watchAdmittedAttempt(service *orchestrator.Service, registry *p
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(50 * time.Millisecond)
+		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
 			info, ok := service.GetRun(runID)
 			if !ok {
 				return
 			}
+			history := registry.Snapshot()
+			if !attemptNeedsRunUpdate(history, info) {
+				if info.Status != orchestrator.RunStatusQueued && info.Status != orchestrator.RunStatusRunning {
+					return
+				}
+				continue
+			}
 			if err := registry.Update(func(candidate *producttasks.History) error { return updateAttemptFromRun(candidate, info) }); err != nil {
-				return
+				// A transient current/last-good write failure must not permanently
+				// abandon the watcher; the next state transition retries the publish.
+				continue
 			}
 			if info.Status != orchestrator.RunStatusQueued && info.Status != orchestrator.RunStatusRunning {
 				return
 			}
 		}
 	}()
+}
+
+func (s *Server) reconcileTaskAttemptsAfterRestart(service *orchestrator.Service, registry *producttasks.Registry) {
+	if service == nil || registry == nil {
+		return
+	}
+	for _, attempt := range registry.Snapshot().Attempts {
+		if attempt.Status != producttasks.AttemptQueued && attempt.Status != producttasks.AttemptRunning {
+			continue
+		}
+		info, ok := service.GetRun(attempt.RunID)
+		if !ok {
+			// The runtime history may have been retained less long than Task
+			// history. Do not leave a durable queued/running identity forever;
+			// expose an explicit unavailable terminal state instead.
+			_ = registry.Update(func(candidate *producttasks.History) error {
+				return markAttemptUnavailableAfterRestart(candidate, attempt.TaskID, attempt.AttemptID)
+			})
+			continue
+		}
+		if attemptNeedsRunUpdate(registry.Snapshot(), info) {
+			_ = registry.Update(func(candidate *producttasks.History) error { return updateAttemptFromRun(candidate, info) })
+		}
+		if info.Status == orchestrator.RunStatusQueued || info.Status == orchestrator.RunStatusRunning {
+			s.watchAdmittedAttempt(service, registry, attempt.RunID, attempt.AttemptID)
+		}
+	}
+}
+
+func markAttemptUnavailableAfterRestart(history *producttasks.History, taskID, attemptID string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for index := range history.Attempts {
+		attempt := &history.Attempts[index]
+		if attempt.TaskID != taskID || attempt.AttemptID != attemptID {
+			continue
+		}
+		attempt.Status = producttasks.AttemptFailed
+		attempt.FinishedAt = &now
+		attempt.TerminalSummary = &producttasks.TerminalSummary{
+			Status:           producttasks.AttemptFailed,
+			ErrorCode:        "run_reconciled_after_restart",
+			Error:            "runtime run identity was not found after restart",
+			RetainedEvidence: attempt.RetainedEvidence,
+		}
+		attempt.Outcome = producttasks.Outcome{State: producttasks.Unavailable, UnavailableReason: "runtime run identity was not found after restart"}
+		for taskIndex := range history.Tasks {
+			if history.Tasks[taskIndex].TaskID != taskID {
+				continue
+			}
+			for summaryIndex := range history.Tasks[taskIndex].Attempts {
+				summary := &history.Tasks[taskIndex].Attempts[summaryIndex]
+				if summary.AttemptID != attemptID {
+					continue
+				}
+				summary.Status = producttasks.AttemptFailed
+				summary.UpdatedAt = now
+				summary.FinishedAt = &now
+				history.Tasks[taskIndex].LastActivityAt = now
+				history.Tasks[taskIndex].Outcome = attempt.Outcome
+				return nil
+			}
+		}
+		return nil
+	}
+	return errors.New("attempt run linkage not found")
+}
+
+func attemptNeedsRunUpdate(history producttasks.History, info orchestrator.RunInfo) bool {
+	for _, attempt := range history.Attempts {
+		if attempt.RunID != info.RunID || attempt.AttemptID != info.AttemptID {
+			continue
+		}
+		status := attemptStatusFromRun(info.Status)
+		if attempt.Status != status || (info.FinishedAt != nil && attempt.FinishedAt == nil) || (status == producttasks.AttemptRunning && attempt.StartedAt == nil) {
+			return true
+		}
+		if info.FinishedAt != nil && attempt.FinishedAt != nil && *attempt.FinishedAt != info.FinishedAt.UTC().Format(time.RFC3339Nano) {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func parseAttemptAdmissionOptions(rawPipeline, rawIntent string) (orchestrator.Pipeline, orchestrator.RunIntent, error) {
@@ -473,16 +566,40 @@ func normalizeResolutionSource(source string) string {
 	return source
 }
 
-func attemptProviderModels(snapshot serverSessionSnapshot, attempt producttasks.Attempt) *acpruntime.ProviderModelResolution {
-	resolved, err := snapshot.Service.ResolveProviderModelProfile(snapshot.Workspace.Manifest)
+func attemptRuntimeSnapshot(attempt producttasks.Attempt) *acpruntime.AdmittedRuntimeSnapshot {
+	stepProviders := acpruntime.StepProviderValues{}
+	stepSources := acpruntime.StepProviderSources{}
+	for stepID, preset := range attempt.EffectiveRuntime.StepOverrides {
+		provider, err := acpruntime.ParseProvider(preset.Provider)
+		if err != nil {
+			continue
+		}
+		stepProviders[stepID] = provider
+		stepSources[stepID] = acpruntime.ProviderSourceOverride
+	}
+	provider, err := acpruntime.ParseProvider(attempt.EffectiveRuntime.Provider)
 	if err != nil {
 		return nil
 	}
-	provider := acpruntime.Provider(attempt.EffectiveRuntime.Provider)
-	config := resolved.Effective[provider]
-	config.Model, config.Effort = attempt.EffectiveRuntime.Model, attempt.EffectiveRuntime.Effort
-	resolved.Effective[provider] = config
-	return &resolved
+	repositoryScopes := make([]string, 0, len(attempt.EffectiveRuntime.Scope.Repositories))
+	for _, repository := range attempt.EffectiveRuntime.Scope.Repositories {
+		if strings.TrimSpace(repository.Name) != "" {
+			repositoryScopes = append(repositoryScopes, strings.TrimSpace(repository.Name))
+		}
+	}
+	models := acpruntime.ProviderModelValues{provider: {Model: attempt.EffectiveRuntime.Model, Effort: attempt.EffectiveRuntime.Effort}}
+	modelSources := acpruntime.ProviderModelSources{provider: {Model: acpruntime.ProviderModelSourceWorkspace, Effort: acpruntime.ProviderModelSourceWorkspace}}
+	return &acpruntime.AdmittedRuntimeSnapshot{
+		Mode:                 attempt.EffectiveRuntime.Mode,
+		StepProviders:        stepProviders,
+		StepProviderSources:  stepSources,
+		ProviderModels:       models,
+		ProviderModelSources: modelSources,
+		Execution:            acpruntime.ExecutionValues{Strategy: attempt.EffectiveRuntime.Execution.Strategy, MaxParallel: attempt.EffectiveRuntime.Execution.MaxParallel, FailurePolicy: attempt.EffectiveRuntime.Execution.FailurePolicy, ShardMode: attempt.EffectiveRuntime.Execution.ShardMode},
+		Permissions:          acpruntime.PermissionValues{Mode: attempt.EffectiveRuntime.Permissions, ApprovalChannel: acpruntime.PermissionApprovalFailFast},
+		Timeouts:             acpruntime.TimeoutValues{StepTimeoutSec: attempt.EffectiveRuntime.Timeouts["step_timeout_sec"], HeartbeatSec: attempt.EffectiveRuntime.Timeouts["heartbeat_sec"], PipelineTimeoutSec: attempt.EffectiveRuntime.Timeouts["pipeline_timeout_sec"], PipelineKillGraceSec: attempt.EffectiveRuntime.Timeouts["pipeline_kill_grace_sec"], APIReadyTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_ready_timeout_sec"], APIInitTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_init_timeout_sec"], UIInitPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_init_poll_timeout_sec"], UICancelPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_cancel_poll_timeout_sec"]},
+		RepositoryScopes:     repositoryScopes,
+	}
 }
 
 func validateTaskRepositoryScope(task producttasks.Task, ws workspace.Root) error {

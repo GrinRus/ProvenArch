@@ -1733,6 +1733,8 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         "excellent_blockers_by_step": [],
         "provider_total": Counter(),
         "provider_hard": Counter(),
+        "authority_source_values": Counter(),
+        "promotion_audit_values": Counter(),
     }
 
     if not tsv_path.exists() or not tsv_path.is_file():
@@ -1764,6 +1766,10 @@ def parse_backend_stats(tsv_path: Path) -> dict[str, object]:
         parts = line.split("\t")
         stats["total"] = int(stats["total"]) + 1
         provider = field(parts, "provider", "")
+        authority_source: Counter = stats["authority_source_values"]  # type: ignore[assignment]
+        authority_source.update([field(parts, "effective_verdict_source", "") or "missing"])
+        authority_audit: Counter = stats["promotion_audit_values"]  # type: ignore[assignment]
+        authority_audit.update([field(parts, "promotion_audit_result", "") or "missing"])
         hard_pass = field_bool(parts, "hard_pass")
         artifact_quality_failed_field = field_bool(parts, "artifact_quality_failed")
         quality_gates_failed_field = field_bool(parts, "quality_gates_failed")
@@ -2018,6 +2024,13 @@ def strict_blockers(
             reasons.append(f"{init_key}={frontend.get(init_key, 'missing')} (expected passed)")
     if release_mode and shard_plan_invariant != "passed":
         reasons.append(f"shard_plan_invariant={shard_plan_invariant} (release requires passed)")
+    if release_mode:
+        authority_sources = stats.get("authority_source_values")
+        authority_audits = stats.get("promotion_audit_values")
+        if not isinstance(authority_sources, Counter) or authority_sources.get("orchestrator", 0) != expected_backend_runs:
+            reasons.append(f"effective_verdict_source={dict(authority_sources or {})} (release requires orchestrator for every run)")
+        if not isinstance(authority_audits, Counter) or authority_audits.get("pass", 0) != expected_backend_runs:
+            reasons.append(f"promotion_audit_result={dict(authority_audits or {})} (release requires pass for every run)")
 
     return reasons
 
@@ -2370,6 +2383,10 @@ for rec in records:
                 "partial_failure_count": int(stats["partial_failure_count"]),
             },
             "frontend": frontend_statuses,
+            "public_authority": {
+                "effective_verdict_source": "orchestrator" if isinstance(stats.get("authority_source_values"), Counter) and stats["authority_source_values"].get("orchestrator", 0) == expected_backend_runs else "missing_or_invalid",
+                "promotion_audit_result": "pass" if isinstance(stats.get("promotion_audit_values"), Counter) and stats["promotion_audit_values"].get("pass", 0) == expected_backend_runs else "missing_or_invalid",
+            },
             "artifacts": {
                 "run_matrix_tsv": rec["run_matrix_tsv"],
                 "run_matrix_md": rec["run_matrix_md"],

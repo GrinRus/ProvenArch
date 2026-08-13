@@ -103,7 +103,7 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		service.SetRuntimeMode(runtimeConfig.Mode)
 	}
 	taskRegistry, taskRegistryErr := producttasks.NewRegistry(ws, time.Now)
-	return &Server{
+	server := &Server{
 		workspace:         ws,
 		workspacePath:     ws.Path,
 		workspaceSelected: true,
@@ -115,6 +115,8 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		consoleEntered:    true,
 		generation:        1,
 	}
+	server.reconcileTaskAttemptsAfterRestart(service, taskRegistry)
+	return server
 }
 
 func NewLauncherServer(runtimeConfig ServerRuntimeConfig, factory ServiceFactory) *Server {
@@ -303,6 +305,9 @@ func (s *Server) resetTaskRegistryLocked(ws workspace.Root) {
 	registry, err := producttasks.NewRegistry(ws, time.Now)
 	s.taskRegistry = registry
 	s.taskRegistryErr = err
+	if err == nil {
+		s.reconcileTaskAttemptsAfterRestart(s.service, registry)
+	}
 }
 
 func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
@@ -421,10 +426,10 @@ func (s *Server) attachWorkspace(ws workspace.Root) (*orchestrator.Service, erro
 	s.workspace = ws
 	s.workspacePath = ws.Path
 	s.workspaceSelected = true
-	s.resetTaskRegistryLocked(ws)
 	if s.serviceFactory != nil {
 		s.service = s.serviceFactory(ws, s.runtimeConfig)
 	}
+	s.resetTaskRegistryLocked(ws)
 	s.generation++
 	return s.service, nil
 }

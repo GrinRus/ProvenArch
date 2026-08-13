@@ -337,6 +337,8 @@ Output mapping rules:
   `base_ref/base_oid`, resulting `head_oid`/commit and the confirmed full-workspace inventory
   fingerprint. An unavailable publication carries only an explicit reason; it is never inferred from
   a clean worktree or latest commit.
+- The standalone Attempt payload uses `terminal_summary: null` until terminalization. An available
+  outcome repeats the exact `attempt_id` alongside `run_id` and `snapshot_path`.
 
 ## 9) Source Revisions Schema
 

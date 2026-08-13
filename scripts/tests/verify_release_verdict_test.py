@@ -51,7 +51,13 @@ class VerifyReleaseVerdictTest(unittest.TestCase):
                 "selected_providers": ["qwen-code", "claude-code", "codex-code"],
                 "selected_run_indexes": ["1"],
             },
-            "records": [{"strict_status": "passed"}],
+            "records": [{
+                "strict_status": "passed",
+                "public_authority": {
+                    "effective_verdict_source": "orchestrator",
+                    "promotion_audit_result": "pass",
+                },
+            }],
         }
 
     def write_ready_evidence(self, root: Path, matrix_id: str) -> Path:

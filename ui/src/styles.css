@@ -5436,7 +5436,8 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 .product-ask > span:first-child { color: var(--ink-muted); font-size: 17px; }
 .product-icon-button { display: inline-grid !important; place-items: center; width: 38px; height: 38px; padding: 0 !important; font-size: 15px; font-weight: 700; }
 .product-utilities a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-hover); }
-.product-layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+.product-layout { display: grid; grid-template-columns: 224px minmax(0, 1fr) auto; min-height: calc(100vh - 64px); }
+.product-layout.nav-collapsed { grid-template-columns: 64px minmax(0, 1fr) auto; }
 .primary-nav { position: sticky; top: 64px; height: calc(100vh - 64px); gap: 2px; padding: 18px 13px 16px; border-right: 0; background: var(--sidebar-bg); color: var(--sidebar-ink); }
 .primary-nav a, .primary-nav button { min-height: 44px; padding: 0 12px; gap: 11px; border: 1px solid transparent; border-radius: 9px; color: #c5dade; font-weight: 680; }
 .primary-nav a > span:first-child, .primary-nav button > span:first-child { width: 22px; color: #8ebdc0; font-size: 15px; }

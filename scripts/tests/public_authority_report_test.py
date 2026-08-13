@@ -69,6 +69,16 @@ class PublicAuthorityReportTest(unittest.TestCase):
         self.assertEqual("", legacy["effective_verdict_source"])
         self.assertFalse(legacy["provider_budget_exhausted"])
 
+    def test_release_authority_gate_requires_explicit_public_evidence(self) -> None:
+        gate, reasons = self.module.public_authority_gate("", "", False, release_mode=True)
+        self.assertTrue(gate)
+        self.assertIn("execution:effective-verdict-missing", reasons)
+        self.assertIn("execution:promotion-audit-missing-or-failed", reasons)
+
+        gate, reasons = self.module.public_authority_gate("orchestrator", "pass", False, release_mode=True)
+        self.assertFalse(gate)
+        self.assertEqual([], reasons)
+
     def test_report_and_tsv_publish_public_authority_without_internal_imports(self) -> None:
         run = self._run()
         with tempfile.TemporaryDirectory() as tempdir:

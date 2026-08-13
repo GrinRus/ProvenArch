@@ -87,6 +87,56 @@ func TestTaskAttemptRetryCreatesChildAttempt(t *testing.T) {
 	}
 }
 
+func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "archived-retry")
+	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"parent-key"}`)
+	var firstPayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&firstPayload); err != nil {
+		first.Body.Close()
+		t.Fatalf("decode parent: %v", err)
+	}
+	first.Body.Close()
+	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
+
+	archive := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/archive", `{"expected_revision":1}`)
+	archive.Body.Close()
+	if archive.StatusCode != http.StatusOK {
+		t.Fatalf("archive task failed: %d", archive.StatusCode)
+	}
+	retry := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+firstPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"archived-child"}`)
+	retry.Body.Close()
+	if retry.StatusCode != http.StatusConflict {
+		t.Fatalf("expected archived retry conflict, got %d", retry.StatusCode)
+	}
+}
+
+func TestMissingRuntimeRunIsReconciledAsUnavailable(t *testing.T) {
+	t.Parallel()
+	attempt := readAttemptFixture(t)
+	attempt.Status = producttasks.AttemptRunning
+	attempt.FinishedAt = nil
+	attempt.TerminalSummary = nil
+	attempt.Outcome = producttasks.Outcome{State: producttasks.Unavailable, UnavailableReason: "attempt has not completed"}
+	history := producttasks.History{
+		Tasks:    []producttasks.Task{{TaskID: attempt.TaskID, Revision: attempt.TaskRevision, Outcome: attempt.Outcome, Attempts: []producttasks.AttemptSummary{{AttemptID: attempt.AttemptID, RunID: attempt.RunID, TaskRevision: attempt.TaskRevision, Status: attempt.Status, AdmittedAt: attempt.AdmittedAt, UpdatedAt: attempt.AdmittedAt, RetainedEvidence: attempt.RetainedEvidence}}}},
+		Attempts: []producttasks.Attempt{attempt},
+	}
+	if err := markAttemptUnavailableAfterRestart(&history, attempt.TaskID, attempt.AttemptID); err != nil {
+		t.Fatalf("reconcile missing run: %v", err)
+	}
+	if history.Attempts[0].Status != producttasks.AttemptFailed || history.Attempts[0].TerminalSummary == nil || history.Attempts[0].TerminalSummary.ErrorCode != "run_reconciled_after_restart" {
+		t.Fatalf("missing run was not terminalized: %+v", history.Attempts[0])
+	}
+	if history.Tasks[0].Outcome.State != producttasks.Unavailable || history.Tasks[0].Attempts[0].Status != producttasks.AttemptFailed {
+		t.Fatalf("task projection was not updated: %+v", history.Tasks[0])
+	}
+}
+
 func TestTaskAttemptRejectsForeignScopeBeforeAdmission(t *testing.T) {
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())

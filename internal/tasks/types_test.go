@@ -143,6 +143,29 @@ func TestAttemptSnapshotCloneIsIndependent(t *testing.T) {
 	}
 }
 
+func TestAttemptQueuedShapeAllowsNullTerminalSummary(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "attempt.example.json"))
+	if err != nil {
+		t.Fatalf("read attempt fixture: %v", err)
+	}
+	attempt, err := ParseAttempt(raw)
+	if err != nil {
+		t.Fatalf("parse attempt fixture: %v", err)
+	}
+	attempt.Status = AttemptRunning
+	attempt.FinishedAt = nil
+	attempt.TerminalSummary = nil
+	attempt.Outcome = Outcome{State: Unavailable, UnavailableReason: "attempt is still running"}
+	encoded, err := MarshalAttempt(attempt)
+	if err != nil {
+		t.Fatalf("marshal queued attempt: %v", err)
+	}
+	if _, err := ParseAttempt(encoded); err != nil {
+		t.Fatalf("queued attempt with null terminal summary must validate: %v", err)
+	}
+}
+
 func TestPublicationLinkageRoundTripsExactGitIdentity(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "attempt.example.json"))

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -1601,6 +1602,36 @@ def verdict(total: int, issues: list[str] | None = None, hard_pass: bool = True)
     return "Poor"
 
 
+def public_authority_gate(
+    effective_verdict_source: str,
+    promotion_audit_result: str,
+    provider_budget_exhausted: bool,
+    release_mode: bool = False,
+) -> tuple[bool, list[str]]:
+    """Return whether public authority evidence blocks this run.
+
+    Diagnostic reports preserve legacy/missing authority as telemetry. Release
+    reports require an explicit orchestrator effective verdict and a passing
+    promotion audit.
+    """
+    source = effective_verdict_source.strip()
+    audit = promotion_audit_result.strip()
+    reasons: list[str] = []
+    if source and source != "orchestrator":
+        reasons.append("execution:effective-verdict-authority")
+    if audit and audit not in {"pass", "fail"}:
+        reasons.append("execution:promotion-audit-invalid")
+    if audit == "fail":
+        reasons.append("execution:promotion-audit-failed")
+    if provider_budget_exhausted:
+        reasons.append("execution:provider-budget-exhausted")
+    if release_mode and source != "orchestrator":
+        reasons.append("execution:effective-verdict-missing")
+    if release_mode and audit != "pass":
+        reasons.append("execution:promotion-audit-missing-or-failed")
+    return bool(reasons), sorted(set(reasons))
+
+
 @dataclass
 class RunEvaluation:
     provider: str
@@ -1687,6 +1718,7 @@ def evaluate_run(
     run_dir: Path,
     preflight: dict[str, Any],
     classification_row: dict[str, str] | None = None,
+    release_mode: bool = False,
 ) -> RunEvaluation:
     summary_path = run_dir / "session-summary.md"
     run_results_path = run_dir / "run-results.tsv"
@@ -1902,26 +1934,18 @@ def evaluate_run(
     quality_alerts = int(quality_counter_totals.get("quality_alerts", 0))
     effective_verdict_source = str(public_authority["effective_verdict_source"])
     promotion_audit_result = str(public_authority["promotion_audit_result"])
-    authority_source_invalid = bool(effective_verdict_source and effective_verdict_source != "orchestrator")
-    authority_audit_invalid = bool(promotion_audit_result and promotion_audit_result not in {"pass", "fail"})
-    authority_gate_failed = (
-        promotion_audit_result == "fail"
-        or authority_source_invalid
-        or authority_audit_invalid
-        or bool(public_authority["provider_budget_exhausted"])
+    authority_gate_failed, authority_issues = public_authority_gate(
+        effective_verdict_source,
+        promotion_audit_result,
+        bool(public_authority["provider_budget_exhausted"]),
+        release_mode,
     )
-    if promotion_audit_result == "fail":
-        issues.append("execution:promotion-audit-failed")
-        details.append("execution/public-authority -> promotion_audit_result=fail")
-    if bool(public_authority["provider_budget_exhausted"]):
-        issues.append("execution:provider-budget-exhausted")
-        details.append("execution/public-authority -> provider_budget_exhausted=true")
-    if authority_source_invalid:
-        issues.append("execution:effective-verdict-authority")
-        details.append(f"execution/public-authority -> effective_verdict_source={effective_verdict_source}")
-    if authority_audit_invalid:
-        issues.append("execution:promotion-audit-invalid")
-        details.append(f"execution/public-authority -> promotion_audit_result={promotion_audit_result}")
+    for authority_issue in authority_issues:
+        issues.append(authority_issue)
+        details.append(
+            f"execution/public-authority -> source={effective_verdict_source or 'missing'} "
+            f"audit={promotion_audit_result or 'missing'} release_mode={int(release_mode)}"
+        )
     if repair_attempts >= 2:
         issues.append("execution:repair-heavy")
         details.append(f"execution/runtime-recovery -> repair_attempts={repair_attempts} fresh_retries={fresh_retries} focused_repairs={focused_repairs}")
@@ -3465,6 +3489,7 @@ def main() -> int:
 
     preflight_path = batch_root / "preflight.json"
     preflight = read_json(preflight_path) if preflight_path.exists() else {}
+    release_mode = os.environ.get("E2E_MATRIX_RELEASE_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
     classifications = reconstruct_backend_classifications(batch_root, parse_backend_classifications(batch_root))
     selected_providers = resolve_selected_providers(preflight, classifications, batch_root)
     selected_run_indexes = resolve_selected_run_indexes(preflight, classifications, batch_root)
@@ -3480,6 +3505,7 @@ def main() -> int:
                     run_dir,
                     preflight,
                     classifications.get((provider, run_index)),
+                    release_mode,
                 )
             )
     runs.sort(key=lambda item: (item.provider, item.run_index))

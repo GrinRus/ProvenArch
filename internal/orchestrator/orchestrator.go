@@ -126,8 +126,13 @@ type RunInfo struct {
 	CurrentStep          string                          `json:"current_step,omitempty"`
 	RuntimeMode          string                          `json:"runtime_mode,omitempty"`
 	StepProviders        map[string]string               `json:"step_providers,omitempty"`
+	StepProviderSources  acpruntime.StepProviderSources  `json:"step_provider_sources,omitempty"`
 	ProviderModels       acpruntime.ProviderModelValues  `json:"provider_models,omitempty"`
 	ProviderModelSources acpruntime.ProviderModelSources `json:"provider_model_sources,omitempty"`
+	ExecutionProfile     acpruntime.ExecutionValues      `json:"execution_profile,omitempty"`
+	PermissionProfile    acpruntime.PermissionValues     `json:"permission_profile,omitempty"`
+	Timeouts             acpruntime.TimeoutValues        `json:"timeouts,omitempty"`
+	RepositoryScopes     []string                        `json:"repository_scopes,omitempty"`
 	Warnings             []string                        `json:"warnings,omitempty"`
 	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
 	ErrorCode            string                          `json:"error_code,omitempty"`
@@ -205,6 +210,7 @@ type RunRequest struct {
 	RetryScopes          []string
 	RetryReusedInputs    []string
 	ProviderModels       *acpruntime.ProviderModelResolution
+	RuntimeSnapshot      *acpruntime.AdmittedRuntimeSnapshot
 }
 
 type PendingRunInfo struct {
@@ -234,8 +240,13 @@ type runHistoryItem struct {
 	CurrentStep          string                          `json:"current_step,omitempty"`
 	RuntimeMode          string                          `json:"runtime_mode,omitempty"`
 	StepProviders        map[string]string               `json:"step_providers,omitempty"`
+	StepProviderSources  acpruntime.StepProviderSources  `json:"step_provider_sources,omitempty"`
 	ProviderModels       acpruntime.ProviderModelValues  `json:"provider_models,omitempty"`
 	ProviderModelSources acpruntime.ProviderModelSources `json:"provider_model_sources,omitempty"`
+	ExecutionProfile     acpruntime.ExecutionValues      `json:"execution_profile,omitempty"`
+	PermissionProfile    acpruntime.PermissionValues     `json:"permission_profile,omitempty"`
+	Timeouts             acpruntime.TimeoutValues        `json:"timeouts,omitempty"`
+	RepositoryScopes     []string                        `json:"repository_scopes,omitempty"`
 	Warnings             []string                        `json:"warnings,omitempty"`
 	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
 	ErrorCode            string                          `json:"error_code,omitempty"`
@@ -407,6 +418,80 @@ func (s *Service) resolveRunProviderModels(request RunRequest) (acpruntime.Provi
 	return s.ResolveProviderModelProfile(request.Workspace.Manifest)
 }
 
+func (s *Service) resolveStepProvidersForRun(request RunRequest, snapshot *acpruntime.AdmittedRuntimeSnapshot) (acpruntime.StepProviderResolution, error) {
+	if snapshot != nil {
+		if len(snapshot.StepProviders) == 0 {
+			return acpruntime.StepProviderResolution{}, fmt.Errorf("admitted runtime snapshot has no step providers")
+		}
+		return acpruntime.StepProviderResolution{
+			Effective: snapshot.StepProviders,
+			Source:    snapshot.StepProviderSources,
+		}, nil
+	}
+	resolved, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	if err != nil {
+		return acpruntime.StepProviderResolution{}, err
+	}
+	if request.ProviderOverride != "" {
+		provider, parseErr := acpruntime.ParseProvider(string(request.ProviderOverride))
+		if parseErr != nil {
+			return acpruntime.StepProviderResolution{}, parseErr
+		}
+		for key := range resolved.Effective {
+			resolved.Effective[key] = provider
+			resolved.Source[key] = acpruntime.ProviderSourceOverride
+		}
+	}
+	return resolved, nil
+}
+
+func (s *Service) resolveProviderModelsForRun(request RunRequest, snapshot *acpruntime.AdmittedRuntimeSnapshot) (acpruntime.ProviderModelResolution, error) {
+	if snapshot != nil {
+		return acpruntime.ProviderModelResolution{
+			Effective: snapshot.ProviderModels,
+			Source:    snapshot.ProviderModelSources,
+		}, nil
+	}
+	return s.resolveRunProviderModels(request)
+}
+
+func runtimeSnapshotFromRunInfo(info RunInfo) *acpruntime.AdmittedRuntimeSnapshot {
+	// Older persisted runs do not contain a complete admission snapshot. Keep
+	// their legacy resume path instead of manufacturing zero-value runtime
+	// settings (which would silently change execution semantics).
+	if len(info.StepProviders) == 0 || info.RuntimeMode == "" ||
+		info.ExecutionProfile.Strategy == "" || info.PermissionProfile.Mode == "" ||
+		info.Timeouts.StepTimeoutSec <= 0 {
+		return nil
+	}
+	stepProviders := acpruntime.StepProviderValues{}
+	for key, provider := range info.StepProviders {
+		parsed, err := acpruntime.ParseProvider(provider)
+		if err != nil {
+			return nil
+		}
+		stepProviders[key] = parsed
+	}
+	return &acpruntime.AdmittedRuntimeSnapshot{
+		Mode:                 info.RuntimeMode,
+		StepProviders:        stepProviders,
+		StepProviderSources:  cloneStepProviderSources(info.StepProviderSources),
+		ProviderModels:       cloneProviderModelValues(info.ProviderModels),
+		ProviderModelSources: cloneProviderModelSources(info.ProviderModelSources),
+		Execution:            info.ExecutionProfile,
+		Permissions:          info.PermissionProfile,
+		Timeouts:             info.Timeouts,
+		RepositoryScopes:     append([]string(nil), info.RepositoryScopes...),
+	}
+}
+
+func runtimeSnapshotRepositoryScopes(snapshot *acpruntime.AdmittedRuntimeSnapshot) []string {
+	if snapshot == nil {
+		return nil
+	}
+	return normalizeOrderedUniqueStrings(snapshot.RepositoryScopes)
+}
+
 func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artifact, error) {
 	runID := s.nextRunID()
 	return s.runWithID(ctx, request, runID)
@@ -433,8 +518,20 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	initialArtifacts := []Artifact{}
 	initialWarnings := []string{}
 	resumeFromStep := strings.TrimSpace(request.ResumeFromStep)
-	resolvedStepProviders, resolvedStepProvidersErr := s.ResolveStepProviderProfile(request.Workspace.Manifest)
-	resolvedProviderModels, resolvedProviderModelsErr := s.resolveRunProviderModels(request)
+	runtimeSnapshot := acpruntime.CloneAdmittedRuntimeSnapshot(request.RuntimeSnapshot)
+	if runtimeSnapshot == nil && resumed {
+		runtimeSnapshot = runtimeSnapshotFromRunInfo(resumedRecord.info)
+	}
+	resolvedStepProviders, resolvedStepProvidersErr := s.resolveStepProvidersForRun(request, runtimeSnapshot)
+	resolvedProviderModels, resolvedProviderModelsErr := s.resolveProviderModelsForRun(request, runtimeSnapshot)
+	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
+	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)
+	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
+	if runtimeSnapshot != nil {
+		resolvedExecution = acpruntime.ExecutionResolution{Effective: runtimeSnapshot.Execution}
+		resolvedPermissions = acpruntime.PermissionResolution{Effective: runtimeSnapshot.Permissions}
+		resolvedTimeouts = acpruntime.TimeoutResolution{Effective: runtimeSnapshot.Timeouts}
+	}
 	runLogMessage := "run started"
 	runLogFields := map[string]any{
 		"pipeline": string(request.Pipeline),
@@ -466,7 +563,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 		StartedAt:     startedAt,
 		Question:      strings.TrimSpace(request.Question),
 		CurrentStep:   resumeFromStep,
-		RuntimeMode:   s.runtimeMode,
+		RuntimeMode:   admissionRuntimeMode(s.runtimeMode, runtimeSnapshot),
 		StepProviders: map[string]string{},
 		Warnings:      append([]string(nil), initialWarnings...),
 	}
@@ -487,11 +584,16 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	}
 	if resolvedStepProvidersErr == nil {
 		initialInfo.StepProviders = resolvedStepProviders.Effective.StringMap()
+		initialInfo.StepProviderSources = cloneStepProviderSources(resolvedStepProviders.Source)
 	}
 	if resolvedProviderModelsErr == nil {
 		initialInfo.ProviderModels = resolvedProviderModels.Effective
 		initialInfo.ProviderModelSources = resolvedProviderModels.Source
 	}
+	initialInfo.ExecutionProfile = resolvedExecution.Effective
+	initialInfo.PermissionProfile = resolvedPermissions.Effective
+	initialInfo.Timeouts = resolvedTimeouts.Effective
+	initialInfo.RepositoryScopes = runtimeSnapshotRepositoryScopes(runtimeSnapshot)
 	if err := s.storeRun(runRecord{
 		info:      initialInfo,
 		artifacts: append([]Artifact(nil), initialArtifacts...),
@@ -557,8 +659,6 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			return s.failRunBeforeExecution(runID, initialInfo, initialArtifacts, fmt.Errorf("prepare retry inputs: %w", err), err, "run failed: retry input preparation", nil)
 		}
 	}
-	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
-	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)
 	stepRunnerResolver := newStepRunnerResolver(s.runnerFactory, resolvedStepProviders.Effective)
 	validation := request.Workspace.Validate(ctx, workspace.ValidateOptions{
 		ResolveRepos: true,
@@ -712,6 +812,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			stepProviders:     resolvedStepProviders.Effective,
 			providerModels:    resolvedProviderModels.Effective,
 			permissionProfile: resolvedPermissions.Effective,
+			repositoryScopes:  runtimeSnapshotRepositoryScopes(runtimeSnapshot),
 			retryScopes:       append([]string(nil), request.RetryScopes...),
 		},
 		pipelineQualityState: pipelineQualityState{
@@ -742,7 +843,6 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	if refreshImpact != nil {
 		execution.refreshIntentContext = buildRefreshIntentContext(ctx, *refreshImpact, execution.resolvedRepoPaths)
 	}
-	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
 	execution.executionProfile = resolvedExecution.Effective
 	if resolvedTimeouts.Effective.StepTimeoutSec > 0 {
 		execution.runtimeStepTimeout = time.Duration(resolvedTimeouts.Effective.StepTimeoutSec) * time.Second
@@ -982,6 +1082,7 @@ type pipelineRuntimeState struct {
 	runtimeHeartbeatInterval time.Duration
 	executionProfile         acpruntime.ExecutionValues
 	permissionProfile        acpruntime.PermissionValues
+	repositoryScopes         []string
 	refreshIntentContext     string
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string
@@ -1250,6 +1351,9 @@ func resolvedSourceRepoEvidence(repos []workspace.ResolvedRepo) []workspace.Reso
 }
 
 func (e *pipelineExecution) repoScopes() []string {
+	if len(e.repositoryScopes) > 0 {
+		return append([]string(nil), e.repositoryScopes...)
+	}
 	return normalizeOrderedUniqueStrings(collectRepoScopes(e.workspace.Manifest.Repos))
 }
 

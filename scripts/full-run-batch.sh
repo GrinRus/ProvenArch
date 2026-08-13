@@ -1396,6 +1396,7 @@ finalize_provider_readiness_failure() {
     cat "$BATCH_ROOT/report-paths.txt"
   else
     log "report generation failed after provider readiness failure (see $BATCH_ROOT/report-paths.txt if present)"
+    [[ -f "$BATCH_ROOT/report-paths.txt" ]] && cat "$BATCH_ROOT/report-paths.txt" >&2 || true
   fi
   log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "operational_host_preflight_failed: selected provider readiness failed: $reason"
@@ -1417,6 +1418,7 @@ finalize_precheck_failure() {
     cat "$BATCH_ROOT/report-paths.txt"
   else
     log "report generation failed after precheck failure (see $BATCH_ROOT/report-paths.txt if present)"
+    [[ -f "$BATCH_ROOT/report-paths.txt" ]] && cat "$BATCH_ROOT/report-paths.txt" >&2 || true
   fi
   log "backend failure classes: precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
   die "batch precheck failed: reason=$reason precheck_failed=$PRECHECK_FAILED_FAILURES runtime_contract_failed=$RUNTIME_CONTRACT_FAILURES runner_unavailable=$RUNNER_UNAVAILABLE_FAILURES runtime_timeout=$RUNTIME_TIMEOUT_FAILURES infra_signal_terminated=$INFRA_SIGNAL_TERMINATED_FAILURES infra_incomplete_cycle=$INFRA_INCOMPLETE_CYCLE_FAILURES summary_missing=$SUMMARY_MISSING_FAILURES runtime_flow_failed=$RUNTIME_FLOW_FAILED_FAILURES cancellation_like=$CANCELLATION_LIKE_FAILURES other=$OTHER_FAILURES"
