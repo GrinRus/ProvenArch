@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 
 import type { GuidedRepo } from "../lib/appContracts";
-import { admitTaskAttempt, createTask, type TaskScope } from "../lib/taskApi";
+import { admitTaskAttempt, createTask, newIdempotencyKey, type TaskScope } from "../lib/taskApi";
 import { Button, PageHeader } from "./SemanticPrimitives";
 
 type TaskComposerProps = {
@@ -33,6 +33,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createdTaskId, setCreatedTaskId] = useState("");
+  const [admissionIdempotencyKey] = useState(() => newIdempotencyKey());
   const scope = useMemo(() => taskScope(repos), [repos]);
   const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode, runtimeProvider: normalizedProvider });
   const canSubmit = title.trim().length > 0 && goal.trim().length > 0 && readiness.ok && !busy;
@@ -58,7 +59,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
       setCreatedTaskId(task.task_id);
       let attempt: Awaited<ReturnType<typeof admitTaskAttempt>>;
       try {
-        attempt = await admitTaskAttempt(task.task_id, { pipeline: "init", intent: "start" });
+        attempt = await admitTaskAttempt(task.task_id, { pipeline: "init", intent: "start", idempotencyKey: admissionIdempotencyKey });
       } catch (requestError) {
         throw new Error(`Task created, but Attempt admission failed: ${requestError instanceof Error ? requestError.message : "unknown admission error"}`);
       }

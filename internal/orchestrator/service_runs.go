@@ -33,28 +33,9 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 		return "", ErrQueueUnsupported
 	}
 	request.Intent = intent
-	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	resolvedStepProviders, resolvedProviderModels, err := s.resolveAdmissionRuntime(request)
 	if err != nil {
 		return "", err
-	}
-	if request.ProviderOverride != "" {
-		provider, parseErr := acpruntime.ParseProvider(string(request.ProviderOverride))
-		if parseErr != nil {
-			return "", parseErr
-		}
-		for key := range resolvedStepProviders.Effective {
-			resolvedStepProviders.Effective[key] = provider
-			resolvedStepProviders.Source[key] = acpruntime.ProviderSourceOverride
-		}
-	}
-	resolvedProviderModels, err := s.ResolveProviderModelProfile(request.Workspace.Manifest)
-	if err != nil {
-		return "", err
-	}
-	if request.ProviderModels == nil {
-		request.ProviderModels = &resolvedProviderModels
-	} else {
-		resolvedProviderModels = *request.ProviderModels
 	}
 	runID := strings.TrimSpace(request.RequestedRunID)
 	if runID == "" {
@@ -87,10 +68,14 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 				Status:               RunStatusQueued,
 				StartedAt:            now,
 				Question:             strings.TrimSpace(request.Question),
-				RuntimeMode:          s.runtimeMode,
+				RuntimeMode:          admissionRuntimeMode(s.runtimeMode, request.RuntimeSnapshot),
 				StepProviders:        resolvedStepProviders.Effective.StringMap(),
+				StepProviderSources:  cloneStepProviderSources(resolvedStepProviders.Source),
 				ProviderModels:       resolvedProviderModels.Effective,
 				ProviderModelSources: resolvedProviderModels.Source,
+				ExecutionProfile:     admissionExecutionProfile(s, request),
+				PermissionProfile:    admissionPermissionProfile(s, request),
+				Timeouts:             admissionTimeoutProfile(s, request),
 				Progress:             progress,
 				Retry:                retry,
 			},
@@ -145,6 +130,76 @@ func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string
 	})
 
 	return runID, nil
+}
+
+func (s *Service) resolveAdmissionRuntime(request RunRequest) (acpruntime.StepProviderResolution, acpruntime.ProviderModelResolution, error) {
+	if request.RuntimeSnapshot != nil {
+		mode, err := acpruntime.NormalizeMode(request.RuntimeSnapshot.Mode)
+		if err != nil {
+			return acpruntime.StepProviderResolution{}, acpruntime.ProviderModelResolution{}, err
+		}
+		request.RuntimeSnapshot.Mode = mode
+		if len(request.RuntimeSnapshot.StepProviders) == 0 {
+			return acpruntime.StepProviderResolution{}, acpruntime.ProviderModelResolution{}, fmt.Errorf("admitted runtime snapshot has no step providers")
+		}
+		return acpruntime.StepProviderResolution{
+				Effective: request.RuntimeSnapshot.StepProviders,
+				Source:    request.RuntimeSnapshot.StepProviderSources,
+			}, acpruntime.ProviderModelResolution{
+				Effective: request.RuntimeSnapshot.ProviderModels,
+				Source:    request.RuntimeSnapshot.ProviderModelSources,
+			}, nil
+	}
+	resolvedStepProviders, err := s.ResolveStepProviderProfile(request.Workspace.Manifest)
+	if err != nil {
+		return acpruntime.StepProviderResolution{}, acpruntime.ProviderModelResolution{}, err
+	}
+	if request.ProviderOverride != "" {
+		provider, parseErr := acpruntime.ParseProvider(string(request.ProviderOverride))
+		if parseErr != nil {
+			return acpruntime.StepProviderResolution{}, acpruntime.ProviderModelResolution{}, parseErr
+		}
+		for key := range resolvedStepProviders.Effective {
+			resolvedStepProviders.Effective[key] = provider
+			resolvedStepProviders.Source[key] = acpruntime.ProviderSourceOverride
+		}
+	}
+	resolvedProviderModels, err := s.ResolveProviderModelProfile(request.Workspace.Manifest)
+	if err != nil {
+		return acpruntime.StepProviderResolution{}, acpruntime.ProviderModelResolution{}, err
+	}
+	if request.ProviderModels != nil {
+		resolvedProviderModels = *request.ProviderModels
+	}
+	return resolvedStepProviders, resolvedProviderModels, nil
+}
+
+func admissionRuntimeMode(fallback string, snapshot *acpruntime.AdmittedRuntimeSnapshot) string {
+	if snapshot != nil && snapshot.Mode != "" {
+		return snapshot.Mode
+	}
+	return fallback
+}
+
+func admissionExecutionProfile(s *Service, request RunRequest) acpruntime.ExecutionValues {
+	if request.RuntimeSnapshot != nil {
+		return request.RuntimeSnapshot.Execution
+	}
+	return s.ResolveExecutionProfile(request.Workspace.Manifest).Effective
+}
+
+func admissionPermissionProfile(s *Service, request RunRequest) acpruntime.PermissionValues {
+	if request.RuntimeSnapshot != nil {
+		return request.RuntimeSnapshot.Permissions
+	}
+	return acpruntime.ResolvePermissions(request.Workspace.Manifest).Effective
+}
+
+func admissionTimeoutProfile(s *Service, request RunRequest) acpruntime.TimeoutValues {
+	if request.RuntimeSnapshot != nil {
+		return request.RuntimeSnapshot.Timeouts
+	}
+	return acpruntime.ResolveTimeouts(request.Workspace.Manifest).Effective
 }
 
 func (s *Service) CancelRun(runID string) error {
@@ -749,8 +804,13 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		RuntimeMode:          record.info.RuntimeMode,
 		Question:             record.info.Question,
 		StepProviders:        cloneStringMap(record.info.StepProviders),
+		StepProviderSources:  cloneStepProviderSources(record.info.StepProviderSources),
 		ProviderModels:       cloneProviderModelValues(record.info.ProviderModels),
 		ProviderModelSources: cloneProviderModelSources(record.info.ProviderModelSources),
+		ExecutionProfile:     record.info.ExecutionProfile,
+		PermissionProfile:    record.info.PermissionProfile,
+		Timeouts:             record.info.Timeouts,
+		RepositoryScopes:     append([]string(nil), record.info.RepositoryScopes...),
 		Warnings:             append([]string(nil), record.info.Warnings...),
 		PendingPermissions:   clonePermissionRequests(record.info.PendingPermissions),
 		ErrorCode:            record.info.ErrorCode,
@@ -794,8 +854,13 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			CurrentStep:          item.CurrentStep,
 			RuntimeMode:          item.RuntimeMode,
 			StepProviders:        cloneStringMap(item.StepProviders),
+			StepProviderSources:  cloneStepProviderSources(item.StepProviderSources),
 			ProviderModels:       cloneProviderModelValues(item.ProviderModels),
 			ProviderModelSources: cloneProviderModelSources(item.ProviderModelSources),
+			ExecutionProfile:     item.ExecutionProfile,
+			PermissionProfile:    item.PermissionProfile,
+			Timeouts:             item.Timeouts,
+			RepositoryScopes:     append([]string(nil), item.RepositoryScopes...),
 			Warnings:             append([]string(nil), item.Warnings...),
 			PendingPermissions:   clonePermissionRequests(item.PendingPermissions),
 			ErrorCode:            item.ErrorCode,
@@ -842,13 +907,26 @@ func cloneRunInfo(value RunInfo) RunInfo {
 	clone := value
 	clone.FinishedAt = cloneTimePointer(value.FinishedAt)
 	clone.StepProviders = cloneStringMap(value.StepProviders)
+	clone.StepProviderSources = cloneStepProviderSources(value.StepProviderSources)
 	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
 	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
+	clone.RepositoryScopes = append([]string(nil), value.RepositoryScopes...)
 	clone.Warnings = append([]string(nil), value.Warnings...)
 	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
 	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)
 	clone.Progress = cloneRunProgress(value.Progress)
 	clone.Retry = cloneRetryLineage(value.Retry)
+	return clone
+}
+
+func cloneStepProviderSources(values acpruntime.StepProviderSources) acpruntime.StepProviderSources {
+	if values == nil {
+		return nil
+	}
+	clone := make(acpruntime.StepProviderSources, len(values))
+	for key, source := range values {
+		clone[key] = source
+	}
 	return clone
 }
 

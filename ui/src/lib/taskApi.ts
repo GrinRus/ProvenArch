@@ -40,25 +40,38 @@ export type TaskAttempt = {
   pipeline: string;
   status: string;
   task_revision: number;
-  goal_snapshot?: string;
-  context_snapshot?: string;
-  scope_snapshot?: TaskScope;
-  desired_runner?: TaskRunnerPreset;
-  effective_runtime?: {
+  intent_snapshot: {
+    title: string;
+    goal: string;
+    context?: string;
+    scope: TaskScope;
+    desired_runner: TaskRunnerPreset;
+  };
+  effective_runtime: {
     mode?: string;
     provider?: string;
     model?: string;
     effort?: string;
     permissions?: string;
+    timeouts?: Record<string, number>;
+    scope?: TaskScope;
+    execution?: {
+      strategy?: string;
+      max_parallel?: number;
+      failure_policy?: string;
+      shard_mode?: string;
+    };
+    step_overrides?: Record<string, TaskRunnerPreset>;
+    resolution_sources?: Record<string, string>;
   };
   admitted_at: string;
-  queued_at?: string;
-  started_at?: string;
-  finished_at?: string;
-  terminal_summary?: { state?: string; message?: string; error_code?: string };
-  outcome?: ProductTask["outcome"];
-  retained_evidence?: string;
-  publication?: ProductTask["publication"];
+  queued_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  terminal_summary: { status: string; error_code?: string; error?: string; summary?: string; retained_evidence: string } | null;
+  outcome: ProductTask["outcome"];
+  retained_evidence: string;
+  publication: ProductTask["publication"];
 };
 
 export type TaskListResponse = {
@@ -85,12 +98,12 @@ export async function createTask(request: CreateTaskRequest): Promise<ProductTas
   return response.task;
 }
 
-export async function admitTaskAttempt(taskId: string, request: AdmitTaskAttemptRequest = {}): Promise<TaskAttempt> {
+export async function admitTaskAttempt(taskId: string, request: AdmitTaskAttemptRequest & { idempotencyKey?: string } = {}): Promise<TaskAttempt> {
   const response = await fetchJSON<{ attempt: TaskAttempt }>(`/api/tasks/${encodeURIComponent(taskId)}/attempts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      idempotency_key: newIdempotencyKey(),
+      idempotency_key: request.idempotencyKey ?? newIdempotencyKey(),
       pipeline: request.pipeline ?? "init",
       intent: request.intent ?? "start",
     }),
@@ -133,7 +146,7 @@ export async function setTaskArchive(taskId: string, expectedRevision: number, a
   return response.task;
 }
 
-function newIdempotencyKey(): string {
+export function newIdempotencyKey(): string {
   const cryptoAPI = globalThis.crypto as Crypto & { randomUUID?: () => string } | undefined;
   if (cryptoAPI?.randomUUID) return cryptoAPI.randomUUID();
   return `attempt-${Date.now()}-${Math.random().toString(36).slice(2)}`;

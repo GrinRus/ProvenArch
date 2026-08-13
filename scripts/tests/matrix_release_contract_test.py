@@ -218,17 +218,17 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 frontend_matrix_md="${REPORTS_ROOT}/frontend_e2e_matrix_${BATCH_ID}.md"
 
                 {
-                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\n'
+                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\teffective_verdict_source\\tpromotion_audit_result\\n'
                   for provider in "${selected_providers[@]}"; do
                     for run_idx in $(seq 1 "${RUN_COUNT}"); do
                       if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
                       elif [[ "${MATRIX_TEST_QWEN_BACKEND_FAILURE:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
                       elif [[ "${MATRIX_TEST_ARTIFACT_TELEMETRY:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t2\\tsnapshot\\tanalysis:cross-repo-missing,artifact:quality-warning\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t2\\tsnapshot\\tanalysis:cross-repo-missing,artifact:quality-warning\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
                       else
-                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
                       fi
                     done
                   done

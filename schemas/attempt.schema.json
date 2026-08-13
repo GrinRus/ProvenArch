@@ -35,7 +35,9 @@
     "queued_at": {"type": ["string", "null"], "format": "date-time"},
     "started_at": {"type": ["string", "null"], "format": "date-time"},
     "finished_at": {"type": ["string", "null"], "format": "date-time"},
-    "terminal_summary": {"$ref": "#/$defs/terminal_summary"},
+    "terminal_summary": {
+      "anyOf": [{"$ref": "#/$defs/terminal_summary"}, {"type": "null"}]
+    },
     "retained_evidence": {"type": "string", "enum": ["full", "summary_only", "unavailable"]},
     "outcome": {"$ref": "#/$defs/outcome"},
     "publication": {"$ref": "#/$defs/publication"}
@@ -135,6 +137,7 @@
       "required": ["state"],
       "properties": {
         "state": {"type": "string", "enum": ["available", "unavailable"]},
+        "attempt_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$"},
         "run_id": {"type": "string", "minLength": 1},
         "snapshot_path": {"type": "string", "minLength": 1},
         "unavailable_reason": {"type": "string", "minLength": 1, "maxLength": 1000}

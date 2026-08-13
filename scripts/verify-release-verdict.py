@@ -72,6 +72,18 @@ def verify_payload(payload: dict[str, Any]) -> list[str]:
                 continue
             if record.get("strict_status") != "passed":
                 failures.append(f"records[{index}].strict_status must be passed, got {record.get('strict_status')!r}")
+            authority = record.get("public_authority")
+            if not isinstance(authority, dict):
+                failures.append(f"records[{index}].public_authority must be an object")
+            else:
+                if authority.get("effective_verdict_source") != "orchestrator":
+                    failures.append(
+                        f"records[{index}].public_authority.effective_verdict_source must be orchestrator, got {authority.get('effective_verdict_source')!r}"
+                    )
+                if authority.get("promotion_audit_result") != "pass":
+                    failures.append(
+                        f"records[{index}].public_authority.promotion_audit_result must be pass, got {authority.get('promotion_audit_result')!r}"
+                    )
     return failures
 
 

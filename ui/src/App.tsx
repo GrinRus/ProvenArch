@@ -111,7 +111,7 @@ export default function App() {
 
   function handleDestinationChange(nextDestination: WorkflowDestination) {
     if (nextDestination === "changes" && runId) {
-      navigateRoute({ destination: "changes", runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
+      navigateRoute({ destination: "changes", runId, taskId: route.taskId, attemptId: route.attemptId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
       return;
     }
     navigateDestination(nextDestination);
@@ -1026,6 +1026,7 @@ export default function App() {
 	    onBackToAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
 	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
 	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", taskId, invalid: [] })}
+	    onOpenChanges={(taskId, attemptId, runId) => navigateRoute({ destination: "changes", taskId, attemptId, runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] })}
 	  /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace

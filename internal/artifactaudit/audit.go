@@ -437,7 +437,7 @@ func (a *auditor) scanValidatorPaths(verdict contracts.ValidatorVerdict, finalRo
 
 func (a *auditor) record(filePath string, raw []byte) {
 	if len(a.report.Artifacts) >= MaxArtifacts {
-		a.report.Truncated = true
+		a.markTruncated()
 		return
 	}
 	sum := sha256.Sum256(raw)
@@ -447,8 +447,8 @@ func (a *auditor) record(filePath string, raw []byte) {
 }
 
 func (a *auditor) add(code, severity, filePath string, related []string, message string) {
-	if len(a.report.Issues) >= MaxIssues {
-		a.report.Truncated = true
+	if len(a.report.Issues) >= MaxIssues-1 {
+		a.markTruncated()
 		return
 	}
 	if len(message) > MaxMessageBytes {
@@ -458,6 +458,26 @@ func (a *auditor) add(code, severity, filePath string, related []string, message
 		Code: code, Severity: severity, Path: filepath.ToSlash(filePath),
 		RelatedPaths: sortedUnique(related), Message: message,
 	})
+}
+
+func (a *auditor) markTruncated() {
+	a.report.Truncated = true
+	for _, issue := range a.report.Issues {
+		if issue.Code == "audit.scan.truncated" {
+			return
+		}
+	}
+	issue := Issue{
+		Code:         "audit.scan.truncated",
+		Severity:     "error",
+		RelatedPaths: []string{},
+		Message:      "audit output was truncated; the incomplete scan is not eligible for promotion",
+	}
+	if len(a.report.Issues) < MaxIssues {
+		a.report.Issues = append(a.report.Issues, issue)
+		return
+	}
+	a.report.Issues[MaxIssues-1] = issue
 }
 
 func (a *auditor) finish() {
@@ -487,7 +507,7 @@ func finalizeReport(report *Report) {
 		}
 	}
 	switch {
-	case report.Summary.Error > 0:
+	case report.Truncated, report.Summary.Error > 0:
 		report.Status = StatusFail
 	case report.Summary.Warning > 0:
 		report.Status = StatusWarn

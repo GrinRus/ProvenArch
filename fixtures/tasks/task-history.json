@@ -38,7 +38,7 @@
       "finished_at": "2026-08-11T10:05:00Z",
       "terminal_summary": {"status": "succeeded", "summary": "Promoted architecture snapshot is available.", "retained_evidence": "full"},
       "retained_evidence": "full",
-      "outcome": {"state": "available", "run_id": "run_20260811_100000_001", "snapshot_path": "reports/taskruns/run_20260811_100000_001/promoted-snapshot/architecture-snapshot.json"},
+      "outcome": {"state": "available", "attempt_id": "attempt_20260811_0001", "run_id": "run_20260811_100000_001", "snapshot_path": "reports/taskruns/run_20260811_100000_001/promoted-snapshot/architecture-snapshot.json"},
       "publication": {"state": "unavailable", "unavailable_reason": "No Git publication has been requested."}
     }
   ],

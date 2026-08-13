@@ -45,6 +45,20 @@ func TestScanSelectedRunPassesDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestAuditTruncationIsFailClosed(t *testing.T) {
+	audit := auditor{report: Report{Version: Version, Status: StatusPass, Issues: []Issue{}, Artifacts: []Artifact{}}}
+	for index := 0; index < MaxIssues+10; index++ {
+		audit.add("audit.synthetic.warning", "warning", "reports/doc.md", nil, "synthetic warning")
+	}
+	audit.finish()
+	if !audit.report.Truncated || audit.report.Status != StatusFail {
+		t.Fatalf("truncated audit must fail closed: %+v", audit.report)
+	}
+	if !hasIssue(audit.report, "audit.scan.truncated") {
+		t.Fatalf("truncated audit must expose a typed issue: %+v", audit.report.Issues)
+	}
+}
+
 func TestScanSelectedRunPublicRequiresEffectiveAuthority(t *testing.T) {
 	ws, runID := writeAuditFixture(t, false)
 	legacy := ScanSelectedRunPublic(ws, runID)

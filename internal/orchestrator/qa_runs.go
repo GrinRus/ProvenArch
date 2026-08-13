@@ -69,6 +69,11 @@ func (s *Service) runQAWithID(
 	resolvedExecution := s.ResolveExecutionProfile(request.Workspace.Manifest)
 	resolvedPermissions := acpruntime.ResolvePermissions(request.Workspace.Manifest)
 	resolvedTimeouts := acpruntime.ResolveTimeouts(request.Workspace.Manifest)
+	if request.RuntimeSnapshot != nil {
+		resolvedExecution = acpruntime.ExecutionResolution{Effective: request.RuntimeSnapshot.Execution}
+		resolvedPermissions = acpruntime.PermissionResolution{Effective: request.RuntimeSnapshot.Permissions}
+		resolvedTimeouts = acpruntime.TimeoutResolution{Effective: request.RuntimeSnapshot.Timeouts}
+	}
 	stepRunnerResolver := newStepRunnerResolver(s.runnerFactory, resolvedStepProviders.Effective)
 
 	artifacts := append([]Artifact(nil), initialArtifacts...)

@@ -27,6 +27,7 @@ type TaskRouteContainerProps = {
   onBackToAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void;
   onNewTask?: () => void;
   onOpenArchitecture?: (taskId: string) => void;
+  onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void;
 };
 
 const groups = [
@@ -44,7 +45,7 @@ export function TaskRouteContainer(props: TaskRouteContainerProps) {
     return <TaskInbox filters={props.filters ?? {}} onFiltersChange={props.onFiltersChange} onSelectTask={props.onSelectTask} onNewTask={props.onNewTask} />;
   }
   if (props.view === "detail" && props.taskId) {
-    return <TaskDetail taskId={props.taskId} filters={props.filters ?? {}} onSelectAttempt={props.onSelectAttempt} onBack={() => props.onFiltersChange?.(props.filters ?? {})} onOpenArchitecture={props.onOpenArchitecture} />;
+    return <TaskDetail taskId={props.taskId} filters={props.filters ?? {}} onSelectAttempt={props.onSelectAttempt} onBack={() => props.onFiltersChange?.(props.filters ?? {})} onOpenArchitecture={props.onOpenArchitecture} onOpenChanges={props.onOpenChanges} />;
   }
   if (props.view === "attempt" && props.taskId && props.attemptId) {
     return <AttemptDetail taskId={props.taskId} attemptId={props.attemptId} filters={props.filters ?? {}} onSelectTask={props.onSelectTask} onOpenStudio={(taskId, attemptId) => props.onOpenStudio?.(taskId, attemptId, props.filters ?? {})} />;
@@ -157,7 +158,7 @@ function TaskRow({ task, group, onSelect }: { task: ProductTask; group: TaskGrou
   </article>;
 }
 
-function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitecture }: { taskId: string; filters: TaskFilters; onSelectAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void; onBack: () => void; onOpenArchitecture?: (taskId: string) => void }) {
+function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitecture, onOpenChanges }: { taskId: string; filters: TaskFilters; onSelectAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void; onBack: () => void; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void }) {
   const [task, setTask] = useState<ProductTask | null>(null);
   const [attempts, setAttempts] = useState<TaskAttempt[]>([]);
   const [review, setReview] = useState<RunReviewSummaryResponse | null>(null);
@@ -185,6 +186,27 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
     });
     return () => controller.abort();
   }, [taskId]);
+  useEffect(() => {
+    if (!task || !attempts.some((attempt) => attempt.status === "queued" || attempt.status === "running")) return;
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        const [nextTask, nextAttempts] = await Promise.all([getTask(taskId, controller.signal), listTaskAttempts(taskId, controller.signal)]);
+        if (controller.signal.aborted) return;
+        setTask(nextTask);
+        setAttempts(nextAttempts.items);
+        const latest = nextAttempts.items[nextAttempts.items.length - 1];
+        if (latest && !["queued", "running"].includes(latest.status)) {
+          setReview(await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal }));
+        }
+      } catch {
+        // Keep the last known state visible; the next poll retries and the
+        // explicit page-level error remains reserved for initial loading.
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 1000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [taskId, task, attempts]);
 
   async function archive(archived: boolean) {
     if (!task) return;
@@ -205,20 +227,20 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
     {archiveStatus ? <p className="status info" role="status" data-testid="task-archive-status">{archiveStatus}</p> : null}
     {task ? <>
       <div className="task-detail-summary"><p className="eyebrow">Task ID <code>{task.task_id}</code></p><p>{task.goal}</p><dl className="compact-defs"><div><dt>Lifecycle</dt><dd>{task.lifecycle}</dd></div><div><dt>Outcome</dt><dd>{task.outcome.state === "available" ? "Available" : task.outcome.unavailable_reason || "Unavailable"}</dd></div><div><dt>Runner</dt><dd>{runnerLabel(task)}</dd></div><div><dt>Scope</dt><dd>{repositoryLabel(task)}</dd></div></dl></div>
-      <TaskOutcome task={task} latestAttempt={attempts[attempts.length - 1]} review={review} onOpenArchitecture={onOpenArchitecture} />
+      <TaskOutcome task={task} latestAttempt={attempts[attempts.length - 1]} review={review} onOpenArchitecture={onOpenArchitecture} onOpenChanges={onOpenChanges} />
       <section className="task-attempt-history" aria-labelledby="task-attempt-history-title"><div className="task-group-heading"><h2 id="task-attempt-history-title">Attempt history</h2><span className="status info">{attempts.length}</span></div>{attempts.length === 0 ? <p className="hint">No Attempt has been admitted for this Task yet.</p> : <div className="task-attempt-list">{attempts.map((attempt) => <AttemptRow key={attempt.attempt_id} attempt={attempt} onSelect={() => onSelectAttempt?.(task.task_id, attempt.attempt_id, filters)} />)}</div>}</section>
     </> : null}
   </section>;
 }
 
-function TaskOutcome({ task, latestAttempt, review, onOpenArchitecture }: { task: ProductTask; latestAttempt?: TaskAttempt; review: RunReviewSummaryResponse | null; onOpenArchitecture?: (taskId: string) => void }) {
+function TaskOutcome({ task, latestAttempt, review, onOpenArchitecture, onOpenChanges }: { task: ProductTask; latestAttempt?: TaskAttempt; review: RunReviewSummaryResponse | null; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void }) {
   const result = review?.result;
   const semantic = review?.review?.summary;
   const terminalFailure = latestAttempt && ["failed", "canceled", "timeout"].includes(latestAttempt.status);
   if (!result && !terminalFailure) return <section className="task-outcome task-outcome-unavailable" data-testid="task-outcome"><h2>Outcome</h2><p className="hint">No terminal Attempt outcome is available yet. The Task intent is durable and can be admitted when the runner is ready.</p></section>;
-  if (!result) return <section className="task-outcome task-outcome-failed" data-testid="task-outcome"><div><p className="eyebrow">Attempt outcome</p><h2>{latestAttempt?.status === "canceled" ? "Attempt canceled" : "Attempt needs recovery"}</h2><p>{latestAttempt?.terminal_summary?.message || "The last Attempt did not produce a promotable outcome."}</p></div><dl className="compact-defs"><div><dt>Evidence</dt><dd>{latestAttempt?.retained_evidence || "Retained evidence state is reported by the Attempt."}</dd></div><div><dt>Current Architecture</dt><dd>Not changed by this Attempt; last-good state remains independent.</dd></div></dl></section>;
+  if (!result) return <section className="task-outcome task-outcome-failed" data-testid="task-outcome"><div><p className="eyebrow">Attempt outcome</p><h2>{latestAttempt?.status === "canceled" ? "Attempt canceled" : "Attempt needs recovery"}</h2><p>{latestAttempt?.terminal_summary?.error || latestAttempt?.terminal_summary?.summary || "The last Attempt did not produce a promotable outcome."}</p></div><dl className="compact-defs"><div><dt>Evidence</dt><dd>{latestAttempt?.retained_evidence || "Retained evidence state is reported by the Attempt."}</dd></div><div><dt>Current Architecture</dt><dd>Not changed by this Attempt; last-good state remains independent.</dd></div></dl></section>;
   const partial = !review?.review?.semantic_changes.available;
-  return <section className={`task-outcome task-outcome-${result.state}`} data-testid="task-outcome"><div className="task-outcome-copy"><p className="eyebrow">Outcome · exact run snapshot <code>{review.run_id}</code></p><h2>{result.state === "completed" ? "Architecture result ready" : result.state === "completed_with_gaps" ? "Result ready with gaps" : result.state === "canceled" ? "Attempt canceled" : "Attempt needs recovery"}</h2><p>{result.summary}</p><p className="hint">{result.promotion.current_usable ? "Current validator-approved Architecture remains available independently of this Task review." : "No current validator-approved Architecture is available."}</p></div><dl className="task-outcome-counts"><div><dt>Entities</dt><dd>{semantic ? `${semantic.entities_added} added · ${semantic.entities_changed} changed · ${semantic.entities_removed} removed` : partial ? "Unavailable" : result.produced.entities ?? 0}</dd></div><div><dt>Edges</dt><dd>{semantic ? `${semantic.edges_added} added · ${semantic.edges_changed} changed · ${semantic.edges_removed} removed` : partial ? "Unavailable" : result.produced.edges ?? 0}</dd></div><div><dt>Findings / questions</dt><dd>{semantic ? `${semantic.findings} / ${semantic.questions}` : partial ? "Unavailable" : "Unavailable"}</dd></div><div><dt>Gaps</dt><dd>{semantic ? semantic.gaps : result.coverage?.missing ?? "Unavailable"}</dd></div></dl><div className="task-outcome-action"><strong>Recommended next action</strong><span>{result.recommended_action.replace(/_/g, " ")}</span>{onOpenArchitecture && result.promotion.current_usable ? <Button density="compact" onClick={() => onOpenArchitecture(task.task_id)} data-testid="task-open-architecture">Open current Architecture</Button> : null}</div>{partial ? <p className="status warn">Semantic comparison is unavailable for this snapshot; no zero delta was fabricated.</p> : null}</section>;
+  return <section className={`task-outcome task-outcome-${result.state}`} data-testid="task-outcome"><div className="task-outcome-copy"><p className="eyebrow">Outcome · exact run snapshot <code>{review.run_id}</code></p><h2>{result.state === "completed" ? "Architecture result ready" : result.state === "completed_with_gaps" ? "Result ready with gaps" : result.state === "canceled" ? "Attempt canceled" : "Attempt needs recovery"}</h2><p>{result.summary}</p><p className="hint">{result.promotion.current_usable ? "Current validator-approved Architecture remains available independently of this Task review." : "No current validator-approved Architecture is available."}</p></div><dl className="task-outcome-counts"><div><dt>Entities</dt><dd>{semantic ? `${semantic.entities_added} added · ${semantic.entities_changed} changed · ${semantic.entities_removed} removed` : partial ? "Unavailable" : result.produced.entities ?? 0}</dd></div><div><dt>Edges</dt><dd>{semantic ? `${semantic.edges_added} added · ${semantic.edges_changed} changed · ${semantic.edges_removed} removed` : partial ? "Unavailable" : result.produced.edges ?? 0}</dd></div><div><dt>Findings / questions</dt><dd>{semantic ? `${semantic.findings} / ${semantic.questions}` : partial ? "Unavailable" : "Unavailable"}</dd></div><div><dt>Gaps</dt><dd>{semantic ? semantic.gaps : result.coverage?.missing ?? "Unavailable"}</dd></div></dl><div className="task-outcome-action"><strong>Recommended next action</strong><span>{result.recommended_action.replace(/_/g, " ")}</span>{onOpenArchitecture && result.promotion.current_usable ? <Button density="compact" onClick={() => onOpenArchitecture(task.task_id)} data-testid="task-open-architecture">Open current Architecture</Button> : null}{onOpenChanges && latestAttempt ? <Button density="compact" onClick={() => onOpenChanges(task.task_id, latestAttempt.attempt_id, review.run_id)} data-testid="task-open-changes">Open Changes and Publish</Button> : null}</div>{partial ? <p className="status warn">Semantic comparison is unavailable for this snapshot; no zero delta was fabricated.</p> : null}</section>;
 }
 
 function AttemptRow({ attempt, onSelect }: { attempt: TaskAttempt; onSelect: () => void }) {
@@ -236,6 +258,16 @@ function AttemptDetail({ taskId, attemptId, filters, onSelectTask, onOpenStudio 
     void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => { if (!controller.signal.aborted) { setAttempt(nextAttempt); setState("loaded"); } }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Attempt could not be loaded"); setState("error"); } });
     return () => controller.abort();
   }, [taskId, attemptId]);
+  useEffect(() => {
+    if (!attempt || !["queued", "running"].includes(attempt.status)) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => {
+        if (!controller.signal.aborted) setAttempt(nextAttempt);
+      }).catch(() => undefined);
+    }, 1000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [taskId, attemptId, attempt]);
   return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<div className="actions"><Button density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>{attempt ? <Button density="compact" onClick={() => onOpenStudio?.(taskId, attempt.attempt_id)} data-testid="attempt-open-studio">Open Pipeline Studio</Button> : null}</div>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
 }
 
@@ -255,9 +287,25 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
     }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Pipeline Studio could not be loaded"); setState("error"); } });
     return () => controller.abort();
   }, [taskId, attemptId]);
+  useEffect(() => {
+    if (!attempt || !["queued", "running"].includes(attempt.status)) return;
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        const nextAttempt = await getTaskAttempt(taskId, attemptId, controller.signal);
+        if (controller.signal.aborted) return;
+        setAttempt(nextAttempt);
+        setReview(await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal }));
+      } catch {
+        // Keep the last structured progress while the next poll retries.
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 1000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [taskId, attemptId, attempt]);
   const steps = review?.steps.length ? review.steps : fallbackStudioSteps(attempt?.pipeline);
   const active = attempt?.status === "queued" || attempt?.status === "running";
-  const blocker = review?.recovery || (attempt && ["failed", "canceled", "timeout"].includes(attempt.status) ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.message || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null);
+  const blocker = review?.recovery || (attempt && ["failed", "canceled", "timeout"].includes(attempt.status) ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.error || attempt.terminal_summary?.summary || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null);
   return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{steps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
 }
 
@@ -277,7 +325,7 @@ function taskGroup(task: ProductTask): TaskGroup {
 
 function groupLabel(group: TaskGroup): string { return groups.find((item) => item.id === group)?.label ?? group; }
 function runnerLabel(task: ProductTask): string { return task.desired_runner.provider || task.desired_runner.preset || "runner unavailable"; }
-function runnerLabelFromAttempt(attempt: TaskAttempt): string { return attempt.effective_runtime?.provider || attempt.desired_runner?.provider || attempt.desired_runner?.preset || "runner snapshot unavailable"; }
+function runnerLabelFromAttempt(attempt: TaskAttempt): string { return attempt.effective_runtime?.provider || attempt.intent_snapshot?.desired_runner?.provider || attempt.intent_snapshot?.desired_runner?.preset || "runner snapshot unavailable"; }
 function repositoryLabel(task: ProductTask): string { return task.scope.repositories.map((repository) => repository.name).join(", ") || "scope unavailable"; }
 function formatDate(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? "activity unavailable" : date.toLocaleString(); }
 function dateInput(value?: string): string { return value ? value.slice(0, 10) : ""; }

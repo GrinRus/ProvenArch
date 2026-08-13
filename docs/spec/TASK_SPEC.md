@@ -91,6 +91,11 @@ Every Attempt includes at least:
 - terminal summary and retained-evidence state;
 - exact run-snapshot/result/change/publication references when available.
 
+For queued and running Attempts, `terminal_summary` is explicitly `null`. Once terminal, it is an
+object containing the terminal status, bounded error/summary fields and retained-evidence state.
+An available outcome repeats the exact `attempt_id` and `run_id` linkage so a standalone Attempt
+payload remains self-describing.
+
 Attempt status follows the linked run lifecycle while that run is retained. Terminalization copies
 a bounded immutable summary into Task history so archive/history remains useful after detailed run
 retention. A retry/rerun always creates a new child Attempt.

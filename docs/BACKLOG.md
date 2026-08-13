@@ -2914,7 +2914,7 @@ Acceptance:
 
 ## Epic 25 — Task-first Live E2E and Hardened Runtime Evidence Alignment
 
-Status (2026-08-12): **25A/25B implementation complete; 25C trusted gate operationally blocked.** The release
+Status (2026-08-13): **25A/25B implementation complete; 25C trusted gate operationally blocked.** The release
 boundary is accepted; Task-first frontend assertions, public authority report consumption and
 public-API Task/Attempt admission in the backend cycle are implemented provider-free. Missing or
 ambiguous identity remains intentionally fail-closed and is never synthesized from legacy runs.
@@ -2926,6 +2926,13 @@ configured Kimi billing-cycle account, while Codex readiness passed. No provider
 evidence was created. The resulting `RELEASE BLOCKED` verdict is an operational host/account
 blocker, not a reason to weaken the public Task/Attempt boundary or change canonical matrices. Rerun
 on a trusted host/account with Claude and Qwen quota/permission.
+
+Provider-independent closure was re-run on `main` commit `2edb83bc` with exact Node `22.21.1`:
+contracts, Go/Python/UI tests, lint, build, readable fixtures, deterministic UI build, embedded
+parity and mock E2E `8/8` passed. A 2026-08-13 readiness recheck confirmed Codex `0.144.1` ready,
+but Claude `2.1.85` and Qwen `0.19.11` still fail artifact smoke with the configured Kimi
+billing-cycle `403 permission_error`. No canonical matrix was started; this remains an operational
+provider blocker, not a product verdict.
 
 ### Goal
 
