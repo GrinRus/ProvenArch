@@ -45,6 +45,72 @@ func TestScanSelectedRunPassesDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestScanSelectedRunAcceptsAbsoluteValidatorPathsInsideSelectedRun(t *testing.T) {
+	ws, runID := writeAuditFixture(t, false)
+	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
+	raw, err := ws.ReadFile(providerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verdict contracts.ValidatorVerdict
+	if err := json.Unmarshal(raw, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	for index, checkedPath := range verdict.CheckedPaths {
+		verdict.CheckedPaths[index] = filepath.Join(ws.Path, filepath.FromSlash(checkedPath))
+	}
+	updated, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFileAtomic(providerPath, append(updated, '\n')); err != nil {
+		t.Fatal(err)
+	}
+
+	report := ScanSelectedRun(ws, runID)
+	if report.Status != StatusPass {
+		t.Fatalf("absolute paths inside selected run must pass, got %+v", report)
+	}
+	if hasIssue(report, "audit.validator.checked_path_foreign") || hasIssue(report, "audit.validator.checked_path_missing_final") || hasIssue(report, "audit.validator.checked_path_missing_citation") {
+		t.Fatalf("absolute paths inside selected run were not normalized: %+v", report.Issues)
+	}
+}
+
+func TestScanSelectedRunRejectsAbsoluteValidatorPathThroughForeignSymlink(t *testing.T) {
+	ws, runID := writeAuditFixture(t, false)
+	foreignRoot := t.TempDir()
+	foreignPath := filepath.Join(foreignRoot, "foreign.json")
+	if err := os.WriteFile(foreignPath, []byte("foreign"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(ws.Path, "reports", "taskruns", runID, "staging", "final", "foreign-link.json")
+	if err := os.Symlink(foreignPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
+	raw, err := ws.ReadFile(providerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var verdict contracts.ValidatorVerdict
+	if err := json.Unmarshal(raw, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	verdict.CheckedPaths = append(verdict.CheckedPaths, linkPath)
+	updated, err := json.MarshalIndent(verdict, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteFileAtomic(providerPath, append(updated, '\n')); err != nil {
+		t.Fatal(err)
+	}
+
+	report := ScanSelectedRun(ws, runID)
+	if !hasIssue(report, "audit.validator.checked_path_foreign") {
+		t.Fatalf("absolute path through a foreign symlink must fail closed, got %+v", report)
+	}
+}
+
 func TestAuditTruncationIsFailClosed(t *testing.T) {
 	audit := auditor{report: Report{Version: Version, Status: StatusPass, Issues: []Issue{}, Artifacts: []Artifact{}}}
 	for index := 0; index < MaxIssues+10; index++ {

@@ -409,8 +409,9 @@ func (a *auditor) scanValidatorPaths(verdict contracts.ValidatorVerdict, finalRo
 	hasFinal, hasCitation := false, false
 	taskRoot := path.Join("reports", "taskruns", a.runID) + "/"
 	for _, raw := range verdict.CheckedPaths {
-		clean := filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
-		if clean == "." || filepath.IsAbs(clean) || strings.Contains(clean, "\\") || !strings.HasPrefix(clean, taskRoot) {
+		clean, ok := a.normalizeValidatorPath(raw, taskRoot)
+		if !ok {
+			clean = filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
 			a.add("audit.validator.checked_path_foreign", "error", clean, nil, "validator checked path is outside the selected run")
 			continue
 		}
@@ -428,10 +429,80 @@ func (a *auditor) scanValidatorPaths(verdict contracts.ValidatorVerdict, finalRo
 		a.add("audit.validator.checked_path_missing_citation", "error", citationPath, nil, "validator checked_paths must include the selected citation index")
 	}
 	for _, raw := range verdict.FixedPaths {
-		clean := filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
-		if clean == "." || filepath.IsAbs(clean) || strings.Contains(clean, "\\") || !strings.HasPrefix(clean, taskRoot) {
+		clean, ok := a.normalizeValidatorPath(raw, taskRoot)
+		if !ok {
+			clean = filepath.ToSlash(path.Clean(strings.TrimSpace(raw)))
 			a.add("audit.validator.fixed_path_foreign", "error", clean, []string{finalPath}, "provider fixed_paths must remain inside the selected run")
 		}
+	}
+}
+
+// normalizeValidatorPath accepts the logical run-relative paths used by the
+// contract and absolute paths emitted by some provider CLIs. Absolute paths
+// are accepted only when they resolve inside this workspace's selected run;
+// the returned value is always the canonical logical path used by the audit.
+// Resolving both sides handles macOS aliases such as /tmp -> /private/tmp
+// without weakening containment checks for symlink escapes.
+func (a *auditor) normalizeValidatorPath(raw, taskRoot string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.Contains(trimmed, `\`) {
+		return "", false
+	}
+	clean := filepath.Clean(filepath.FromSlash(trimmed))
+	if clean == "." {
+		return "", false
+	}
+	if !filepath.IsAbs(clean) {
+		logical := filepath.ToSlash(path.Clean(trimmed))
+		if logical == "." || logical == ".." || strings.HasPrefix(logical, "../") || !strings.HasPrefix(logical, taskRoot) {
+			return "", false
+		}
+		return logical, true
+	}
+
+	workspaceRoot := filepath.Clean(a.ws.Path)
+	resolvedWorkspaceRoot, err := resolvePathForContainment(workspaceRoot)
+	if err != nil {
+		return "", false
+	}
+	resolvedCandidate, err := resolvePathForContainment(clean)
+	if err != nil {
+		return "", false
+	}
+	runRel := filepath.FromSlash(strings.TrimSuffix(taskRoot, "/"))
+	runRoot := filepath.Join(resolvedWorkspaceRoot, runRel)
+	rel, err := filepath.Rel(runRoot, resolvedCandidate)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return path.Join(taskRoot, filepath.ToSlash(rel)), true
+}
+
+// resolvePathForContainment resolves an absolute path even when its leaf is
+// not present yet by resolving the nearest existing parent and appending the
+// missing suffix. This prevents a symlinked directory inside the selected run
+// from making a foreign absolute path look lexically contained.
+func resolvePathForContainment(value string) (string, error) {
+	clean := filepath.Clean(value)
+	current := clean
+	suffix := []string{}
+	for {
+		if _, err := os.Lstat(current); err == nil {
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", err
+			}
+			for index := len(suffix) - 1; index >= 0; index-- {
+				resolved = filepath.Join(resolved, suffix[index])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", os.ErrNotExist
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
 	}
 }
 
