@@ -150,16 +150,18 @@ func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
 	if leftType == "team" {
 		return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(right.Name) != ""
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(left.ID)), "external.system.") && leftType == "external.system" {
+	leftID := strings.ToLower(strings.TrimSpace(left.ID))
+	if (strings.HasPrefix(leftID, "external.system.") && leftType == "external.system") ||
+		(strings.HasPrefix(leftID, "infra.") && leftType == "infrastructure") {
 		return semanticExternalSystemNamesAgree(left.ID, left.Name, right.Name)
 	}
 	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
 }
 
 // semanticExternalSystemNamesAgree permits the same repository to describe a
-// stable external platform with its product name or a well-known acronym. The
-// ID remains authoritative; aliases are deliberately narrow so unrelated
-// external-system claims still fail closed.
+// stable platform with its product name or a well-known acronym. The ID remains
+// authoritative; aliases are deliberately narrow so unrelated claims still
+// fail closed.
 func semanticExternalSystemNamesAgree(id, leftName, rightName string) bool {
 	if semanticNameAgreesWithID(id, leftName) && semanticNameAgreesWithID(id, rightName) {
 		return true
@@ -221,6 +223,8 @@ func normalizeSemanticTypeForID(id, value string) string {
 		return "datastore"
 	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners"}, typeName):
 		return "team"
+	case strings.HasPrefix(id, "infra.") && containsSemanticType([]string{"infrastructure", "runtime-platform", "platform", "compute-platform", "kubernetes-cluster"}, typeName):
+		return "infrastructure"
 	default:
 		return typeName
 	}

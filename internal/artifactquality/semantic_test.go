@@ -149,6 +149,8 @@ func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T)
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "repository-owners", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "team", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.gke", Type: "runtime-platform", Name: "Google Kubernetes Engine", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.gke", Type: "infrastructure", Name: "Google Kubernetes Engine infrastructure", Provenance: evidence("iac/tf-anthos-gke/README.md")}}},
 	}
 	if err := ValidateSemanticIDCollisions(observations...); err != nil {
 		t.Fatalf("canonical ID type families should merge, got %v", err)
