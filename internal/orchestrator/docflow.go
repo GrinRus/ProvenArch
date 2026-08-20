@@ -1015,7 +1015,7 @@ func newSemanticEndpointRemap(entities []contracts.Entity, entityRemap map[strin
 
 func normalizeSemanticEntity(entity contracts.Entity, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver) contracts.Entity {
 	entity.ID = strings.TrimSpace(entity.ID)
-	entity.Type = normalizeSemanticEntityType(entity.Type)
+	entity.Type = normalizeSemanticEntityType(entity.ID, entity.Type)
 	entity.Name = strings.TrimSpace(entity.Name)
 	entity.OwnerTeamID = strings.TrimSpace(entity.OwnerTeamID)
 	entity.Aliases = dedupeExactStrings(entity.Aliases)
@@ -1296,13 +1296,32 @@ func semanticEntityDedupKey(entity contracts.Entity) string {
 	return strings.Join([]string{entityType, repo, name, evidencePath}, "|")
 }
 
-func normalizeSemanticEntityType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
+func normalizeSemanticEntityType(id, value string) string {
+	typeName := strings.ToLower(strings.TrimSpace(value))
+	switch typeName {
 	case "database", "data-store", "data store":
-		return "datastore"
-	default:
-		return strings.TrimSpace(value)
+		typeName = "datastore"
 	}
+	id = strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "backend-service", "kubernetes-service"}, typeName):
+		return "service"
+	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
+		return "datastore"
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group"}, typeName):
+		return "team"
+	default:
+		return typeName
+	}
+}
+
+func containsSemanticType(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeSemanticEntityNameDedupKey(entityType string, name string) string {

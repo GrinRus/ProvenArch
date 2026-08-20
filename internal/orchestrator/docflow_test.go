@@ -1452,6 +1452,36 @@ func TestNormalizeSemanticSnapshotRekeysConflictingWeakEdgeIDs(t *testing.T) {
 	}
 }
 
+func TestNormalizeSemanticSnapshotNormalizesCanonicalIDTypeFamilies(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")},
+		{ID: "db.bank.of.anthos.accounts", Type: "datastore", Name: "Accounts database", Provenance: evidence("README.md")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "team", Name: "maintainers", Provenance: evidence(".github/CODEOWNERS")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Entities), 3; got != want {
+		t.Fatalf("expected one canonical entity per ID family, got=%d: %#v", got, snapshot.Entities)
+	}
+	for _, entity := range snapshot.Entities {
+		switch {
+		case strings.HasPrefix(entity.ID, "svc.") && entity.Type != "service":
+			t.Fatalf("service ID family must normalize to service, got %#v", entity)
+		case strings.HasPrefix(entity.ID, "db.") && entity.Type != "datastore":
+			t.Fatalf("db ID family must normalize to datastore, got %#v", entity)
+		case strings.HasPrefix(entity.ID, "team.") && entity.Type != "team":
+			t.Fatalf("team ID family must normalize to team, got %#v", entity)
+		}
+	}
+}
+
 func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *testing.T) {
 	t.Parallel()
 

@@ -137,13 +137,18 @@ func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
 	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
 		return false
 	}
-	if normalizeSemanticType(left.Type) != normalizeSemanticType(right.Type) {
+	leftType := normalizeSemanticTypeForID(left.ID, left.Type)
+	rightType := normalizeSemanticTypeForID(right.ID, right.Type)
+	if leftType != rightType {
 		return false
 	}
 	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
 	rightRepo := semanticLogicalRepo(right.Provenance.Evidence)
 	if leftRepo == "" || leftRepo != rightRepo {
 		return false
+	}
+	if leftType == "team" {
+		return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(right.Name) != ""
 	}
 	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
 }
@@ -171,6 +176,30 @@ func normalizeSemanticType(value string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
+}
+
+func normalizeSemanticTypeForID(id, value string) string {
+	typeName := normalizeSemanticType(value)
+	id = strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "backend-service", "kubernetes-service"}, typeName):
+		return "service"
+	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
+		return "datastore"
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group"}, typeName):
+		return "team"
+	default:
+		return typeName
+	}
+}
+
+func containsSemanticType(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func semanticLogicalRepo(evidence []contracts.Evidence) string {
