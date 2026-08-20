@@ -62,6 +62,53 @@ func TestValidateSemanticIDCollisionsAllowsIdenticalShardReplayButRejectsConflic
 	}
 }
 
+func TestValidateSemanticIDCollisionsAllowsSameRepoEntityObservations(t *testing.T) {
+	left := contracts.Entity{
+		ID:   "svc.bank.accounts-db",
+		Type: "database",
+		Name: "accounts-db",
+		Provenance: contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: "README.md"}},
+		},
+	}
+	right := contracts.Entity{
+		ID:   "svc.bank.accounts-db",
+		Type: "datastore",
+		Name: "Accounts PostgreSQL database",
+		Provenance: contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/accounts/accounts-db/README.md"}},
+		},
+	}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err != nil {
+		t.Fatalf("same-repo exact entity observations should merge during normalization, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsRejectsSameRepoUnrelatedEntityObservation(t *testing.T) {
+	left := contracts.Entity{
+		ID:   "svc.bank.accounts-db",
+		Type: "service",
+		Name: "Accounts",
+		Provenance: contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: "README.md"}},
+		},
+	}
+	right := left
+	right.Name = "Payments API"
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("unrelated same-repo exact ID should remain a collision, got %v", err)
+	}
+}
+
 func TestValidateSemanticEnvelopeJSONRejectsUnknownNestedFields(t *testing.T) {
 	raw := []byte(`{"semantic":{"coverage":{"observed":[],"missing":[],"notes":[]},"questions":[],"entities":[{"id":"svc.api","type":"service","name":"API","provenance":{"kind":"observation","confidence":0.8,"unexpected":true}}],"edges":[],"findings":[]}}`)
 	if err := ValidateSemanticEnvelopeJSON(raw); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {

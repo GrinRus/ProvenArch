@@ -1394,6 +1394,34 @@ func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(
 	}
 }
 
+func TestNormalizeSemanticSnapshotMergesExactSameRepoEntityObservations(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "svc.bank.accounts-db", Type: "database", Name: "accounts-db", Provenance: evidence("README.md")},
+			{ID: "svc.bank.accounts-db", Type: "datastore", Name: "Accounts PostgreSQL database", Provenance: evidence("src/accounts/accounts-db/README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected exact same-repo observations to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "datastore"; got != want {
+		t.Fatalf("expected database type synonym to normalize, got=%q", got)
+	}
+	if got, want := len(snapshot.Entities[0].Provenance.Evidence), 2; got != want {
+		t.Fatalf("expected merged provenance evidence, got=%d: %#v", got, snapshot.Entities[0].Provenance.Evidence)
+	}
+}
+
 func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *testing.T) {
 	t.Parallel()
 

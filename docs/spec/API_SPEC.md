@@ -1238,8 +1238,10 @@ Validator admission separately rejects contradictory provider drafts (`PASS` wit
 provider-authored `fixed_paths`, duplicate/conflicting issue identities and non-deterministic issue
 ordering. After advisory reconciliation, an effective `FAIL` requires at least one technical error;
 issue document/citation/path references must resolve against the selected-run inventory.
-Semantic admission also rejects unknown envelope fields, duplicate IDs across shard snapshots and
-dangling edge endpoints; unresolved finding/question references remain explicit advisory gaps.
+Semantic admission also rejects unknown envelope fields, incompatible duplicate IDs across shard
+snapshots and dangling edge endpoints. Exact entity observations from the same logical repository
+may be merged only after the deterministic type/ID-leaf/name compatibility check; unresolved
+finding/question references remain explicit advisory gaps.
 
 **200**
 ```json

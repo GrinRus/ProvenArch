@@ -3,6 +3,7 @@ package artifactquality
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -70,6 +71,7 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 		identity    string
 		location    string
 		fingerprint string
+		value       any
 	}
 	seen := map[string]registration{}
 	problems := []string{}
@@ -90,11 +92,16 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 			fingerprint := string(fingerprintBytes)
 			if prior, exists := seen[id]; exists {
 				if prior.identity != identity || prior.fingerprint != fingerprint {
+					if priorEntity, ok := prior.value.(contracts.Entity); ok {
+						if entity, ok := value.(contracts.Entity); ok && semanticEntitiesCanMerge(priorEntity, entity) {
+							return
+						}
+					}
 					problems = append(problems, fmt.Sprintf("semantic id %q collides between %s and %s", id, prior.location, location))
 				}
 				return
 			}
-			seen[id] = registration{identity: identity, location: location, fingerprint: fingerprint}
+			seen[id] = registration{identity: identity, location: location, fingerprint: fingerprint, value: value}
 		}
 		for _, entity := range snapshot.Entities {
 			register("entity", entity.ID, entity)
@@ -113,6 +120,97 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 		return nil
 	}
 	return semanticProblems(problems)
+}
+
+// semanticEntitiesCanMerge permits an exact entity ID to be observed by
+// multiple shards when the observations are from the same logical repository,
+// use compatible type vocabulary, and agree on the ID/name leaf. The exact ID
+// remains authoritative; normalization later merges evidence and fields. A
+// different repository, type family, or unrelated name is still a hard
+// collision.
+func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
+	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
+		return false
+	}
+	if normalizeSemanticType(left.Type) != normalizeSemanticType(right.Type) {
+		return false
+	}
+	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
+	rightRepo := semanticLogicalRepo(right.Provenance.Evidence)
+	if leftRepo == "" || leftRepo != rightRepo {
+		return false
+	}
+	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
+}
+
+func normalizeSemanticType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "database", "data-store", "data store":
+		return "datastore"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func semanticLogicalRepo(evidence []contracts.Evidence) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	repo := strings.TrimSpace(filepath.Base(strings.TrimSpace(evidence[0].Repo)))
+	if repo == "" || repo == "." {
+		return ""
+	}
+	if dash := strings.LastIndex(repo, "-"); dash > 0 && dash < len(repo)-1 {
+		suffix := repo[dash+1:]
+		if len(suffix) >= 7 && isHexToken(suffix) {
+			repo = repo[:dash]
+		}
+	}
+	return strings.ToLower(repo)
+}
+
+func semanticNameAgreesWithID(id, name string) bool {
+	idLeaf := strings.TrimSpace(id)
+	if splitAt := strings.LastIndexAny(idLeaf, ".:/\\"); splitAt >= 0 {
+		idLeaf = idLeaf[splitAt+1:]
+	}
+	idToken := semanticNameToken(idLeaf)
+	nameToken := semanticNameToken(name)
+	if idToken == "" || nameToken == "" {
+		return false
+	}
+	if idToken == nameToken || strings.Contains(nameToken, idToken) || strings.Contains(idToken, nameToken) {
+		return true
+	}
+	for _, suffix := range []string{"database", "datastore", "db", "service"} {
+		if strings.HasSuffix(idToken, suffix) && len(idToken) > len(suffix) {
+			stem := strings.TrimSuffix(idToken, suffix)
+			if strings.Contains(nameToken, stem) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func semanticNameToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isHexToken(value string) bool {
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // semanticIdentityValue intentionally excludes provenance. The same logical
