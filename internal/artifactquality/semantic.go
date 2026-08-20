@@ -150,7 +150,38 @@ func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
 	if leftType == "team" {
 		return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(right.Name) != ""
 	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(left.ID)), "external.system.") && leftType == "external.system" {
+		return semanticExternalSystemNamesAgree(left.ID, left.Name, right.Name)
+	}
 	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
+}
+
+// semanticExternalSystemNamesAgree permits the same repository to describe a
+// stable external platform with its product name or a well-known acronym. The
+// ID remains authoritative; aliases are deliberately narrow so unrelated
+// external-system claims still fail closed.
+func semanticExternalSystemNamesAgree(id, leftName, rightName string) bool {
+	if semanticNameAgreesWithID(id, leftName) && semanticNameAgreesWithID(id, rightName) {
+		return true
+	}
+	idLeaf := strings.TrimSpace(id)
+	if splitAt := strings.LastIndexAny(idLeaf, ".:/\\"); splitAt >= 0 {
+		idLeaf = idLeaf[splitAt+1:]
+	}
+	aliases := map[string][]string{
+		"gke": {"gke", "googlekubernetesengine", "googlecloudgke", "anthos"},
+	}
+	leftToken := semanticNameToken(leftName)
+	rightToken := semanticNameToken(rightName)
+	leftMatches, rightMatches := false, false
+	for _, alias := range aliases[semanticNameToken(idLeaf)] {
+		aliasToken := semanticNameToken(alias)
+		leftMatches = leftMatches || strings.Contains(leftToken, aliasToken)
+		rightMatches = rightMatches || strings.Contains(rightToken, aliasToken)
+	}
+	// A product name and acronym may use different aliases (for example,
+	// "Google Kubernetes Engine" vs "Google Cloud GKE and Anthos").
+	return leftMatches && rightMatches
 }
 
 // semanticEdgesCanRekey permits a weak short edge ID to be reused by shards

@@ -149,6 +149,24 @@ func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T)
 	}
 }
 
+func TestValidateSemanticIDCollisionsAllowsExternalSystemProductAliases(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}}}
+	}
+	observations := []contracts.SemanticSnapshot{
+		{Entities: []contracts.Entity{{ID: "external.system.bank.of.anthos.gke", Type: "external.system", Name: "Google Kubernetes Engine", Provenance: evidence("docs/ci-cd-pipeline.md")}}},
+		{Entities: []contracts.Entity{{ID: "external.system.bank.of.anthos.gke", Type: "external.system", Name: "Google Cloud GKE and Anthos platform", Provenance: evidence("iac/tf-anthos-gke/README.md")}}},
+	}
+	if err := ValidateSemanticIDCollisions(observations...); err != nil {
+		t.Fatalf("external-system product name/acronym aliases should merge, got %v", err)
+	}
+	conflicting := observations[1]
+	conflicting.Entities[0].Name = "Cloud SQL"
+	if err := ValidateSemanticIDCollisions(observations[0], conflicting); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("unrelated external-system names should remain a collision, got %v", err)
+	}
+}
+
 func TestValidateSemanticEnvelopeJSONRejectsUnknownNestedFields(t *testing.T) {
 	raw := []byte(`{"semantic":{"coverage":{"observed":[],"missing":[],"notes":[]},"questions":[],"entities":[{"id":"svc.api","type":"service","name":"API","provenance":{"kind":"observation","confidence":0.8,"unexpected":true}}],"edges":[],"findings":[]}}`)
 	if err := ValidateSemanticEnvelopeJSON(raw); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {

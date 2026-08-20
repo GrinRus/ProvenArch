@@ -1241,7 +1241,10 @@ issue document/citation/path references must resolve against the selected-run in
 Semantic admission also rejects unknown envelope fields, incompatible duplicate IDs across shard
 snapshots and dangling edge endpoints. Exact entity observations from the same logical repository
 may be merged only after the deterministic type/ID-leaf/name compatibility check; canonical
-`svc.*`/`db.*`/`team.*` prefixes may normalize only their documented compatible type families.
+`svc.*`/`db.*`/`team.*` prefixes may normalize only their documented compatible type families;
+`external.system.*` IDs may merge only when both same-repository names match a documented
+product/acronym alias set (for example `gke` with `Google Kubernetes Engine` or `Google Cloud
+GKE`).
 A repeated weak
 edge ID from the same logical repository and relation type may be re-keyed from its endpoint pair
 before the final identity check; incompatible edge type/repository collisions remain hard failures.
