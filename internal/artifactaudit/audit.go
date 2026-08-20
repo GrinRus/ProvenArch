@@ -123,14 +123,27 @@ func sha256Hex(raw []byte) string {
 // in-memory orchestrator technical candidate before effective-verdict
 // persistence. This keeps audit authority acyclic.
 func ScanSelectedRunWithCandidate(ws workspace.Root, runID string, candidate contracts.ValidatorVerdict) Report {
-	return scan(ws, runID, "selected_run", &candidate)
+	return ScanSelectedRunWithCandidateAndRepoRoots(ws, runID, candidate, nil)
+}
+
+// ScanSelectedRunWithCandidateAndRepoRoots runs the selected-run scanner with
+// the resolved repository roots from the current execution. This is required
+// for managed git_url sources: the manifest intentionally keeps the source
+// declarative, while the runtime resolves it to an ACP-owned checkout before
+// evidence validation.
+func ScanSelectedRunWithCandidateAndRepoRoots(ws workspace.Root, runID string, candidate contracts.ValidatorVerdict, repoRoots map[string]string) Report {
+	return scanWithRepoRoots(ws, runID, "selected_run", &candidate, repoRoots)
 }
 
 func ScanPromotedRun(ws workspace.Root, runID string) Report {
-	return scan(ws, runID, "promoted_current", nil)
+	return scanWithRepoRoots(ws, runID, "promoted_current", nil, nil)
 }
 
 func scan(ws workspace.Root, runID string, scope string, candidate *contracts.ValidatorVerdict) Report {
+	return scanWithRepoRoots(ws, runID, scope, candidate, nil)
+}
+
+func scanWithRepoRoots(ws workspace.Root, runID string, scope string, candidate *contracts.ValidatorVerdict, repoRoots map[string]string) Report {
 	runID = strings.TrimSpace(runID)
 	audit := auditor{
 		ws:          ws,
@@ -139,6 +152,7 @@ func scan(ws workspace.Root, runID string, scope string, candidate *contracts.Va
 		documents:   map[string]contracts.FinalRunDocument{},
 		citations:   map[string]contracts.DocumentCitation{},
 		repoSources: map[string]workspace.RepoSource{},
+		repoRoots:   cloneRepoRoots(repoRoots),
 		candidate:   candidate,
 	}
 	for _, source := range ws.Manifest.Repos {
@@ -159,7 +173,24 @@ type auditor struct {
 	documents   map[string]contracts.FinalRunDocument
 	citations   map[string]contracts.DocumentCitation
 	repoSources map[string]workspace.RepoSource
+	repoRoots   map[string]string
 	candidate   *contracts.ValidatorVerdict
+}
+
+func cloneRepoRoots(repoRoots map[string]string) map[string]string {
+	if len(repoRoots) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(repoRoots))
+	for name, root := range repoRoots {
+		name = strings.TrimSpace(name)
+		root = strings.TrimSpace(root)
+		if name == "" || root == "" {
+			continue
+		}
+		cloned[name] = root
+	}
+	return cloned
 }
 
 func (a *auditor) scan() {
@@ -359,7 +390,10 @@ func (a *auditor) scanSourceEvidence(repoName, evidencePath string, lines *contr
 		a.add("audit.evidence.repo_unknown", "error", evidencePath, nil, "evidence references an unknown repository")
 		return
 	}
-	repoRoot := strings.TrimSpace(source.Path)
+	repoRoot := strings.TrimSpace(a.repoRoots[source.Name])
+	if repoRoot == "" {
+		repoRoot = strings.TrimSpace(source.Path)
+	}
 	if repoRoot == "" {
 		a.add("audit.evidence.repo_unavailable", "warning", evidencePath, nil, "evidence repository is not available as a local path")
 		return

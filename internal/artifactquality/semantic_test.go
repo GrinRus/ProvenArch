@@ -139,6 +139,8 @@ func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T)
 	observations := []contracts.SemanticSnapshot{
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos.balance-reader", Type: "dependency", Name: "Balance Reader", Provenance: evidence("src/ledger/ledgerwriter/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos.balance-reader", Type: "service", Name: "Balance Reader", Provenance: evidence("src/ledger/balancereader/README.md")}}},
 		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "system", Name: "Bank of Anthos application", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")}}},

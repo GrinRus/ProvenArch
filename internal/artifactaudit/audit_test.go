@@ -45,6 +45,27 @@ func TestScanSelectedRunPassesDeterministicallyWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestScanSelectedRunWithCandidateUsesResolvedGitURLRoot(t *testing.T) {
+	ws, runID := writeAuditFixture(t, false)
+	repoRoot := ws.Manifest.Repos[0].Path
+	ws.Manifest.Repos[0].Path = ""
+	ws.Manifest.Repos[0].GitURL = "https://example.test/sample.git"
+	candidate := contracts.ValidatorVerdict{
+		Version: 1, RunID: runID, GeneratedAt: "2026-07-26T00:00:00Z", Verdict: "PASS",
+		CheckedPaths: []string{
+			path.Join("reports", "taskruns", runID, "staging", "final", "final-run-index.json"),
+			path.Join("reports", "taskruns", runID, "staging", "final", "citation-index.json"),
+		},
+	}
+	report := ScanSelectedRunWithCandidateAndRepoRoots(ws, runID, candidate, map[string]string{"sample": repoRoot})
+	if report.Status != StatusPass {
+		t.Fatalf("resolved git_url root should pass selected-run audit, got %+v", report)
+	}
+	if hasIssue(report, "audit.evidence.repo_unavailable") {
+		t.Fatalf("resolved git_url root was ignored: %+v", report.Issues)
+	}
+}
+
 func TestScanSelectedRunAcceptsAbsoluteValidatorPathsInsideSelectedRun(t *testing.T) {
 	ws, runID := writeAuditFixture(t, false)
 	providerPath := path.Join("reports", "taskruns", runID, "validator", "validator-verdict.json")
