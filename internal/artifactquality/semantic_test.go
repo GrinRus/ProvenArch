@@ -139,10 +139,14 @@ func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T)
 	observations := []contracts.SemanticSnapshot{
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "system", Name: "Bank of Anthos application", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")}}},
 		{Entities: []contracts.Entity{{ID: "db.bank.of.anthos.accounts", Type: "datastore", Name: "Accounts database", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-maintainers", Type: "team", Name: "maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "repository-owners", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "team", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 	}
 	if err := ValidateSemanticIDCollisions(observations...); err != nil {
 		t.Fatalf("canonical ID type families should merge, got %v", err)

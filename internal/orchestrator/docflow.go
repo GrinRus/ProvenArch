@@ -1306,9 +1306,11 @@ func normalizeSemanticEntityType(id, value string) string {
 	switch {
 	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "backend-service", "kubernetes-service"}, typeName):
 		return "service"
+	case strings.HasPrefix(id, "system.") && containsSemanticType([]string{"system", "application", "service", "backend-service", "kubernetes-service"}, typeName):
+		return "system"
 	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
 		return "datastore"
-	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group"}, typeName):
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners"}, typeName):
 		return "team"
 	default:
 		return typeName
