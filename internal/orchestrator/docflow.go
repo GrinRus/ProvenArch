@@ -1042,8 +1042,9 @@ func mergeSemanticEntity(winner contracts.Entity, candidate contracts.Entity) co
 }
 
 func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasResolver, evidencePaths semanticEvidencePathResolver, endpointRemap semanticEndpointRemap) []contracts.Edge {
-	grouped := map[string][]contracts.Edge{}
-	order := []string{}
+	normalizedEdges := make([]contracts.Edge, 0, len(edges))
+	exactIDSignatures := map[string]map[string]struct{}{}
+	exactIDCounts := map[string]int{}
 	for _, edge := range edges {
 		edge.ID = strings.TrimSpace(edge.ID)
 		edge.Type = strings.TrimSpace(edge.Type)
@@ -1051,6 +1052,38 @@ func dedupeSemanticEdges(edges []contracts.Edge, repoAliases semanticRepoAliasRe
 		edge.From = rewriteSemanticEndpointID(edge.From, endpointRemap)
 		edge.To = rewriteSemanticEndpointID(edge.To, endpointRemap)
 		edge.Provenance = normalizeSemanticProvenance(edge.Provenance, repoAliases, evidencePaths)
+		normalizedEdges = append(normalizedEdges, edge)
+		id := normalizeSemanticKey(edge.ID)
+		if id == "" {
+			continue
+		}
+		signature := strings.Join([]string{normalizeSemanticKey(edge.Type), strings.TrimSpace(edge.From), strings.TrimSpace(edge.To)}, "\x00")
+		if exactIDSignatures[id] == nil {
+			exactIDSignatures[id] = map[string]struct{}{}
+		}
+		exactIDSignatures[id][signature] = struct{}{}
+		exactIDCounts[id]++
+	}
+	grouped := map[string][]contracts.Edge{}
+	order := []string{}
+	for _, edge := range normalizedEdges {
+		id := normalizeSemanticKey(edge.ID)
+		if exactIDCounts[id] > 1 {
+			if len(exactIDSignatures[id]) > 1 {
+				// The provider reused a weak edge ID for distinct endpoint
+				// pairs. Canonicalize each pair before final identity checks.
+				edge.ID = canonicalSemanticEdgeID(edge)
+			} else {
+				// Same exact edge identity observed with different evidence;
+				// merge it and retain all provenance.
+				key := "exact|" + id
+				if _, exists := grouped[key]; !exists {
+					order = append(order, key)
+				}
+				grouped[key] = append(grouped[key], edge)
+				continue
+			}
+		}
 		key := semanticEdgeDedupKey(edge)
 		if _, exists := grouped[key]; !exists {
 			order = append(order, key)
@@ -1339,6 +1372,33 @@ func semanticEdgeDedupKey(edge contracts.Edge) string {
 		return "id|" + strings.TrimSpace(edge.ID)
 	}
 	return strings.Join([]string{edgeType, fromID, toID, evidencePath}, "|")
+}
+
+func canonicalSemanticEdgeID(edge contracts.Edge) string {
+	return strings.Join([]string{
+		"edge",
+		canonicalSemanticIDPart(edge.From),
+		canonicalSemanticIDPart(edge.Type),
+		canonicalSemanticIDPart(edge.To),
+	}, ".")
+}
+
+func canonicalSemanticIDPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	previousSeparator := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' {
+			b.WriteRune(r)
+			previousSeparator = false
+			continue
+		}
+		if !previousSeparator {
+			b.WriteByte('-')
+			previousSeparator = true
+		}
+	}
+	return strings.Trim(b.String(), "-._")
 }
 
 func primarySemanticEvidenceRepo(evidence []contracts.Evidence) string {

@@ -97,6 +97,11 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 							return
 						}
 					}
+					if priorEdge, ok := prior.value.(contracts.Edge); ok {
+						if edge, ok := value.(contracts.Edge); ok && semanticEdgesCanRekey(priorEdge, edge) {
+							return
+						}
+					}
 					problems = append(problems, fmt.Sprintf("semantic id %q collides between %s and %s", id, prior.location, location))
 				}
 				return
@@ -141,6 +146,22 @@ func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
 		return false
 	}
 	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
+}
+
+// semanticEdgesCanRekey permits a weak short edge ID to be reused by shards
+// when the observations are from the same logical repository and share the
+// same relation type. Normalization then derives a canonical ID from each
+// endpoint pair, preserving both claims without overwriting either one.
+func semanticEdgesCanRekey(left, right contracts.Edge) bool {
+	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
+		return false
+	}
+	if normalizeSemanticType(left.Type) != normalizeSemanticType(right.Type) {
+		return false
+	}
+	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
+	rightRepo := semanticLogicalRepo(right.Provenance.Evidence)
+	return leftRepo != "" && leftRepo == rightRepo
 }
 
 func normalizeSemanticType(value string) string {

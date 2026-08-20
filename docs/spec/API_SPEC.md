@@ -1240,8 +1240,10 @@ ordering. After advisory reconciliation, an effective `FAIL` requires at least o
 issue document/citation/path references must resolve against the selected-run inventory.
 Semantic admission also rejects unknown envelope fields, incompatible duplicate IDs across shard
 snapshots and dangling edge endpoints. Exact entity observations from the same logical repository
-may be merged only after the deterministic type/ID-leaf/name compatibility check; unresolved
-finding/question references remain explicit advisory gaps.
+may be merged only after the deterministic type/ID-leaf/name compatibility check. A repeated weak
+edge ID from the same logical repository and relation type may be re-keyed from its endpoint pair
+before the final identity check; incompatible edge type/repository collisions remain hard failures.
+Unresolved finding/question references remain explicit advisory gaps.
 
 **200**
 ```json

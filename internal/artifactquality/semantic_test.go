@@ -109,6 +109,29 @@ func TestValidateSemanticIDCollisionsRejectsSameRepoUnrelatedEntityObservation(t
 	}
 }
 
+func TestValidateSemanticIDCollisionsAllowsSameRepoWeakEdgeIDRekey(t *testing.T) {
+	left := contracts.Edge{
+		ID:   "edge.balance-reader.reads-ledger-db",
+		Type: "reads-from",
+		From: "service.balance-reader",
+		To:   "service.ledger-db",
+		Provenance: contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: "README.md"}},
+		},
+	}
+	right := left
+	right.From = "svc.bank.of.anthos.src.ledger.balancereader"
+	right.To = "db.bank.of.anthos.ledger-db"
+	right.Provenance.Evidence = []contracts.Evidence{{Repo: "bank-of-anthos", Path: "src/ledger/balancereader/README.md"}}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{left}},
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{right}},
+	); err != nil {
+		t.Fatalf("same-repo weak edge IDs should be rekeyed during normalization, got %v", err)
+	}
+}
+
 func TestValidateSemanticEnvelopeJSONRejectsUnknownNestedFields(t *testing.T) {
 	raw := []byte(`{"semantic":{"coverage":{"observed":[],"missing":[],"notes":[]},"questions":[],"entities":[{"id":"svc.api","type":"service","name":"API","provenance":{"kind":"observation","confidence":0.8,"unexpected":true}}],"edges":[],"findings":[]}}`)
 	if err := ValidateSemanticEnvelopeJSON(raw); err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {

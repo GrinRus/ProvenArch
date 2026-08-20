@@ -1422,6 +1422,36 @@ func TestNormalizeSemanticSnapshotMergesExactSameRepoEntityObservations(t *testi
 	}
 }
 
+func TestNormalizeSemanticSnapshotRekeysConflictingWeakEdgeIDs(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Edges: []contracts.Edge{
+			{ID: "edge.reader.reads-db", Type: "reads-from", From: "service.reader", To: "service.db", Provenance: evidence("README.md")},
+			{ID: "edge.reader.reads-db", Type: "reads-from", From: "svc.bank.reader", To: "db.bank.db", Provenance: evidence("src/reader/README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Edges), 2; got != want {
+		t.Fatalf("expected both endpoint-specific edge observations, got=%d: %#v", got, snapshot.Edges)
+	}
+	if snapshot.Edges[0].ID == snapshot.Edges[1].ID {
+		t.Fatalf("expected conflicting weak edge IDs to be rekeyed, got=%q", snapshot.Edges[0].ID)
+	}
+	for _, edge := range snapshot.Edges {
+		if !strings.HasPrefix(edge.ID, "edge.") || !strings.Contains(edge.ID, ".reads-from.") {
+			t.Fatalf("expected canonical endpoint-derived edge ID, got %q", edge.ID)
+		}
+	}
+}
+
 func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *testing.T) {
 	t.Parallel()
 
