@@ -69,6 +69,19 @@ def write_transcript(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def resolve_pipeline_timeout_sec(explicit: int | None) -> int:
+    value = explicit
+    if value is None:
+        raw = os.environ.get("PIPELINE_TIMEOUT_SEC", "1800")
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"pipeline timeout must be an integer, got {raw!r}") from exc
+    if value <= 0:
+        raise RuntimeError(f"pipeline timeout must be positive, got {value}")
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--acp-bin", required=True)
@@ -80,6 +93,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--server-log", required=True)
     parser.add_argument("--api-ready-timeout-sec", type=int, default=120)
+    parser.add_argument(
+        "--pipeline-timeout-sec",
+        type=int,
+        default=None,
+        help="Effective pipeline polling deadline supplied by the backend-cycle harness.",
+    )
     parser.add_argument("--poll-sec", type=float, default=0.25)
     return parser.parse_args()
 
@@ -115,6 +134,7 @@ def main() -> int:
     terminal_status = "failed"
     error_message = ""
     try:
+        pipeline_timeout_sec = resolve_pipeline_timeout_sec(args.pipeline_timeout_sec)
         with server_log.open("w", encoding="utf-8") as log_file:
             server = subprocess.Popen(
                 server_command,
@@ -168,7 +188,7 @@ def main() -> int:
         if not attempt_id or not run_id or str(attempt.get("task_id") or "").strip() != task_id:
             raise RuntimeError("public Attempt admission returned an inconsistent Task/Attempt/run join")
 
-        deadline = time.monotonic() + max(1, int(os.environ.get("PIPELINE_TIMEOUT_SEC", "1800")))
+        deadline = time.monotonic() + pipeline_timeout_sec
         while time.monotonic() < deadline:
             current_response = request_json(base_url, "GET", f"/api/tasks/{task_id}/attempts/{attempt_id}")
             current = current_response.get("attempt")
@@ -184,7 +204,7 @@ def main() -> int:
                 break
             time.sleep(max(0.05, args.poll_sec))
         else:
-            error_message = f"Attempt did not reach terminal state within PIPELINE_TIMEOUT_SEC={os.environ.get('PIPELINE_TIMEOUT_SEC', '1800')}"
+            error_message = f"Attempt did not reach terminal state within PIPELINE_TIMEOUT_SEC={pipeline_timeout_sec}"
             try:
                 request_json(base_url, "POST", f"/api/pipeline/runs/{run_id}/cancel", {})
             except Exception:

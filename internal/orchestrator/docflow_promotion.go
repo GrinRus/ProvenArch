@@ -74,7 +74,7 @@ func (e *pipelineExecution) auditSelectedRunBeforePromotion() (artifactaudit.Rep
 		e.recordConformanceDiagnostic(map[string]any{"promotion_audit_result": "not_requested"})
 		return artifactaudit.Report{Version: artifactaudit.Version, RunID: e.runID, Scope: "selected_run", Status: artifactaudit.StatusPass, Issues: []artifactaudit.Issue{}, Artifacts: []artifactaudit.Artifact{}, Summary: artifactaudit.Summary{}}, nil
 	}
-	report := artifactaudit.ScanSelectedRunWithCandidate(e.workspace, e.promotionRunID(), *e.validatorVerdict)
+	report := artifactaudit.ScanSelectedRunWithCandidateAndRepoRoots(e.workspace, e.promotionRunID(), *e.validatorVerdict, e.resolvedRepoPaths)
 	if report.Status != artifactaudit.StatusFail {
 		e.recordConformanceDiagnostic(map[string]any{"promotion_audit_result": string(report.Status)})
 		return report, nil

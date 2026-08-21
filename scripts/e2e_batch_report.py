@@ -1619,7 +1619,7 @@ def public_authority_gate(
     reasons: list[str] = []
     if source and source != "orchestrator":
         reasons.append("execution:effective-verdict-authority")
-    if audit and audit not in {"pass", "fail"}:
+    if audit and audit not in {"pass", "warn", "fail"}:
         reasons.append("execution:promotion-audit-invalid")
     if audit == "fail":
         reasons.append("execution:promotion-audit-failed")

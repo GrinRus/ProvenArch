@@ -1061,6 +1061,7 @@ run_cli_pipeline() {
       --output "$output_path"
       --server-log "$output_path.server.log"
       --api-ready-timeout-sec "$API_READY_TIMEOUT_SEC"
+      --pipeline-timeout-sec "$PIPELINE_TIMEOUT_SEC"
     )
     log "task-first admission: public Task/Attempt API runtime=$runtime_label pipeline=$pipeline listen=$task_api_listen"
   else

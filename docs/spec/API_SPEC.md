@@ -1238,8 +1238,19 @@ Validator admission separately rejects contradictory provider drafts (`PASS` wit
 provider-authored `fixed_paths`, duplicate/conflicting issue identities and non-deterministic issue
 ordering. After advisory reconciliation, an effective `FAIL` requires at least one technical error;
 issue document/citation/path references must resolve against the selected-run inventory.
-Semantic admission also rejects unknown envelope fields, duplicate IDs across shard snapshots and
-dangling edge endpoints; unresolved finding/question references remain explicit advisory gaps.
+Semantic admission also rejects unknown envelope fields, incompatible duplicate IDs across shard
+snapshots and dangling edge endpoints. Exact entity observations from the same logical repository
+may be merged only after the deterministic type/ID-leaf/name compatibility check; canonical
+`svc.*`/`system.*`/`db.*`/`team.*`/`infra.*` prefixes may normalize only their documented compatible type families
+(`svc.*`/`system.*`: service/application/system/dependency vocabulary, `db.*`: datastore/stateful-workload/database-workload,
+`team.*`: team/owner-group/repository-owners, `infra.*`: infrastructure/runtime-platform/platform/compute-platform/kubernetes-cluster);
+`external.system.*` IDs may merge only when both same-repository names match a documented
+product/acronym alias set (for example `gke` with `Google Kubernetes Engine` or `Google Cloud
+GKE`).
+A repeated weak
+edge ID from the same logical repository and relation type may be re-keyed from its endpoint pair
+before the final identity check; incompatible edge type/repository collisions remain hard failures.
+Unresolved finding/question references remain explicit advisory gaps.
 
 **200**
 ```json

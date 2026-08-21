@@ -1,5 +1,8 @@
+import importlib.util
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class LiveE2EBlackBoxReportTest(unittest.TestCase):
@@ -49,6 +52,29 @@ class LiveE2EBlackBoxReportTest(unittest.TestCase):
             self.assertIn(token, task_helper)
         self.assertNotIn("internal.orchestrator", task_helper)
         self.assertNotIn("run-history.json", task_helper)
+
+    def test_task_attempt_helper_receives_resolved_pipeline_timeout(self) -> None:
+        helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")
+        task_helper = (self.repo_root / "scripts" / "internal" / "live-task-attempt.py").read_text(encoding="utf-8")
+        self.assertIn('--pipeline-timeout-sec "$PIPELINE_TIMEOUT_SEC"', helper)
+        self.assertIn('"--pipeline-timeout-sec"', task_helper)
+        self.assertIn("resolve_pipeline_timeout_sec(args.pipeline_timeout_sec)", task_helper)
+        self.assertIn("deadline = time.monotonic() + pipeline_timeout_sec", task_helper)
+        self.assertIn("within PIPELINE_TIMEOUT_SEC={pipeline_timeout_sec}", task_helper)
+
+    def test_task_attempt_timeout_resolver_prefers_explicit_effective_value(self) -> None:
+        path = self.repo_root / "scripts" / "internal" / "live-task-attempt.py"
+        spec = importlib.util.spec_from_file_location("live_task_attempt_for_test", path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with patch.dict(os.environ, {"PIPELINE_TIMEOUT_SEC": "1800"}, clear=False):
+            self.assertEqual(module.resolve_pipeline_timeout_sec(3600), 3600)
+            self.assertEqual(module.resolve_pipeline_timeout_sec(None), 1800)
+        with self.assertRaisesRegex(RuntimeError, "must be positive"):
+            module.resolve_pipeline_timeout_sec(0)
 
     def test_backend_cycle_restores_isolated_repo_permissions_before_cleanup(self) -> None:
         helper = (self.repo_root / "scripts" / "internal" / "live-e2e-backend-cycle.sh").read_text(encoding="utf-8")

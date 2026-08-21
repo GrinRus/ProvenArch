@@ -2267,6 +2267,18 @@ for rec in records:
     execution_failure_policy = str((execution or {}).get("failure_policy", "-"))
     execution_shard_mode = str((execution or {}).get("shard_discovery_mode", "-"))
     raw_output_refs = collect_raw_output_refs(rec)
+    authority_sources = stats.get("authority_source_values")
+    authority_audits = stats.get("promotion_audit_values")
+    if isinstance(authority_sources, Counter) and authority_sources.get("orchestrator", 0) == expected_backend_runs:
+        public_authority_source = "orchestrator"
+    elif isinstance(authority_sources, Counter) and authority_sources:
+        public_authority_source = next(iter(authority_sources)) if len(authority_sources) == 1 else "conflict"
+    else:
+        public_authority_source = "missing_or_invalid"
+    if isinstance(authority_audits, Counter) and authority_audits:
+        public_authority_audit = next(iter(authority_audits)) if len(authority_audits) == 1 else "conflict"
+    else:
+        public_authority_audit = "missing_or_invalid"
 
     tsv_lines.append(
         "\t".join(
@@ -2384,8 +2396,8 @@ for rec in records:
             },
             "frontend": frontend_statuses,
             "public_authority": {
-                "effective_verdict_source": "orchestrator" if isinstance(stats.get("authority_source_values"), Counter) and stats["authority_source_values"].get("orchestrator", 0) == expected_backend_runs else "missing_or_invalid",
-                "promotion_audit_result": "pass" if isinstance(stats.get("promotion_audit_values"), Counter) and stats["promotion_audit_values"].get("pass", 0) == expected_backend_runs else "missing_or_invalid",
+                "effective_verdict_source": public_authority_source,
+                "promotion_audit_result": public_authority_audit,
             },
             "artifacts": {
                 "run_matrix_tsv": rec["run_matrix_tsv"],

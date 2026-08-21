@@ -79,6 +79,10 @@ class PublicAuthorityReportTest(unittest.TestCase):
         self.assertFalse(gate)
         self.assertEqual([], reasons)
 
+        diagnostic_gate, diagnostic_reasons = self.module.public_authority_gate("orchestrator", "warn", False)
+        self.assertFalse(diagnostic_gate)
+        self.assertEqual([], diagnostic_reasons)
+
     def test_report_and_tsv_publish_public_authority_without_internal_imports(self) -> None:
         run = self._run()
         with tempfile.TemporaryDirectory() as tempdir:

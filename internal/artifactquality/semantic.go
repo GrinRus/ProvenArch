@@ -3,6 +3,7 @@ package artifactquality
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -70,6 +71,7 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 		identity    string
 		location    string
 		fingerprint string
+		value       any
 	}
 	seen := map[string]registration{}
 	problems := []string{}
@@ -90,11 +92,21 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 			fingerprint := string(fingerprintBytes)
 			if prior, exists := seen[id]; exists {
 				if prior.identity != identity || prior.fingerprint != fingerprint {
+					if priorEntity, ok := prior.value.(contracts.Entity); ok {
+						if entity, ok := value.(contracts.Entity); ok && semanticEntitiesCanMerge(priorEntity, entity) {
+							return
+						}
+					}
+					if priorEdge, ok := prior.value.(contracts.Edge); ok {
+						if edge, ok := value.(contracts.Edge); ok && semanticEdgesCanRekey(priorEdge, edge) {
+							return
+						}
+					}
 					problems = append(problems, fmt.Sprintf("semantic id %q collides between %s and %s", id, prior.location, location))
 				}
 				return
 			}
-			seen[id] = registration{identity: identity, location: location, fingerprint: fingerprint}
+			seen[id] = registration{identity: identity, location: location, fingerprint: fingerprint, value: value}
 		}
 		for _, entity := range snapshot.Entities {
 			register("entity", entity.ID, entity)
@@ -113,6 +125,179 @@ func ValidateSemanticIDCollisions(snapshots ...contracts.SemanticSnapshot) error
 		return nil
 	}
 	return semanticProblems(problems)
+}
+
+// semanticEntitiesCanMerge permits an exact entity ID to be observed by
+// multiple shards when the observations are from the same logical repository,
+// use compatible type vocabulary, and agree on the ID/name leaf. The exact ID
+// remains authoritative; normalization later merges evidence and fields. A
+// different repository, type family, or unrelated name is still a hard
+// collision.
+func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
+	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
+		return false
+	}
+	leftType := normalizeSemanticTypeForID(left.ID, left.Type)
+	rightType := normalizeSemanticTypeForID(right.ID, right.Type)
+	if leftType != rightType {
+		return false
+	}
+	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
+	rightRepo := semanticLogicalRepo(right.Provenance.Evidence)
+	if leftRepo == "" || leftRepo != rightRepo {
+		return false
+	}
+	if leftType == "team" {
+		return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(right.Name) != ""
+	}
+	leftID := strings.ToLower(strings.TrimSpace(left.ID))
+	if (strings.HasPrefix(leftID, "external.system.") && leftType == "external.system") ||
+		(strings.HasPrefix(leftID, "infra.") && leftType == "infrastructure") {
+		return semanticExternalSystemNamesAgree(left.ID, left.Name, right.Name)
+	}
+	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
+}
+
+// semanticExternalSystemNamesAgree permits the same repository to describe a
+// stable platform with its product name or a well-known acronym. The ID remains
+// authoritative; aliases are deliberately narrow so unrelated claims still
+// fail closed.
+func semanticExternalSystemNamesAgree(id, leftName, rightName string) bool {
+	if semanticNameAgreesWithID(id, leftName) && semanticNameAgreesWithID(id, rightName) {
+		return true
+	}
+	idLeaf := strings.TrimSpace(id)
+	if splitAt := strings.LastIndexAny(idLeaf, ".:/\\"); splitAt >= 0 {
+		idLeaf = idLeaf[splitAt+1:]
+	}
+	aliases := map[string][]string{
+		"gke": {"gke", "googlekubernetesengine", "googlecloudgke", "anthos"},
+	}
+	leftToken := semanticNameToken(leftName)
+	rightToken := semanticNameToken(rightName)
+	leftMatches, rightMatches := false, false
+	for _, alias := range aliases[semanticNameToken(idLeaf)] {
+		aliasToken := semanticNameToken(alias)
+		leftMatches = leftMatches || strings.Contains(leftToken, aliasToken)
+		rightMatches = rightMatches || strings.Contains(rightToken, aliasToken)
+	}
+	// A product name and acronym may use different aliases (for example,
+	// "Google Kubernetes Engine" vs "Google Cloud GKE and Anthos").
+	return leftMatches && rightMatches
+}
+
+// semanticEdgesCanRekey permits a weak short edge ID to be reused by shards
+// when the observations are from the same logical repository and share the
+// same relation type. Normalization then derives a canonical ID from each
+// endpoint pair, preserving both claims without overwriting either one.
+func semanticEdgesCanRekey(left, right contracts.Edge) bool {
+	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
+		return false
+	}
+	if normalizeSemanticType(left.Type) != normalizeSemanticType(right.Type) {
+		return false
+	}
+	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
+	rightRepo := semanticLogicalRepo(right.Provenance.Evidence)
+	return leftRepo != "" && leftRepo == rightRepo
+}
+
+func normalizeSemanticType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "database", "data-store", "data store":
+		return "datastore"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func normalizeSemanticTypeForID(id, value string) string {
+	typeName := normalizeSemanticType(value)
+	id = strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service"}, typeName):
+		return "service"
+	case strings.HasPrefix(id, "system.") && containsSemanticType([]string{"system", "application", "service", "backend-service", "kubernetes-service"}, typeName):
+		return "system"
+	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
+		return "datastore"
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners"}, typeName):
+		return "team"
+	case strings.HasPrefix(id, "infra.") && containsSemanticType([]string{"infrastructure", "runtime-platform", "platform", "compute-platform", "kubernetes-cluster"}, typeName):
+		return "infrastructure"
+	default:
+		return typeName
+	}
+}
+
+func containsSemanticType(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func semanticLogicalRepo(evidence []contracts.Evidence) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	repo := strings.TrimSpace(filepath.Base(strings.TrimSpace(evidence[0].Repo)))
+	if repo == "" || repo == "." {
+		return ""
+	}
+	if dash := strings.LastIndex(repo, "-"); dash > 0 && dash < len(repo)-1 {
+		suffix := repo[dash+1:]
+		if len(suffix) >= 7 && isHexToken(suffix) {
+			repo = repo[:dash]
+		}
+	}
+	return strings.ToLower(repo)
+}
+
+func semanticNameAgreesWithID(id, name string) bool {
+	idLeaf := strings.TrimSpace(id)
+	if splitAt := strings.LastIndexAny(idLeaf, ".:/\\"); splitAt >= 0 {
+		idLeaf = idLeaf[splitAt+1:]
+	}
+	idToken := semanticNameToken(idLeaf)
+	nameToken := semanticNameToken(name)
+	if idToken == "" || nameToken == "" {
+		return false
+	}
+	if idToken == nameToken || strings.Contains(nameToken, idToken) || strings.Contains(idToken, nameToken) {
+		return true
+	}
+	for _, suffix := range []string{"database", "datastore", "db", "service"} {
+		if strings.HasSuffix(idToken, suffix) && len(idToken) > len(suffix) {
+			stem := strings.TrimSuffix(idToken, suffix)
+			if strings.Contains(nameToken, stem) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func semanticNameToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isHexToken(value string) bool {
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // semanticIdentityValue intentionally excludes provenance. The same logical

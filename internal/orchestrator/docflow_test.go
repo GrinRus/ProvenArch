@@ -1394,6 +1394,94 @@ func TestNormalizeSemanticSnapshotDedupesRepoAliasEntitiesAndRewritesReferences(
 	}
 }
 
+func TestNormalizeSemanticSnapshotMergesExactSameRepoEntityObservations(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "svc.bank.accounts-db", Type: "database", Name: "accounts-db", Provenance: evidence("README.md")},
+			{ID: "svc.bank.accounts-db", Type: "datastore", Name: "Accounts PostgreSQL database", Provenance: evidence("src/accounts/accounts-db/README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected exact same-repo observations to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "datastore"; got != want {
+		t.Fatalf("expected database type synonym to normalize, got=%q", got)
+	}
+	if got, want := len(snapshot.Entities[0].Provenance.Evidence), 2; got != want {
+		t.Fatalf("expected merged provenance evidence, got=%d: %#v", got, snapshot.Entities[0].Provenance.Evidence)
+	}
+}
+
+func TestNormalizeSemanticSnapshotRekeysConflictingWeakEdgeIDs(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Edges: []contracts.Edge{
+			{ID: "edge.reader.reads-db", Type: "reads-from", From: "service.reader", To: "service.db", Provenance: evidence("README.md")},
+			{ID: "edge.reader.reads-db", Type: "reads-from", From: "svc.bank.reader", To: "db.bank.db", Provenance: evidence("src/reader/README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Edges), 2; got != want {
+		t.Fatalf("expected both endpoint-specific edge observations, got=%d: %#v", got, snapshot.Edges)
+	}
+	if snapshot.Edges[0].ID == snapshot.Edges[1].ID {
+		t.Fatalf("expected conflicting weak edge IDs to be rekeyed, got=%q", snapshot.Edges[0].ID)
+	}
+	for _, edge := range snapshot.Edges {
+		if !strings.HasPrefix(edge.ID, "edge.") || !strings.Contains(edge.ID, ".reads-from.") {
+			t.Fatalf("expected canonical endpoint-derived edge ID, got %q", edge.ID)
+		}
+	}
+}
+
+func TestNormalizeSemanticSnapshotNormalizesCanonicalIDTypeFamilies(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")},
+		{ID: "db.bank.of.anthos.accounts", Type: "datastore", Name: "Accounts database", Provenance: evidence("README.md")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "team", Name: "maintainers", Provenance: evidence(".github/CODEOWNERS")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
+
+	if got, want := len(snapshot.Entities), 3; got != want {
+		t.Fatalf("expected one canonical entity per ID family, got=%d: %#v", got, snapshot.Entities)
+	}
+	for _, entity := range snapshot.Entities {
+		switch {
+		case strings.HasPrefix(entity.ID, "svc.") && entity.Type != "service":
+			t.Fatalf("service ID family must normalize to service, got %#v", entity)
+		case strings.HasPrefix(entity.ID, "db.") && entity.Type != "datastore":
+			t.Fatalf("db ID family must normalize to datastore, got %#v", entity)
+		case strings.HasPrefix(entity.ID, "team.") && entity.Type != "team":
+			t.Fatalf("team ID family must normalize to team, got %#v", entity)
+		}
+	}
+}
+
 func TestNormalizeSemanticSnapshotResolvesUniqueExtensionlessEvidencePaths(t *testing.T) {
 	t.Parallel()
 
