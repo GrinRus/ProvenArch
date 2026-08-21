@@ -905,6 +905,14 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
   fireEvent.click(screen.getByTestId(`stage-${stage}`));
 }
 
+async function chooseReviewPackage(runID: string) {
+  const runLabel = await screen.findByText(new RegExp(runID));
+  const packageRow = runLabel.closest("li");
+  const action = packageRow?.querySelector("button");
+  if (!action) throw new Error(`Review package ${runID} is not selectable`);
+  fireEvent.click(action);
+}
+
 describe("App", () => {
   afterEach(() => {
     cleanup();
@@ -1898,7 +1906,7 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/setup");
   });
 
-  it("opens Review by default when a completed run already has artifacts", async () => {
+  it("keeps Changes unselected until the operator chooses an exact review package", async () => {
     vi.stubGlobal(
       "fetch",
       createFetchMock({
@@ -1917,8 +1925,9 @@ describe("App", () => {
 
     await renderConsoleApp("/changes");
 
-    expect(await screen.findByTestId("review-panel")).toBeInTheDocument();
-    expect(window.location.search).toContain("run=run-1");
+    expect(await screen.findByTestId("review-packages")).toBeInTheDocument();
+    expect(window.location.search).not.toContain("run=");
+    expect(screen.getByText("Choose a review package")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Changes" })).toHaveAttribute("aria-current", "page");
@@ -3249,6 +3258,7 @@ describe("App", () => {
     fireEvent.click(askButton);
     const dialog = await screen.findByRole("dialog", { name: "Ask current workspace" });
     expect(dialog).toHaveTextContent("Current workspace · read-only");
+    fireEvent.change(screen.getByTestId("qa-question-input"), { target: { value: "Who owns payments?" } });
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ask current workspace" })).not.toBeInTheDocument());
     expect(askButton).toHaveFocus();
@@ -4465,6 +4475,7 @@ describe("App", () => {
               run_id: "run-old",
               pipeline: "refresh",
               status: "succeeded",
+              authoritative_index: true,
               started_at: "2026-04-03T12:02:00Z",
               finished_at: "2026-04-03T12:02:30Z",
               warnings: [],
@@ -4475,6 +4486,7 @@ describe("App", () => {
               run_id: "run-new",
               pipeline: "refresh",
               status: "succeeded",
+              authoritative_index: true,
               started_at: "2026-04-03T12:01:00Z",
               finished_at: "2026-04-03T12:01:30Z",
               warnings: [],
@@ -4567,6 +4579,7 @@ describe("App", () => {
     await renderConsoleApp();
 
     navigateToStage("review");
+    await chooseReviewPackage("run-old");
     await waitFor(() => {
       expect(screen.getByTestId("evidence-viewer").textContent ?? "").toContain("reports/as-is/overview.md");
       expect(screen.getByTestId("evidence-viewer").textContent ?? "").toContain("Old snapshot overview");
@@ -4609,6 +4622,7 @@ describe("App", () => {
               run_id: "run-old",
               pipeline: "refresh",
               status: "succeeded",
+              authoritative_index: true,
               started_at: "2026-04-03T12:02:00Z",
               finished_at: "2026-04-03T12:02:30Z",
               warnings: [],
@@ -4619,6 +4633,7 @@ describe("App", () => {
               run_id: "run-new",
               pipeline: "refresh",
               status: "succeeded",
+              authoritative_index: true,
               started_at: "2026-04-03T12:01:00Z",
               finished_at: "2026-04-03T12:01:30Z",
               warnings: [],
@@ -4740,6 +4755,7 @@ describe("App", () => {
 
     navigateToStage("review");
     navigateToStage("review");
+    await chooseReviewPackage("run-old");
     fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
 
     await waitFor(() => {
@@ -4840,6 +4856,7 @@ describe("App", () => {
 
     await renderConsoleApp();
     navigateToStage("review");
+    await chooseReviewPackage(runID);
     fireEvent.click(await screen.findByRole("button", { name: /reports\/as-is\/old\.md/i }));
     await waitFor(() => expect(oldDiffRequested).toBe(true));
 
@@ -5473,6 +5490,7 @@ describe("App", () => {
 
     navigateToStage("review");
     navigateToStage("review");
+    await chooseReviewPackage(runID);
 
     const diagramButton = await screen.findByRole("button", { name: /reports\/diagrams\/c4-context\.mmd/i });
     fireEvent.click(diagramButton);

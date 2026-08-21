@@ -96,16 +96,20 @@ The core pipeline is:
    Git action; open `/tasks/legacy` only for read-only runtime diagnostics and pre-Task evidence.
 
 The UI treats the validator-promoted architecture as the product outcome. `Architecture` provides
-Documents as the default read-only reader with Diagrams, Model and Findings sibling modes; the
-existing Context/Container/Component explorer remains available as Model, with service-scoped
-advanced Code view, structured findings/questions and evidence drill-down. `Settings` exposes
-workspace, repository, runtime, scope, Git and diagnostics controls, while
+Map and Documents as the primary read-only workbenches, with Diagrams, Model and Findings sibling
+modes; the existing Context/Container/Component explorer remains available as Model, with
+service-scoped advanced Code view, structured findings/questions and evidence drill-down. `Tasks`
+uses a selected-task preview and outcome-first detail before exposing Attempt diagnostics. `Settings`
+exposes runner presets plus an advanced workspace, repository, runtime, scope, Git and diagnostics
+disclosure, while
 Runtime diagnostics at `/tasks/legacy` separate provider activity from durable step/shard progress and offer dependency-aware
 child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
 runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
 revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain
 their validator-approved semantic payload, so Changes compares individual findings and gaps rather
-than Markdown files. Mermaid diagrams remain deterministic workspace exports.
+than Markdown files. Changes requires an explicit selected review package before publication, and
+Ask is a read-only workspace drawer rather than a blocking primary workflow modal. Mermaid diagrams
+remain deterministic workspace exports.
 
 Runtime drafts stay in run-scoped staging directories. Stable workspace paths are updated only after
 their contract and validator gates pass. A later `refresh` records source revisions and explains

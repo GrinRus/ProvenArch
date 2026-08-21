@@ -66,7 +66,6 @@ export default function App() {
   const unsavedDraftRef = useRef(false);
   const restoredRouteRunRef = useRef<string | null>(null);
   const restoredArtifactRef = useRef<string | null>(null);
-  const defaultChangesRunRef = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupRuntime, setSetupRuntime] = useState("fake");
@@ -110,8 +109,9 @@ export default function App() {
   }, [navigateRoute, route]);
 
   function handleDestinationChange(nextDestination: WorkflowDestination) {
-    if (nextDestination === "changes" && runId) {
-      navigateRoute({ destination: "changes", runId, taskId: route.taskId, attemptId: route.attemptId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
+    const hasExplicitRunContext = Boolean(route.runId && (route.source === "snapshot" || (route.destination === "tasks" && route.taskView === "legacy")));
+    if (nextDestination === "changes" && hasExplicitRunContext && route.runId) {
+      navigateRoute({ destination: "changes", runId: route.runId, taskId: route.taskId, attemptId: route.attemptId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
       return;
     }
     navigateDestination(nextDestination);
@@ -405,6 +405,10 @@ export default function App() {
       return null;
     }
   }
+
+  const handleTaskOutcomeSettled = useCallback(() => {
+    void refreshKnowledge();
+  }, []);
 
   function syncOnboardingStatus(status: OnboardingStatusResponse) {
     setOnboardingStatus(status);
@@ -732,14 +736,6 @@ export default function App() {
       return;
     }
     restoredRouteRunRef.current = null;
-    if (route.destination === "changes" && route.source !== "current" && !route.runRequested) {
-      const latest = runList.find((item) => item.status === "succeeded" && (item.pipeline === "init" || item.pipeline === "refresh"));
-      if (latest && defaultChangesRunRef.current !== latest.run_id) {
-        defaultChangesRunRef.current = latest.run_id;
-        navigateRoute({ ...route, runId: latest.run_id, runRequested: true, source: "snapshot", invalid: [] }, true);
-        if (runId !== latest.run_id) void handleSelectRun(latest.run_id);
-      }
-    }
   }, [clearRunSelection, consoleReady, handleSelectRun, navigateRoute, route, runId, runList]);
 
   useEffect(() => {
@@ -889,6 +885,10 @@ export default function App() {
       && (!architecture.comparison.current_run_id || architecture.comparison.current_run_id !== runId),
   );
   const selectedArchitectureComparison = architectureComparisonMismatch ? undefined : architecture?.comparison;
+  const selectedChangesRunId = destination === "changes" && route.source === "snapshot" && route.runId ? runId : null;
+  const selectedChangesRunStatus = selectedChangesRunId ? runStatus : null;
+  const selectedChangesComparison = selectedChangesRunId ? selectedArchitectureComparison : undefined;
+  const selectedChangesReview = selectedChangesRunId ? runReviewSummary : null;
 
   const runtimeSettingsPanel = (
     <RuntimeProfileSettingsPanel
@@ -1011,7 +1011,7 @@ export default function App() {
 	    runtimeMode={effectiveRuntimeMode}
 	    runtimeProvider={effectiveRuntimeProvider}
 	    onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
-	    onStarted={(taskId, attemptId) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: route.taskFilters, invalid: [] })}
+	    onStarted={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
 	  /> : null}
 	  {destination === "tasks" && route.taskView !== "new" && route.taskView !== "legacy" ? <TaskRouteContainer
 	    view={route.taskView ?? "inbox"}
@@ -1027,26 +1027,27 @@ export default function App() {
 	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
 	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", taskId, invalid: [] })}
 	    onOpenChanges={(taskId, attemptId, runId) => navigateRoute({ destination: "changes", taskId, attemptId, runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] })}
+	    onOutcomeSettled={handleTaskOutcomeSettled}
 	  /> : null}
 	  {destination === "changes" ? (
 		<ChangesWorkspace
 		  view={route.changesView ?? "overview"}
 		  source={route.source ?? "snapshot"}
-		  page={{
+		page={{
 			runs: runList,
-			selectedRunID: runId,
+			selectedRunID: selectedChangesRunId,
 			selectedEvidenceStatus: evidenceSnapshot.status,
 			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
 			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
 			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
-			architectureComparison: selectedArchitectureComparison,
-			architectureComparisonMismatch,
-			runReview: runReviewSummary?.review,
+			architectureComparison: selectedChangesComparison,
+			architectureComparisonMismatch: Boolean(selectedChangesRunId && architectureComparisonMismatch),
+			runReview: selectedChangesReview?.review,
 			taskId: route.taskId,
 			attemptId: route.attemptId,
 			onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
 		  }}
-		  review={{ runId, runStatus, runList, coverageSummary, openQuestions, nonDiagramArtifacts, diagramArtifacts, selectedArtifact, selectedArtifactContent, evidenceStatus: evidenceSnapshot.status, evidenceIssues: evidenceSnapshot.issues, reviewSummary: runReviewSummary, demo: runStatus?.runtime_mode === "fake", gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
+		  review={{ runId: selectedChangesRunId, runStatus: selectedChangesRunStatus, runList, coverageSummary: selectedChangesRunId ? coverageSummary : "", openQuestions: selectedChangesRunId ? openQuestions : "", nonDiagramArtifacts: selectedChangesRunId ? nonDiagramArtifacts : [], diagramArtifacts: selectedChangesRunId ? diagramArtifacts : [], selectedArtifact: selectedChangesRunId ? selectedArtifact : "", selectedArtifactContent: selectedChangesRunId ? selectedArtifactContent : "", evidenceStatus: selectedChangesRunId ? evidenceSnapshot.status : "idle", evidenceIssues: selectedChangesRunId ? evidenceSnapshot.issues : [], reviewSummary: selectedChangesReview, demo: selectedChangesRunStatus?.runtime_mode === "fake", gitDiff: selectedChangesRunId ? gitDiff : null, gitDiffStatus: selectedChangesRunId ? gitDiffStatus : "idle", onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
 		  proposals={{
 		    artifacts: [
 		      ...nonDiagramArtifacts,
@@ -1090,7 +1091,10 @@ export default function App() {
 		  selectedArtifactPath={route.artifact}
 		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
 		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] })}
-		  onDocumentChange={(artifact) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] })}
+			  onDocumentChange={(artifact) => navigateRoute(
+			    { ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] },
+			    destination === "knowledge" && !route.artifact,
+			  )}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
 		  onOpenRuns={() => handleDestinationChange("tasks")}
 		  taskId={route.taskId}

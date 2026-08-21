@@ -9697,3 +9697,391 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
   DoD passed (`contracts`, Go, Python `263/263`, UI `158/158`, lint/typecheck and embedded build),
   followed by independent offline closure: race suites, 90 readable fixtures, mock E2E `7/7`, full
   deterministic DoD and byte-identical embedded `ui_dist` all passed.
+
+---
+
+## EP-20260821-task-first-design-qa-closure
+
+### Current layer
+
+Implementation/review. Q0–Q9 implementation slices are complete; Q10 is in progress with full
+deterministic checks, embedded-asset parity, responsive/accessibility smoke and final live UI
+comparison still required.
+
+### Context
+
+- Epic 23 contracts, routes and additive surfaces are implemented, but the fresh comparison in
+  [`design-qa.md`](../design-qa.md) found six P1 and five P2 gaps against the authoritative
+  task-first UX and target composition references.
+- The current UI is operational and deterministic tests pass, but it still reads as a dense
+  operator console. The highest-risk gaps are contradictory Task/Attempt state, diagnostic-first
+  routing, incomplete Architecture/Findings workbenches, duplicated Changes review, modal Ask and
+  raw runtime Settings.
+- Written product behavior remains authoritative over PNGs. The corrective work must preserve
+  automatic validator-gated promotion, immutable Attempt identity, current Architecture authority,
+  full-workspace Git publication and read-only analyzed repositories.
+- Existing implementation-status claims in Epic 23 describe additive contract/surface completion;
+  they do not constitute visual or UX closure. Status docs are corrected only after rendered
+  acceptance passes.
+
+### Goal
+
+Make the task-first UI trustworthy, calm and outcome-first: a user can create a Task, understand its
+result, trace current Architecture evidence, review already-promoted changes, publish the complete
+workspace and use Ask/Settings without needing runtime vocabulary or hidden legacy surfaces.
+
+### Non-goals
+
+- No hosted mode, multi-user collaboration, persisted approval workflow or security enforcement.
+- No new headless provider beyond `fake`, `claude-code`, `qwen-code`, `codex-code`.
+- No pipeline/schema change made only to imitate reference screenshots.
+- No structured YAML/JSON editing until the accepted lossless round-trip requirement is proven.
+- No visual Mermaid drag editor or selected-file Git commit.
+- No new runtime model/reasoning defaults, live matrix changes or release gate expansion.
+- No write to analyzed source repositories and no hidden compatibility UI.
+
+### Source of truth
+
+1. `schemas/*`, validators and `docs/spec/*`, including `TASK_SPEC.md` and `PIPELINE_SPEC.md`.
+2. `docs/UI_TASK_FIRST_PRODUCT_DESIGN.md`.
+3. Epic 23 acceptance in `docs/BACKLOG.md`.
+4. `docs/UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`.
+5. `design-qa.md` and the normalized comparison evidence.
+6. PNGs under `docs/assets/ui-task-first-product/` for composition, density and visual character.
+
+### Product brief
+
+- **Product type:** local-first responsive web/desktop developer tool embedded in the Go binary.
+- **Primary users:** architect/tech lead, operator/maintainer, reviewer/stakeholder and first-time
+  evaluator.
+- **Primary job:** turn an architecture question into validated, evidence-backed, Git-reviewable
+  current workspace knowledge.
+- **Primary path:** Setup -> New Task -> Running/Outcome -> Architecture/Findings -> Changes ->
+  Publish.
+- **Recovery path:** failed/canceled Attempt -> retained last-good Architecture -> one blocker ->
+  child Attempt retry/change runner.
+- **Quality bar:** no contradictory terminal state, no silent identity fallback, no P0/P1/P2 design
+  QA findings, keyboard-complete primary jobs and deterministic offline closure.
+
+### Assumptions and required decisions
+
+- The PNGs are composition targets, not pixel/copy/data-contract oracles; written behavior wins.
+- Structured model inspection remains read-only in this epic.
+- Until the exact target display font is identified, implementation may use an approved system
+  serif fallback for display/document roles; the choice must be recorded before Q2 is accepted.
+- The current UI has no coherent icon package. Adding one production icon dependency requires
+  explicit owner approval; otherwise licensed source icons must be supplied. Text glyphs are not an
+  accepted closure path.
+
+### Dependency order
+
+```text
+Q0 baseline decisions/fixtures
+  |--> Q1 state truth and identity
+  |--> Q2 visual foundation
+
+Q1 + Q2 --> Q3 Setup and New Task --> Q4 Inbox and Outcome --> Q5 Pipeline Studio
+Q1 + Q2 --> Q6 Architecture Map/Documents/Diagrams --> Q7 Model/Schema/Findings
+Q1 + Q2 + Q7 --> Q8 Changes and Publish
+Q2 + Q6 --> Q9 Ask and Runner Settings
+Q3..Q9 --> Q10 responsive/accessibility/design-QA/docs closure
+```
+
+### Reviewable slices
+
+#### Q0 — Baseline decisions and deterministic visual fixtures (`S`)
+
+**Outcome:** every later slice compares the same route, state, data and viewport.
+
+- Record the approved display-font strategy and icon source/dependency decision.
+- Add/refresh deterministic fixture identities for Setup ready, New Task empty, populated Inbox,
+  running/succeeded/failed/canceled Attempt, current/partial Architecture, selected finding,
+  initial/update Changes, Publish confirmation, Ask answered/failed and runner readiness.
+- Capture the missing Pipeline Recovery and answered Ask implementation states.
+- Define comparison viewports: source-sized design QA captures plus the canonical responsive matrix
+  `1440x980`, `1024x768`, `768x1024`, `390x844`, DPR 1.
+- Keep current-behavior captures ephemeral; only target references stay committed.
+
+**Acceptance:** every target screen has one matched deterministic implementation state or an
+explicitly documented contract blocker; source and implementation can be compared side by side
+without density, browser-chrome or state ambiguity.
+
+#### Q1 — Task/Attempt state truth, refresh and route identity (`M`)
+
+**Outcome:** no user-visible state contradicts the authoritative Task/Attempt/run contracts.
+
+- Route a newly admitted Attempt to the Task running/outcome surface, not Pipeline Studio.
+- Derive terminal status, structured steps, blocker and recovery from one exact Attempt/run review
+  identity. A succeeded Attempt cannot retain active/pending/failed presentation.
+- Invalidate/refetch current Architecture automatically after successful promotion; no manual global
+  Refresh is required to see the new authority.
+- Remove direct-Changes latest-run fallback. An exact Task/Attempt/run is restored from the URL, or
+  the UI shows an explicit chooser/unavailable state.
+- Keep failed/canceled child-retry lineage and last-good Architecture visible without mutating the
+  terminal parent.
+- Start with frontend/view-model/API-consumption fixes. If the public contract cannot express a
+  coherent state, invoke `acp-schema-guardian` before changing schemas or validators.
+
+**Acceptance:** fixtures cover queued, running, stalled, succeeded, failed, canceled and timed-out
+Attempts; no terminal row or detail uses active language; Architecture refreshes after promotion;
+stale/missing identities fail closed and never substitute latest/current data.
+
+#### Q2 — Visual foundation and reusable component contract (`M`)
+
+**Outcome:** screen work consumes one target-aligned design system instead of one-off overrides.
+
+- Make `ui/src/styles/tokens.css` the semantic source for warm canvas/surfaces, forest primary,
+  rare orange decision/recovery accent, text, borders, focus and semantic statuses.
+- Add type roles for display, document, body, label, metadata and code; retain sans UI text and use
+  the approved serif only where the target uses display/document hierarchy.
+- Preserve the existing spacing scale but define relaxed workbench/onboarding and compact repeated-
+  operations density modes.
+- Define component contracts and states for ProductShell/Nav, PageHeader, Workbench/SplitPane,
+  Drawer/Sheet, TaskRow, EvidenceCard/Chain, Status/Authority, FilterBar, Disclosure, Empty/Loading/
+  Error/Partial panels, buttons, fields and icon buttons.
+- Replace text glyphs with one approved vector icon family; no handcrafted inline SVG/CSS art.
+- Remove raw screen-specific colors/radii when an existing semantic token can express the role.
+
+**Acceptance:** tokens have real consumers and no duplicate semantic meanings; all touched
+components cover hover/active/focus-visible/disabled/loading/selected/invalid states; light desktop
+nav and mobile bottom nav use the same semantic roles; target title/body/meta hierarchy is visible
+in rendered fixtures.
+
+#### Q3 — Guided Setup review and New Task composer (`M`)
+
+**Outcome:** a first-time evaluator understands boundaries, runner readiness and expected output
+before starting work.
+
+- Setup uses the target stepper, exact workspace/source/runner summary, readiness, read/write
+  boundaries, quality warning and “What happens next”.
+- `Create first task` opens New Task and never starts analysis implicitly.
+- New Task is goal-first with optional context, compact scope, runner preset/readiness, effective
+  model/effort and a “What you’ll get” pane.
+- Preserve draft across navigation, provider readiness recovery, offline/reconnect and demo fallback.
+- Keep one primary `Start task` action adjacent to the real blocker/reason.
+
+**Acceptance:** ready/partial/blocked/save-error/offline Setup and empty/draft/invalid/checking/
+unavailable/conflict/queued New Task states pass; displayed scope equals submitted scope; the first
+Task can be started keyboard-only and at `390x844` without hiding the primary action.
+
+#### Q4 — Task Inbox, selection, Attempt history and outcome (`L`)
+
+**Outcome:** Tasks is an efficient daily workspace rather than a filter-heavy administrative list.
+
+- Desktop uses lifecycle list + selected Task preview; mobile uses a route split with preserved
+  filters and list position.
+- Collapse advanced filters behind one control; keep search and primary lifecycle filters visible.
+- Show goal, meaningful state, runner and last activity without raw IDs on each compact row.
+- Outcome-first Task detail shows validated result, semantic counts, questions/gaps, current
+  Architecture availability and recommended next action before Attempt telemetry.
+- Keep Attempt identity/config/lineage in history/detail and diagnostics, not the primary outcome.
+- Preserve archive/unarchive, empty/filtered-empty/loading/error/offline/retry behavior and focus.
+
+**Acceptance:** the first useful Task appears above the fold on mobile; 1000-row fixture remains
+scannable and keyboard-safe; Task list/detail/history counts reconcile; succeeded/failed/canceled/
+recovered/demo/live outcomes are truthful and URL-restorable.
+
+#### Q5 — Focused Pipeline Studio and recovery (`M`)
+
+**Outcome:** diagnostics are one level deeper and show one real recovery decision.
+
+- Open Studio only from an exact Attempt.
+- Show canonical durable steps, scopes/artifacts and last useful progress; provider activity never
+  advances completion.
+- Select one blocker with cause, retained data and recommended action.
+- Put raw logs, JSON, permission telemetry and technical IDs into bounded Diagnostics disclosure.
+- Implement/verify Retry failed scope, Change runner for next Attempt and cooperative Stop states
+  against authoritative admission/retry contracts.
+
+**Acceptance:** active/retrying/stalled/permission-required/failed/canceled captures match their
+contracts; retry creates a child and leaves the parent immutable; diagnostics cannot create an
+unbounded page; a missing matching recovery capture blocks slice acceptance.
+
+#### Q6 — Architecture Map, Documents, Diagrams and shared evidence (`L`)
+
+**Outcome:** current Architecture is the independent knowledge product and remains usable during
+or after failed Attempts.
+
+- Architecture Map uses a semantic catalog/map/inspector layout with validated nodes/edges, search,
+  filters, zoom/fit, current authority and an accessible list alternative.
+- Selection links exact document, model entity, finding and evidence identities.
+- Documents default to Architecture Home or Task-linked semantic document, not an alphabetical
+  proposal path; use semantic tree, rendered/source modes, outline and evidence/context pane.
+- Keep allowlisted current Markdown edit separate from promoted/run-snapshot read-only readers.
+- Diagrams add fit/zoom, raw fallback, exact selected identity and accessible relation parity.
+- Preserve explicit unavailable/partial/stale/broken/oversized/offline states without inventing
+  topology or evidence.
+
+**Acceptance:** current knowledge survives active/failed Attempts; default selection is useful and
+authoritative; every visible claim/relation can reach exact evidence; map/list/document/diagram
+keyboard and containment fixtures pass.
+
+#### Q7 — Model/Schema workbench and Findings evidence chain (`L`)
+
+**Outcome:** structured knowledge and review decisions are distinct, evidence-first workbenches.
+
+- Split Model/Schema from the map into semantic tree, structured inspector and validation/evidence
+  pane; keep Source under Advanced and editing disabled until lossless patching exists.
+- Surface schema/version, field help, logical IDs, semantic diagnostics and related entity/edge
+  navigation without using filenames as facts.
+- Findings uses list/detail/evidence-chain composition with observation, why it matters, suggested
+  direction, exact repo/path/line refs, confidence and coverage gaps.
+- Resolve `related_ids` into actionable evidence links; never show only a reference count.
+- Expose guarded review/proposal draft actions only where the persisted decision contract permits.
+
+**Acceptance:** invalid/unavailable structured source retains the last valid rendering; comments/
+unknown keys/order/multiline fixtures keep read-only truth; finding counters reconcile with Task and
+Changes; one keyboard path completes finding -> evidence -> source -> returned focus.
+
+#### Q8 — Changes truth and full-workspace Publish (`L`)
+
+**Outcome:** semantic review and Git mutation are clear, distinct decisions.
+
+- Replace stacked semantic + legacy review with one workbench: grouped change set, selected rendered/
+  source diff and review notes/evidence.
+- State explicitly that validator-approved knowledge already updated current Architecture; review
+  here does not approve/reject analysis and Publish only performs the Git action.
+- Keep Summary/Evidence/Files/Publish materially distinct and pinned to exact Task/Attempt/run.
+- Show semantic delta first and Git inventory second; never equate their counters.
+- Publish confirmation defaults to folder/file counts, validation, open risks, commit message and
+  branch/HEAD; move fingerprint and individual paths into Technical details/All files disclosures.
+- Preserve authoritative stale HEAD/inventory, dirty/clean, conflict, busy, failure and retry gates.
+
+**Acceptance:** no latest-run fallback, duplicate H1/review surface or “replace/promote current
+snapshot” copy remains; the exact full-workspace scope is clear; stale confirmation cannot mutate
+Git; successful commit refreshes Task/publication state and cannot double-submit.
+
+#### Q9 — Contextual Ask and Runner Settings (`M`)
+
+**Outcome:** Ask preserves Architecture context, while everyday runner configuration is preset-first.
+
+- Replace centered Ask modal with a right contextual drawer that keeps Architecture visible,
+  restores focus and uses internal/sticky scrolling without clipped controls.
+- Cover empty/running/answered/unresolved/failed/retry/provider-outage Ask states with impact summary,
+  architecture path, citations, assumptions and explicit proposal action.
+- Make Runner Settings a preset list + selected runner/model/effort/execution + readiness card + task
+  defaults.
+- Put raw timeout, permission, precedence and per-step keys inside Advanced; preserve effective vs
+  desired/source values and immutable active Attempt history.
+
+**Acceptance:** Ask never mutates current knowledge implicitly and remains usable at desktop/mobile;
+provider outage clearly distinguishes blocked new Ask/Attempt from readable existing Architecture;
+preset invalid/save/conflict/readiness states fail inline and cannot rewrite an admitted Attempt.
+
+#### Q10 — Responsive, accessibility, deterministic design QA and docs closure (`L`)
+
+**Outcome:** the implemented UI, embedded binary and documentation make the same truthful claim.
+
+- Run the full state/viewport matrix with overflow, console-error, critical axe, keyboard-only,
+  focus-return, 200% zoom, reduced-motion, long-path and touch-target checks.
+- Compare matched implementation captures against every target reference using full-view and focused
+  side-by-side evidence; append iteration history to `design-qa.md`.
+- Remove obsolete/duplicated components, CSS, routes, test IDs and compatibility DOM exposed by the
+  corrective slices.
+- Run `acp-docs-sync` only after behavior is implemented; synchronize README, ARCHITECTURE,
+  STAKEHOLDER, TESTING_STRATEGY, Epic 23 status and the migration-plan status.
+- Verify source repositories are unchanged and embedded `ui_dist` matches the tested frontend.
+- Execute full DoD: `make contracts`, `make test`, `make lint`, `make build`; deterministic UI mock
+  E2E remains offline and required. Live provider gate remains a separate trusted-machine step via
+  `acp-e2e-live-gate` after deterministic closure.
+
+**Acceptance:** critical axe violations are zero; no global overflow or clipped primary action at
+all supported viewports; every primary job is keyboard-complete; no actionable P0/P1/P2 design QA
+finding remains; `design-qa.md` ends with exact `final result: passed`; full DoD and embedded parity
+pass from a clean tree.
+
+### State matrix required for closure
+
+| Surface | Required states |
+| --- | --- |
+| Setup | default, partial, blocked, ready, save error, offline/reconnect |
+| New Task | empty, draft, invalid, readiness checking/unavailable, admission conflict, starting, queued, offline |
+| Inbox | loading, empty, filtered empty, populated, error/retry, offline, archived |
+| Task/Attempt | queued, running, stalled, succeeded, failed, canceled, timeout, retained last-good, child retry |
+| Architecture | loading, unavailable, partial, current, stale identity, error, active/failed Attempt alongside current |
+| Document/Model/Diagram | no selection, loading, loaded, read-only, editable where allowed, dirty, invalid, oversized, render error, save error |
+| Findings | empty, filtered empty, selected, missing evidence, unresolved, proposal unavailable/available, error |
+| Changes | no exact context, initial review, update with baseline, unavailable comparison, stale identity, semantic/file views |
+| Publish | loading, ready, warnings, blocked, stale HEAD/inventory, conflict, busy, success, failure/retry |
+| Ask | empty, running, answered, unresolved, failed, retrying, provider outage, proposal confirmation |
+| Settings | loading, preset selected, dirty, invalid, checking, ready, save conflict, advanced expanded |
+
+### Cross-slice interaction rules
+
+- One dominant action per primary surface; diagnostics and raw IDs are secondary disclosures.
+- Explicit Task/Attempt/artifact/evidence authority stays in the URL and never silently falls back.
+- Validation is adjacent to the field/action; async work announces one bounded status and prevents
+  duplicate submission.
+- Destructive or Git-mutating actions require exact scope preview and stale-state rejection.
+- Dialog/drawer close returns focus to the invoker; route transitions focus the new `h1` or explicit
+  surface heading.
+- Mobile touch targets are at least 44px; status never relies on color alone.
+- Source-repository paths are evidence links only; editable workspace boundaries remain explicit.
+
+### Milestones
+
+1. **Trustworthy Task loop:** Q0–Q5 accepted.
+2. **Evidence-first Architecture:** Q6–Q7 accepted.
+3. **Truthful review, publication and utilities:** Q8–Q9 accepted.
+4. **Product closure:** Q10 accepted and design QA passed.
+
+### Stop condition
+
+Stop implementation planning expansion when Q0–Q10 acceptance is satisfied. Do not add unrelated
+providers, hosted/security scope, structured editing or new runtime defaults merely to close visual
+references. If Q1 proves the public state contract is insufficient, pause that slice for an explicit
+schema/contract decision instead of inventing frontend state.
+
+### Progress log
+
+- 2026-08-21: Baseline plan created from `design-qa.md`, Epic 23, the target UX and migration plan.
+  No implementation started. Current QA remains `blocked` with six P1 and five P2 findings.
+- 2026-08-21: Q1 implementation started. New Task admission now lands on exact Task detail;
+  terminal Pipeline Studio states suppress stale blockers/active language; Architecture refreshes
+  after a promoted Task outcome; direct Changes navigation no longer chooses a latest run. Narrow
+  component tests pass. Live verification is in progress against a fresh fake workspace; the first
+  fixture exposed a separate empty-analysis-exclude backend fixture failure, then a non-empty
+  exclude fixture produced a successful promoted outcome and updated Architecture authority.
+- 2026-08-21: Q2–Q3 implemented. Shared warm semantic tokens, display/document typography,
+  responsive shell states, Guided Setup stepper, goal-first New Task layout and the “What you’ll
+  get” boundary panel are live; focused component tests and typecheck pass.
+- 2026-08-21: Q4–Q9 implemented. Inbox now has a selected-task preview; Architecture exposes the
+  Map workbench and actionable Findings evidence chains; Changes is explicit-review-package-first;
+  Ask is a contextual read-only drawer; Settings is preset-first with collapsed advanced controls.
+  Focused Knowledge/Ask/Task/Changes suites pass, followed by the full UI suite (47 files,
+  256 tests) and App suite (103 tests).
+- 2026-08-21: Documentation synchronized across README, ARCHITECTURE, STAKEHOLDER_DOC and the
+  task-first UX baseline. Q10 verification remains open pending the final deterministic DoD,
+  embedded UI parity and design-qa result.
+- 2026-08-21: Q10 verification found and fixed an Architecture auto-selection history regression:
+  initial document selection now uses `replaceState`, while explicit document changes remain
+  navigable. Git Publish confirmation now leads with grouped folder/count scope and keeps HEAD,
+  fingerprint and the full file inventory under disclosures. The full mock E2E is green (8/8),
+  embedded parity is green, and live desktop/mobile smoke is clean. Design QA remains blocked only
+  on the owner-approved icon family decision plus the not-yet-recorded axe/keyboard/zoom and
+  dedicated recovery/answered-Ask evidence matrix; canonical `make build` also remains pinned to
+  unavailable Node.js 22.21.1 on this host, while the equivalent version-check-disabled build and
+  embedded parity pass.
+- 2026-08-21: Publish confirmation was refined after the QA pass to show grouped folder/count scope
+  first and keep technical Git identity plus the full file list in disclosures. Targeted Publish
+  tests and the full UI suite remain green after the refinement.
+- 2026-08-21: Q10 live closure completed its responsive/accessibility pass. Map, Setup and Settings
+  controls were reflowed for tablet/mobile; all visible mobile controls are at least 44px; Ask
+  now restores focus to its invoker; Findings controls have explicit form identities; `/robots.txt`
+  and the shell meta description are valid. The live matrix covered 28 route × viewport cases with
+  no overflow or clipping, Lighthouse desktop/mobile scored 100/100/100 with zero failed audits,
+  answered Ask was verified with three citations, and the deterministic recovery matrix remains
+  8/8 green. Full UI (47 files/256 tests), Go, Python (274 tests), contracts, lint, embedded build
+  and `ui_dist` parity pass. Q10 remains blocked only by the owner-approved icon/font decisions,
+  unavailable native 200%/reduced-motion emulation in the current browser surface, and the exact
+  Node.js 22.21.1 release toolchain required by canonical `make build`.
+- 2026-08-21: Q10 final closure completed. The MVP icon decision is now explicit: the shell uses a
+  self-contained CSS primitive icon family, with no unapproved production dependency; the target
+  font metadata was not present in the references, so the documented Georgia/system-serif fallback
+  is accepted for this slice. Exact Node.js 22.21.1 was resolved through the repository toolchain
+  candidate path. A fresh full DoD passed (`make contracts`, `make test`, `make lint`, `make build`),
+  including Go, Python (274 tests), UI (47 files/256 tests), embedded parity and unchanged source
+  fixtures. Playwright/CDP verified reduced-motion and page scale 200% across all seven routes;
+  the final live matrix is 28/28, mobile touch targets are 0 below 44px, Lighthouse is 100/100/100
+  on desktop and mobile, and mock E2E remains 8/8. Q10 is accepted and the product-design QA result
+  is `passed`.

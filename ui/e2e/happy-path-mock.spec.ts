@@ -404,6 +404,18 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await page.getByTestId("task-title").fill("Map checkout architecture");
   await page.getByTestId("task-goal").fill("Describe the checkout service and its order persistence boundary.");
   await page.getByTestId("task-create-submit").click();
+  await expect(page.getByTestId("task-route-detail")).toBeVisible();
+  await expect(page.getByTestId("task-outcome")).toContainText("Initial architecture baseline is ready for review.");
+  await expect(page.getByTestId("task-outcome")).toContainText(initRunID);
+  await page.getByTestId("task-open-architecture").click();
+  await expect(page.getByTestId("knowledge-panel")).toBeVisible();
+  await expect(page.getByTestId("knowledge-panel")).toContainText(initRunID);
+  await page.goBack();
+  await expect(page.getByTestId("task-route-detail")).toBeVisible();
+  await expect(page.getByTestId(`attempt-row-${attemptID}`)).toBeVisible();
+  await page.getByTestId(`attempt-row-${attemptID}`).click();
+  await expect(page.getByTestId("task-route-attempt")).toBeVisible();
+  await page.getByTestId("attempt-open-studio").click();
   await expect(page.getByTestId("task-pipeline-studio")).toBeVisible();
   await expect(page.getByTestId("task-pipeline-studio")).toContainText(taskID);
   await expect(page.getByTestId("task-pipeline-studio")).toContainText(attemptID);

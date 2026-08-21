@@ -74,9 +74,11 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
 
   return (
     <section className="panel stage-panel task-composer" data-testid="task-composer">
-      <PageHeader title="New Task" purpose="Describe the analysis intent, confirm its repository scope and admit a runner preset before any Attempt starts." state={<span className={`status ${readiness.ok ? "ok" : "warn"}`}>{readiness.label}</span>} />
+      <PageHeader title="New Task" purpose="Describe the question, confirm its repository scope and choose how the analysis should run." state={<span className={`status ${readiness.ok ? "ok" : "warn"}`}>{readiness.label}</span>} />
       {!workspaceReady ? <p className="status warn" role="status" data-testid="task-composer-workspace-blocked">Workspace and runtime readiness are unavailable. No Task will be created.</p> : null}
       {error ? <p className="status err" role="alert" data-testid="task-composer-error">{error}</p> : null}
+      <div className="task-composer-layout">
+      <div className="task-composer-form">
       <form onSubmit={handleSubmit}>
         <div className="settings-form-grid">
           <div className="field">
@@ -119,6 +121,19 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
           {createdTaskId && error ? <Button type="button" onClick={() => onCreated(createdTaskId)} data-testid="task-open-created">Open created Task</Button> : null}
         </div>
       </form>
+      </div>
+      <aside className="task-composer-expectations" aria-label="What you will get">
+        <p className="eyebrow">What you’ll get</p>
+        <h2>A traceable architecture answer</h2>
+        <p className="hint">ProvenArch keeps your intent and execution identity together so the result is easy to review and safe to publish.</p>
+        <ol>
+          <li><strong>Task record</strong><span>Your question, scope and runner snapshot.</span></li>
+          <li><strong>Attempt outcome</strong><span>Validated facts, gaps and the exact run identity.</span></li>
+          <li><strong>Evidence chain</strong><span>Architecture, findings and repository citations.</span></li>
+        </ol>
+        <div className="task-composer-boundary"><strong>Read-only source boundary</strong><span>Source repositories are inspected; only this workspace receives generated artifacts.</span></div>
+      </aside>
+      </div>
     </section>
   );
 }

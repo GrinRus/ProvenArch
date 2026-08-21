@@ -168,6 +168,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", s.handleTasks)
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/robots.txt" {
+			writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			writer.WriteHeader(http.StatusOK)
+			_, _ = writer.Write([]byte("User-agent: *\nDisallow:\n"))
+			return
+		}
 		if strings.HasPrefix(request.URL.Path, "/api/") {
 			if s.shouldBlockAPIRequest(request.URL.Path) {
 				writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select or create an ACP workspace before using this API")

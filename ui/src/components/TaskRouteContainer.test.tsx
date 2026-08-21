@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskRouteContainer } from "./TaskRouteContainer";
-import { getTask, listTaskAttempts, listTasks, type ProductTask, type TaskAttempt } from "../lib/taskApi";
+import { getTask, getTaskAttempt, listTaskAttempts, listTasks, type ProductTask, type TaskAttempt } from "../lib/taskApi";
 
 const task = {
   version: 1,
@@ -79,16 +79,34 @@ describe("TaskRouteContainer", () => {
   });
 
   it("shows semantic outcome counts only when the exact run review is available", async () => {
+    const onOutcomeSettled = vi.fn();
     vi.mocked(getTask).mockResolvedValue({ ...task, outcome: { state: "available", attempt_id: "attempt-1", run_id: "run-1" } } as ProductTask);
     vi.mocked(listTaskAttempts).mockResolvedValue({ items: [{ version: 1, attempt_id: "attempt-1", task_id: "task-1", run_id: "run-1", status: "succeeded", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1, finished_at: "2026-08-11T10:01:00Z" } as TaskAttempt] });
     vi.mocked(getPipelineRunReviewSummary).mockResolvedValue({ run_id: "run-1", pipeline: "init", status: "succeeded", started_at: "2026-08-11T10:00:00Z", result: { state: "completed", summary: "Validated architecture result", produced: {}, partial_scopes: 0, failed_scopes: 0, promotion: { changed: true, current_usable: true }, recommended_action: "review_architecture" }, steps: [], review: { review_kind: "initial", source_run_id: "run-1", semantic_changes: { available: true, categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, document_changes: { available: true, added: [], changed: [], removed: [] }, findings: [], questions: [], gaps: [], summary: { entities_added: 2, entities_changed: 1, entities_removed: 0, edges_added: 3, edges_changed: 0, edges_removed: 1, documents_added: 0, documents_changed: 0, documents_removed: 0, findings: 1, questions: 2, gaps: 1 }, runtime: { providers: [], step_providers: {} }, authority: { mode: "promoted_current", source_run_id: "run-1" }, generated_at: "2026-08-11T10:01:00Z" } });
-    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} />);
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} onOutcomeSettled={onOutcomeSettled} />);
     await waitFor(() => expect(screen.getByTestId("task-outcome")).toHaveTextContent("Validated architecture result"));
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("2 added · 1 changed · 0 removed");
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("Current validator-approved Architecture remains available");
+    expect(onOutcomeSettled).toHaveBeenCalledWith("task-1", "attempt-1", "run-1");
+  });
+
+  it("keeps a succeeded Attempt terminal in Pipeline Studio", async () => {
+    vi.mocked(getTaskAttempt).mockResolvedValue({ version: 1, attempt_id: "attempt-1", task_id: "task-1", run_id: "run-1", status: "succeeded", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1, retained_evidence: "retained" } as TaskAttempt);
+    vi.mocked(getPipelineRunReviewSummary).mockResolvedValue({
+      run_id: "run-1", pipeline: "init", status: "succeeded", started_at: "2026-08-11T10:00:00Z",
+      steps: [{ step_id: "init.step1", key: "collect", label: "Collect", state: "active", artifact_count: 0, artifact_paths: [], taskrun_paths: [], warnings_count: 0, errors_count: 0 }],
+      result: { state: "completed", summary: "Ready", produced: {}, partial_scopes: 0, failed_scopes: 0, promotion: { changed: true, current_usable: true }, recommended_action: "review_architecture" },
+    } as never);
+    render(<TaskRouteContainer view="studio" taskId="task-1" attemptId="attempt-1" filters={{}} />);
+    const studio = await screen.findByTestId("task-pipeline-studio");
+    expect(studio).toHaveTextContent("done");
+    expect(studio).not.toHaveTextContent("active");
+    expect(screen.queryByTestId("pipeline-blocker")).not.toBeInTheDocument();
   });
 
   it("opens Pipeline Studio only for the exact Attempt and keeps diagnostics bounded", async () => {
+    vi.mocked(getTaskAttempt).mockResolvedValue({ version: 1, attempt_id: "attempt-2", task_id: "task-1", run_id: "run-1", status: "failed", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1, terminal_summary: { status: "failed", error: "stopped", retained_evidence: "retained" }, retained_evidence: "retained" } as TaskAttempt);
+    vi.mocked(getPipelineRunReviewSummary).mockResolvedValue(null);
     render(<TaskRouteContainer view="studio" taskId="task-1" attemptId="attempt-2" filters={{}} />);
     await waitFor(() => expect(screen.getByTestId("task-pipeline-studio")).toHaveTextContent("run-1"));
     expect(screen.getByTestId("task-pipeline-studio")).toHaveTextContent("init.step0.constitution");
