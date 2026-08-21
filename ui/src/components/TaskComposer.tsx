@@ -87,7 +87,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
           </div>
           <div className="field">
             <label htmlFor="task-goal">Goal</label>
-            <input id="task-goal" data-testid="task-goal" value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What should the validated result explain?" required />
+            <textarea id="task-goal" data-testid="task-goal" rows={4} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What do you want to understand?" required />
           </div>
         </div>
         <div className="field">

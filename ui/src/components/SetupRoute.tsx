@@ -80,6 +80,7 @@ export type SetupRouteProps = {
   onEditorContentChange: (value: string) => void;
   onSaveEditor: () => void;
   wizardContractReady: boolean;
+  onCreateTask: () => void;
   onStart: () => void;
 };
 
@@ -146,6 +147,7 @@ export function SetupRoute({
   onEditorContentChange,
   onSaveEditor,
   wizardContractReady,
+  onCreateTask,
   onStart,
 }: SetupRouteProps) {
   return (
@@ -240,7 +242,7 @@ export function SetupRoute({
         />
       ) : null}
 
-      {step === "review" ? <GuidedSetupReview briefReady={wizardContractReady} workspaceReady={validateResult?.ok === true} busy={busy} onStart={onStart} /> : null}
+      {step === "review" ? <GuidedSetupReview briefReady={wizardContractReady} workspaceReady={validateResult?.ok === true} busy={busy} repoCount={guidedRepos.length} docsImportsReady={Boolean(guidedDocsImportsPath)} runtimeLabel={setupRuntimeProvider ? `${setupRuntime} · ${setupRuntimeProvider}` : setupRuntime} readinessLabel={doctorResult?.ok === true ? "Ready" : doctorResult ? "Needs attention" : "Not checked"} onBack={() => onStepChange("runner")} onCreateTask={onCreateTask} onStart={onStart} /> : null}
     </GuidedSetupPage>
   );
 }

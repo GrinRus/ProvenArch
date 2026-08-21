@@ -4957,6 +4957,8 @@ code {
 .architecture-map-toolbar { display: grid; grid-template-columns: auto minmax(14rem, 1fr) auto; align-items: center; gap: var(--space-3); }
 .architecture-map-filters { display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(8rem, auto) minmax(10rem, auto); gap: var(--space-2); min-width: 0; }
 .architecture-map-filters select { width: 100%; }
+.architecture-filter-disclosure { display: contents; }
+.architecture-filter-disclosure > summary { display: none; }
 .segmented-control { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-soft); }
 .segmented-control > button, .segmented-control summary, .segmented-control details button { min-height: 36px; padding: 0 var(--space-3); border: 0; border-radius: 4px; background: transparent; color: var(--ink-muted); font-size: var(--type-meta); font-weight: 700; }
 .segmented-control > button[aria-pressed="true"], .segmented-control details button[aria-pressed="true"] { background: var(--surface); color: var(--accent-ink); box-shadow: 0 1px 2px rgb(15 23 42 / 10%); }
@@ -5057,19 +5059,31 @@ code {
   .architecture-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .architecture-tabs button { min-height: 44px; }
   .architecture-map-toolbar { grid-template-columns: 1fr; }
-  .architecture-map-filters { grid-template-columns: 1fr; }
+  .architecture-filter-disclosure { display: block; min-width: 0; }
+  .architecture-filter-disclosure > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font-size: var(--type-meta); font-weight: 750; cursor: pointer; list-style: none; }
+  .architecture-filter-disclosure > summary::-webkit-details-marker { display: none; }
+  .architecture-filter-disclosure > summary span { color: var(--ink-muted); font-size: var(--type-caption); font-weight: 650; }
+  .architecture-filter-disclosure[open] > summary { border-color: var(--accent-line); background: var(--accent-soft); }
+  .architecture-map-filters { grid-template-columns: 1fr; margin-top: var(--space-2); }
   .architecture-map-toolbar > button { min-height: 44px; }
   .segmented-control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
   .segmented-control > button, .segmented-control details, .segmented-control summary { width: 100%; min-width: 44px; min-height: 44px; }
   .architecture-map-layout { display: block; min-height: 0; border: 0; background: transparent; }
   .architecture-canvas { display: none; }
   .architecture-inspector { padding: var(--space-4) 0; border: 0; }
-  .architecture-mobile-list { display: grid; gap: var(--space-2); }
+  .architecture-mobile-list { display: grid; grid-row: 4; gap: var(--space-2); }
+  .architecture-map-layout { grid-row: 5; }
   .architecture-mobile-list button { min-height: 56px; display: grid; justify-items: start; gap: 2px; padding: var(--space-3); text-align: left; }
   .architecture-mobile-list button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
   .architecture-mobile-list span { color: var(--ink-muted); font-size: var(--type-meta); }
   .architecture-page.is-map-fullscreen { position: static; padding: var(--space-4); }
   .architecture-page.is-map-fullscreen .architecture-header, .architecture-page.is-map-fullscreen .architecture-tabs { display: flex; }
+  .architecture-page.is-map-fullscreen .architecture-filter-disclosure { display: block; }
+  .architecture-page.is-map-fullscreen .architecture-filter-disclosure > summary { display: flex; }
+  .architecture-page.is-map-fullscreen .architecture-filter-disclosure[open] .architecture-map-filters { display: grid; }
+  .architecture-page.is-map-fullscreen .architecture-map-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem); min-height: calc(100dvh - 11rem); }
+  .architecture-page.is-map-fullscreen .architecture-canvas { display: block; min-height: calc(100dvh - 11rem); }
+  .architecture-page.is-map-fullscreen .architecture-mobile-list { display: none; }
   .architecture-metrics { grid-template-columns: 1fr 1fr; }
   .catalog-toolbar { display: grid; align-items: stretch; }
   .architecture-flows li { grid-template-columns: 1fr auto; }
@@ -5871,6 +5885,23 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 .ask-drawer > header p:not(.eyebrow) { max-width: 380px; margin: 0; color: var(--ink-muted); font-size: 13px; line-height: 1.45; }
 .ask-drawer > header button { flex: 0 0 auto; min-height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); color: var(--ink); font-weight: 700; }
 .ask-drawer > .panel { margin-top: 20px; padding: 0; border: 0; box-shadow: none; background: transparent; }
+/* The Ask surface is a narrow utility drawer, so its workbench must collapse
+   into one readable stream instead of preserving the desktop three-column grid. */
+.ask-drawer .qa-workbench,
+.ask-drawer .qa-side-column {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ask-drawer .qa-workbench > *,
+.ask-drawer .qa-side-column > * {
+  min-width: 0;
+}
+.ask-drawer .qa-composer textarea,
+.ask-drawer .qa-answer p,
+.ask-drawer .qa-run-summary,
+.ask-drawer .qa-related-partial,
+.ask-drawer .qa-unresolved-box {
+  overflow-wrap: anywhere;
+}
 .settings-runtime-boundary { display: grid; gap: 5px; margin: 18px 0; padding: 14px 16px; border: 1px solid var(--accent-line); border-radius: 9px; background: var(--accent-soft); color: var(--ink-muted); font-size: 12px; line-height: 1.45; }
 .settings-runtime-boundary strong { color: var(--ink); font-size: 13px; }
 .runner-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0 22px; }
@@ -5918,10 +5949,60 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 
 /* Mobile interaction guardrail: every visible control stays at least 44px high. */
 @media (max-width: 680px) {
+  .product-utilities .product-ask {
+    display: inline-grid !important;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  .product-ask > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
   .architecture-tabs button,
   .architecture-map-toolbar > button,
   .architecture-map-filters input,
   .architecture-map-filters select,
   .segmented-control > details button,
   .settings-danger-zone .ui-button { min-height: 44px; }
+}
+
+/* Review surfaces: make the next action and the evidence context scannable. */
+.setup-review-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.setup-review-summary > div { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.setup-review-summary span { color: var(--ink-muted); font-size: 11px; font-weight: 740; letter-spacing: .05em; text-transform: uppercase; }
+.setup-review-summary strong { color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.setup-review-next { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding: 16px; border: 1px solid var(--accent-line); border-radius: 10px; background: var(--accent-soft); }
+.setup-review-next > div { display: grid; gap: 4px; min-width: 0; }
+.setup-review-next span { color: var(--ink-muted); font-size: 13px; line-height: 1.45; }
+.setup-review-actions { justify-content: space-between; margin-top: 18px; }
+
+/* Findings keep the queue and its selected evidence in one desktop viewport. */
+@media (min-width: 1181px) {
+  .architecture-findings { grid-template-columns: minmax(260px, .72fr) minmax(0, 1.28fr); align-items: start; }
+  .architecture-findings > header,
+  .architecture-findings > .findings-toolbar,
+  .architecture-findings > .proposal-decision-boundary { grid-column: 1 / -1; }
+  .architecture-findings > .architecture-findings-grid { grid-column: 1; grid-row: 3; grid-template-columns: 1fr; max-height: calc(100vh - 26rem); overflow: auto; align-self: start; }
+  .architecture-findings > .finding-detail { grid-column: 2; grid-row: 3; position: sticky; top: 88px; min-height: 22rem; margin-top: 0; align-self: start; }
+}
+
+.settings-runtime-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 2px; }
+.task-composer #task-goal { min-height: 116px; resize: vertical; }
+.task-composer-form .actions .ui-button.tone-primary { width: 100%; min-height: 48px; }
+
+@media (max-width: 680px) {
+  .setup-review-summary { grid-template-columns: 1fr 1fr; }
+  .setup-review-next { display: grid; }
+  .setup-review-next .ui-button { width: 100%; }
+  .setup-review-actions { display: grid; }
+  .setup-review-actions .ui-button { width: 100%; }
+  .settings-runtime-actions { display: grid; }
+  .settings-runtime-actions .ui-button { width: 100%; }
+  .architecture-mobile-list { order: 3; grid-row: auto; }
+  .architecture-map-layout { order: 4; grid-row: auto; }
 }

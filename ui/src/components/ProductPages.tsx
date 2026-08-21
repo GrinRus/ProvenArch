@@ -35,15 +35,27 @@ function setupStepHint(step: SetupStep): string {
   return "Review the plan and start";
 }
 
-export function GuidedSetupReview({ briefReady, workspaceReady, busy, onStart }: { briefReady: boolean; workspaceReady: boolean; busy: boolean; onStart: () => void }) {
+export function GuidedSetupReview({ briefReady, workspaceReady, busy, repoCount, docsImportsReady, runtimeLabel, readinessLabel, onBack, onCreateTask, onStart }: { briefReady: boolean; workspaceReady: boolean; busy: boolean; repoCount: number; docsImportsReady: boolean; runtimeLabel: string; readinessLabel: string; onBack: () => void; onCreateTask: () => void; onStart: () => void }) {
   return (
     <section className="panel stage-panel" data-testid="guided-setup-review">
       <div className="stage-header"><div><h1>Review & start</h1><p className="hint">Confirm the persisted workspace, analysis brief and runtime readiness before the first Task Attempt.</p></div></div>
-      <dl className="compact-defs">
-        <div><dt>Workspace</dt><dd>{workspaceReady ? "Ready" : "Needs validation"}</dd></div>
-        <div><dt>Analysis brief</dt><dd>{briefReady ? "Saved" : "Not saved — starting requires a quality warning confirmation"}</dd></div>
-      </dl>
-      <button type="button" data-testid="guided-start-analysis" disabled={busy || !workspaceReady} onClick={onStart}>Start Task</button>
+      <div className="setup-review-summary" aria-label="Setup review summary">
+        <div><span>Workspace</span><strong>{workspaceReady ? "Ready" : "Needs validation"}</strong></div>
+        <div><span>Sources</span><strong>{repoCount} {repoCount === 1 ? "repository" : "repositories"}</strong></div>
+        <div><span>Docs imports</span><strong>{docsImportsReady ? "Configured" : "Default"}</strong></div>
+        <div><span>Runner</span><strong>{runtimeLabel || "Not configured"}</strong></div>
+        <div><span>Readiness</span><strong>{readinessLabel}</strong></div>
+        <div><span>Analysis brief</span><strong>{briefReady ? "Saved" : "Needs review"}</strong></div>
+      </div>
+      {!briefReady ? <p className="status warn">Save the analysis brief before starting to keep the result focused and evidence-backed.</p> : null}
+      <div className="setup-review-next" data-testid="setup-review-next">
+        <div><strong>What happens next</strong><span>Create a task, run evidence-backed analysis, then review the generated architecture workspace.</span></div>
+        <button type="button" className="ui-button tone-primary" data-testid="guided-create-task" disabled={busy || !workspaceReady} onClick={onCreateTask}>Create first task</button>
+      </div>
+      <div className="actions setup-review-actions">
+        <button type="button" className="ui-button tone-neutral" onClick={onBack}>Back to readiness</button>
+        <button type="button" className="ui-button tone-neutral" data-testid="guided-start-analysis" disabled={busy || !workspaceReady} onClick={onStart}>Start analysis</button>
+      </div>
     </section>
   );
 }

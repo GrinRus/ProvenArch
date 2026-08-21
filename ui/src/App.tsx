@@ -1177,6 +1177,7 @@ export default function App() {
           onEditorContentChange={setSelectedEditorContent}
           onSaveEditor={() => void handleSaveSelectedEditorArtifact()}
           wizardContractReady={wizardContractReady}
+          onCreateTask={() => navigateRoute({ destination: "tasks", taskView: "new", invalid: [] })}
           onStart={() => void handleSetupFirstRun("analysis")}
         />
       ) : null}

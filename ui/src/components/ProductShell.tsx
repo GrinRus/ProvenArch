@@ -68,6 +68,7 @@ export function ProductShell({ destination, workflow, workspacePath, runtimeLabe
           <div className="context-drawer-actions">
             <button type="button" onClick={() => { setDrawerOpen(false); onRefresh(); }}>Refresh workspace data</button>
             <button type="button" onClick={() => { setDrawerOpen(false); onDestinationChange("setup"); }}>Open Setup</button>
+            <button type="button" onClick={() => { setDrawerOpen(false); onAsk(); }}>Ask about this architecture</button>
           </div>
           <button type="button" onClick={() => { setDrawerOpen(false); onDiagnostics(); }}>Open runtime diagnostics</button>
         </ContextDrawer>

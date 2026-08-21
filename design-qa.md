@@ -384,3 +384,45 @@ assets may improve pixel-level reference fidelity, but they are not required for
 truthful release candidate.
 
 final result: passed
+
+### Pass 5 — fresh priority closure
+
+Date: 2026-08-21
+Layer: implementation / live priority closure
+Scope: the actionable findings from the fresh reference-screen audit, without reopening the
+already-accepted MVP decisions recorded above.
+
+Implemented and verified:
+
+- Ask now collapses its workbench to one readable drawer column; desktop scroll width equals the
+  drawer width (`519px`), and mobile exposes a 44px compact Ask control plus an Ask action in
+  Details.
+- Changes replaces the misleading initial “Continue to publish” state with an explicit
+  “Review publication gate”; selecting a review package is still required before publication is
+  actionable, while the gate remains available for an honest blocked explanation.
+- Mobile Architecture filters are collapsed by default, validated elements appear before the
+  inspector, and mobile fullscreen restores a real ReactFlow canvas (`123×690px` in the 390px
+  live check) instead of a zero-sized hidden map.
+- Guided Setup review now summarizes workspace, sources, docs imports, runner, readiness and
+  brief state, with a clear “Create first task” handoff and a return-to-readiness action.
+- Findings uses a desktop master/detail composition: queue and selected evidence share the same
+  row (`y=484px` in the live 1586×992 check), with the decision boundary below.
+- Settings opens Advanced runtime controls by default and adds direct readiness/diagnostics
+  actions; live verification found 31 visible runtime controls and no horizontal overflow.
+- New Task uses a four-row Goal textarea with task-oriented placeholder copy and a full-width
+  primary submit action.
+
+Live evidence: rebuilt embedded server `provenarch-ui-live-q4` on `127.0.0.1:18181`, desktop
+1586×992 and mobile 390×844 checks, mobile screenshot review, zero console warnings/errors, zero
+horizontal overflow, and successful Setup → Create first task routing to `/tasks/new`.
+
+Verification after Pass 5:
+
+- `npm run typecheck`: passed.
+- Targeted UI suite: 3 files, 114 tests passed.
+- `npm run build`: passed.
+- Embedded `make build` completed with the pinned Node 22.21.1 candidate at
+  `/tmp/provenarch-node-22.21.1-bin`; `diff -qr --exclude=README.md ui/dist internal/api/ui_dist`
+  is clean.
+
+final result: passed
