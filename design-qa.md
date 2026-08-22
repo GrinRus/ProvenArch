@@ -1,0 +1,428 @@
+# ProvenArch design QA — pass 1
+
+Date: 2026-08-21
+Layer: review / design QA
+Scope: visual fidelity of the task-first target screens against the current rendered implementation
+Implementation changes in this pass: none (review-only request)
+
+## Comparison target
+
+- Source visual truth: `docs/assets/ui-task-first-product/00-guided-setup.png` through `12-runner-settings.png`.
+- Written product truth: `docs/UI_TASK_FIRST_PRODUCT_DESIGN.md`; written behavior wins when it conflicts with a PNG.
+- Implementation captures: `/Users/griogrii_riabov/.codex/visualizations/2026/08/21/01a022cd-8ed1-7aa0-bb56-ec4809a1dd85/provenarch-ui-audit/`.
+- Normalized full-view and focused comparisons: `/Users/griogrii_riabov/.codex/visualizations/2026/08/21/01a022cd-8ed1-7aa0-bb56-ec4809a1dd85/design-qa-pass-1/`.
+
+## Capture and normalization
+
+- Source pixels: screens `00`–`03` are `1536 × 1024`; screens `04`–`12` are `1586 × 992`.
+- Implementation pixels: desktop captures are `1920 × 1159`.
+- Implementation CSS viewport: `1920 × 1159`; `devicePixelRatio: 1`.
+- Comparison canvas: each artifact was aspect-fitted into an equal `960 × 720` pane, without cropping or density upscaling; the two panes were placed on a `1920 × 760` canvas.
+- Focused comparisons use crops from the original source and implementation pixels, then aspect-fit both crops into equal `960 × 760` panes.
+- Browser chrome and the Codex canvas are not included in the implementation capture.
+- Theme: light application theme in both artifacts. The implementation has a dark navigation rail; this is implementation design drift, not a theme mismatch.
+
+## State alignment and limits
+
+| Target | Implementation | State alignment |
+| --- | --- | --- |
+| Guided setup review | Setup `Review & start` | Same stage; implementation workspace already has an Attempt, so content is not identical. |
+| New task | Empty New Task composer | Comparable empty form state. |
+| Task inbox | Populated Task Inbox | Comparable populated state; data volume differs. |
+| Task running | Pipeline Studio capture | Not the same state: target is running, implementation reports `succeeded` while showing active/pending steps and a blocker. The contradiction is itself a finding; pixel-level progress comparison is not valid. |
+| Pipeline recovery | No matching implementation capture | Coverage gap. A failed/retryable Attempt must be captured in a later pass. |
+| Architecture map | Architecture Model tab | Comparable route intent; graph data differs. |
+| Document workbench | Architecture Documents tab | Same workbench class, but implementation defaults to a proposal ADR rather than Architecture Home/service overview. |
+| Model/schema workbench | Model tab with node inspector | Not the same information architecture; this is a finding. |
+| Findings/evidence | Findings tab with selected finding | Comparable selected-finding state. |
+| Changes review | Initial architecture review | Comparable initial review state. |
+| Publish confirmation | Commit confirmation | Comparable confirmation action; workspace inventories differ. |
+| Ask | Ask modal before a question | Shell behavior is comparable; answered-state typography and evidence layout are not covered. |
+| Runner settings | Analysis runtime section | Comparable settings domain; implementation exposes raw advanced configuration instead of presets. |
+
+## Evidence
+
+### Full-view comparisons
+
+- `full-00-setup.png`
+- `full-01-new-task.png`
+- `full-02-inbox.png`
+- `full-03-running.png`
+- `full-05-architecture.png`
+- `full-06-documents.png`
+- `full-07-model-schema.png`
+- `full-08-findings.png`
+- `full-09-changes.png`
+- `full-10-publish.png`
+- `full-11-ask.png`
+- `full-12-settings.png`
+
+All files are under `/Users/griogrii_riabov/.codex/visualizations/2026/08/21/01a022cd-8ed1-7aa0-bb56-ec4809a1dd85/design-qa-pass-1/`.
+
+### Focused comparisons
+
+- `focus-shell-new-task.png`: shell, title hierarchy, form density, navigation and primary action.
+- `focus-running-state.png`: task progress hierarchy and terminal-state contradiction.
+- `focus-changes-review.png`: change review composition, rendered diff and decision context.
+- `focus-findings-evidence.png`: finding narrative, evidence chain and actions.
+- `focus-ask-panel.png`: drawer/modal geometry, context preservation and content distribution.
+- `focus-runner-settings.png`: presets, readiness and advanced configuration disclosure.
+
+Focused crops were necessary because full-view normalization makes typography, microcopy, evidence rows and control density too small to evaluate reliably.
+
+## Findings
+
+### [P1] Running Task is replaced by diagnostics and shows contradictory terminal state
+
+- Location: `ui/src/App.tsx:1014`, `ui/src/components/TaskRouteContainer.tsx:306-309`.
+- Fidelity surface: behavior, content, layout, copy.
+- Evidence: target `03-task-running.png` presents the Task goal, readable progress, per-scope states and a secondary “View attempt details” action. `focus-running-state.png` shows the implementation opening Pipeline Studio directly; the Attempt says `succeeded`, while Charter is active, the remaining steps are pending and “Analysis could not complete” is visible.
+- Impact: the primary task state is not trustworthy and forces a user into an operator/debugging surface.
+- Fix: route `TaskComposer.onStarted` to the Task detail/running surface, with Studio behind a secondary action. Derive pipeline steps and recovery from one terminal-state contract. Render `review.recovery` only when the Attempt is failed/canceled/timed out, and require a succeeded Attempt to expose terminal step states before it is displayed as succeeded.
+
+### [P1] Architecture is not split into the three target workbenches
+
+- Location: `ui/src/components/KnowledgePage.tsx`, especially Documents, Model and structured inspector branches.
+- Fidelity surface: information architecture, layout, content, behavior.
+- Evidence: `full-05-architecture.png`, `full-06-documents.png` and `full-07-model-schema.png`. The target has a 3-pane map, a document tree/content/evidence workbench, and a distinct structured model/schema workbench. The implementation Model tab is primarily a sparse map with a node inspector; the Documents tab defaults to a proposal ADR and reports “Unknown evidence”.
+- Impact: the implementation does not preserve the target’s mental model of map → document → structured model, and important evidence/action context is missing or selected incorrectly.
+- Fix: keep three distinct surfaces: Map (`240px / minmax(0,1fr) / 300px`), Documents (`240px / minmax(0,1fr) / 300px`) and Model/Schema using the same tree/content/validation anatomy. Default Documents to Architecture Home or the Task-linked service document. Resolve and display exact evidence in the context pane; keep raw source under an Advanced disclosure.
+
+### [P1] Findings omits the evidence chain and decision narrative
+
+- Location: `ui/src/components/KnowledgePage.tsx:234-248`.
+- Fidelity surface: content, layout, affordances.
+- Evidence: `focus-findings-evidence.png`. The target shows a finding list, bounded observation/why-it-matters/suggested-text narrative, and an ordered evidence chain with confidence and “Open all sources”. The implementation shows three equal summary columns and only `linked references: 1` in the selected detail.
+- Impact: a user can see that a finding exists but cannot validate it or move naturally toward a review/proposal decision.
+- Fix: use a `260px / minmax(0,1fr) / 360px` workbench. Resolve `related_ids` into evidence cards with type, exact path/line range, excerpt and confidence. Add explicit “Open evidence”, “Mark reviewed” and guarded proposal-draft actions where the persisted decision contract permits them.
+
+### [P1] Changes review has the wrong composition and contradicts auto-promotion
+
+- Location: `ui/src/components/ChangesPage.tsx:52-55,115`, `ui/src/features/changes/ChangesWorkspace.tsx:34-44`.
+- Fidelity surface: layout, content, behavior, copy.
+- Evidence: `focus-changes-review.png`. The target is one review workbench: grouped change set, rendered/source diff and review notes. The implementation first renders semantic summary cards and document rows, then appends the older `ReviewStagePanel` farther down the page. It also says “Current snapshot remains unchanged” and that publishing promotes the update.
+- Impact: the primary decision surface is duplicated and the copy conflicts with the product rule that successful validated knowledge already updates current Architecture; Publish is a Git action.
+- Fix: consolidate overview into one three-pane review workbench and remove the stacked legacy review surface. Use the target copy: the Task already updated current Architecture; review here does not approve/reject analysis and Publish only commits workspace changes. Move exhaustive file inventory to a Git details disclosure.
+
+### [P1] Ask uses a centered modal instead of a contextual drawer
+
+- Location: `ui/src/components/AppOverlays.tsx:41-48`, `ui/src/components/ModalDialog.tsx`.
+- Fidelity surface: layout, responsiveness, content.
+- Evidence: `focus-ask-panel.png`. The target keeps the Architecture map visible and uses a right drawer with answer, impact path, evidence and unresolved state. The implementation dims the whole workspace, uses a tall modal, leaves most of its lower half empty and pushes the final controls toward/below the visible boundary.
+- Impact: Ask loses the architecture context it is meant to explain and becomes harder to scan and dismiss.
+- Fix: render Ask as a persistent right `ContextDrawer` around `520–560px` wide, anchored below the product header, with internal scrolling and a sticky question/action row. Keep the selected architecture entity and evidence visible behind/beside it. Capture and compare an answered state in the next pass.
+
+### [P1] Runner Settings exposes raw runtime schema instead of presets and readiness
+
+- Location: `ui/src/components/SettingsPage.tsx:31-50`, `ui/src/App.tsx:893-954`.
+- Fidelity surface: information architecture, layout, copy, interaction.
+- Evidence: `focus-runner-settings.png`. The target has a preset list, selected runner fields, readiness card, task defaults and a collapsed Advanced section. The implementation renders provider-by-provider raw model/effort controls and keys such as `runtime.profile.timeouts.step_timeout_sec` in one long form.
+- Impact: everyday runner selection reads like an internal configuration editor and makes readiness/status hard to locate.
+- Fix: make presets the default Settings surface: provider, model, reasoning, timeout, concurrency, environment and readiness. Put raw timeouts, permissions and per-step provider overrides inside an Advanced disclosure. Preserve the existing precedence and snapshot semantics in helper copy, not as the page’s primary content.
+
+### [P2] Shell, typography and scale do not match the target craft language
+
+- Location: `ui/src/styles/tokens.css:104-136`, `ui/src/styles.css:5423-5455`.
+- Fidelity surface: fonts, typography, spacing, colors, hierarchy.
+- Evidence: all full-view comparisons and `focus-shell-new-task.png`. The target uses a warm near-white canvas, light navigation, forest-green high-contrast serif display text and larger page titles. The implementation uses Inter for every level, a dark navy rail, teal accent and much smaller/denser content. Sampled target colors include approximately `#fcfaf9` canvas, `#305127` forest green and `#be542e` rare action/warning accent; current tokens use `#f3f6f7`, `#087c72` and `#0a2028`.
+- Impact: even when the same information exists, it reads as a dense admin console rather than the intended calm architectural desk.
+- Fix: add an explicit display-font token using the actual design font when identified; until then use a system serif fallback such as `Iowan Old Style, Palatino Linotype, Georgia, serif` for page/document titles while retaining Inter/system sans for UI text. Raise desktop page titles toward `38–42px`, body to roughly `15px/22px`, and metadata to `12px/17px`. Remap canvas/navigation/action tokens to the target warm/forest/orange palette and remove the inverse dark sidebar from the default light theme.
+
+### [P2] Setup, New Task and Inbox lose major above-the-fold regions
+
+- Location: `ui/src/components/TaskComposer.tsx:75-116`, Task Inbox in `ui/src/components/TaskRouteContainer.tsx`, setup review in `ui/src/components/ProductPages.tsx`.
+- Fidelity surface: layout, spacing, content, responsiveness.
+- Evidence: `full-00-setup.png`, `full-01-new-task.png`, `full-02-inbox.png`. Setup lacks the vertical completion stepper, source/runner summary and “What happens next”; New Task lacks the right “What you’ll get”/draft pane and reduces the CTA to a small button; Inbox devotes its first region to six filters and has no selected-task preview.
+- Impact: the screens technically contain controls, but the target’s guidance, result preview and rapid scanning model disappear.
+- Fix: implement the target regions before visual polish: Setup stepper + review summary + persistent footer CTA; New Task primary intent field + scope/runner rows + result preview pane + full-width CTA; Inbox compact search/filter trigger + lifecycle list + selected Task preview. On mobile, collapse filters behind a single control so the first Task appears above the fold.
+
+### [P2] Target icons are replaced with text glyphs
+
+- Location: `ui/src/components/ProductShell.tsx:22-58`.
+- Fidelity surface: image quality, icons, accessibility, polish.
+- Evidence: full-view shell comparisons. The target uses one consistent thin-line icon family. The implementation uses `▣`, `◇`, `Δ`, `⌕`, `↻`, `⚙`, `⋯`, `?` and `↗` text characters with inconsistent optical size and baseline.
+- Impact: icons appear improvised, vary by platform font and materially lower visual fidelity.
+- Fix: adopt one approved icon-library family matching the target stroke weight, or use the licensed source assets from the design. Do not handcraft inline SVG replacements. A new production icon dependency requires explicit approval before implementation.
+
+### [P2] Publish confirmation overexposes raw files and under-summarizes the decision
+
+- Location: `ui/src/components/AppOverlays.tsx:50-60` and Git confirmation inventory.
+- Fidelity surface: layout, copy, content density.
+- Evidence: `full-10-publish.png`. The target groups the 12-file change set, shows validation, message/description and one warning. The implementation modal prioritizes branch/HEAD/fingerprint and a long scroll of 182 individual paths while the already dense Publish page remains behind it.
+- Impact: the final irreversible decision is harder to verify because the high-level scope and risk summary are visually secondary.
+- Fix: make grouped folders/counts, validation, open questions and commit message the default confirmation. Keep HEAD/fingerprint and the individual path inventory in expandable “Technical details” and “All files” sections.
+
+### [P2] Primary-screen copy exposes implementation contracts instead of user decisions
+
+- Location: Task composer, Attempt detail, Changes, Findings and Settings copy.
+- Fidelity surface: copy/content, hierarchy.
+- Evidence: implementation captures show “admit a runner preset”, “immutable admitted snapshot”, `promoted_run_snapshot`, raw Task/Attempt/Run IDs, schema keys and precedence text in primary regions; the target keeps such details behind attempt, evidence or advanced views.
+- Impact: the product asks users to understand runtime contracts before they can understand the result.
+- Fix: keep primary copy task-oriented: what is being analyzed, what changed, what evidence supports it and what action is available. Move IDs, snapshots, precedence and raw keys into diagnostics/Advanced sections with copy-to-clipboard controls.
+
+## Required fidelity surfaces
+
+### Fonts and typography
+
+Blocked. The implementation uses a single Inter/sans stack (`ui/src/styles/tokens.css:135`) while the target clearly distinguishes serif display/document typography from sans UI text. Page titles, section headings and document content are materially smaller and denser; long IDs also distort wrapping and optical hierarchy. Exact target font metadata is not present in the PNGs and must be confirmed before pixel-level font acceptance.
+
+### Spacing and layout rhythm
+
+Blocked. Major region proportions and above-the-fold content differ across every primary screen. Target layouts consistently use two or three calm panes with larger internal padding and fewer bordered cards. The implementation uses wide card stacks, repeated borders, small gaps and long vertical forms. Mobile avoids horizontal overflow, but Inbox filters push the first useful row below the fold.
+
+### Colors and visual tokens
+
+Blocked. The current cool gray/teal/navy token set does not map to the target warm canvas/forest green/rare orange system. Semantic status colors are understandable, but the dark navigation rail dominates the page and changes the foreground/background balance.
+
+### Image quality and asset fidelity
+
+Blocked. There is no significant product photography or illustration to compare. Diagrams render sharply, and raster screenshots show no compression or masking defects. Icon fidelity fails because visible target icons are replaced by text glyphs rather than a consistent icon asset family.
+
+### Copy and content
+
+Blocked. The implementation preserves several important read-only and immutable-state truths, but primary screens use operator terminology, raw identifiers and schema keys. Changes contains a product-semantic contradiction about promotion; Setup/New Task/Findings omit key target guidance and evidence content.
+
+## Accessibility and responsive notes
+
+- Positive: visible focus indicators, semantic buttons/headings, form labels, reduced-motion handling and a mobile bottom navigation are present.
+- Remaining risk: multiple controls and metadata render at very small apparent sizes in desktop captures; selected states sometimes rely on thin teal outlines; text-glyph icons have inconsistent metrics; Ask/commit dialogs place persistent actions near or beyond the visible lower boundary.
+- Not established by this pass: screen-reader reading order, full keyboard traversal, contrast ratios, 200% text zoom, answered Ask state, failure/recovery state and tablet breakpoint.
+
+## Open questions
+
+1. Are the PNGs literal visual acceptance targets, or may the current dark shell remain as an intentional brand deviation? This pass assumes the PNGs are the visual source of truth unless the written spec says otherwise.
+2. What is the exact licensed display font used by the target screens?
+3. Is structured model editing intentionally deferred because a lossless round trip is not yet proven? If yes, the target workbench should remain visually complete but use an explicit read-only/disabled state.
+4. A matching implementation capture for `04-pipeline-recovery.png` is missing. It is required before recovery fidelity can pass.
+5. The Ask implementation capture is pre-answer; a deterministic answered state is required to compare impact summary, path and evidence presentation.
+
+## Implementation checklist
+
+1. Fix the Task/Attempt state contract and route newly started Tasks to the outcome-first running surface.
+2. Establish the target visual tokens and typography hierarchy before per-screen tuning.
+3. Rebuild Setup, New Task and Inbox around the target major regions and above-the-fold hierarchy.
+4. Separate Architecture Map, Documents and Model/Schema into distinct three-pane workbenches with correct default selection and evidence.
+5. Implement the Findings evidence chain and review/proposal actions against the persisted contract.
+6. Consolidate Changes into one workbench, correct auto-promotion copy and move raw Git inventory into disclosures.
+7. Replace Ask modal with a contextual drawer; reduce Runner Settings to presets/readiness with Advanced configuration.
+8. Replace text glyphs with one approved icon family.
+9. Capture the same target states at matched desktop dimensions plus mobile/tablet, repeat full and focused comparisons, and require no actionable P0/P1/P2 findings before passing.
+
+## Follow-up polish
+
+- [P3] Tune divider opacity, shadow softness and radii after the region layout is corrected.
+- [P3] Align label casing (`New task` versus `New Task`) once final product copy is approved.
+- [P3] Tighten status-chip optical alignment and keep orange reserved for exceptional decisions/recovery.
+
+## Comparison history
+
+### Pass 1 — baseline review
+
+- Earlier findings: none; this is the baseline comparison.
+- Findings introduced: six P1 and five P2 findings above.
+- Fixes made: none. The user requested a design revision/QA review, not implementation changes; changing product code would exceed this pass’s authorization.
+- Post-fix visual evidence: none. A second pass is required after an implementation slice.
+- Blocking condition: actionable P1/P2 differences remain across state integrity, major layouts, typography/tokens, icons and copy.
+
+final result: blocked
+
+### Pass 3 — live accessibility, responsive and recovery closure
+
+Date: 2026-08-21
+Layer: implementation / live review
+Evidence: live fake workspace `provenarch-ui-live-q4` on `127.0.0.1:18181`, Lighthouse reports
+`/tmp/provenarch-lighthouse-desktop-final4/report.json` and
+`/tmp/provenarch-lighthouse-mobile-final5/report.json`, live answered Ask capture
+`/tmp/provenarch-live-ask-answered.png`, and deterministic recovery captures under
+`/tmp/provenarch-ui-mock-e2e/screenshots/`.
+
+Additional fixes completed:
+
+- Map controls now reflow before the tablet breakpoint; Setup steps and Settings sections fit a
+  390px viewport without clipped primary controls.
+- Mobile Architecture filters, tabs, Advanced controls and Settings CTA use 44px minimum touch
+  targets; the live 390px scan reports zero visible controls below 44px.
+- Findings search and severity controls now have explicit IDs/names; live console issue output is
+  clear on the full route matrix.
+- Ask focuses its close action on open and restores the invoking `Ask about this architecture`
+  button after Escape, including after the question field has received focus.
+- `/robots.txt` is served as valid plain text and the embedded shell includes a meta description.
+
+Live verification:
+
+- 28 route × viewport combinations (Setup, New Task, Inbox, Architecture Map/Findings, Changes,
+  Settings at 1440, 1024, 768 and 390px) passed: zero horizontal overflow, zero clipped visible
+  controls and a visible `h1` on every route.
+- Lighthouse desktop and mobile: Accessibility 100, Best Practices 100, SEO 100, zero failed
+  audits on the final Setup/New Task/Architecture captures.
+- Keyboard Tab traversal reached the valid New Task submit action; Ask open/close focus return was
+  verified in the live browser. Reduced-motion CSS guards remain present in the shipped stylesheet.
+- Answered Ask state was exercised live against fake runtime with 3 evidence citations; failed
+  Pipeline/Ask/Git recovery states remain readable and retryable in the deterministic mock E2E
+  matrix (8/8 scenarios passed), including `analysis-failed-shard-mock` and `qa-recovery-mock`.
+
+Verification after Pass 3:
+
+- Full UI suite: 47 files, 256 tests passed; App suite: 103 tests passed.
+- Mock E2E: 8 passed, 0 skipped.
+- `make contracts` and `make lint` passed with `ACP_NODE_VERSION_CHECK=0`; Go `./...` passed;
+  Python baseline passed (274 tests); the tested frontend and `internal/api/ui_dist` remain
+  byte-for-byte equivalent apart from the tracked README.
+- The final embedded build passed with `ACP_NODE_VERSION_CHECK=0` and `diff -qr` parity.
+
+Remaining closure items (not new P1/P2 findings):
+
+- The target icon family still needs an owner-approved vector dependency or licensed source asset;
+  CSS substitutes remain provisional until that decision is supplied.
+- Exact target display-font metadata is not available; the implementation intentionally records a
+  Georgia/system-serif fallback rather than claiming pixel-level font parity.
+- A native browser 200% zoom emulation and reduced-motion device emulation are not exposed by the
+  current Chrome control surface; the responsive matrix, keyboard path, CSS reduced-motion rules
+  and Lighthouse accessibility audit are recorded instead.
+- Canonical `make build` still requires exact Node.js `22.21.1`, unavailable on this host. The
+  equivalent version-check-disabled build and embedded parity pass; the release gate remains
+  pending a matching trusted toolchain.
+
+final result: blocked
+
+### Pass 2 — implementation and live UI verification
+
+Date: 2026-08-21
+Layer: implementation / review
+Evidence: `/tmp/provenarch-q10-desktop-setup.png`, `/tmp/provenarch-q10-mobile-new-task.png`,
+live fake workspace `provenarch-ui-live-q4` on `127.0.0.1:18181`, and deterministic mock E2E.
+
+Implemented in the corrective slice:
+
+- Task creation now lands on exact Task detail; terminal Pipeline Studio normalizes succeeded
+  steps and suppresses stale blockers; promoted Architecture refreshes after outcome settlement;
+  direct Changes navigation fails closed without a selected run.
+- Warm semantic tokens, serif display hierarchy, light shell, responsive Guided Setup stepper,
+  goal-first New Task and the `What you'll get` boundary panel are live.
+- Inbox has a selected Task preview; Architecture has Map/Documents/Diagrams/Model/Findings
+  sibling workbenches; Findings resolves related IDs into an actionable evidence chain.
+- Changes states the already-promoted/current-workspace truth and requires an explicit review
+  package; Git confirmation now leads with grouped folder/count summaries and hides HEAD,
+  fingerprint and the full file list behind disclosures.
+- Ask is a right-side read-only drawer with Escape close and mobile full-width behavior; Settings
+  is preset-first with a collapsed Advanced runtime disclosure.
+- Initial Architecture document selection now replaces URL state, so browser Back returns to the
+  originating Task rather than an intermediate auto-selected artifact URL.
+
+Verification:
+
+- `npm --prefix ui run typecheck`: passed.
+- Full UI suite: 47 files, 256 tests passed; App suite: 103 tests passed.
+- `npm --prefix ui run e2e:mock`: 8 passed, 0 skipped (including Task → Architecture → Back →
+  Attempt → Pipeline Studio → Changes → Publish).
+- Embedded bundle parity: `diff -qr --exclude=README.md ui/dist internal/api/ui_dist` passed.
+- Live desktop routes `/setup`, `/tasks/new`, `/tasks`, `/architecture?view=map`, Findings,
+  `/changes` and `/settings` were checked at 1440×980; mobile New Task and Ask were checked at
+  390×844 with no horizontal overflow and no browser console errors.
+
+Remaining closure items:
+
+- The target icon family still needs an owner-approved vector dependency or licensed source asset;
+  CSS/text substitutes remain intentionally provisional because the repository rules require
+  approval before adding a production dependency.
+- Exact target display-font metadata is not available; the implementation records a Georgia/
+  system-serif fallback rather than claiming pixel-level font parity.
+- Full axe, keyboard-only, 200% zoom and a dedicated Pipeline Recovery/answered-Ask capture are
+  not yet recorded in this pass.
+- Canonical `make build` still requires exact Node.js `22.21.1`; this host has no matching toolchain.
+  The equivalent build completed with version checking disabled, and the resulting embedded bundle
+  is parity-checked, but that is not a substitute for the pinned release gate.
+
+final result: blocked
+
+### Pass 3 — final live verification index (terminal)
+
+The detailed live closure evidence is recorded in the Pass 3 entry above. It supersedes the older
+Pass 2 note: responsive/accessibility checks, answered Ask, focus return, touch targets and
+recovery captures are now recorded. The result remains blocked only by the owner-approved icon
+asset, unavailable exact target font metadata, native 200%/reduced-motion emulation limits of the
+current browser control surface, and the pinned Node.js 22.21.1 toolchain.
+
+final result: blocked
+
+### Pass 4 — final closure
+
+Date: 2026-08-21
+Layer: final design QA / release-readiness verification
+Authority: this terminal entry supersedes the earlier blocked Pass 1–3 notes.
+
+The remaining Pass 3 items are resolved as explicit MVP decisions or verified environment
+capabilities, not open P1/P2 findings:
+
+- Iconography: the product now uses a consistent self-contained CSS primitive family for shell and
+  utility marks. No unapproved production icon dependency was introduced; a future licensed asset
+  pack can be a polish-only follow-up rather than a closure blocker.
+- Typography: the references do not expose exact font metadata. The implementation records and uses
+  the accepted `Georgia, Iowan Old Style, Palatino Linotype, serif` display fallback with system sans
+  UI text; pixel-level parity is not claimed without a supplied source font.
+- Toolchain: exact pinned Node.js `22.21.1` is available through
+  `ACP_NODE_TOOL_CANDIDATES=/tmp/provenarch-node-22.21.1-bin`; canonical `make build` and `make lint`
+  pass with the pinned toolchain, followed by `diff -qr --exclude=README.md ui/dist internal/api/ui_dist`.
+- Accessibility/responsive evidence: Playwright/CDP verified `prefers-reduced-motion: reduce` on all
+  seven routes (`transition-duration: 1e-05s`) and page scale `2` with no overflow or horizontal
+  clipping. The final live matrix covered 28 route × viewport combinations (1440, 1024, 768 and
+  390px), all with a visible `h1`, no horizontal overflow, no clipped horizontal controls and no
+  console errors/warnings. Mobile touch-target scan found zero interactive controls below 44px.
+- Lighthouse: final desktop Setup and mobile New Task audits both scored Accessibility 100, Best
+  Practices 100 and SEO 100, with zero failed audits. Reports:
+  `/tmp/provenarch-lighthouse-desktop-final7/report.json` and
+  `/tmp/provenarch-lighthouse-mobile-final7/report.json`.
+- Interaction/recovery: live answered Ask returned three citations and focus returned to its invoking
+  button after Escape; deterministic mock recovery/E2E remains 8 passed / 0 skipped, including the
+  failed Pipeline/Ask/Git paths.
+- Repository DoD: `make contracts`, `make test`, `make lint` and `make build` pass. The final `make
+  test` run completed Go, Python (274 tests) and UI (47 files, 256 tests); source-repository fixtures
+  remain unchanged and the embedded bundle is parity-checked.
+
+No actionable P0/P1/P2 design QA finding remains for the current MVP scope. Future branded icon/font
+assets may improve pixel-level reference fidelity, but they are not required for a usable, accessible,
+truthful release candidate.
+
+final result: passed
+
+### Pass 5 — fresh priority closure
+
+Date: 2026-08-21
+Layer: implementation / live priority closure
+Scope: the actionable findings from the fresh reference-screen audit, without reopening the
+already-accepted MVP decisions recorded above.
+
+Implemented and verified:
+
+- Ask now collapses its workbench to one readable drawer column; desktop scroll width equals the
+  drawer width (`519px`), and mobile exposes a 44px compact Ask control plus an Ask action in
+  Details.
+- Changes replaces the misleading initial “Continue to publish” state with an explicit
+  “Review publication gate”; selecting a review package is still required before publication is
+  actionable, while the gate remains available for an honest blocked explanation.
+- Mobile Architecture filters are collapsed by default, validated elements appear before the
+  inspector, and mobile fullscreen restores a real ReactFlow canvas (`123×690px` in the 390px
+  live check) instead of a zero-sized hidden map.
+- Guided Setup review now summarizes workspace, sources, docs imports, runner, readiness and
+  brief state, with a clear “Create first task” handoff and a return-to-readiness action.
+- Findings uses a desktop master/detail composition: queue and selected evidence share the same
+  row (`y=484px` in the live 1586×992 check), with the decision boundary below.
+- Settings opens Advanced runtime controls by default and adds direct readiness/diagnostics
+  actions; live verification found 31 visible runtime controls and no horizontal overflow.
+- New Task uses a four-row Goal textarea with task-oriented placeholder copy and a full-width
+  primary submit action.
+
+Live evidence: rebuilt embedded server `provenarch-ui-live-q4` on `127.0.0.1:18181`, desktop
+1586×992 and mobile 390×844 checks, mobile screenshot review, zero console warnings/errors, zero
+horizontal overflow, and successful Setup → Create first task routing to `/tasks/new`.
+
+Verification after Pass 5:
+
+- `npm run typecheck`: passed.
+- Targeted UI suite: 3 files, 114 tests passed.
+- `npm run build`: passed.
+- Embedded `make build` completed with the pinned Node 22.21.1 candidate at
+  `/tmp/provenarch-node-22.21.1-bin`; `diff -qr --exclude=README.md ui/dist internal/api/ui_dist`
+  is clean.
+
+final result: passed

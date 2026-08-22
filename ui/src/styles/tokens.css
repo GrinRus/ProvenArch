@@ -135,3 +135,60 @@
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
 }
+
+/* Product-design foundation: warm paper canvas, forest authority and restrained orange decisions. */
+:root {
+  --bg: #f5f0e8;
+  --surface: #fffdf8;
+  --surface-muted: #f1ece3;
+  --surface-soft: #f8f4ed;
+  --line: #ded7cc;
+  --line-strong: #b9afa1;
+  --line-soft: #ebe5dc;
+  --ink: #17352b;
+  --ink-muted: #68756d;
+  --ink-faint: #9a9f98;
+  --accent: #1f5b46;
+  --accent-hover: #184936;
+  --accent-soft: #e3eee7;
+  --accent-line: #b8d0c1;
+  --warn: #bf6b36;
+  --warn-soft: #fff0e4;
+  --err: #a64032;
+  --err-soft: #fceae5;
+  --ok: #32724f;
+  --ok-soft: #e6f2e9;
+  --info: #4b6d79;
+  --info-soft: #eaf1f1;
+  --sidebar-bg: #fffdf8;
+  --sidebar-accent-bg-selected: #e9f1eb;
+  --sidebar-ink: #244438;
+  --sidebar-ink-muted: #7d897f;
+  --sidebar-ink-soft: #65776b;
+  --sidebar-ink-strong: #17352b;
+  --sidebar-line: #e4ddd3;
+  --sidebar-control-line: #d7d0c5;
+  --sidebar-control-bg: #f8f4ed;
+  --sidebar-accent-line: #b8d0c1;
+  --sidebar-accent-line-strong: #1f5b46;
+  --sidebar-accent-line-selected: #1f5b46;
+  --sidebar-focus-shadow: rgba(31, 91, 70, .16);
+  --focus-ring: rgba(191, 107, 54, .78);
+  --focus-soft: rgba(191, 107, 54, .14);
+  --topbar-bg: rgba(255, 253, 248, .94);
+  --shadow: 0 1px 2px rgba(45, 38, 29, .05), 0 14px 36px rgba(45, 38, 29, .06);
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --density-workbench: 12px;
+  --density-onboarding: 20px;
+  font-family: var(--font-body);
+}
+
+/* Accessibility calibration: muted roles still need readable contrast on warm surfaces. */
+:root {
+  --ink-muted: #58645d;
+  --ink-faint: #6a756d;
+  --sidebar-ink-muted: #55665b;
+  --sidebar-ink-soft: #5b6b60;
+}

@@ -20,9 +20,9 @@ type ProductShellProps = {
 };
 
 const workspaceDestinations: Array<{ id: WorkflowDestination; label: string; icon: string }> = [
-  { id: "tasks", label: "Tasks", icon: "▣" },
-  { id: "knowledge", label: "Architecture", icon: "◇" },
-  { id: "changes", label: "Changes", icon: "Δ" },
+  { id: "tasks", label: "Tasks", icon: "tasks" },
+  { id: "knowledge", label: "Architecture", icon: "architecture" },
+  { id: "changes", label: "Changes", icon: "changes" },
 ];
 
 export function ProductShell({ destination, workflow, workspacePath, runtimeLabel, buildLabel, buildTitle, workspaceValid, children, onDestinationChange, onAsk, onDiagnostics, onRefresh }: ProductShellProps) {
@@ -40,22 +40,22 @@ export function ProductShell({ destination, workflow, workspacePath, runtimeLabe
           <span className="product-runtime">{runtimeLabel}</span>
         </div>
         <div className="product-utilities">
-          <button className="product-ask" type="button" data-testid="stage-ask" onClick={onAsk}><span aria-hidden="true">⌕</span><span>Ask about this architecture</span></button>
-          <button className="product-icon-button" type="button" data-testid="console-refresh-btn" aria-label="Refresh workspace data" onClick={onRefresh}>↻</button>
-          <a className="product-icon-button" href={destinationPaths.settings} data-testid="settings-utility" aria-label="Workspace configuration" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}>⚙</a>
-          <a className="product-icon-button" href={destinationPaths.setup} data-testid="setup-utility" aria-label="Lifecycle menu" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}>⋯</a>
-          <button className="product-icon-button" type="button" aria-label="Details" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}>?</button>
+          <button className="product-ask" type="button" data-testid="stage-ask" onClick={onAsk}><span className="shell-icon shell-icon-search" aria-hidden="true" /><span>Ask about this architecture</span></button>
+          <button className="product-icon-button" type="button" data-testid="console-refresh-btn" aria-label="Refresh workspace data" onClick={onRefresh}><span className="shell-icon shell-icon-refresh" aria-hidden="true" /></button>
+          <a className="product-icon-button" href={destinationPaths.settings} data-testid="settings-utility" aria-label="Workspace configuration" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}><span className="shell-icon shell-icon-settings" aria-hidden="true" /></a>
+          <a className="product-icon-button" href={destinationPaths.setup} data-testid="setup-utility" aria-label="Lifecycle menu" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}><span className="shell-icon shell-icon-more" aria-hidden="true" /></a>
+          <button className="product-icon-button" type="button" aria-label="Details" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><span className="shell-icon shell-icon-info" aria-hidden="true">i</span></button>
         </div>
       </header>
       <div className={`product-layout ${navCollapsed ? "nav-collapsed" : ""}`}>
           <nav className="primary-nav" aria-label="Primary">
-            <button className="nav-collapse" type="button" aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={() => setNavCollapsed((value) => !value)}>{navCollapsed ? "›" : "‹"}</button>
+            <button className="nav-collapse" type="button" aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={() => setNavCollapsed((value) => !value)}><span className={`nav-collapse-icon ${navCollapsed ? "is-expanded" : ""}`} aria-hidden="true" /></button>
           <p className="nav-section-label">Workspace</p>
-          {workspaceDestinations.map((item) => <a key={item.id} href={destinationPaths[item.id]} data-testid={`destination-${item.id}`} aria-current={destination === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange(item.id); }}><span aria-hidden="true">{item.icon}</span><span className="nav-label">{item.label}</span></a>)}
+          {workspaceDestinations.map((item) => <a key={item.id} href={destinationPaths[item.id]} data-testid={`destination-${item.id}`} aria-current={destination === item.id ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange(item.id); }}><span className={`nav-icon nav-icon-${item.icon}`} aria-hidden="true" /><span className="nav-label">{item.label}</span></a>)}
           <p className="nav-section-label nav-section-label-utilities">Utilities</p>
-          <a href={destinationPaths.settings} data-testid="settings-nav" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}><span aria-hidden="true">⚙</span><span className="nav-label">Settings</span></a>
-          <a href={destinationPaths.setup} data-testid="setup-nav" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}><span aria-hidden="true">↗</span><span className="nav-label">Setup</span></a>
-          <button type="button" data-testid="diagnostics-nav" onClick={onDiagnostics}><span aria-hidden="true">↗</span><span className="nav-label">Diagnostics</span></button>
+          <a href={destinationPaths.settings} data-testid="settings-nav" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}><span className="nav-icon nav-icon-settings" aria-hidden="true" /><span className="nav-label">Settings</span></a>
+          <a href={destinationPaths.setup} data-testid="setup-nav" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}><span className="nav-icon nav-icon-setup" aria-hidden="true" /><span className="nav-label">Setup</span></a>
+          <button type="button" data-testid="diagnostics-nav" onClick={onDiagnostics}><span className="nav-icon nav-icon-diagnostics" aria-hidden="true" /><span className="nav-label">Diagnostics</span></button>
         </nav>
         <div className="product-content">{children}</div>
         <ContextDrawer open={drawerOpen} title="Workspace details" description="Runtime, build and diagnostic context for this local session." onClose={() => setDrawerOpen(false)}>
@@ -68,6 +68,7 @@ export function ProductShell({ destination, workflow, workspacePath, runtimeLabe
           <div className="context-drawer-actions">
             <button type="button" onClick={() => { setDrawerOpen(false); onRefresh(); }}>Refresh workspace data</button>
             <button type="button" onClick={() => { setDrawerOpen(false); onDestinationChange("setup"); }}>Open Setup</button>
+            <button type="button" onClick={() => { setDrawerOpen(false); onAsk(); }}>Ask about this architecture</button>
           </div>
           <button type="button" onClick={() => { setDrawerOpen(false); onDiagnostics(); }}>Open runtime diagnostics</button>
         </ContextDrawer>

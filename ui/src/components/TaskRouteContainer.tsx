@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import type { TaskFilters, TaskRouteView } from "../lib/appRoutes";
 import type { RunReviewSummaryResponse } from "../lib/appContracts";
@@ -28,6 +28,7 @@ type TaskRouteContainerProps = {
   onNewTask?: () => void;
   onOpenArchitecture?: (taskId: string) => void;
   onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void;
+  onOutcomeSettled?: (taskId: string, attemptId: string, runId: string) => void;
 };
 
 const groups = [
@@ -45,7 +46,7 @@ export function TaskRouteContainer(props: TaskRouteContainerProps) {
     return <TaskInbox filters={props.filters ?? {}} onFiltersChange={props.onFiltersChange} onSelectTask={props.onSelectTask} onNewTask={props.onNewTask} />;
   }
   if (props.view === "detail" && props.taskId) {
-    return <TaskDetail taskId={props.taskId} filters={props.filters ?? {}} onSelectAttempt={props.onSelectAttempt} onBack={() => props.onFiltersChange?.(props.filters ?? {})} onOpenArchitecture={props.onOpenArchitecture} onOpenChanges={props.onOpenChanges} />;
+    return <TaskDetail taskId={props.taskId} filters={props.filters ?? {}} onSelectAttempt={props.onSelectAttempt} onBack={() => props.onFiltersChange?.(props.filters ?? {})} onOpenArchitecture={props.onOpenArchitecture} onOpenChanges={props.onOpenChanges} onOutcomeSettled={props.onOutcomeSettled} />;
   }
   if (props.view === "attempt" && props.taskId && props.attemptId) {
     return <AttemptDetail taskId={props.taskId} attemptId={props.attemptId} filters={props.filters ?? {}} onSelectTask={props.onSelectTask} onOpenStudio={(taskId, attemptId) => props.onOpenStudio?.(taskId, attemptId, props.filters ?? {})} />;
@@ -73,6 +74,7 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
   const [loadMoreBusy, setLoadMoreBusy] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,6 +99,11 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
     if (!needle) return tasks;
     return tasks.filter((task) => [task.title, task.goal, task.context ?? ""].some((value) => value.toLocaleLowerCase().includes(needle)));
   }, [filters.search, tasks]);
+  const selectedTask = visibleTasks.find((task) => task.task_id === selectedTaskId) ?? visibleTasks[0];
+  useEffect(() => {
+    if (selectedTask && selectedTask.task_id !== selectedTaskId) setSelectedTaskId(selectedTask.task_id);
+    if (!selectedTask && selectedTaskId) setSelectedTaskId(null);
+  }, [selectedTask, selectedTaskId]);
   const grouped = useMemo(() => groups.reduce<Record<TaskGroup, ProductTask[]>>((result, group) => {
     result[group.id] = visibleTasks.filter((task) => taskGroup(task) === group.id);
     return result;
@@ -124,11 +131,14 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
       {status === "loading" ? <p className="status info" role="status" data-testid="task-inbox-loading">Loading Tasks…</p> : null}
       {status === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-inbox-error">{error}</p><Button onClick={() => onFiltersChange?.({ ...filters })}>Retry</Button></div> : null}
       {status === "loaded" && visibleTasks.length === 0 ? <p className="status info" role="status" data-testid="task-inbox-empty">No Tasks match these filters. Clear a filter or create a new Task.</p> : null}
+      <div className="task-inbox-workbench">
       <div className="task-inbox-groups" data-testid="task-inbox-groups">
         {groups.map((group) => <section className="task-group" key={group.id} data-testid={`task-group-${group.id}`} aria-labelledby={`task-group-${group.id}-title`}>
           <header className="task-group-heading"><h2 id={`task-group-${group.id}-title`}>{group.label}</h2><span className="status info">{grouped[group.id].length}</span></header>
-          {grouped[group.id].length === 0 ? <p className="hint task-group-empty">No Tasks</p> : <div className="task-row-list">{grouped[group.id].map((task) => <TaskRow key={task.task_id} task={task} group={group.id} onSelect={() => onSelectTask?.(task.task_id, filters)} />)}</div>}
+          {grouped[group.id].length === 0 ? <p className="hint task-group-empty">No Tasks</p> : <div className="task-row-list">{grouped[group.id].map((task) => <TaskRow key={task.task_id} task={task} group={group.id} selected={task.task_id === selectedTask?.task_id} onSelect={() => { setSelectedTaskId(task.task_id); onSelectTask?.(task.task_id, filters); }} />)}</div>}
         </section>)}
+      </div>
+      {selectedTask ? <TaskInboxPreview task={selectedTask} group={taskGroup(selectedTask)} onOpen={() => onSelectTask?.(selectedTask.task_id, filters)} /> : <aside className="task-inbox-preview panel" data-testid="task-inbox-preview-empty"><p className="eyebrow">Selected Task</p><h2>Choose a Task</h2><p className="hint">A compact outcome preview will appear here without changing the selected lifecycle filter.</p></aside>}
       </div>
       {hasMore ? <div className="actions"><Button onClick={() => void loadMore()} disabled={loadMoreBusy}>{loadMoreBusy ? "Loading…" : "Load more Tasks"}</Button></div> : null}
     </section>
@@ -147,9 +157,9 @@ function TaskFiltersBar({ filters, onChange }: { filters: TaskFilters; onChange:
   </form>;
 }
 
-function TaskRow({ task, group, onSelect }: { task: ProductTask; group: TaskGroup; onSelect: () => void }) {
+function TaskRow({ task, group, selected, onSelect }: { task: ProductTask; group: TaskGroup; selected?: boolean; onSelect: () => void }) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } };
-  return <article className="task-row" data-testid={`task-row-${task.task_id}`}>
+  return <article className={`task-row${selected ? " is-selected" : ""}`} data-testid={`task-row-${task.task_id}`}>
     <div className="task-row-main" role="button" tabIndex={0} onClick={onSelect} onKeyDown={onKeyDown} aria-label={`Open Task ${task.title}`}>
       <div className="task-row-heading"><strong>{task.title || "Untitled Task"}</strong><span className={`status task-status-${group}`}>{groupLabel(group)}</span></div>
       <p>{task.goal}</p>
@@ -158,13 +168,33 @@ function TaskRow({ task, group, onSelect }: { task: ProductTask; group: TaskGrou
   </article>;
 }
 
-function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitecture, onOpenChanges }: { taskId: string; filters: TaskFilters; onSelectAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void; onBack: () => void; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void }) {
+function TaskInboxPreview({ task, group, onOpen }: { task: ProductTask; group: TaskGroup; onOpen: () => void }) {
+  const outcomeLabel = task.outcome.state === "available" ? "Result ready" : task.outcome.unavailable_reason || "No terminal outcome";
+  const scopeCount = task.scope.repositories.length;
+  return <aside className="task-inbox-preview panel" data-testid="task-inbox-preview" aria-label="Selected Task preview">
+    <p className="eyebrow">Selected Task</p>
+    <div className="task-inbox-preview-heading"><div><h2>{task.title || "Untitled Task"}</h2><p>{task.goal}</p></div><span className={`status task-status-${group}`}>{groupLabel(group)}</span></div>
+    <dl className="task-inbox-preview-metrics"><div><dt>Outcome</dt><dd>{outcomeLabel}</dd></div><div><dt>Scope</dt><dd>{scopeCount} {scopeCount === 1 ? "repository" : "repositories"}</dd></div><div><dt>Attempts</dt><dd>{task.attempts.length}</dd></div></dl>
+    <p className="hint">{runnerLabel(task)} · {repositoryLabel(task)}</p>
+    <Button tone="primary" onClick={onOpen} data-testid="task-inbox-preview-open">Open Task</Button>
+  </aside>;
+}
+
+function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitecture, onOpenChanges, onOutcomeSettled }: { taskId: string; filters: TaskFilters; onSelectAttempt?: (taskId: string, attemptId: string, filters: TaskFilters) => void; onBack: () => void; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void; onOutcomeSettled?: (taskId: string, attemptId: string, runId: string) => void }) {
   const [task, setTask] = useState<ProductTask | null>(null);
   const [attempts, setAttempts] = useState<TaskAttempt[]>([]);
   const [review, setReview] = useState<RunReviewSummaryResponse | null>(null);
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
   const [archiveStatus, setArchiveStatus] = useState("");
+  const notifiedOutcomeRun = useRef<string | null>(null);
+
+  function notifySettledOutcome(attempt: TaskAttempt | undefined, nextReview: RunReviewSummaryResponse | null) {
+    if (!attempt || !nextReview?.result || ["queued", "running"].includes(attempt.status) || notifiedOutcomeRun.current === attempt.run_id) return;
+    if (!nextReview.result.promotion.current_usable && !nextReview.result.promotion.changed) return;
+    notifiedOutcomeRun.current = attempt.run_id;
+    onOutcomeSettled?.(taskId, attempt.attempt_id, attempt.run_id);
+  }
   useEffect(() => {
     const controller = new AbortController();
     setState("loading");
@@ -174,7 +204,9 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
       setAttempts(nextAttempts.items);
       const latest = nextAttempts.items[nextAttempts.items.length - 1];
       if (latest?.run_id && latest.status !== "queued" && latest.status !== "running") {
-        setReview(await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal }));
+        const nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
+        setReview(nextReview);
+        notifySettledOutcome(latest, nextReview);
       } else {
         setReview(null);
       }
@@ -193,11 +225,17 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
       try {
         const [nextTask, nextAttempts] = await Promise.all([getTask(taskId, controller.signal), listTaskAttempts(taskId, controller.signal)]);
         if (controller.signal.aborted) return;
+        const latest = nextAttempts.items[nextAttempts.items.length - 1];
+        let nextReview: RunReviewSummaryResponse | null = null;
+        if (latest && !["queued", "running"].includes(latest.status)) {
+          nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
+        }
+        if (controller.signal.aborted) return;
         setTask(nextTask);
         setAttempts(nextAttempts.items);
-        const latest = nextAttempts.items[nextAttempts.items.length - 1];
-        if (latest && !["queued", "running"].includes(latest.status)) {
-          setReview(await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal }));
+        if (nextReview) {
+          setReview(nextReview);
+          notifySettledOutcome(latest, nextReview);
         }
       } catch {
         // Keep the last known state visible; the next poll retries and the
@@ -206,7 +244,7 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
     };
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [taskId, task, attempts]);
+  }, [taskId, task, attempts, onOutcomeSettled]);
 
   async function archive(archived: boolean) {
     if (!task) return;
@@ -305,8 +343,11 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
   }, [taskId, attemptId, attempt]);
   const steps = review?.steps.length ? review.steps : fallbackStudioSteps(attempt?.pipeline);
   const active = attempt?.status === "queued" || attempt?.status === "running";
-  const blocker = review?.recovery || (attempt && ["failed", "canceled", "timeout"].includes(attempt.status) ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.error || attempt.terminal_summary?.summary || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null);
-  return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{steps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
+  const terminalFailure = Boolean(attempt && ["failed", "canceled", "timeout"].includes(attempt.status));
+  const blocker = terminalFailure ? review?.recovery || (attempt ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.error || attempt.terminal_summary?.summary || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null) : active ? review?.recovery : null;
+  const terminalSuccess = attempt?.status === "succeeded" && review?.result && ["completed", "completed_with_gaps"].includes(review.result.state);
+  const displayedSteps = terminalSuccess ? steps.map((step) => ({ ...step, state: "done" as const })) : steps;
+  return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{displayedSteps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress && active ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
 }
 
 function fallbackStudioSteps(pipeline?: string): Array<{ step_id: string; key: string; label: string; state: "done" | "active" | "failed" | "pending"; artifact_count: number; artifact_paths: string[]; taskrun_paths: string[]; warnings_count: number; errors_count: number; last_message?: string }> {

@@ -374,6 +374,11 @@ Release workflow hardening:
 - active compatibility inventory отсутствует; tests не должны ожидать compatibility rule ids
 - validator repair stage проверяется отдельно на atomicity: при write failure staged state не мутируется
 - UI ownership split держится unit/integration coverage-ом поверх route shell `App.tsx`, `useWorkspaceSetup`, `useRunExplorer`, `useRunLogs`, `useRunArtifacts`
+- Design-QA closure coverage additionally keeps the task-first shell truthful across the selected
+  Inbox preview, Architecture Map/Documents/Findings workbenches, explicit Changes package choice,
+  contextual Ask drawer and preset-first Settings. The current local verification baseline is the
+  full UI suite plus typecheck; the Q10 matrix still requires the canonical deterministic DoD and
+  embedded asset parity before closure is marked passed.
 
 ### Semantic tests
 - duplicate repo names

@@ -46,7 +46,7 @@
 
 2) **UI (`ui/`)** *(operator console shell)*
    - React + TypeScript + Vite
-   - Реализованное поведение ниже описывает текущий binary. Planned task-first cutover
+   - Реализованное поведение ниже описывает текущий binary. Task-first cutover
      `Tasks / Architecture / Changes`, runner presets и content-aware artifact workbenches
      зафиксированы отдельно в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md)
      и accepted target contract [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md). W23A1 machine-readable
@@ -76,7 +76,10 @@
      malformed/broken-reference files дают typed partial state, а keyboard-accessible table остаётся
      fallback Model view. Documents are the default Architecture mode, with Diagrams, Model and Findings as explicit sibling modes; historical Changes, immutable QA answer/context and QA diagnostics use separate
      `run_snapshot`, `qa_snapshot` and `qa_audit` authorities without cross-authority fallback.
-     Filename-derived graph запрещён.
+     Filename-derived graph запрещён. The Inbox keeps a selected-task preview; Architecture exposes
+     Map, Documents, Diagrams, Model and Findings as sibling workbenches, with related evidence
+     shown from the selected finding. Ask is a read-only right-side drawer, and Settings presents
+     runner presets before the collapsed advanced runtime controls.
    - Changes объединяет historical review packages и четыре локальных режима `Overview / Findings / Proposals / Diff`: Evidence открывается контекстно внутри review surface, а Publish остаётся явным header handoff, не скрытой мобильной вкладкой. Successful `init|refresh` открывает run-pinned Change Review, failed/canceled/recovered — Run Studio, QA остаётся в Ask history; publication отдельного исторического run отображается как `Unknown`.
    - Changes/Knowledge используют shared safe Evidence Viewer (`Rendered / Raw / Diff`): raw HTML
      отключён, GFM поддержан, Mermaid из fenced blocks изолирован, header всегда показывает

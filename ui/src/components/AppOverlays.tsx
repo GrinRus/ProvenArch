@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { ModalDialog } from "./ModalDialog";
 import { AskStagePanel } from "./StagePanels";
 import type { QAProposalDraftResponse } from "../lib/qaApi";
@@ -36,16 +37,36 @@ export function AppOverlays({
   onCancelBriefSkip,
   onConfirmBriefSkip,
 }: AppOverlaysProps) {
+  const askInvokerRef = useRef<HTMLElement | null>(null);
+  const askCloseRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (askOpen) {
+      askInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      askCloseRef.current?.focus();
+      return;
+    }
+    const invoker = askInvokerRef.current;
+    askInvokerRef.current = null;
+    if (invoker && document.contains(invoker)) {
+      invoker.focus();
+    }
+  }, [askOpen]);
+
+  useEffect(() => {
+    if (!askOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseAsk();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [askOpen, onCloseAsk]);
   return (
     <>
-      <ModalDialog
-        open={askOpen}
-        title="Ask current workspace"
-        description="Current workspace · read-only. Q&A execution and history do not alter Change Review or Publish acceptance."
-        onCancel={onCloseAsk}
-      >
+      {askOpen ? <aside className="ask-drawer" role="dialog" aria-modal="false" aria-label="Ask current workspace">
+        <header><div><p className="eyebrow">Workspace Q&A</p><h2>Ask current workspace</h2><p>Read-only Q&amp;A. Answers cite the promoted workspace and never change Change Review or Publish acceptance.</p></div><button ref={askCloseRef} type="button" onClick={onCloseAsk} aria-label="Close Ask">Close</button></header>
         <AskStagePanel onOpenArtifact={onOpenAskCitation} onProposalCreated={onProposalCreated} />
-      </ModalDialog>
+      </aside> : null}
 
       <ModalDialog
         open={gitConfirmation !== null}
@@ -74,23 +95,42 @@ export function AppOverlays({
 }
 
 function GitConfirmationInventory({ diff }: { diff: GitDiffResponse }) {
+  const changedFiles = diff.files.length;
+  const changedFolders = diff.folders.length;
+  const additions = diff.files.reduce((total, file) => total + file.additions, 0);
+  const deletions = diff.files.reduce((total, file) => total + file.deletions, 0);
   return (
     <div className="git-confirmation" data-testid="git-confirmation-inventory">
-      <dl className="compact-defs">
-        <div><dt>Branch</dt><dd>{diff.branch}</dd></div>
-        <div><dt>HEAD</dt><dd><code>{diff.head_oid ?? "unborn"}</code></dd></div>
-        <div><dt>Base</dt><dd>{diff.base_ref} · <code>{diff.base_oid ?? "unborn"}</code></dd></div>
-        <div><dt>Fingerprint</dt><dd><code>{diff.fingerprint}</code></dd></div>
-      </dl>
-      {diff.files.length === 0 ? <p>No workspace changes.</p> : (
-        <ul>
-          {diff.files.map((file) => (
-            <li key={`${file.status}:${file.original_path ?? ""}:${file.path}`}>
-              <strong>{file.status}</strong> <code>{file.path}</code>
-              {file.original_path ? <span> from <code>{file.original_path}</code></span> : null}
-            </li>
-          ))}
-        </ul>
+      {changedFiles === 0 ? <p>No workspace changes.</p> : (
+        <>
+          <div className="git-confirmation-summary">
+            <strong>{changedFiles} changed file{changedFiles === 1 ? "" : "s"} across {changedFolders} folder{changedFolders === 1 ? "" : "s"}</strong>
+            <span>{additions} additions · {deletions} deletions · complete workspace scope</span>
+          </div>
+          <ul className="git-confirmation-folders">
+            {diff.folders.map((folder) => <li key={folder.folder}><strong>{folder.folder}</strong><span>{folder.files} file{folder.files === 1 ? "" : "s"} · +{folder.additions} / −{folder.deletions}</span></li>)}
+          </ul>
+          <details>
+            <summary>Technical details</summary>
+            <dl className="compact-defs">
+              <div><dt>Branch</dt><dd>{diff.branch}</dd></div>
+              <div><dt>HEAD</dt><dd><code>{diff.head_oid ?? "unborn"}</code></dd></div>
+              <div><dt>Base</dt><dd>{diff.base_ref} · <code>{diff.base_oid ?? "unborn"}</code></dd></div>
+              <div><dt>Fingerprint</dt><dd><code>{diff.fingerprint}</code></dd></div>
+            </dl>
+          </details>
+          <details>
+            <summary>All files</summary>
+            <ul>
+              {diff.files.map((file) => (
+                <li key={`${file.status}:${file.original_path ?? ""}:${file.path}`}>
+                  <strong>{file.status}</strong> <code>{file.path}</code>
+                  {file.original_path ? <span> from <code>{file.original_path}</code></span> : null}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </>
       )}
     </div>
   );

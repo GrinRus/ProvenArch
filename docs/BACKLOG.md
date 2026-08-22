@@ -1944,9 +1944,10 @@ Follow-up note (2026-04-22):
 
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
-Status (2026-08-12): **target design and pre-implementation authority decisions accepted; 23B1
-through 23N additive slices, the Tasks-primary navigation cutover and W23O legacy route/component
-closure are implemented; final deterministic closure remains tracked by the DoD.**
+Status (2026-08-21): **target design and authority decisions accepted; 23B1 through 23N additive
+slices, the Tasks-primary navigation cutover, W23O legacy route/component closure and the
+design-QA Q0–Q9 corrective slices are implemented; final deterministic Q10 closure remains tracked
+by the DoD.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2377,10 +2378,11 @@ Acceptance:
 - status uses text/icon/shape and live regions do not announce duplicates;
 - mobile title/authority/state/action fit before the first long content section.
 
-Implementation status (2026-08-11, W23N): Task Inbox tests now cover loading, empty, error and retry
+Implementation status (2026-08-21, W23N/Q10): Task Inbox tests cover loading, empty, error and retry
 states with explicit status/alert semantics; Task rows are keyboard-activatable without changing
-their opaque identity. Task filters and Attempt rows use 44px minimum controls, while existing
-focus-visible, safe-area and responsive shell rules remain unchanged.
+their opaque identity. The Inbox now includes a selected-task preview, shared warm tokens and
+responsive shell rules preserve 44px controls and focus-visible states; final rendered matrix and
+embedded parity remain part of Q10 closure.
 
 ### 23O — Deterministic UI closure, old-shell removal and docs sync
 

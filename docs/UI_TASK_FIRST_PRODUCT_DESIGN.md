@@ -1,11 +1,13 @@
 # Task-first ProvenArch — целевой UX/UI baseline
 
-Статус: **authoritative planned target**, 2026-08-11.
+Статус: **authoritative target; implementation-aligned after the 2026-08-21 design-QA closure slice**, 2026-08-21.
 
 Этот документ определяет следующий целевой UX ProvenArch. Он заменяет прежние направления
-Console V2 и Architecture Change Review как источник UI-решений. Текущий binary пока сохраняет
-реализованный shell `Home / Analyze / Architecture / Changes`; переход выполняется отдельными
-reviewable slices из Epic 23.
+Console V2 и Architecture Change Review как источник UI-решений. Текущий binary использует
+task-first shell `Tasks / Architecture / Changes` с Guided Setup, New Task, outcome-first detail,
+Map/Documents/Diagrams/Model/Findings workbenches, explicit Changes selection, Ask drawer and
+runner presets; remaining visual QA is tracked in the ExecPlan rather than treated as a contract
+change.
 
 Письменные правила, продуктовая модель и state contracts авторитетнее PNG. Изображения в
 `docs/assets/ui-task-first-product/` фиксируют композицию, плотность и визуальный характер, но не
