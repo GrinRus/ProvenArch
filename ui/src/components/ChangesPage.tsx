@@ -49,7 +49,7 @@ export function ChangesPage({
   const pageAction = readOnlyWorkspace
     ? <span className="status info" data-testid="changes-read-only-badge">Read-only workspace</span>
     : !selectedRunID
-      ? <Button data-testid="stage-publish" onClick={() => onViewChange("publish")}>Review publication gate</Button>
+      ? <Button data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>Review publication gate</Button>
       : !canPublish
         ? <Button data-testid="changes-open-run-studio" onClick={() => onOpenRunStudio(selectedRunID)}>Open Run Studio</Button>
         : <Button tone="primary" data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>{view === "publish" ? "Publication review" : "Continue to publish"}</Button>;
