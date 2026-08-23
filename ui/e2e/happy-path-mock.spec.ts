@@ -399,14 +399,19 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
 
   await page.goto("/tasks");
   await expect(page.getByTestId("task-route-inbox")).toBeVisible();
+  await expect(page.locator("details.task-filters-advanced")).not.toHaveAttribute("open");
+  await expect(page.locator("details.task-empty-groups")).not.toHaveAttribute("open");
   await page.getByTestId("task-inbox-new").click();
   await expect(page.getByTestId("task-composer")).toBeVisible();
+  await expect(page.locator('[data-route-heading="true"]')).toBeFocused();
   await page.getByTestId("task-title").fill("Map checkout architecture");
   await page.getByTestId("task-goal").fill("Describe the checkout service and its order persistence boundary.");
   await page.getByTestId("task-create-submit").click();
   await expect(page.getByTestId("task-route-detail")).toBeVisible();
   await expect(page.getByTestId("task-outcome")).toContainText("Initial architecture baseline is ready for review.");
   await expect(page.getByTestId("task-outcome")).toContainText(initRunID);
+  await expect(page.getByTestId("task-outcome")).toContainText("Unavailable");
+  await expect(page.getByTestId("task-outcome")).not.toContainText("0 added · 0 changed · 0 removed");
   await page.getByTestId("task-open-architecture").click();
   await expect(page.getByTestId("knowledge-panel")).toBeVisible();
   await expect(page.getByTestId("knowledge-panel")).toContainText(initRunID);
@@ -425,6 +430,7 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await page.goto("/knowledge?view=documents&source=current");
   await expect(page.getByTestId("architecture-documents")).toBeVisible();
   await expect(page.getByRole("region", { name: "Architecture document reader" })).toContainText("Architecture overview");
+  await expect(page.getByRole("button", { name: /reports\/as-is\/overview\.md/ }).first()).toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: "Diagrams", exact: true }).click();
   await expect(page.getByTestId("architecture-diagrams")).toBeVisible();
   await captureEvidenceScreenshot(page, "happy-path-architecture.png");
@@ -450,4 +456,19 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await expectNoCriticalAxeViolations(page);
   expect(consoleErrors).toEqual([]);
   await captureEvidenceScreenshot(page, "happy-path-publish.png");
+
+  await page.goto("/settings");
+  await expect(page.getByTestId("settings-page")).toBeVisible();
+  await expect(page.locator("details.settings-runtime-advanced")).not.toHaveAttribute("open");
+  await expectNoHorizontalOverflow(page);
+  await expectNoCriticalAxeViolations(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-row-task-happy-checkout")).toBeVisible();
+  const mobileTask = await page.getByTestId("task-row-task-happy-checkout").boundingBox();
+  expect(mobileTask?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(700);
+  await expect(page.locator("details.task-filters-advanced")).not.toHaveAttribute("open");
+  await expectNoHorizontalOverflow(page);
+  await expectNoCriticalAxeViolations(page);
 });

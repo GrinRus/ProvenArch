@@ -50,7 +50,6 @@ import { ReviewEvidenceWorkbench } from "../features/review/ReviewEvidenceWorkbe
 import {
   buildAnalysisShardRows,
   buildAnalysisStepTimeline,
-  capitalize,
   formatArtifactPairRefs,
   type AnalysisShardRow,
   type AnalysisStep,
@@ -1216,7 +1215,7 @@ export function ReviewStagePanel({
       <section className="panel stage-panel" data-testid="results-coverage-panel">
         <div className="stage-header">
           <div>
-            <h1>{routeView === "overview" ? "Review" : capitalize(routeView)}</h1>
+            <p className="eyebrow">Review workbench</p>
             <p className="hint">{reviewRouteDescription(routeView)}</p>
           </div>
           <StatusBadge tone={nonDiagramArtifacts.length + diagramArtifacts.length > 0 ? "ok" : "info"}>
@@ -1237,6 +1236,7 @@ export function ReviewStagePanel({
             </button>
           </section>
         ) : null}
+        {routeView === "overview" && reviewSummary?.review ? <ChangesReviewBrief review={reviewSummary.review} /> : null}
         <ReviewEvidenceWorkbench
           routeView={routeView}
           coverageSummary={coverageSummary}
@@ -1267,6 +1267,17 @@ export function ReviewStagePanel({
       </section>
     </div>
   );
+}
+
+function ChangesReviewBrief({ review }: { review: NonNullable<RunReviewSummaryResponse["review"]> }) {
+  const comparison = review.semantic_changes;
+  const changeCount = Object.values(comparison.categories).reduce((total, category) => total + category.added.length + category.changed.length + category.removed.length, 0);
+  const documentCount = review.summary.documents_added + review.summary.documents_changed + review.summary.documents_removed;
+  return <section className="changes-review-brief" data-testid="semantic-changes" aria-label="Selected change set summary">
+    <div className="changes-review-brief-heading"><div><p className="eyebrow">{review.review_kind === "initial" ? "Run-pinned initial review" : "Run-pinned architecture update"}</p><h2>{review.review_kind === "initial" ? "Initial architecture review" : "Architecture update review"}</h2><p className="hint">Validator-approved promotion is complete. This workbench is the human Git review surface.</p></div><span className={`status ${comparison.available ? "ok" : "info"}`}>{comparison.available ? "Semantic delta" : "Initial snapshot"}</span></div>
+    <div className="changes-review-brief-metrics" data-testid="run-pinned-review-summary"><div><strong>{changeCount}</strong><span>semantic changes</span></div><div><strong>{documentCount}</strong><span>document changes</span></div><div><strong>{review.summary.findings}</strong><span>findings</span></div><div><strong>{review.summary.gaps}</strong><span>coverage gaps</span></div><div><strong>{review.runtime.mode || "Unknown"}</strong><span>runner mode</span></div></div>
+    <div className="changes-review-brief-grid"><section><h3>Change sets</h3>{comparison.available ? <ul>{(["entities", "edges", "findings", "gaps"] as const).map((category) => <li key={category}><strong>{category}</strong><span>{comparison.categories[category].added.length} added · {comparison.categories[category].changed.length} changed · {comparison.categories[category].removed.length} removed</span></li>)}</ul> : <p className="hint">This first snapshot establishes the baseline for future refresh comparisons.</p>}</section><section><h3>Review notes</h3>{review.findings.length + review.questions.length + review.gaps.length === 0 ? <p className="status ok">No open review notes.</p> : <ul>{review.findings.slice(0, 3).map((finding) => <li key={finding.id}><strong>{finding.title}</strong><span>{finding.severity}</span></li>)}{review.questions.slice(0, 3).map((question) => <li key={question.id}><strong>{question.text}</strong><span>{question.priority || "open"}</span></li>)}{review.gaps.slice(0, 3).map((gap) => <li key={gap}><strong>{gap}</strong><span>coverage gap</span></li>)}</ul>}</section></div>
+  </section>;
 }
 
 export function ProposalsStagePanel({

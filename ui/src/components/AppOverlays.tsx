@@ -9,33 +9,38 @@ type GitConfirmation = {
   diff: GitDiffResponse;
 };
 
+type GitConfirmationContext = {
+  taskId?: string;
+  attemptId?: string;
+  runId?: string;
+  commitMessage?: string;
+  openQuestions?: string;
+  evidenceIdentity?: "demo" | "live";
+};
+
 type AppOverlaysProps = {
   askOpen: boolean;
   gitConfirmation: GitConfirmation | null;
-  briefSkipConfirmationOpen: boolean;
   busy: boolean;
   onCloseAsk: () => void;
   onOpenAskCitation: (path: string) => void;
   onProposalCreated: (proposal: QAProposalDraftResponse) => void;
   onCancelGitAction: () => void;
   onConfirmGitAction: () => void;
-  onCancelBriefSkip: () => void;
-  onConfirmBriefSkip: () => void;
+  gitConfirmationContext?: GitConfirmationContext;
 };
 
 /** Global dialogs kept outside the route renderer so page composition stays task-focused. */
 export function AppOverlays({
   askOpen,
   gitConfirmation,
-  briefSkipConfirmationOpen,
   busy,
   onCloseAsk,
   onOpenAskCitation,
   onProposalCreated,
   onCancelGitAction,
   onConfirmGitAction,
-  onCancelBriefSkip,
-  onConfirmBriefSkip,
+  gitConfirmationContext,
 }: AppOverlaysProps) {
   const askInvokerRef = useRef<HTMLElement | null>(null);
   const askCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -64,7 +69,7 @@ export function AppOverlays({
   return (
     <>
       {askOpen ? <aside className="ask-drawer" role="dialog" aria-modal="false" aria-label="Ask current workspace">
-        <header><div><p className="eyebrow">Workspace Q&A</p><h2>Ask current workspace</h2><p>Read-only Q&amp;A. Answers cite the promoted workspace and never change Change Review or Publish acceptance.</p></div><button ref={askCloseRef} type="button" onClick={onCloseAsk} aria-label="Close Ask">Close</button></header>
+        <header><div><p className="eyebrow">Workspace Q&A</p><h2>Ask current workspace</h2><p>Read-only Q&amp;A. Answers cite the promoted workspace and never change the selected Task review or Publish acceptance.</p></div><button ref={askCloseRef} type="button" onClick={onCloseAsk} aria-label="Close Ask">Close</button></header>
         <AskStagePanel onOpenArtifact={onOpenAskCitation} onProposalCreated={onProposalCreated} />
       </aside> : null}
 
@@ -77,24 +82,14 @@ export function AppOverlays({
         onCancel={onCancelGitAction}
         onConfirm={onConfirmGitAction}
       >
-        {gitConfirmation ? <GitConfirmationInventory diff={gitConfirmation.diff} /> : null}
+        {gitConfirmation ? <GitConfirmationInventory diff={gitConfirmation.diff} context={gitConfirmationContext} /> : null}
       </ModalDialog>
-
-      <ModalDialog
-        open={briefSkipConfirmationOpen}
-        title="Start without a saved analysis brief?"
-        description="The run can proceed, but missing project name and scope usually reduces evidence quality and actionability."
-        confirmLabel="Start with quality warning"
-        busy={busy}
-        onCancel={onCancelBriefSkip}
-        onConfirm={onConfirmBriefSkip}
-      />
 
     </>
   );
 }
 
-function GitConfirmationInventory({ diff }: { diff: GitDiffResponse }) {
+function GitConfirmationInventory({ diff, context }: { diff: GitDiffResponse; context?: GitConfirmationContext }) {
   const changedFiles = diff.files.length;
   const changedFolders = diff.folders.length;
   const additions = diff.files.reduce((total, file) => total + file.additions, 0);
@@ -107,6 +102,17 @@ function GitConfirmationInventory({ diff }: { diff: GitDiffResponse }) {
             <strong>{changedFiles} changed file{changedFiles === 1 ? "" : "s"} across {changedFolders} folder{changedFolders === 1 ? "" : "s"}</strong>
             <span>{additions} additions · {deletions} deletions · complete workspace scope</span>
           </div>
+          <section className="git-confirmation-decision" aria-label="Publication decision summary">
+            <p className="eyebrow">Decision summary</p>
+            <dl className="compact-defs">
+              <div><dt>Task</dt><dd>{context?.taskId || "Unpinned workspace publication"}</dd></div>
+              <div><dt>Attempt</dt><dd>{context?.attemptId || "Not linked"}</dd></div>
+              <div><dt>Reviewed run</dt><dd>{context?.runId || diff.run_id || "Not pinned"}</dd></div>
+              <div><dt>Evidence</dt><dd>{context?.evidenceIdentity === "demo" ? "Demo / deterministic" : "Live or local runtime"}</dd></div>
+              <div><dt>Commit message</dt><dd>{context?.commitMessage || "Not specified"}</dd></div>
+              <div><dt>Open questions</dt><dd>{countOpenQuestions(context?.openQuestions)} unresolved</dd></div>
+            </dl>
+          </section>
           <ul className="git-confirmation-folders">
             {diff.folders.map((folder) => <li key={folder.folder}><strong>{folder.folder}</strong><span>{folder.files} file{folder.files === 1 ? "" : "s"} · +{folder.additions} / −{folder.deletions}</span></li>)}
           </ul>
@@ -134,4 +140,8 @@ function GitConfirmationInventory({ diff }: { diff: GitDiffResponse }) {
       )}
     </div>
   );
+}
+
+function countOpenQuestions(value?: string): number {
+  return (value ?? "").split("\n").filter((line) => /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line)).length;
 }

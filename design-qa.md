@@ -426,3 +426,66 @@ Verification after Pass 5:
   is clean.
 
 final result: passed
+
+### Pass 6 — fresh priority closure implementation
+
+Date: 2026-08-23
+Layer: implementation / responsive accessibility verification
+Scope: close the actionable findings from the fresh task-first audit after Pass 5.
+
+Implemented:
+
+- Changes keeps one route-level h1 and one review workbench; the inner review surface is
+  labelled as a workbench and no longer presents a duplicate page title.
+- Architecture Documents resolve the authoritative exports.home_path, semantic Architecture
+  Home name or canonical reports/as-is/overview.md before alphabetical fallback.
+- Task outcomes gate semantic counters on an available exact comparison and use explicit
+  Unavailable/produced/coverage wording when the comparison is absent; no zero delta is implied.
+- Route transitions reset scroll and focus the new route heading; the heading is programmatically
+  focusable without changing the keyboard order.
+- Inbox keeps Search/Lifecycle visible, collapses Advanced filters and groups empty lifecycle states
+  behind one disclosure; Settings keeps Advanced runtime controls closed until requested.
+
+Verification:
+
+- UI typecheck passed; focused corrective suites passed (30 tests), full UI suite passed (47 files,
+  258 tests), and deterministic mock E2E passed 8/8.
+- The happy-path mock now asserts route-heading focus, truthful initial outcome counters,
+  Architecture Home selection, closed Inbox/Settings disclosures, mobile first-useful-task position,
+  no horizontal overflow and critical axe cleanliness.
+- Desktop and mobile checks passed with no console errors, no global horizontal overflow, and no
+  critical axe violations on the changed surfaces; source repositories remained untouched.
+
+No actionable P0/P1/P2 design QA finding remains for the current MVP scope.
+
+final result: passed
+
+### Pass 7 — task-first audit remediation
+
+Date: 2026-08-23
+Layer: implementation / final deterministic verification
+Scope: close the remaining P1/P2 findings from the latest task-first reference audit.
+
+The corrective slice now keeps Guided Setup as a setup-to-Task handoff (no implicit analysis CTA),
+makes New Task goal-first with an above-the-fold Start Task action, defaults Architecture to the
+semantic Map, groups document navigation around Architecture Home, and gives Findings a selected
+detail plus ordered evidence chain with explicit unavailable states. Changes presents one compact
+selected change-set workbench before the existing evidence surface, while Publish confirmation and
+post-mutation refresh use the same authoritative full-workspace Git inventory. Settings runner
+presets are selectable and saveable; advanced runtime controls remain collapsed and mobile controls
+retain 44px touch targets.
+
+Verification:
+
+- Focused route, Architecture, Changes, Task and App suites: 128 tests passed.
+- Full UI suite: 47 files / 258 tests passed.
+- Deterministic mock E2E: 8/8 scenarios passed, including desktop/mobile overflow and critical axe
+  checks on the happy path.
+- Full DoD passed with the pinned Node.js 22.21.1 candidate at
+  `/tmp/provenarch-node-22.21.1-bin`: `make contracts`, `make test` (Go, Python 274 tests, UI 47
+  files/258 tests), `make lint` and `make build`; `diff -qr --exclude=README.md ui/dist
+  internal/api/ui_dist` is clean and source repository fixtures are unchanged.
+
+No actionable P0/P1/P2 design QA finding remains for the current MVP scope.
+
+final result: passed

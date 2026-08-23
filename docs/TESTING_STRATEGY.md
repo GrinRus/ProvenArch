@@ -377,8 +377,10 @@ Release workflow hardening:
 - Design-QA closure coverage additionally keeps the task-first shell truthful across the selected
   Inbox preview, Architecture Map/Documents/Findings workbenches, explicit Changes package choice,
   contextual Ask drawer and preset-first Settings. The current local verification baseline is the
-  full UI suite plus typecheck; the Q10 matrix still requires the canonical deterministic DoD and
-  embedded asset parity before closure is marked passed.
+  full UI suite plus typecheck, mock E2E 8/8, desktop/mobile overflow and critical axe checks,
+  route-heading focus checks, Architecture Home selection, truthful unavailable outcomes and
+  collapsed Inbox/Settings disclosures. The canonical deterministic DoD and embedded asset parity
+  are required evidence for Q10 and passed on 2026-08-23.
 
 ### Semantic tests
 - duplicate repo names

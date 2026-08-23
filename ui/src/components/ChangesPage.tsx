@@ -51,30 +51,33 @@ export function ChangesPage({
     : !selectedRunID
       ? <Button data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>Review publication gate</Button>
       : !canPublish
-        ? <Button data-testid="changes-open-run-studio" onClick={() => onOpenRunStudio(selectedRunID)}>Open Run Studio</Button>
+        ? <Button data-testid="changes-open-run-studio" onClick={() => onOpenRunStudio(selectedRunID)}>Open recovery</Button>
         : <Button tone="primary" data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>{view === "publish" ? "Publication review" : "Continue to publish"}</Button>;
   return (
     <section className="changes-page" data-testid="changes-page">
       <PageHeader
         title={readOnlyWorkspace ? "Current workspace evidence" : !selectedRunReviewable && selectedRunID ? "Run needs recovery" : effectiveRunReview?.review_kind === "initial" ? "Review initial architecture" : "Review architecture update"}
-        purpose={readOnlyWorkspace ? "Inspect the current workspace without mixing it with a historical run snapshot." : "Review the selected run snapshot, confirm semantic evidence, then publish the complete workspace to Git."}
-        source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? `Run snapshot · ${selectedRunID}` : "Choose a review package"}
+        purpose={readOnlyWorkspace ? "Inspect the current workspace without mixing it with a historical run snapshot." : "Review the selected Task snapshot, confirm semantic evidence, then publish the complete workspace to Git."}
+        source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? "Selected Task snapshot" : "Choose a Task to review"}
         action={pageAction}
       />
       {taskId ? <aside className="task-changes-context" data-testid="task-changes-context" aria-label="Task Changes context"><div><p className="eyebrow">Task context</p><strong>Changes for the selected Task</strong><p><code>{taskId}</code> · Attempt <code>{attemptId || "unavailable"}</code> · exact selected run identity only</p><span className="hint">No latest-run fallback; Current workspace evidence and historical snapshot publication stay distinct.</span></div>{onOpenTask ? <button type="button" className="ui-button tone-neutral" onClick={() => onOpenTask(taskId)}>Back to Task</button> : null}</aside> : null}
       <RouteTabs
-        label="Change Review views"
+        label="Changes views"
         value={view}
         items={changeViews.map((id) => ({ id, label: label(id), testId: `stage-${id === "overview" ? "review" : id}` }))}
         onChange={onViewChange}
       />
       {!readOnlyWorkspace && selectedRunBlocked && (view === "overview" || view === "findings") ? <UnavailableRunReview /> : null}
-      {!readOnlyWorkspace && !selectedRunBlocked && (view === "overview" || view === "findings") ? <SemanticArchitectureChanges comparison={architectureComparison} comparisonMismatch={architectureComparisonMismatch} runReview={effectiveRunReview} selectedRunID={selectedRunID} focus={view === "findings" ? "review" : "all"} /> : null}
-      {!readOnlyWorkspace && view === "overview" ? (
+      {!readOnlyWorkspace && !selectedRunBlocked && view === "findings" ? <SemanticArchitectureChanges comparison={architectureComparison} comparisonMismatch={architectureComparisonMismatch} runReview={effectiveRunReview} selectedRunID={selectedRunID} focus="review" /> : null}
+      {!readOnlyWorkspace && view === "overview" && !selectedRunID ? (
         <aside className="panel review-packages" data-testid="review-packages">
-          <h2>Review packages</h2>
-          {reviewCandidates.length === 0 ? <p className="empty-state">No analysis history is available.</p> : <ul className="compact-list">{reviewCandidates.map((run) => {
-            return <li key={run.run_id}><div><strong>{run.pipeline} · {run.run_id}</strong><span>{run.status}</span><span>{refreshLabel(run)}</span><span>Publication: Unknown</span></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id)}>Change Review</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open Run Studio</button>}</li>;
+          <h2>Tasks awaiting review</h2>
+          <p className="hint">Choose a completed architecture Task to inspect its evidence and publication decision.</p>
+          {reviewCandidates.length === 0 ? <p className="empty-state">No completed Tasks are available.</p> : <ul className="compact-list">{reviewCandidates.map((run) => {
+            const taskLabel = run.pipeline === "refresh" ? "Refresh architecture" : "Initial architecture";
+            const statusLabel = run.status === "succeeded" ? "Ready for review" : run.status === "running" ? "In progress" : run.status === "queued" ? "Queued" : "Needs recovery";
+            return <li key={run.run_id}><div><strong>{taskLabel}</strong><span>{statusLabel}</span><span>{refreshLabel(run)}</span><span>Publication: Unknown</span><details><summary>Technical identity</summary><code>{run.run_id}</code></details></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id)}>Review architecture</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open recovery</button>}</li>;
           })}</ul>}
         </aside>
       ) : null}
@@ -84,11 +87,11 @@ export function ChangesPage({
 }
 
 function UnavailableRunReview() {
-  return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Selected run</p><h2>Change Review is unavailable</h2><p>This run did not produce a successful authoritative snapshot. Open Run Studio to inspect recovery details or choose a successful indexed run.</p></div><span className="status blocked">Run Studio</span></section>;
+  return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Selected Task attempt</p><h2>Recovery is required before review</h2><p>This attempt did not produce a successful authoritative snapshot. Open recovery details or choose a successful indexed Task.</p></div><span className="status blocked">Recovery</span></section>;
 }
 
 function SemanticArchitectureChanges({ comparison, comparisonMismatch, runReview, selectedRunID, focus }: { comparison?: ArchitectureComparison; comparisonMismatch: boolean; runReview?: RunReviewContract; selectedRunID: string | null; focus: "all" | "review" }) {
-  if (runReview && (!selectedRunID || runReview.source_run_id !== selectedRunID)) return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Selected run review</p><h2>Review unavailable for selected run</h2><p>This review package has no matching selected run, so no semantic or document delta is shown here.</p></div><span className="status blocked">Review snapshot</span></section>;
+  if (runReview && (!selectedRunID || runReview.source_run_id !== selectedRunID)) return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Selected Task review</p><h2>Review unavailable for selected Task</h2><p>This snapshot does not match the selected Task attempt, so no semantic or document delta is shown here.</p></div><span className="status blocked">Review snapshot</span></section>;
   if (runReview) return <RunPinnedReview review={runReview} focus={focus} />;
   if (comparisonMismatch) return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Selected run comparison</p><h2>Comparison unavailable for selected run</h2><p>The promoted architecture comparison belongs to another run, so no current delta is shown here.</p></div><span className="status blocked">Review snapshot</span></section>;
   if (!comparison?.available) return <section className="panel semantic-changes" data-testid="semantic-changes"><div><p className="eyebrow">Promoted baseline comparison</p><h2>Semantic comparison is not available yet</h2><p>{comparison?.reason || "Run and promote a second architecture generation to establish a baseline."}</p></div></section>;

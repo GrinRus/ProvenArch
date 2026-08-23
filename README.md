@@ -22,10 +22,10 @@ the same Git workflow you use for code.
 > [release notes](https://github.com/GrinRus/ProvenArch/releases) for the exact contents of a
 > published binary.
 
-![Planned task-first product UI reference](docs/assets/ui-task-first-product/02-task-inbox.png)
+![Task-first product UI reference](docs/assets/ui-task-first-product/02-task-inbox.png)
 
-_Planned task-first product direction with representative data; this is not the current binary or a
-live analysis result. See the [target UX specification](docs/UI_TASK_FIRST_PRODUCT_DESIGN.md)._
+_Task-first product UI reference with representative data; live results and workspace state are
+authoritative at runtime. See the [target UX specification](docs/UI_TASK_FIRST_PRODUCT_DESIGN.md).
 
 ## Why ProvenArch
 

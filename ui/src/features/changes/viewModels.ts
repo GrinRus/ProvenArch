@@ -11,7 +11,7 @@ export type ChangesRouteModel =
 export function buildChangesRouteModel(view: ChangesView, source: RouteSource): ChangesRouteModel {
   switch (view) {
     case "overview":
-      return { kind: view, source, title: "Review overview", purpose: "Run identity, coverage and review readiness." };
+      return { kind: view, source, title: "Review overview", purpose: "Task snapshot, semantic delta and publication decision." };
     case "evidence":
       return { kind: view, source, title: "Evidence", purpose: "Selected immutable evidence and artifact navigation." };
     case "findings":

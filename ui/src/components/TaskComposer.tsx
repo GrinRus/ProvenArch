@@ -36,7 +36,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
   const [admissionIdempotencyKey] = useState(() => newIdempotencyKey());
   const scope = useMemo(() => taskScope(repos), [repos]);
   const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode, runtimeProvider: normalizedProvider });
-  const canSubmit = title.trim().length > 0 && goal.trim().length > 0 && readiness.ok && !busy;
+  const canSubmit = goal.trim().length > 0 && readiness.ok && !busy;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,7 +45,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
     setError("");
     try {
       const task = await createTask({
-        title: title.trim(),
+        title: title.trim() || deriveTaskTitle(goal),
         goal: goal.trim(),
         context: context.trim() || undefined,
         scope,
@@ -74,20 +74,20 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
 
   return (
     <section className="panel stage-panel task-composer" data-testid="task-composer">
-      <PageHeader title="New Task" purpose="Describe the question, confirm its repository scope and choose how the analysis should run." state={<span className={`status ${readiness.ok ? "ok" : "warn"}`}>{readiness.label}</span>} />
+      <PageHeader title="New Task" purpose="Start with the architecture question. Scope and runner defaults are captured with the Task." state={<span className={`status ${readiness.ok ? "ok" : "warn"}`}>{readiness.label}</span>} action={<Button tone="primary" type="submit" form="task-composer-form" data-testid="task-create-header" disabled={!canSubmit}>{busy ? "Starting…" : "Start Task"}</Button>} />
       {!workspaceReady ? <p className="status warn" role="status" data-testid="task-composer-workspace-blocked">Workspace and runtime readiness are unavailable. No Task will be created.</p> : null}
       {error ? <p className="status err" role="alert" data-testid="task-composer-error">{error}</p> : null}
       <div className="task-composer-layout">
       <div className="task-composer-form">
-      <form onSubmit={handleSubmit}>
+      <form id="task-composer-form" onSubmit={handleSubmit}>
         <div className="settings-form-grid">
           <div className="field">
-            <label htmlFor="task-title">Task title</label>
-            <input id="task-title" data-testid="task-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Map payment authorization" required />
+            <label htmlFor="task-goal">Goal</label>
+            <textarea className="task-goal-primary" id="task-goal" data-testid="task-goal" rows={5} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What architecture question should ProvenArch answer?" required />
           </div>
           <div className="field">
-            <label htmlFor="task-goal">Goal</label>
-            <textarea id="task-goal" data-testid="task-goal" rows={4} value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What do you want to understand?" required />
+            <label htmlFor="task-title">Task title <span className="field-hint">Optional label</span></label>
+            <input id="task-title" data-testid="task-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Map payment authorization" />
           </div>
         </div>
         <div className="field">
@@ -117,7 +117,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
           <p className={`status ${readiness.ok ? "ok" : "warn"}`} role="status" data-testid="task-runner-readiness">{readiness.detail}</p>
         </section>
         <div className="actions">
-          <Button tone="primary" type="submit" data-testid="task-create-submit" disabled={!canSubmit}>{busy ? "Creating Task…" : "Create Task"}</Button>
+          <Button tone="primary" type="submit" data-testid="task-create-submit" disabled={!canSubmit}>{busy ? "Starting Task…" : "Start Task"}</Button>
           {createdTaskId && error ? <Button type="button" onClick={() => onCreated(createdTaskId)} data-testid="task-open-created">Open created Task</Button> : null}
         </div>
       </form>
@@ -144,6 +144,11 @@ function taskScope(repos: GuidedRepo[]): TaskScope {
       .map((repo) => ({ name: repo.name.trim(), paths: repo.analysis_include.split(/[\n,]/u).map((path) => path.trim()).filter(Boolean) }))
       .filter((repo) => repo.name.length > 0),
   };
+}
+
+function deriveTaskTitle(goal: string): string {
+  const normalized = goal.trim().replace(/\s+/gu, " ");
+  return normalized.length > 72 ? `${normalized.slice(0, 69).trimEnd()}…` : normalized || "Architecture question";
 }
 
 function runnerReadiness(input: { workspaceReady: boolean; scope: TaskScope; mode: RunnerMode; provider: RunnerProvider; runtimeMode: string; runtimeProvider: RunnerProvider }): { ok: boolean; label: string; detail: string } {

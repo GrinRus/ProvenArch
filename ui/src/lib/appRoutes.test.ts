@@ -13,7 +13,7 @@ describe("application route codec", () => {
   });
 
   it("defaults an unknown console path to the authoritative Task Inbox", () => {
-    expect(parseAppRoute(location("/"), true)).toMatchObject({ destination: "tasks", taskView: "inbox" });
+    expect(parseAppRoute(location("/"), true)).toMatchObject({ destination: "tasks", taskView: "inbox", invalid: [] });
     expect(parseAppRoute(location("/unknown-path"), true)).toMatchObject({ destination: "tasks", taskView: "inbox" });
   });
 
@@ -31,9 +31,9 @@ describe("application route codec", () => {
     const changes = parseAppRoute(location("/changes?task=task-1&attempt=attempt-1&run=run-1&view=evidence&source=snapshot"), true);
     expect(changes).toMatchObject({ destination: "changes", taskId: "task-1", attemptId: "attempt-1", runId: "run-1" });
     expect(formatAppRoute(changes)).toBe("/changes?task=task-1&attempt=attempt-1&run=run-1&view=evidence&source=snapshot&mode=rendered");
-    const architecture = parseAppRoute(location("/architecture?task=task-1&view=documents&source=current"), true);
+    const architecture = parseAppRoute(location("/architecture?task=task-1&view=map&source=current"), true);
     expect(architecture).toMatchObject({ destination: "knowledge", taskId: "task-1" });
-    expect(formatAppRoute(architecture)).toBe("/architecture?view=documents&source=current&task=task-1");
+    expect(formatAppRoute(architecture)).toBe("/architecture?view=map&source=current&task=task-1");
   });
 
   it("drops unsafe Task context instead of treating it as an authority", () => {
@@ -99,10 +99,12 @@ describe("application route codec", () => {
     expect(destinationForStage("publish")).toBe("changes");
   });
 
-  it("opens Architecture in Documents while preserving legacy map aliases", () => {
-    const documents = parseAppRoute(location("/architecture"), true);
+  it("opens Architecture in the semantic Map while preserving explicit document routes", () => {
+    const map = parseAppRoute(location("/architecture"), true);
+    expect(map).toMatchObject({ destination: "knowledge", knowledgeView: "map" });
+    expect(formatAppRoute(map)).toBe("/architecture?view=map&source=current");
+    const documents = parseAppRoute(location("/architecture?view=documents"), true);
     expect(documents).toMatchObject({ destination: "knowledge", knowledgeView: "documents" });
-    expect(formatAppRoute(documents)).toBe("/architecture?view=documents&source=current");
     expect(parseAppRoute(location("/architecture/map"), true)).toMatchObject({ destination: "knowledge", knowledgeView: "map" });
   });
 

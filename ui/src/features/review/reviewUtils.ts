@@ -10,7 +10,7 @@ export type ReviewTrustStatus = {
 
 export function reviewRouteDescription(view: "overview" | "evidence" | "findings" | "diff"): string {
   switch (view) {
-    case "overview": return "Validate run identity, coverage and review readiness before publication.";
+    case "overview": return "Review the selected Task snapshot, semantic delta and publication decision.";
     case "evidence": return "Inspect immutable selected-run evidence and its exact artifact identity.";
     case "findings": return "Resolve findings, coverage questions and decision blockers.";
     case "diff": return "Inspect the server-authoritative current workspace Git diff.";

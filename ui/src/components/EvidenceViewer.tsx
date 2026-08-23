@@ -77,6 +77,7 @@ export function EvidenceViewer({ path, content, runId, sourceMode, demo, provena
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                h1: ({ children }) => <h2>{children}</h2>,
                 a: ({ href, children }) => {
                   const target = href ?? "";
                   if (isLocalEvidenceLink(target)) {

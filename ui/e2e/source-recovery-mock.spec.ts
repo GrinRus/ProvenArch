@@ -274,7 +274,7 @@ test("source recovery mock: validation blockers stay actionable and readable", a
 
   await page.getByTestId("stage-readiness").click();
   await expect(page.getByTestId("stage-readiness")).toHaveAttribute("aria-current", "page");
-  await expect(page.getByTestId("setup-run-first-btn")).toBeDisabled();
+  await expect(page.getByTestId("setup-create-task-btn")).toBeDisabled();
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("Workspace");
   await expect(page.getByTestId("readiness-summary-cards")).toContainText("blocked");
 

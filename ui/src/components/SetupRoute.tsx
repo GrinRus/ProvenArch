@@ -48,7 +48,6 @@ export type SetupRouteProps = {
   onSetupRuntimeProviderChange: (value: string) => void;
   onValidateWorkspace: () => void;
   onCheckDoctor: () => void;
-  onRunFirstAnalysis: () => void;
   runtimeSettingsPanel: ReactNode;
   artifactCount: number;
   workspaceHealthReport: WorkspaceHealthResponse | null;
@@ -79,9 +78,7 @@ export type SetupRouteProps = {
   onEditorSelectionChange: (path: string) => void;
   onEditorContentChange: (value: string) => void;
   onSaveEditor: () => void;
-  wizardContractReady: boolean;
   onCreateTask: () => void;
-  onStart: () => void;
 };
 
 export function SetupRoute({
@@ -115,7 +112,6 @@ export function SetupRoute({
   onSetupRuntimeProviderChange,
   onValidateWorkspace,
   onCheckDoctor,
-  onRunFirstAnalysis,
   runtimeSettingsPanel,
   artifactCount,
   workspaceHealthReport,
@@ -146,9 +142,7 @@ export function SetupRoute({
   onEditorSelectionChange,
   onEditorContentChange,
   onSaveEditor,
-  wizardContractReady,
   onCreateTask,
-  onStart,
 }: SetupRouteProps) {
   return (
     <GuidedSetupPage step={step} onStepChange={onStepChange}>
@@ -193,7 +187,7 @@ export function SetupRoute({
           onSetupRuntimeProviderChange={onSetupRuntimeProviderChange}
           onValidateWorkspace={onValidateWorkspace}
           onCheckDoctor={onCheckDoctor}
-          onRunFirstAnalysis={onRunFirstAnalysis}
+          onCreateTask={onCreateTask}
           runtimeSettingsPanel={runtimeSettingsPanel}
           artifactCount={artifactCount}
           workspaceHealthReport={workspaceHealthReport}
@@ -242,7 +236,7 @@ export function SetupRoute({
         />
       ) : null}
 
-      {step === "review" ? <GuidedSetupReview briefReady={wizardContractReady} workspaceReady={validateResult?.ok === true} busy={busy} repoCount={guidedRepos.length} docsImportsReady={Boolean(guidedDocsImportsPath)} runtimeLabel={setupRuntimeProvider ? `${setupRuntime} · ${setupRuntimeProvider}` : setupRuntime} readinessLabel={doctorResult?.ok === true ? "Ready" : doctorResult ? "Needs attention" : "Not checked"} onBack={() => onStepChange("runner")} onCreateTask={onCreateTask} onStart={onStart} /> : null}
+      {step === "review" ? <GuidedSetupReview workspaceReady={validateResult?.ok === true} busy={busy} repoCount={guidedRepos.length} docsImportsReady={Boolean(guidedDocsImportsPath)} runtimeLabel={setupRuntimeProvider ? `${setupRuntime} · ${setupRuntimeProvider}` : setupRuntime} readinessLabel={doctorResult?.ok === true ? "Ready" : doctorResult ? "Needs attention" : "Not checked"} onBack={() => onStepChange("runner")} onCreateTask={onCreateTask} /> : null}
     </GuidedSetupPage>
   );
 }

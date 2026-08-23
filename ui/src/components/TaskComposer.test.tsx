@@ -29,16 +29,16 @@ describe("TaskComposer", () => {
     const onCreated = vi.fn();
     render(<TaskComposer workspaceReady repos={repos} runtimeMode="fake" runtimeProvider="claude-code" onCreated={onCreated} />);
     expect(screen.getByTestId("task-runner-readiness")).toHaveTextContent("will snapshot fake / claude-code");
-    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Map payments" } });
+    fireEvent.change(screen.getByTestId("task-title"), { target: { value: "Map payments" } });
     fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Explain authorization" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+    fireEvent.click(screen.getByTestId("task-create-submit"));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("task-opaque"));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("blocks create when the selected runner differs from the admitted session", () => {
     render(<TaskComposer workspaceReady repos={repos} runtimeMode="fake" runtimeProvider="claude-code" onCreated={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Task" } });
+    fireEvent.change(screen.getByTestId("task-title"), { target: { value: "Task" } });
     fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
     fireEvent.change(screen.getByLabelText("Runtime mode"), { target: { value: "headless" } });
     expect(screen.getByTestId("task-runner-readiness")).toHaveTextContent("Current session is fake");
@@ -53,9 +53,9 @@ describe("TaskComposer", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onCreated = vi.fn();
     render(<TaskComposer workspaceReady repos={repos} runtimeMode="fake" runtimeProvider="claude-code" onCreated={onCreated} />);
-    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Task" } });
+    fireEvent.change(screen.getByTestId("task-title"), { target: { value: "Task" } });
     fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+    fireEvent.click(screen.getByTestId("task-create-submit"));
     expect(await screen.findByTestId("task-composer-error")).toHaveTextContent("Task created, but Attempt admission failed");
     fireEvent.click(screen.getByTestId("task-open-created"));
     expect(onCreated).toHaveBeenCalledWith("task-created");

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
@@ -7,7 +7,7 @@ import { StatusBadge } from "./ConsolePrimitives";
 import { LocalPathCombobox } from "./LocalPathCombobox";
 import { RepoAnalysisScopeFields } from "./RepoAnalysisScopeFields";
 
-type OnboardingStep = "workspace" | "sources" | "brief" | "runner" | "review";
+type OnboardingStep = "workspace" | "sources" | "runner" | "review";
 
 type OnboardingShellProps = {
   busy: boolean;
@@ -21,8 +21,6 @@ type OnboardingShellProps = {
   doctorResult: DoctorResponse | null;
   setupRuntime: string;
   setupRuntimeProvider: string;
-  briefReady?: boolean;
-  briefPanel?: ReactNode;
   firstRunStatus: string;
   onWorkspacePathChange: (value: string) => void;
   onCreateWorkspaceChange: (value: boolean) => void;
@@ -39,7 +37,7 @@ type OnboardingShellProps = {
   onSaveRuntime: () => void;
   onCheckDoctor: () => void;
   onEnterConsole: () => void;
-  onRunFirstAnalysis: () => void;
+  onCreateFirstTask: () => void;
 };
 
 export function OnboardingShell({
@@ -54,8 +52,6 @@ export function OnboardingShell({
   doctorResult,
   setupRuntime,
   setupRuntimeProvider,
-  briefReady = false,
-  briefPanel = null,
   firstRunStatus,
   onWorkspacePathChange,
   onCreateWorkspaceChange,
@@ -72,9 +68,9 @@ export function OnboardingShell({
   onSaveRuntime,
   onCheckDoctor,
   onEnterConsole,
-  onRunFirstAnalysis,
+  onCreateFirstTask,
 }: OnboardingShellProps) {
-  const [activeStep, setActiveStep] = useState<OnboardingStep>(() => initialOnboardingStep(status, validateResult, briefReady, doctorResult));
+  const [activeStep, setActiveStep] = useState<OnboardingStep>(() => initialOnboardingStep(status, validateResult, doctorResult));
   const workspaceReady = status?.workspace_selected ?? false;
   const recentWorkspaces = status?.recent_workspaces ?? [];
   const repoDiagnosticsByID = buildRepoDiagnostics(guidedRepos, validateResult);
@@ -93,7 +89,6 @@ export function OnboardingShell({
     sourcesReady,
     runtimeReady,
     localReady,
-    briefReady,
     canEnterConsole,
     canRunFirstAnalysis,
     workspacePath: status?.workspace ?? "",
@@ -130,12 +125,11 @@ export function OnboardingShell({
           <div>
             <p className="eyebrow">ProvenArch local console</p>
             <h1>Set up your architecture workspace</h1>
-            <p className="hint">Connect read-only repositories, describe the analysis, choose a runner and review everything before the first run.</p>
+            <p className="hint">Connect read-only repositories, define the first Task goal, choose a runner and review everything before creating the Task.</p>
           </div>
           <div className="onboarding-status-stack" aria-label="onboarding status">
             <StatusPill label="Workspace" ready={workspaceReady} />
             <StatusPill label="Repositories" ready={sourcesReady} />
-            <StatusPill label="Brief" ready={briefReady} />
             <StatusPill label="Runner" ready={runtimeReady} />
           </div>
         </div>
@@ -291,25 +285,12 @@ export function OnboardingShell({
                 {validateResult.ok ? "Sources validated." : "Sources need fixes."}
               </AsyncStatusMessage>
             ) : null}
-            {sourcesReady ? <button type="button" className="onboarding-continue" onClick={() => setActiveStep("brief")}>Continue to analysis brief</button> : null}
-          </section>
-
-          <section className="onboarding-card" data-testid="onboarding-brief-step" hidden={activeStep !== "brief"}>
-            <div className="card-heading">
-              <span className="step-index">3</span>
-              <div>
-                <h2>Analysis brief</h2>
-                <p className="hint">Describe the system, scope and quality priorities so the result is useful for architectural decisions.</p>
-              </div>
-            </div>
-            {briefPanel}
-            {!briefReady ? <p className="status warn">You can continue without a brief, but the first result may be less decision-ready.</p> : <p className="status ok">Analysis brief saved.</p>}
-            <button type="button" className="onboarding-continue" onClick={() => setActiveStep("runner")}>{briefReady ? "Continue to runner" : "Continue without brief"}</button>
+            {sourcesReady ? <button type="button" className="onboarding-continue" onClick={() => setActiveStep("runner")}>Continue to runner</button> : null}
           </section>
 
           <section className="onboarding-card" data-testid="onboarding-runner-step" hidden={activeStep !== "runner"}>
             <div className="card-heading">
-              <span className="step-index">4</span>
+              <span className="step-index">3</span>
               <div>
                 <h2>Runner</h2>
                 <p className="hint">Choose a deterministic walkthrough or explicitly opt in to live architecture analysis.</p>
@@ -357,7 +338,7 @@ export function OnboardingShell({
 
           <section className="onboarding-card onboarding-review-card" data-testid="onboarding-ready-step" hidden={activeStep !== "review"}>
             <div className="card-heading">
-              <span className="step-index">5</span>
+              <span className="step-index">4</span>
               <div>
                 <h2>Review & start</h2>
                 <p className="hint">Confirm what ProvenArch will read, where it will write and which runner is effective.</p>
@@ -366,7 +347,6 @@ export function OnboardingShell({
             <ul className="checklist">
               <li className={workspaceReady ? "is-ready" : ""}>Workspace selected</li>
               <li className={sourcesReady ? "is-ready" : ""}>Read-only repositories validated</li>
-              <li className={briefReady ? "is-ready" : ""}>{briefReady ? "Analysis brief saved" : "Analysis brief skipped — quality warning"}</li>
               <li className={runtimeReady ? "is-ready" : ""}>Runner selected</li>
               <li className={localReady ? "is-ready" : ""}>Local readiness checked</li>
             </ul>
@@ -382,25 +362,25 @@ export function OnboardingShell({
               </button>
               <button
                 type="button"
-                onClick={onRunFirstAnalysis}
+                onClick={onCreateFirstTask}
                 disabled={busy || !canRunFirstAnalysis}
                 title={!canRunFirstAnalysis ? firstAnalysisDisabledReason : undefined}
-                data-testid="onboarding-run-first-analysis"
+                data-testid="onboarding-create-first-task"
               >
-                Run first analysis
+                Create first Task
               </button>
             </div>
             {!canEnterConsole || !canRunFirstAnalysis ? (
               <div className="ready-action-hint" data-testid="onboarding-ready-action-hint">
                 {!canEnterConsole ? <p>Open console waits for: {openConsoleDisabledReason}</p> : null}
-                {!canRunFirstAnalysis ? <p>First analysis waits for: {firstAnalysisDisabledReason}</p> : null}
+                {!canRunFirstAnalysis ? <p>First Task waits for: {firstAnalysisDisabledReason}</p> : null}
               </div>
             ) : (
               <p className="status" data-testid="onboarding-ready-action-hint">
-                Ready to run the first analysis.
+                Ready to create the first Task.
               </p>
             )}
-            {canEnterConsole && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
+            {canEnterConsole && !localReady ? <p className="status warn">Check local readiness before creating the first Task.</p> : null}
             {firstRunStatus ? (
               <AsyncStatusMessage tone="progress" className="status">
                 {firstRunStatus}
@@ -473,10 +453,9 @@ function formatRecentWorkspaceTimestamp(value: string): string {
   return `last opened ${new Date(parsed).toISOString().replace("T", " ").replace(".000Z", " UTC")}`;
 }
 
-function initialOnboardingStep(status: OnboardingStatusResponse | null, validateResult: ValidateResponse | null, briefReady: boolean, doctorResult: DoctorResponse | null): OnboardingStep {
+function initialOnboardingStep(status: OnboardingStatusResponse | null, validateResult: ValidateResponse | null, doctorResult: DoctorResponse | null): OnboardingStep {
   if (!status?.workspace_selected) return "workspace";
   if (validateResult?.ok !== true) return "sources";
-  if (!briefReady) return "brief";
   if (status.runtime.selected !== true || doctorResult?.ok !== true) return "runner";
   return "review";
 }
@@ -606,7 +585,7 @@ function OnboardingRunnerRecovery({
   const isFailing = runtimeProviderCheck?.status === "fail";
   const guidance = providerReadinessGuidance(setupRuntimeProvider, runtimeProviderCheck?.message || runtimeProviderCheck?.suggestion);
   const summary = isPassing
-    ? "Headless provider is ready for first analysis after the other setup gates pass."
+    ? "Headless provider is ready for the first Task after the other setup gates pass."
     : isFailing
       ? "Fix the provider command, authentication or quota before running the first live analysis."
       : "Headless provider is selected. Check the command and auth/quota before the first live analysis.";
@@ -615,7 +594,7 @@ function OnboardingRunnerRecovery({
     <div className="onboarding-runner-recovery" data-testid="onboarding-runner-recovery">
       <div className="section-heading-row">
         <div>
-          <strong>Provider setup for first analysis</strong>
+          <strong>Provider setup for the first Task</strong>
           <p className="hint">{summary}</p>
         </div>
         <StatusBadge tone={isPassing ? "ok" : isFailing ? "error" : "warn"}>{isPassing ? "provider ready" : "provider check"}</StatusBadge>
@@ -664,7 +643,7 @@ function OnboardingRunnerRecovery({
       </dl>
       <ul className="analysis-next-actions">
         <li>Use fake baseline for a deterministic first walkthrough when live provider setup is not ready.</li>
-        {(isPassing ? [`For headless, keep ${providerCommand} available to the ACP service before live analysis.`, "Run first analysis after the remaining setup gates pass."] : guidance.nextActions).map((action) => (
+        {(isPassing ? [`For headless, keep ${providerCommand} available to the ACP service before live analysis.`, "Create the first Task after the remaining setup gates pass."] : guidance.nextActions).map((action) => (
           <li key={action}>{action}</li>
         ))}
       </ul>
@@ -744,7 +723,6 @@ function buildOnboardingProgressSummary({
   sourcesReady,
   runtimeReady,
   localReady,
-  briefReady,
   canEnterConsole,
   canRunFirstAnalysis,
   workspacePath,
@@ -759,7 +737,6 @@ function buildOnboardingProgressSummary({
   sourcesReady: boolean;
   runtimeReady: boolean;
   localReady: boolean;
-  briefReady: boolean;
   canEnterConsole: boolean;
   canRunFirstAnalysis: boolean;
   workspacePath: string;
@@ -793,13 +770,6 @@ function buildOnboardingProgressSummary({
             : "Available after workspace selection.",
     },
     {
-      id: "brief",
-      label: "Analysis brief",
-      ready: briefReady,
-      available: sourcesReady,
-      detail: briefReady ? "Saved for the first analysis" : sourcesReady ? "Recommended; may be skipped with a quality warning." : "Available after repository validation.",
-    },
-    {
       id: "runner",
       label: "Runner",
       ready: runtimeReady,
@@ -815,13 +785,13 @@ function buildOnboardingProgressSummary({
         ? "Local readiness passed"
         : firstDoctorFailure
           ? `${firstDoctorFailure.label}: ${firstDoctorFailure.message}`
-          : "Run local readiness before the first analysis.",
+          : "Run local readiness before creating the first Task.",
     },
   ];
 
   if (!workspaceReady) {
     return {
-      step: "Step 1 of 5",
+      step: "Step 1 of 4",
       action: "Create or open a workspace",
       blocker: "Workspace path is not selected.",
       detail: "ACP needs a Git-tracked architecture workspace before it can save sources or runner settings.",
@@ -831,7 +801,7 @@ function buildOnboardingProgressSummary({
   }
   if (!sourcesReady) {
     return {
-      step: "Step 2 of 5",
+      step: "Step 2 of 4",
       action: sourceBlockingDiagnostic ? "Fix source fields" : "Save and validate sources",
       blocker: sourceBlockingDiagnostic ? `${sourceBlockingDiagnostic.code}: ${sourceBlockingDiagnostic.message}` : "Sources have not passed validation yet.",
       detail: "Connect at least one repository, then validate the manifest before selecting the final console action.",
@@ -841,7 +811,7 @@ function buildOnboardingProgressSummary({
   }
   if (!runtimeReady) {
     return {
-      step: "Step 4 of 5",
+      step: "Step 3 of 4",
       action: "Select the runner",
       blocker: "Runner is not selected.",
       detail: "Use fake for the first deterministic walkthrough. Headless providers remain explicit opt-in.",
@@ -851,28 +821,28 @@ function buildOnboardingProgressSummary({
   }
   if (doctorResult && !localReady) {
     return {
-      step: "Step 5 of 5",
+      step: "Step 4 of 4",
       action: "Fix local readiness blockers",
       blocker: firstDoctorFailure ? `${firstDoctorFailure.label}: ${firstDoctorFailure.message}` : "Readiness has warnings or failed checks.",
-      detail: canEnterConsole ? "The console can open, but first analysis should wait until readiness passes." : "Readiness is blocking first analysis.",
+      detail: canEnterConsole ? "The console can open, but creating the first Task should wait until readiness passes." : "Readiness is blocking the first Task.",
       items,
       tone: "blocked",
     };
   }
   if (!localReady) {
     return {
-      step: "Step 5 of 5",
+      step: "Step 4 of 4",
       action: "Check local readiness",
-      blocker: "First analysis needs a passing readiness check.",
-      detail: canEnterConsole ? "You can open the console now; run the readiness check before starting analysis." : "Run the doctor check before the first analysis.",
+      blocker: "The first Task needs a passing readiness check.",
+      detail: canEnterConsole ? "You can open the console now; run the readiness check before creating the Task." : "Run the doctor check before creating the first Task.",
       items,
       tone: "waiting",
     };
   }
   if (canRunFirstAnalysis) {
     return {
-      step: "Step 5 of 5",
-      action: firstRunStatus ? "First analysis is starting" : "Run first analysis",
+      step: "Step 4 of 4",
+      action: firstRunStatus ? "First Task is opening" : "Create first Task",
       blocker: "No setup blockers.",
       detail: firstRunStatus || "Workspace, sources, runner and local readiness are ready.",
       items,
@@ -880,7 +850,7 @@ function buildOnboardingProgressSummary({
     };
   }
   return {
-    step: "Step 5 of 5",
+    step: "Step 4 of 4",
     action: "Open the console",
     blocker: "Setup is ready for the product shell.",
     detail: "Console review can start from the selected workspace.",
