@@ -261,7 +261,7 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await page.getByLabel("Runtime").selectOption("headless");
   await page.getByLabel("Provider").selectOption("qwen-code");
   await page.getByTestId("onboarding-runtime-save").click();
-  await expect(page.getByTestId("onboarding-runner-recovery")).toContainText("Provider setup for first analysis");
+  await expect(page.getByTestId("onboarding-runner-recovery")).toContainText("Provider setup for the first Task");
   await page.getByRole("button", { name: "Check readiness" }).click();
   const runnerRecovery = page.getByTestId("onboarding-runner-recovery");
   await expect(runnerRecovery).toContainText("qwen-code");
@@ -273,7 +273,7 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await expect(runnerRecovery).toContainText("Use fake baseline for a deterministic first walkthrough");
   await expect(page.getByTestId("onboarding-doctor-result")).toContainText("qwen headless_probe_timeout");
   await page.getByTestId("onboarding-progress-review").click();
-  await expect(page.getByTestId("onboarding-run-first-analysis")).toBeDisabled();
+  await expect(page.getByTestId("onboarding-create-first-task")).toBeDisabled();
   await expect(page.getByTestId("onboarding-enter-console")).toBeDisabled();
   await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("Runtime provider");
   await expectNoHorizontalOverflow(page);

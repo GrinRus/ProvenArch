@@ -30,9 +30,22 @@ describe("KnowledgePage", () => {
     const onDocumentChange = vi.fn();
     render(<KnowledgePage knowledge={partialKnowledge} loading={false} error="" view="documents" onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={onDocumentChange} onOpenArtifact={vi.fn()} />);
     expect(screen.getByTestId("architecture-documents")).toBeInTheDocument();
-    expect(screen.getByText("overview.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reports\/as-is\/overview\.md/ })).toBeInTheDocument();
     expect(onDocumentChange).toHaveBeenCalledWith("reports/as-is/overview.md");
     expect(await screen.findByTestId("evidence-viewer")).toBeInTheDocument();
+  });
+
+  it("prefers the authoritative Architecture Home over an alphabetically first proposal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("# Architecture Home", { status: 200 })));
+    const onDocumentChange = vi.fn();
+    const knowledge = { ...partialKnowledge, artifacts: [
+      { path: "proposals/adr-001.md", kind: "proposal", name: "ADR 001" },
+      { path: "reports/as-is/overview.md", kind: "report", name: "Architecture Home" },
+    ] };
+    render(<KnowledgePage knowledge={knowledge} loading={false} error="" view="documents" onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={onDocumentChange} onOpenArtifact={vi.fn()} />);
+    expect(await screen.findByTestId("evidence-viewer")).toBeInTheDocument();
+    expect(onDocumentChange).toHaveBeenCalledWith("reports/as-is/overview.md");
+    expect(screen.getByRole("button", { name: /Architecture Home/ })).toHaveAttribute("aria-current", "page");
   });
 
   it("renders partial architecture flow without deriving topology from artifact names", () => {
@@ -100,6 +113,8 @@ describe("KnowledgePage", () => {
     }
     render(<Harness />);
     await screen.findByTestId("evidence-viewer");
+    fireEvent.click(screen.getByRole("button", { name: /charter\/readme\.md/ }));
+    await screen.findByText("Editable charter");
     fireEvent.click(screen.getByRole("button", { name: "Edit Markdown" }));
     const editor = await screen.findByTestId("markdown-editor");
     fireEvent.change(editor, { target: { value: "# Updated charter" } });
@@ -176,12 +191,12 @@ describe("KnowledgePage", () => {
     };
     const architecture = { ...architectureFromKnowledge(reviewKnowledge), review: reviewKnowledge.review, coverage: reviewKnowledge.coverage };
     render(<KnowledgePage architecture={architecture} knowledge={reviewKnowledge} loading={false} error="" view="findings" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
-    expect(screen.getByTestId("proposal-decision-boundary")).toHaveTextContent("No Approved status");
+    expect(screen.getByTestId("proposal-decision-boundary")).toHaveTextContent(/Approved status.*unavailable/);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), { target: { value: "owner" } });
     expect(screen.getByRole("button", { name: /Missing owner/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Stale tag/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Missing owner/ }));
     expect(screen.getByText("The service has no canonical owner.")).toBeInTheDocument();
-    expect(screen.getByText(/linked references: 1/)).toBeInTheDocument();
+    expect(screen.getByText(/0 evidence refs/)).toBeInTheDocument();
   });
 });

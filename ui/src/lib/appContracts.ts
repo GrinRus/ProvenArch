@@ -171,6 +171,20 @@ export type ArchitectureEdge = {
   related_questions?: string[];
 };
 
+export type ArchitectureFinding = {
+  id: string;
+  severity: string;
+  title: string;
+  description?: string;
+  rule_id?: string;
+  related_ids?: string[];
+  provenance?: {
+    kind?: string;
+    confidence?: number;
+    evidence?: Array<{ repo: string; path: string; ref?: string; lines?: { start: number; end: number }; excerpt?: string }>;
+  };
+};
+
 export type ArchitectureView = {
   level: ArchitectureLevel;
   available: boolean;
@@ -189,7 +203,7 @@ export type ArchitectureResponse = {
   exports?: { home_path?: string; c4_mermaid_paths: string[] };
   comparison?: ArchitectureComparison;
   review?: {
-    findings: Array<{ id: string; severity: string; title: string; description?: string; related_ids?: string[] }>;
+    findings: ArchitectureFinding[];
     questions: Array<{ id: string; text: string; priority?: string; related_ids?: string[] }>;
   };
   coverage?: { observed?: string[]; missing?: string[]; notes?: string[] };
@@ -206,7 +220,7 @@ export type RunReviewContract = {
   baseline_run_id?: string;
   semantic_changes: ArchitectureComparison;
   document_changes: ArchitectureChangeSet & { available: boolean; reason?: string };
-  findings: Array<{ id: string; severity: string; title: string; description?: string; related_ids?: string[] }>;
+  findings: ArchitectureFinding[];
   questions: Array<{ id: string; text: string; priority?: string; related_ids?: string[] }>;
   gaps: string[];
   summary: {

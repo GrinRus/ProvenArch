@@ -1944,10 +1944,10 @@ Follow-up note (2026-04-22):
 
 ## Epic 23 — Task-first Product UI and Artifact Workbench
 
-Status (2026-08-21): **target design and authority decisions accepted; 23B1 through 23N additive
+Status (2026-08-23): **target design and authority decisions accepted; 23B1 through 23N additive
 slices, the Tasks-primary navigation cutover, W23O legacy route/component closure and the
-design-QA Q0–Q9 corrective slices are implemented; final deterministic Q10 closure remains tracked
-by the DoD.**
+design-QA Q0–Q10 corrective slices are implemented and verified; deterministic Q10 closure is
+accepted by the DoD.**
 
 Authoritative UX: [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Delivery order: [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md).
@@ -2378,11 +2378,12 @@ Acceptance:
 - status uses text/icon/shape and live regions do not announce duplicates;
 - mobile title/authority/state/action fit before the first long content section.
 
-Implementation status (2026-08-21, W23N/Q10): Task Inbox tests cover loading, empty, error and retry
+Implementation status (2026-08-23, W23N/Q10): Task Inbox tests cover loading, empty, error and retry
 states with explicit status/alert semantics; Task rows are keyboard-activatable without changing
-their opaque identity. The Inbox now includes a selected-task preview, shared warm tokens and
-responsive shell rules preserve 44px controls and focus-visible states; final rendered matrix and
-embedded parity remain part of Q10 closure.
+their opaque identity. Advanced filters and empty lifecycle groups are collapsed, selected-task
+preview remains available, route transitions focus the new heading, and shared warm tokens plus
+responsive shell rules preserve 44px controls and focus-visible states. The deterministic rendered
+matrix, axe checks and embedded parity are green.
 
 ### 23O — Deterministic UI closure, old-shell removal and docs sync
 

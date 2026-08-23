@@ -8,7 +8,7 @@ export function Button({ tone = "neutral", density = "comfortable", className = 
 }
 
 export function PageHeader({ title, purpose, state, source, action }: { title: string; purpose: string; state?: ReactNode; source?: ReactNode; action?: ReactNode }) {
-  return <header className="ui-page-header"><div><h1>{title}</h1><p>{purpose}</p>{source ? <div className="ui-page-source">{source}</div> : null}</div>{state ? <div className="ui-page-state">{state}</div> : null}{action ? <div className="ui-page-action">{action}</div> : null}</header>;
+  return <header className="ui-page-header"><div><h1 tabIndex={-1} data-route-heading="true">{title}</h1><p>{purpose}</p>{source ? <div className="ui-page-source">{source}</div> : null}</div>{state ? <div className="ui-page-state">{state}</div> : null}{action ? <div className="ui-page-action">{action}</div> : null}</header>;
 }
 
 export function ContextBar({ children, tone = "neutral", ...props }: HTMLAttributes<HTMLElement> & { tone?: Tone }) {

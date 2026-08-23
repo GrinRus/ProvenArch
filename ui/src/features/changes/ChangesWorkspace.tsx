@@ -41,7 +41,13 @@ export function ChangesWorkspace({ view, source, page, review, proposals, publis
           : <p className="empty-state">Choose a current workspace artifact. No historical run snapshot will be substituted.</p>}
       </section>
     );
-  } else content = <ReviewStagePanel {...review} routeView={view} />;
+  } else content = review.runId || review.selectedArtifact || view === "evidence" ? <ReviewStagePanel {...review} routeView={view} /> : <NoTaskReviewSelection />;
+
+  const showGitState = source === "current"
+    || view === "proposals"
+    || view === "publish"
+    || Boolean(review.runId || review.selectedArtifact)
+    || gitState !== "unknown";
 
   if (source === "current" && view !== "evidence") {
     content = (
@@ -59,11 +65,15 @@ export function ChangesWorkspace({ view, source, page, review, proposals, publis
           <div>
             <p className="hint">{model.purpose}</p>
           </div>
-          <span className={`status git-state-${gitState}`} data-testid="changes-git-state">Git: {gitState}</span>
+          {showGitState ? <span className={`status git-state-${gitState}`} data-testid="changes-git-state">Git: {gitState}</span> : null}
           {askReturnAvailable ? <button type="button" className="link-button" onClick={onReturnToAsk}>Return to Ask</button> : null}
         </header>
         {content}
       </section>
     </ChangesPage>
   );
+}
+
+function NoTaskReviewSelection() {
+  return <section className="panel stage-panel changes-no-selection" data-testid="changes-no-selection"><p className="eyebrow">Task review</p><h2>Select a Task to inspect its evidence</h2><p className="empty-state">Choose a completed Task above. ProvenArch keeps the review pinned to that Task and never falls back to the latest run.</p></section>;
 }

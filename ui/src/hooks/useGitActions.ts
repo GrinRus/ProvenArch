@@ -8,9 +8,10 @@ type UseGitActionsOptions = {
   setBusy: (busy: boolean) => void;
   setError: (message: string | null) => void;
   publicationContext?: GitPublicationContext;
+  loadPublicationDiff?: () => Promise<GitDiffResponse | null>;
 };
 
-export function useGitActions({ setBusy, setError, publicationContext }: UseGitActionsOptions) {
+export function useGitActions({ setBusy, setError, publicationContext, loadPublicationDiff }: UseGitActionsOptions) {
   const [gitMessage, setGitMessage] = useState("chore: update ACP workspace artifacts");
   const [proposalBranch, setProposalBranch] = useState("proposal/beta-refresh");
   const [gitStatus, setGitStatus] = useState<string>("");
@@ -37,7 +38,8 @@ export function useGitActions({ setBusy, setError, publicationContext }: UseGitA
       if (action === "branch" && !proposalBranch.trim()) {
         throw new Error("Proposal branch name is required.");
       }
-      const diff = await loadWorkspaceGitDiff();
+      const diff = await (loadPublicationDiff?.() ?? loadWorkspaceGitDiff());
+      if (!diff) throw new Error("Authoritative workspace Git inventory could not be loaded.");
       if (diff.state === "blocked" || diff.state === "unknown" || diff.state === "stale") {
         throw new Error(diff.message || `Git state is ${diff.state}; refresh and resolve it before publication.`);
       }
@@ -79,6 +81,12 @@ export function useGitActions({ setBusy, setError, publicationContext }: UseGitA
       } else {
         const payload = await createProposalBranch(proposalBranch, identity, publicationContext);
         setGitStatus(`checked out ${payload.branch}`);
+      }
+      try {
+        await loadPublicationDiff?.();
+      } catch {
+        // The Git mutation already succeeded; leave its result visible even if
+        // the follow-up inventory refresh is temporarily unavailable.
       }
       setGitConfirmation(null);
     } catch (requestError) {

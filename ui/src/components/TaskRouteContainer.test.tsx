@@ -42,6 +42,8 @@ describe("TaskRouteContainer", () => {
     expect(screen.getByRole("heading", { name: "Task Inbox" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("task-row-task-1")).toHaveTextContent("Map payment authorization"));
     expect(screen.getByTestId("task-group-ready")).toHaveTextContent("Payments");
+    expect(screen.getByText("Advanced filters").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Empty lifecycle groups").closest("details")).not.toHaveAttribute("open");
     expect(screen.getByTestId("task-route-inbox")).not.toHaveTextContent("latest run");
   });
 
@@ -88,6 +90,22 @@ describe("TaskRouteContainer", () => {
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("2 added · 1 changed · 0 removed");
     expect(screen.getByTestId("task-outcome")).toHaveTextContent("Current validator-approved Architecture remains available");
     expect(onOutcomeSettled).toHaveBeenCalledWith("task-1", "attempt-1", "run-1");
+  });
+
+  it("does not fabricate zero semantic delta when comparison is unavailable", async () => {
+    vi.mocked(getTask).mockResolvedValue({ ...task, outcome: { state: "available", attempt_id: "attempt-1", run_id: "run-1" } } as ProductTask);
+    vi.mocked(listTaskAttempts).mockResolvedValue({ items: [{ version: 1, attempt_id: "attempt-1", task_id: "task-1", run_id: "run-1", status: "succeeded", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1 } as TaskAttempt] });
+    vi.mocked(getPipelineRunReviewSummary).mockResolvedValue({
+      run_id: "run-1", pipeline: "init", status: "succeeded", started_at: "2026-08-11T10:00:00Z",
+      result: { state: "completed", summary: "Initial snapshot ready", produced: {}, partial_scopes: 0, failed_scopes: 0, promotion: { changed: true, current_usable: true }, recommended_action: "review_architecture" },
+      steps: [],
+      review: { review_kind: "initial", source_run_id: "run-1", semantic_changes: { available: false, reason: "No baseline", categories: { entities: { added: [], changed: [], removed: [] }, edges: { added: [], changed: [], removed: [] }, findings: { added: [], changed: [], removed: [] }, gaps: { added: [], changed: [], removed: [] } } }, document_changes: { available: true, added: [], changed: [], removed: [] }, findings: [], questions: [], gaps: [], summary: { entities_added: 0, entities_changed: 0, entities_removed: 0, edges_added: 0, edges_changed: 0, edges_removed: 0, documents_added: 0, documents_changed: 0, documents_removed: 0, findings: 0, questions: 0, gaps: 0 }, runtime: { providers: [], step_providers: {} }, authority: { mode: "promoted_current", source_run_id: "run-1" }, generated_at: "2026-08-11T10:01:00Z" },
+    });
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} />);
+    const outcome = await screen.findByTestId("task-outcome");
+    expect(outcome).toHaveTextContent("Semantic comparison is unavailable");
+    expect(outcome).toHaveTextContent("EntitiesUnavailable");
+    expect(outcome).not.toHaveTextContent("0 added · 0 changed · 0 removed");
   });
 
   it("keeps a succeeded Attempt terminal in Pipeline Studio", async () => {

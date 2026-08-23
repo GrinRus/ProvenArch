@@ -155,7 +155,7 @@ export function useRunActions({
       setRunActionStatus(activeRunResumeMessage(bootstrapRun.status, bootstrapRun.run_id));
       return;
     }
-    setRunActionStatus("No runs yet. Start the first analysis to create reviewable artifacts.");
+    setRunActionStatus("No Attempts yet. Create the first Task to start an evidence-backed run.");
   }, [handleSelectRun, loadRunList, setRunActionStatus, setRunList]);
 
   const pollRunUpdates = useRunUpdatePolling({

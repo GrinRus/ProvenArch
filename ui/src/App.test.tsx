@@ -899,7 +899,12 @@ function navigateToStage(stage: "source" | "readiness" | "charter" | "analysis" 
     if (runButtons.length === 1) fireEvent.click(runButtons[0]);
     return;
   }
-  const destination = stage === "source" || stage === "readiness" || stage === "charter" ? "Setup" : "Changes";
+  if (stage === "charter") {
+    window.history.pushState({}, "", "/setup?step=brief");
+    fireEvent(window, new PopStateEvent("popstate"));
+    return;
+  }
+  const destination = stage === "source" || stage === "readiness" ? "Setup" : "Changes";
   const destinationLink = screen.getByRole("link", { name: destination });
   if (destinationLink.getAttribute("aria-current") !== "page") fireEvent.click(destinationLink);
   fireEvent.click(screen.getByTestId(`stage-${stage}`));
@@ -1061,19 +1066,18 @@ describe("App", () => {
 
     expect(await screen.findByText("Sources validated.")).toBeInTheDocument();
     expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Select the runner");
-    fireEvent.click(screen.getByRole("button", { name: "Continue to analysis brief" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue without brief" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to runner" }));
     fireEvent.click(screen.getByTestId("onboarding-runtime-save"));
 
     await waitFor(() => expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Check local readiness"));
 
     fireEvent.click(screen.getByRole("button", { name: "Check readiness" }));
     await screen.findByTestId("onboarding-doctor-result");
-    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Run first analysis");
+    expect(screen.getByTestId("onboarding-progress-summary")).toHaveTextContent("Create first Task");
     fireEvent.click(screen.getByRole("button", { name: "Review setup" }));
     await waitFor(() => expect(screen.getByTestId("onboarding-enter-console")).not.toBeDisabled());
-    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("Ready to run the first analysis.");
-    expect(screen.getByTestId("onboarding-run-first-analysis")).not.toBeDisabled();
+    expect(screen.getByTestId("onboarding-ready-action-hint")).toHaveTextContent("Ready to create the first Task.");
+    expect(screen.getByTestId("onboarding-create-first-task")).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId("onboarding-enter-console"));
 
@@ -1194,7 +1198,7 @@ describe("App", () => {
     expect(doctorPanel).toHaveTextContent("checked: claude, claude-code");
     expect(doctorPanel).toHaveTextContent("ACP_CLAUDE_CMD");
     const runnerRecovery = screen.getByTestId("onboarding-runner-recovery");
-    expect(runnerRecovery).toHaveTextContent("Provider setup for first analysis");
+    expect(runnerRecovery).toHaveTextContent("Provider setup for the first Task");
     expect(runnerRecovery).toHaveTextContent("claude-code");
     expect(runnerRecovery).toHaveTextContent("claude or claude-code");
     expect(runnerRecovery).toHaveTextContent("ACP_CLAUDE_CMD");
@@ -1585,7 +1589,7 @@ describe("App", () => {
 
     navigateToStage("readiness");
     expect(await screen.findByTestId("workspace-health-summary")).toHaveTextContent("scan failed");
-    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).toBeDisabled();
   });
 
   it("opens the explicit legacy diagnostics surface from Tasks", async () => {
@@ -1732,7 +1736,7 @@ describe("App", () => {
     navigateToStage("readiness");
 
     const readinessCards = await screen.findByTestId("readiness-summary-cards");
-    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Check local readiness before first analysis.");
+    expect(screen.getByTestId("readiness-next-action")).toHaveTextContent("Check local readiness before creating the first Task.");
     expect(readinessCards).toHaveTextContent("Workspace");
     expect(readinessCards).toHaveTextContent("Repositories");
     expect(readinessCards).toHaveTextContent("Runtime provider");
@@ -1927,7 +1931,7 @@ describe("App", () => {
 
     expect(await screen.findByTestId("review-packages")).toBeInTheDocument();
     expect(window.location.search).not.toContain("run=");
-    expect(screen.getByText("Choose a review package")).toBeInTheDocument();
+    expect(screen.getByText("Choose a Task to review")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Changes" })).toHaveAttribute("aria-current", "page");
@@ -3355,7 +3359,7 @@ describe("App", () => {
     expect(screen.getByText("Confidence: 0%")).toBeInTheDocument();
   });
 
-  it("guides first-run setup through validate, doctor, and run", async () => {
+  it("guides first-run setup through validate, doctor, and first Task creation", async () => {
     const fetchMock = createFetchMock({ runID: "run-first" });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3368,20 +3372,18 @@ describe("App", () => {
 
     await screen.findByTestId("workspace-validate-result");
     navigateToStage("readiness");
-    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).toBeDisabled();
     expect(screen.getByTestId("readiness-panel")).toHaveTextContent("Check local readiness");
 
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
     await screen.findByTestId("setup-doctor-result");
     expect(screen.getByText("Local readiness passed.")).toBeInTheDocument();
-    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).not.toBeDisabled();
 
-    fireEvent.click(screen.getByTestId("setup-run-first-btn"));
-    expect(await screen.findByRole("dialog", { name: "Start without a saved analysis brief?" })).toHaveTextContent("reduces evidence quality");
-    fireEvent.click(screen.getByRole("button", { name: "Start with quality warning" }));
-    await screen.findByTestId("analysis-run-progress");
-    expect(window.location.pathname).toMatch(/^\/tasks\/legacy/);
-    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+    fireEvent.click(screen.getByTestId("setup-create-task-btn"));
+    expect(window.location.pathname).toBe("/tasks/new");
+    expect(await screen.findByTestId("task-composer")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
   it("starts from Guided Setup review without a warning after saving the analysis brief", async () => {
@@ -3395,12 +3397,13 @@ describe("App", () => {
     expect(await screen.findByText("Saved charter/wizard/step0-contract.json")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("setup-step-review"));
-    expect(await screen.findByTestId("guided-setup-review")).toHaveTextContent("Analysis briefSaved");
-    fireEvent.click(screen.getByTestId("guided-start-analysis"));
-
-    expect(await screen.findByTestId("analysis-run-progress")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Start without a saved analysis brief?" })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
+    expect(await screen.findByTestId("guided-setup-review")).toHaveTextContent("Ready to create your first Task?");
+    expect(screen.getByTestId("guided-setup-review")).toHaveTextContent("define the Task goal");
+    expect(screen.queryByTestId("guided-start-analysis")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("guided-create-task"));
+    expect(window.location.pathname).toBe("/tasks/new");
+    expect(screen.getByTestId("task-composer")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/pipeline/init", expect.anything());
   });
 
   it("supports local-folder source mode in first-run setup", async () => {
@@ -3496,7 +3499,7 @@ describe("App", () => {
 
     await screen.findByTestId("workspace-validate-result");
     expect(screen.getByText(/Next: Check the repository URL and your local git authentication./)).toBeInTheDocument();
-    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).toBeDisabled();
   });
 
   it("shows Source validation recovery above raw diagnostics", async () => {
@@ -3546,17 +3549,17 @@ describe("App", () => {
     fireEvent.click(screen.getByTestId("workspace-save-btn"));
     await screen.findByTestId("workspace-validate-result");
     navigateToStage("readiness");
-    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).toBeDisabled();
     fireEvent.click(screen.getByTestId("setup-doctor-btn"));
     await screen.findByTestId("setup-doctor-result");
-    expect(screen.getByTestId("setup-run-first-btn")).not.toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).not.toBeDisabled();
 
     navigateToStage("source");
     fireEvent.change(screen.getByLabelText("Repository URL"), { target: { value: "https://github.com/org/changed.git" } });
 
     expect(screen.queryByTestId("workspace-validate-result")).not.toBeInTheDocument();
     navigateToStage("readiness");
-    expect(screen.getByTestId("setup-run-first-btn")).toBeDisabled();
+    expect(screen.getByTestId("setup-create-task-btn")).toBeDisabled();
   });
 
   it("clears readiness checklist after runtime selection changes", async () => {
@@ -5011,7 +5014,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByTestId("destination-changes"));
     await waitFor(() => expect(screen.getByTestId("destination-changes")).toHaveAttribute("aria-current", "page"));
-    expect(screen.getByTestId("changes-open-run-studio")).toHaveTextContent("Open Run Studio");
+    expect(screen.getByTestId("changes-open-run-studio")).toHaveTextContent("Open recovery");
     expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
 
     navigateToStage("analysis");

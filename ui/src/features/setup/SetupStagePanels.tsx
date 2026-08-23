@@ -301,7 +301,7 @@ export type ReadinessStageProps = {
   onSetupRuntimeProviderChange: (value: string) => void;
   onValidateWorkspace: () => void;
   onCheckDoctor: () => void;
-  onRunFirstAnalysis: () => void;
+  onCreateTask: () => void;
   runtimeSettingsPanel: ReactNode;
   artifactCount: number;
   workspaceHealthReport: WorkspaceHealthResponse | null;
@@ -329,7 +329,7 @@ export function ReadinessStagePanel({
   onSetupRuntimeProviderChange,
   onValidateWorkspace,
   onCheckDoctor,
-  onRunFirstAnalysis,
+  onCreateTask,
   runtimeSettingsPanel,
   artifactCount,
   workspaceHealthReport,
@@ -379,8 +379,8 @@ export function ReadinessStagePanel({
           {!validated
             ? "Validate workspace before checking local runtime readiness."
             : !localReady
-              ? "Check local readiness before first analysis."
-              : "Readiness gates are clear; run first analysis when you are ready to generate evidence."}
+              ? "Check local readiness before creating the first Task."
+              : "Readiness gates are clear; create a Task when you are ready to generate evidence."}
         </span>
       </div>
 
@@ -439,15 +439,15 @@ export function ReadinessStagePanel({
         </button>
         <button
           type="button"
-          onClick={onRunFirstAnalysis}
+          onClick={onCreateTask}
           disabled={busy || !validated || !localReady}
-          title={validated && !localReady ? "Check local readiness before first analysis." : undefined}
-          data-testid="setup-run-first-btn"
+          title={validated && !localReady ? "Check local readiness before creating the first Task." : undefined}
+          data-testid="setup-create-task-btn"
         >
-          Run first analysis
+          Create first Task
         </button>
       </div>
-      {validated && !localReady ? <p className="status warn">Check local readiness before first analysis.</p> : null}
+      {validated && !localReady ? <p className="status warn">Check local readiness before creating the first Task.</p> : null}
 
       <WorkspaceValidationResult validateResult={validateResult} validationDiagnosticsByRepo={validationDiagnosticsByRepo} />
       {doctorStatus ? <p className="status">{doctorStatus}</p> : null}
@@ -877,4 +877,3 @@ function DoctorChecklist({ doctorResult }: { doctorResult: DoctorResponse }) {
     </div>
   );
 }
-

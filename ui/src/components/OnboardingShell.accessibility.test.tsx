@@ -62,7 +62,7 @@ function renderShell(overrides: Partial<Parameters<typeof OnboardingShell>[0]> =
     onSaveRuntime: noop,
     onCheckDoctor: noop,
     onEnterConsole: noop,
-    onRunFirstAnalysis: noop,
+    onCreateFirstTask: noop,
     ...overrides,
   };
   render(<OnboardingShell {...props} />);

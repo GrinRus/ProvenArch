@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ArchitectureEdge, ArchitectureLevel, ArchitectureResponse, KnowledgeIssue, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
+import type { ArchitectureEdge, ArchitectureFinding, ArchitectureLevel, ArchitectureResponse, KnowledgeArtifact, KnowledgeIssue, KnowledgeResponse, WorkspaceHealthResponse } from "../lib/appContracts";
 import type { KnowledgeView } from "../lib/appRoutes";
 import { architectureFromKnowledge, loadArtifactText, saveEditableArtifact } from "../lib/workspaceApi";
 import { ArchitectureMap, levelLabel } from "./ArchitectureMap";
@@ -93,8 +93,8 @@ export function KnowledgePage({
         </div>
         <div className="architecture-authority">
           <span className={`status ${architecture?.status === "available" ? "ok" : architecture?.status === "partial" ? "warn" : "err"}`}>{loading ? "Loading" : error ? "Unavailable" : architecture?.status ?? "Unavailable"}</span>
-          <span>{architecture?.authority.freshness ?? "unknown"} · {architecture?.authority.source_run_id || "no promoted run"}</span>
-          <span>Current workspace</span>
+          <span>{architectureAuthorityLabel(architecture)}</span>
+          <span>Current workspace · read-only</span>
         </div>
       </header>
 
@@ -120,7 +120,9 @@ export function KnowledgePage({
       {architecture && architecture.status !== "unavailable" && activePageView === "diagrams" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="diagrams" /> : null}
       {architecture && architecture.status !== "unavailable" && activePageView === "findings" ? <FindingsView architecture={architecture} onOpenArtifact={onOpenArtifact} /> : null}
 
-      {architecture && architecture.status !== "unavailable" && activeView && (activePageView === "map" || activePageView === "model") ? (
+      {architecture && architecture.status !== "unavailable" && activePageView === "model" ? <ModelWorkbench architecture={architecture} selectedEntityID={selectedEntityID} onEntityChange={onEntityChange} onOpenArtifact={onOpenArtifact} /> : null}
+
+      {architecture && architecture.status !== "unavailable" && activeView && activePageView === "map" ? (
         <div className="architecture-map-workspace">
           <div className="architecture-map-toolbar">
             <div className="segmented-control" aria-label="C4 level">
@@ -135,6 +137,7 @@ export function KnowledgePage({
           </div>
           <p className="architecture-breadcrumb">Architecture / {level === "code" && codeScopeService ? `${codeScopeService.name} / ` : ""}{levelLabel(level)}{selectedNode && selectedNode.id !== codeScopeService?.id ? ` / ${selectedNode.name}` : selectedEdge ? ` / ${selectedEdge.name || selectedEdge.type}` : ""}</p>
           <div className="architecture-map-layout">
+            <aside className="architecture-element-list" aria-label="Architecture element list"><div className="panel-subheader"><div><p className="eyebrow">Elements</p><h2>{mobileNodes.length} visible</h2></div></div>{mobileNodes.length === 0 ? <p className="empty-state">No elements match these filters.</p> : <ul>{mobileNodes.map((node) => <li key={node.id}><button type="button" aria-pressed={selectedEntityID === node.id} onClick={() => onEntityChange(node.id)}><strong>{node.name}</strong><span>{node.type} · {Math.round(node.confidence * 100)}%</span></button></li>)}</ul>}</aside>
             <ArchitectureMap view={activeView} level={level} selectedID={selectedEntityID} query={query} typeFilter={typeFilter} repositoryFilter={repositoryFilter} ownerFilter={ownerFilter} tagFilter={tagFilter} onSelect={onEntityChange} />
             <aside className="architecture-inspector" aria-label="Architecture inspector">
               {selectedNode ? <NodeInspector node={selectedNode} currentLevel={level} issues={architecture.issues} onOpenArtifact={onOpenArtifact} onDrillDown={(next) => setLevel(next)} /> : selectedEdge ? <EdgeInspector edge={selectedEdge} nodes={allNodes} issues={architecture.issues} onOpenArtifact={onOpenArtifact} /> : <div className="inspector-empty"><strong>Select an element to inspect</strong><p>Choose an architecture element below, or use the map in fullscreen mode to inspect ownership, confidence and exact repository evidence.</p></div>}
@@ -166,9 +169,24 @@ export function KnowledgePage({
   );
 }
 
+function ModelWorkbench({ architecture, selectedEntityID, onEntityChange, onOpenArtifact }: { architecture: ArchitectureResponse; selectedEntityID?: string; onEntityChange: (id?: string) => void; onOpenArtifact: (path: string) => void }) {
+  const entities = uniqueNodes(Object.values(architecture.views).flatMap((view) => view.nodes));
+  const selected = entities.find((node) => node.id === selectedEntityID) ?? entities[0];
+  const relationships = selected ? uniqueEdges(Object.values(architecture.views).flatMap((view) => view.edges)).filter((edge) => edge.from === selected.id || edge.to === selected.id) : [];
+  return <section className="architecture-model-workbench" data-testid="architecture-model-workbench">
+    <header className="architecture-model-header"><div><p className="eyebrow">Model &amp; schema</p><h2>Validated domain model</h2><p className="hint">Inspect entity contracts, ownership and relationships independently from the visual C4 map.</p></div><span className="status info">Promoted current workspace</span></header>
+    <div className="architecture-model-grid">
+      <aside className="architecture-model-entity-list" aria-label="Model entities"><div className="panel-subheader"><div><h3>Entities</h3><p className="hint">{entities.length} validated</p></div></div>{entities.length === 0 ? <p className="empty-state">No validated model entities are available.</p> : <ul>{entities.map((node) => <li key={node.id}><button type="button" aria-pressed={selected?.id === node.id} onClick={() => onEntityChange(node.id)}><strong>{node.name}</strong><span>{node.type} · {Math.round(node.confidence * 100)}%</span></button></li>)}</ul>}</aside>
+      <section className="architecture-model-schema" aria-label="Selected model schema">{selected ? <><div className="panel-subheader"><div><p className="eyebrow">Selected entity</p><h3>{selected.name}</h3><p className="hint"><code>{selected.id}</code></p></div><span className="status ok">{Math.round(selected.confidence * 100)}% confidence</span></div><dl className="architecture-schema-fields"><div><dt>Type</dt><dd>{selected.type}</dd></div><div><dt>Owner</dt><dd>{selected.owner_team_id || "Unassigned"}</dd></div><div><dt>Repositories</dt><dd>{selected.repositories?.join(", ") || "Not linked"}</dd></div><div><dt>Tags</dt><dd>{selected.tags?.join(", ") || "None"}</dd></div><div><dt>Available levels</dt><dd>{(selected.available_levels ?? []).map(levelLabel).join(", ") || "Context only"}</dd></div></dl><section className="architecture-model-relations"><h4>Relationships <span>{relationships.length}</span></h4>{relationships.length === 0 ? <p className="empty-state">No validated relationships are linked to this entity.</p> : <ul>{relationships.map((edge) => <li key={edge.id}><span className="flow-type">{edge.type}</span><strong>{edge.from === selected.id ? edge.to : edge.from}</strong><span>{edge.name || "Validated relation"}</span></li>)}</ul>}</section><section className="architecture-model-evidence"><h4>Evidence</h4>{selected.evidence?.length ? <ul>{selected.evidence.map((item, index) => <li key={`${item.repo}:${item.path}:${index}`}><div><strong>{item.repo}</strong><code>{item.path}{item.lines ? `:${item.lines.start}-${item.lines.end}` : ""}</code></div><button type="button" onClick={() => onOpenArtifact(item.path)}>Open evidence</button></li>)}</ul> : <p className="empty-state">No bounded evidence is attached to this model entity.</p>}</section></> : <p className="empty-state">Select an entity to inspect its schema.</p>}</section>
+      <aside className="architecture-model-authority"><p className="eyebrow">Model contract</p><h3>Evidence-backed only</h3><p className="hint">This workbench exposes validated fields and relations. It does not infer missing schema from source names.</p><dl className="compact-defs"><div><dt>Entities</dt><dd>{architecture.counts.entities}</dd></div><div><dt>Relations</dt><dd>{architecture.counts.edges}</dd></div><div><dt>Evidence refs</dt><dd>{architecture.counts.evidence}</dd></div><div><dt>Model issues</dt><dd>{architecture.counts.issues}</dd></div></dl></aside>
+    </div>
+  </section>;
+}
+
 function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChange, onOpenArtifact, mode }: { architecture: ArchitectureResponse; selectedArtifactPath?: string; onDocumentChange?: (path?: string) => void; onOpenArtifact: (path: string) => void; mode: "documents" | "diagrams" }) {
   const documents = architecture.artifacts.filter((artifact) => mode === "diagrams" ? artifact.path.endsWith(".mmd") : artifact.path.endsWith(".md")).sort((left, right) => left.path.localeCompare(right.path));
-  const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : documents[0]?.path;
+  const preferredPath = mode === "documents" ? architectureHomePath(architecture, documents) : undefined;
+  const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : preferredPath ?? documents[0]?.path;
   const [content, setContent] = useState("");
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -201,7 +219,7 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
   return <div className="architecture-documents" data-testid={`architecture-${mode}`}>
     <aside className="architecture-document-tree" aria-label={`${mode === "documents" ? "Document" : "Diagram"} tree`}>
       <div><p className="eyebrow">{mode === "documents" ? "Documents" : "Diagrams"}</p><h2>{documents.length} available</h2><p className="hint">Selected promoted workspace authority.</p></div>
-      {documents.length === 0 ? <p className="empty-state">No promoted {mode} are available yet.</p> : <ul>{documents.map((artifact) => <li key={artifact.path}><button type="button" aria-current={selectedPath === artifact.path ? "page" : undefined} onClick={() => onDocumentChange?.(artifact.path)}><strong>{artifact.name}</strong><code>{artifact.path}</code></button></li>)}</ul>}
+      {documents.length === 0 ? <p className="empty-state">No promoted {mode} are available yet.</p> : <div className="semantic-document-groups">{documentGroups(documents, architecture, mode).map((group) => <section key={group.label} className="semantic-document-group"><h3>{group.label}</h3><ul>{group.artifacts.map((artifact) => <li key={artifact.path}><button type="button" aria-current={selectedPath === artifact.path ? "page" : undefined} onClick={() => onDocumentChange?.(artifact.path)}><strong>{documentLabel(artifact, architecture)}</strong><code>{artifact.path}</code></button></li>)}</ul></section>)}</div>}
     </aside>
     <section className="architecture-document-reader" aria-label="Architecture document reader">
       {selectedPath && status === "loaded" ? <>
@@ -227,6 +245,43 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
   </div>;
 }
 
+function architectureHomePath(architecture: ArchitectureResponse, documents: KnowledgeArtifact[]): string | undefined {
+  const exportedHome = architecture.exports?.home_path;
+  if (exportedHome && documents.some((artifact) => artifact.path === exportedHome)) return exportedHome;
+  const namedHome = documents.find((artifact) => /architecture\s+home/i.test(artifact.name));
+  if (namedHome) return namedHome.path;
+  return documents.find((artifact) => artifact.path === "reports/as-is/overview.md")?.path;
+}
+
+function architectureAuthorityLabel(architecture: ArchitectureResponse | null): string {
+  if (!architecture) return "Loading promoted current workspace";
+  if (architecture.authority.freshness === "stale") return "Promoted current workspace · stale freshness";
+  if (architecture.authority.freshness === "recent") return "Promoted current workspace · recently validated";
+  return architecture.authority.source_run_id ? `Promoted current workspace · ${architecture.authority.source_run_id}` : "Promoted current workspace · validated evidence";
+}
+
+function documentLabel(artifact: KnowledgeArtifact, architecture: ArchitectureResponse): string {
+  return architectureHomePath(architecture, architecture.artifacts.filter((item) => item.path.endsWith(".md"))) === artifact.path ? "Architecture Home" : artifact.name;
+}
+
+function documentGroups(documents: KnowledgeArtifact[], architecture: ArchitectureResponse, mode: "documents" | "diagrams"): Array<{ label: string; artifacts: KnowledgeArtifact[] }> {
+  const labels = mode === "diagrams"
+    ? ["Architecture diagrams"]
+    : ["Architecture Home", "Services and domains", "Findings and questions", "Proposals", "Other documents"];
+  const groups = new Map(labels.map((label) => [label, [] as KnowledgeArtifact[]]));
+  for (const artifact of documents) {
+    const home = architectureHomePath(architecture, documents);
+    const label = mode === "diagrams" ? "Architecture diagrams"
+      : artifact.path === home ? "Architecture Home"
+      : artifact.path.startsWith("reports/findings/") || artifact.path.startsWith("reports/coverage/") ? "Findings and questions"
+      : artifact.path.startsWith("proposals/") ? "Proposals"
+      : artifact.path.startsWith("model/") || artifact.path.startsWith("reports/as-is/") ? "Services and domains"
+      : "Other documents";
+    groups.get(label)?.push(artifact);
+  }
+  return [...groups.entries()].filter(([, artifacts]) => artifacts.length > 0).map(([label, artifacts]) => ({ label, artifacts: artifacts.sort((left, right) => left.path.localeCompare(right.path)) }));
+}
+
 function MermaidEvidenceContext({ architecture, onOpenArtifact }: { architecture: ArchitectureResponse; onOpenArtifact: (path: string) => void }) {
   const relations = uniqueEdges(Object.values(architecture.views).flatMap((view) => view.edges));
   return <section className="mermaid-evidence-context" data-testid="mermaid-evidence-context"><p className="eyebrow">Evidence Studio</p><h2>Validated relations</h2><p className="hint">This list is the accessible relation authority. Mermaid layout and arrows are visual aids only and never create semantic relations.</p><p className="status info mermaid-source-note">Promoted Mermaid source is read-only. Use Raw in the Source tab for bounded inspection; source diff remains the only supported comparison until deterministic visual diff exists.</p>{relations.length === 0 ? <p className="empty-state">No validated relations are available for this diagram.</p> : <ul className="mermaid-relation-list">{relations.map((relation) => <li key={relation.id}><span className="flow-type">{relation.type}</span><code className="model-logical-id">{relation.from} → {relation.to}</code><button type="button" onClick={() => onOpenArtifact(relation.path)}>Open relation evidence</button></li>)}</ul>}</section>;
@@ -243,24 +298,67 @@ function FindingsView({ architecture, onOpenArtifact }: { architecture: Architec
   const gaps = architecture.coverage?.missing ?? [];
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState("");
-  const [selected, setSelected] = useState<{ kind: "finding" | "question" | "gap"; id: string }>();
   const normalizedQuery = query.trim().toLowerCase();
   const visibleFindings = findings.filter((finding) => (!severity || finding.severity === severity) && [finding.id, finding.title, finding.description ?? ""].join(" ").toLowerCase().includes(normalizedQuery));
   const visibleQuestions = questions.filter((question) => [question.id, question.text, question.priority ?? ""].join(" ").toLowerCase().includes(normalizedQuery));
   const visibleGaps = gaps.filter((gap) => gap.toLowerCase().includes(normalizedQuery));
-  const selectedFinding = selected?.kind === "finding" ? findings.find((finding) => finding.id === selected.id) : undefined;
-  const selectedQuestion = selected?.kind === "question" ? questions.find((question) => question.id === selected.id) : undefined;
-  const selectedGap = selected?.kind === "gap" ? gaps.find((gap) => gap === selected.id) : undefined;
-  const relatedEvidence = (ids: string[] | undefined) => (ids ?? []).map((id) => allNodesForArchitecture(architecture).find((node) => node.id === id)).filter((node): node is ReturnType<typeof uniqueNodes>[number] => Boolean(node));
-  return <section className="architecture-findings" data-testid="architecture-findings"><header><div><p className="eyebrow">Review queue</p><h2>Findings, questions and gaps</h2><p className="hint">Only promoted semantic findings and explicit coverage gaps are shown. Runtime logs are not required to understand this queue.</p></div><button type="button" onClick={() => onOpenArtifact("reports/findings/findings.md")}>Open findings document</button></header><div className="findings-toolbar"><label htmlFor="findings-search">Search<input id="findings-search" name="findings-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label htmlFor="findings-severity">Severity<select id="findings-severity" name="findings-severity" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">All severities</option>{Array.from(new Set(findings.map((finding) => finding.severity))).sort().map((item) => <option key={item} value={item}>{item}</option>)}</select></label><span className="status info">Status: unresolved · human decision contract unavailable</span></div><div className="architecture-findings-grid"><article><h3>Findings <span>{visibleFindings.length}/{findings.length}</span></h3>{visibleFindings.length === 0 ? <p className="empty-state">No findings match this filter.</p> : <ul className="compact-list">{visibleFindings.map((finding) => <li key={finding.id}><button type="button" aria-pressed={selected?.kind === "finding" && selected.id === finding.id} onClick={() => setSelected({ kind: "finding", id: finding.id })}><strong>{finding.title}</strong><span>{finding.severity}</span><code>{finding.id}</code></button></li>)}</ul>}</article><article><h3>Questions <span>{visibleQuestions.length}/{questions.length}</span></h3>{visibleQuestions.length === 0 ? <p className="empty-state">No open questions match this filter.</p> : <ul className="compact-list">{visibleQuestions.map((question) => <li key={question.id}><button type="button" aria-pressed={selected?.kind === "question" && selected.id === question.id} onClick={() => setSelected({ kind: "question", id: question.id })}><strong>{question.text}</strong><span>{question.priority || "open"}</span><code>{question.id}</code></button></li>)}</ul>}</article><article><h3>Coverage gaps <span>{visibleGaps.length}/{gaps.length}</span></h3>{visibleGaps.length === 0 ? <p className="empty-state">No named coverage gaps match this filter.</p> : <ul className="compact-list">{visibleGaps.map((gap) => <li key={gap}><button type="button" aria-pressed={selected?.kind === "gap" && selected.id === gap} onClick={() => setSelected({ kind: "gap", id: gap })}><strong>{gap}</strong><span>coverage</span></button></li>)}</ul>}</article></div><section className="finding-detail" aria-label="Selected review item">{selectedFinding ? <><p className="eyebrow">Finding detail</p><h3>{selectedFinding.title}</h3><p>{selectedFinding.description || "No further observation was recorded."}</p><p className="hint">Severity: {selectedFinding.severity} · linked references: {selectedFinding.related_ids?.length ?? 0}</p><FindingEvidenceChain nodes={relatedEvidence(selectedFinding.related_ids)} onOpenArtifact={onOpenArtifact} /></> : selectedQuestion ? <><p className="eyebrow">Question detail</p><h3>{selectedQuestion.text}</h3><p className="hint">Priority: {selectedQuestion.priority || "open"} · linked references: {selectedQuestion.related_ids?.length ?? 0}</p><FindingEvidenceChain nodes={relatedEvidence(selectedQuestion.related_ids)} onOpenArtifact={onOpenArtifact} /></> : selectedGap ? <><p className="eyebrow">Coverage gap</p><h3>{selectedGap}</h3><p className="hint">This gap is unresolved; no evidence-backed proposal decision is inferred.</p></> : <p className="empty-state">Select a finding, question or gap to inspect its bounded detail.</p>}</section><aside className="proposal-decision-boundary" data-testid="proposal-decision-boundary"><strong>Proposal decision boundary</strong><span>No Approved status or proposal mutation is available until a persisted human decision contract exists.</span></aside></section>;
+  const [selected, setSelected] = useState<{ kind: "finding" | "question" | "gap"; id: string }>(() => defaultFindingSelection(findings, questions, gaps));
+  const selectedFinding = selected.kind === "finding" ? findings.find((finding) => finding.id === selected.id) : undefined;
+  const selectedQuestion = selected.kind === "question" ? questions.find((question) => question.id === selected.id) : undefined;
+  const selectedGap = selected.kind === "gap" ? gaps.find((gap) => gap === selected.id) : undefined;
+  useEffect(() => {
+    const visibleSelection = (selected.kind === "finding" && visibleFindings.some((item) => item.id === selected.id)) || (selected.kind === "question" && visibleQuestions.some((item) => item.id === selected.id)) || (selected.kind === "gap" && visibleGaps.includes(selected.id));
+    if (visibleSelection) return;
+    const next = defaultFindingSelection(visibleFindings, visibleQuestions, visibleGaps);
+    setSelected(next);
+  }, [selected, visibleFindings, visibleQuestions, visibleGaps]);
+  const relatedNodes = (ids: string[] | undefined) => (ids ?? []).map((id) => allNodesForArchitecture(architecture).find((node) => node.id === id)).filter((node): node is ReturnType<typeof uniqueNodes>[number] => Boolean(node));
+  return <section className="architecture-findings" data-testid="architecture-findings">
+    <header><div><p className="eyebrow">Review queue</p><h2>Findings, questions and gaps</h2><p className="hint">Start with the highest-priority unresolved item. Every conclusion stays linked to promoted evidence.</p></div><button type="button" onClick={() => onOpenArtifact("reports/findings/findings.md")}>Open findings document</button></header>
+    <div className="findings-toolbar"><label htmlFor="findings-search">Search<input id="findings-search" name="findings-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label htmlFor="findings-severity">Severity<select id="findings-severity" name="findings-severity" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">All severities</option>{Array.from(new Set(findings.map((finding) => finding.severity))).sort().map((item) => <option key={item} value={item}>{item}</option>)}</select></label><span className="status info">Unresolved · human decision required</span></div>
+    <div className="architecture-findings-grid">
+      <article><h3>Findings <span>{visibleFindings.length}/{findings.length}</span></h3>{visibleFindings.length === 0 ? <p className="empty-state">No findings match this filter.</p> : <ul className="compact-list">{visibleFindings.map((finding) => <li key={finding.id}><button type="button" title={`Finding ${finding.id}`} aria-pressed={selected.kind === "finding" && selected.id === finding.id} onClick={() => setSelected({ kind: "finding", id: finding.id })}><strong>{finding.title}</strong><span>{finding.severity}{finding.rule_id ? ` · ${finding.rule_id}` : ""}</span></button></li>)}</ul>}</article>
+      <article><h3>Questions <span>{visibleQuestions.length}/{questions.length}</span></h3>{visibleQuestions.length === 0 ? <p className="empty-state">No open questions match this filter.</p> : <ul className="compact-list">{visibleQuestions.map((question) => <li key={question.id}><button type="button" title={`Question ${question.id}`} aria-pressed={selected.kind === "question" && selected.id === question.id} onClick={() => setSelected({ kind: "question", id: question.id })}><strong>{question.text}</strong><span>{question.priority || "open"}</span></button></li>)}</ul>}</article>
+      <article><h3>Coverage gaps <span>{visibleGaps.length}/{gaps.length}</span></h3>{visibleGaps.length === 0 ? <p className="empty-state">No named coverage gaps match this filter.</p> : <ul className="compact-list">{visibleGaps.map((gap) => <li key={gap}><button type="button" aria-pressed={selected.kind === "gap" && selected.id === gap} onClick={() => setSelected({ kind: "gap", id: gap })}><strong>{gap}</strong><span>coverage</span></button></li>)}</ul>}</article>
+    </div>
+    <section className="finding-detail" aria-label="Selected review item">
+      {selectedFinding ? <FindingDetail finding={selectedFinding} relatedNodes={relatedNodes(selectedFinding.related_ids)} onOpenArtifact={onOpenArtifact} /> : selectedQuestion ? <ReviewQuestionDetail question={selectedQuestion} relatedNodes={relatedNodes(selectedQuestion.related_ids)} onOpenArtifact={onOpenArtifact} /> : selectedGap ? <><p className="eyebrow">Coverage gap</p><h3>{selectedGap}</h3><div className="finding-detail-section"><h4>Why it matters</h4><p>This gap is unresolved and limits the confidence of the promoted architecture.</p></div><div className="finding-detail-section"><h4>Suggested architecture</h4><p className="status info">No persisted proposal is attached yet. Use the evidence chain to draft one in Proposals.</p></div></> : <p className="empty-state">No review item is available for this filter.</p>}
+    </section>
+    <aside className="proposal-decision-boundary" data-testid="proposal-decision-boundary"><strong>Proposal decision boundary</strong><span>Findings are evidence-backed review items. Approved status and proposal mutation are unavailable until a persisted human decision exists.</span></aside>
+  </section>;
+}
+
+function defaultFindingSelection(findings: ArchitectureFinding[], questions: Array<{ id: string; text: string; priority?: string }>, gaps: string[]): { kind: "finding" | "question" | "gap"; id: string } {
+  const severityRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  const finding = [...findings].sort((left, right) => (severityRank[left.severity.toLowerCase()] ?? 5) - (severityRank[right.severity.toLowerCase()] ?? 5))[0];
+  if (finding) return { kind: "finding", id: finding.id };
+  const question = questions[0];
+  if (question) return { kind: "question", id: question.id };
+  return { kind: "gap", id: gaps[0] ?? "" };
+}
+
+function FindingDetail({ finding, relatedNodes, onOpenArtifact }: { finding: ArchitectureFinding; relatedNodes: ReturnType<typeof uniqueNodes>; onOpenArtifact: (path: string) => void }) {
+  const evidence = findingEvidence(finding, relatedNodes);
+  return <><p className="eyebrow">Finding detail</p><h3>{finding.title}</h3><div className="finding-detail-meta"><span className={`status severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span><span>{finding.provenance?.confidence !== undefined ? `${Math.round(finding.provenance.confidence * 100)}% confidence` : "Confidence unavailable"}</span><span>{evidence.length} evidence refs</span></div><div className="finding-detail-section"><h4>Observed</h4><p>{finding.description || "No narrative observation was recorded in the promoted snapshot."}</p></div><div className="finding-detail-section"><h4>Why it matters</h4><p>{finding.rule_id ? `This finding is raised by ${finding.rule_id} and remains unresolved.` : "The promoted architecture cannot treat this review item as resolved without a human decision."}</p></div><div className="finding-detail-section"><h4>Suggested architecture</h4><p className="status info">No persisted proposal is attached yet. Draft the change only after reviewing the cited evidence.</p></div><details className="finding-identity"><summary>Technical identity</summary><dl className="compact-defs"><div><dt>Finding ID</dt><dd><code>{finding.id}</code></dd></div><div><dt>Authority</dt><dd>{finding.provenance?.kind || "promoted semantic snapshot"}</dd></div></dl></details><FindingEvidenceChain evidence={evidence} onOpenArtifact={onOpenArtifact} /></>;
+}
+
+function ReviewQuestionDetail({ question, relatedNodes, onOpenArtifact }: { question: { id: string; text: string; priority?: string; related_ids?: string[] }; relatedNodes: ReturnType<typeof uniqueNodes>; onOpenArtifact: (path: string) => void }) {
+  return <><p className="eyebrow">Open question</p><h3>{question.text}</h3><div className="finding-detail-meta"><span className="status warn">{question.priority || "open"}</span><span>{relatedNodes.length} linked evidence refs</span></div><div className="finding-detail-section"><h4>Observed</h4><p>The promoted snapshot leaves this question unresolved.</p></div><div className="finding-detail-section"><h4>Suggested architecture</h4><p className="status info">No proposal is inferred. Resolve the question against the linked evidence before drafting a change.</p></div><details className="finding-identity"><summary>Technical identity</summary><code>{question.id}</code></details><FindingEvidenceChain evidence={findingEvidence(undefined, relatedNodes)} onOpenArtifact={onOpenArtifact} /></>;
 }
 
 function allNodesForArchitecture(architecture: ArchitectureResponse) {
   return uniqueNodes(Object.values(architecture.views).flatMap((view) => view.nodes));
 }
 
-function FindingEvidenceChain({ nodes, onOpenArtifact }: { nodes: ReturnType<typeof uniqueNodes>; onOpenArtifact: (path: string) => void }) {
-  return <section className="finding-evidence-chain" aria-label="Evidence chain"><p className="eyebrow">Evidence chain</p>{nodes.length === 0 ? <p className="hint">No linked model entity is available in the promoted snapshot.</p> : <ul>{nodes.map((node) => <li key={node.id}><div><strong>{node.name}</strong><span>{node.type} · {node.evidence?.[0]?.repo || "repository evidence unavailable"}</span><code>{node.evidence?.[0]?.path || node.path}</code></div><button type="button" onClick={() => onOpenArtifact(node.evidence?.[0]?.path || node.path)}>Open evidence</button></li>)}</ul>}</section>;
+function findingEvidence(finding: ArchitectureFinding | undefined, nodes: ReturnType<typeof uniqueNodes>): Array<{ id: string; label: string; repo?: string; path: string; lines?: { start: number; end: number }; excerpt?: string }> {
+  const refs: Array<{ id: string; label: string; repo?: string; path: string; lines?: { start: number; end: number }; excerpt?: string }> = [];
+  for (const [index, item] of (finding?.provenance?.evidence ?? []).entries()) refs.push({ id: `finding:${index}:${item.repo}:${item.path}`, label: "Finding citation", repo: item.repo, path: item.path, lines: item.lines, excerpt: item.excerpt });
+  for (const node of nodes) for (const [index, item] of (node.evidence ?? []).entries()) refs.push({ id: `node:${node.id}:${index}:${item.path}`, label: node.name, repo: item.repo, path: item.path, lines: item.lines });
+  return Array.from(new Map(refs.map((item) => [`${item.repo ?? ""}:${item.path}:${item.lines?.start ?? ""}`, item])).values());
+}
+
+function FindingEvidenceChain({ evidence, onOpenArtifact }: { evidence: Array<{ id: string; label: string; repo?: string; path: string; lines?: { start: number; end: number }; excerpt?: string }>; onOpenArtifact: (path: string) => void }) {
+  return <section className="finding-evidence-chain" aria-label="Evidence chain"><p className="eyebrow">Evidence chain</p>{evidence.length === 0 ? <p className="hint">No bounded citation is attached to this review item.</p> : <ol>{evidence.map((item, index) => <li key={item.id}><div><span className="finding-evidence-order">{index + 1}</span><strong>{item.label}</strong><span>{item.repo || "repository unavailable"}{item.lines ? ` · lines ${item.lines.start}–${item.lines.end}` : ""}</span><code>{item.path}</code>{item.excerpt ? <q>{item.excerpt}</q> : null}</div><button type="button" onClick={() => onOpenArtifact(item.path)}>Open evidence</button></li>)}</ol>}</section>;
 }
 
 function NodeInspector({ node, currentLevel, issues, onOpenArtifact, onDrillDown }: { node: ReturnType<typeof uniqueNodes>[number]; currentLevel: ArchitectureLevel; issues: KnowledgeIssue[]; onOpenArtifact: (path: string) => void; onDrillDown: (level: ArchitectureLevel) => void }) {

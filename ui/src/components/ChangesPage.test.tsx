@@ -12,15 +12,15 @@ const runs: RunListItem[] = [
 ];
 
 describe("ChangesPage", () => {
-  it("routes only successful indexed analysis runs to Change Review", () => {
+  it("routes only successful indexed analysis runs to architecture review", () => {
     const onSelectChangeReview = vi.fn();
     const onOpenRunStudio = vi.fn();
     render(<ChangesPage runs={runs} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={onSelectChangeReview} onOpenRunStudio={onOpenRunStudio}>content</ChangesPage>);
     expect(screen.getByTestId("review-packages")).not.toHaveTextContent("qa-1");
     expect(screen.getAllByText("Publication: Unknown")).toHaveLength(3);
-    fireEvent.click(screen.getByRole("button", { name: "Change Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review architecture" }));
     expect(onSelectChangeReview).toHaveBeenCalledWith("run-good");
-    const studioButtons = screen.getAllByRole("button", { name: "Open Run Studio" });
+    const studioButtons = screen.getAllByRole("button", { name: "Open recovery" });
     fireEvent.click(studioButtons[0]);
     fireEvent.click(studioButtons[1]);
     expect(onOpenRunStudio.mock.calls.flat()).toEqual(expect.arrayContaining(["run-no-index", "run-failed"]));
@@ -45,7 +45,7 @@ it("fails closed when the promoted comparison belongs to another run", () => {
       gaps: { added: [], changed: [], removed: [] },
     },
   };
-  render(<ChangesPage runs={runs} selectedRunID="run-selected" selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} architectureComparison={comparison} architectureComparisonMismatch>content</ChangesPage>);
+  render(<ChangesPage runs={runs} selectedRunID="run-selected" selectedEvidenceStatus="idle" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} architectureComparison={comparison} architectureComparisonMismatch>content</ChangesPage>);
   expect(screen.getByText("Comparison unavailable for selected run")).toBeInTheDocument();
   expect(screen.queryByText("What changed in the architecture")).not.toBeInTheDocument();
   expect(screen.getByText("The promoted architecture comparison belongs to another run, so no current delta is shown here.")).toBeInTheDocument();
@@ -65,7 +65,7 @@ it("renders a run-pinned initial summary instead of a baseline delta", () => {
     authority: { mode: "promoted_run_snapshot", source_run_id: "run-good" },
     generated_at: "2026-08-04T20:00:00Z",
   };
-  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
+  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
   expect(screen.getByText("Initial architecture summary")).toBeInTheDocument();
   expect(screen.getByTestId("run-pinned-review-summary")).toHaveTextContent("fake");
   expect(screen.queryByText("What changed in the architecture")).not.toBeInTheDocument();
@@ -92,7 +92,7 @@ it("keeps current workspace evidence read-only and does not reuse a run review",
 
 it("keeps failed runs in Run Studio instead of presenting a publishable review", () => {
   render(<ChangesPage runs={runs} selectedRunID="run-failed" selectedEvidenceStatus="available" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
-  expect(screen.getByText("Change Review is unavailable")).toBeInTheDocument();
+  expect(screen.getByText("Recovery is required before review")).toBeInTheDocument();
   expect(screen.getByTestId("changes-open-run-studio")).toBeInTheDocument();
   expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
 });

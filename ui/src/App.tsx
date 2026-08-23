@@ -10,7 +10,6 @@ import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
 import { SettingsPage } from "./components/SettingsPage";
 import { SetupRoute } from "./components/SetupRoute";
-import { WizardContractPanel } from "./components/WizardContractPanel";
 import {
   AnalysisStagePanel,
 } from "./components/StagePanels";
@@ -34,7 +33,7 @@ import {
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { StageId } from "./lib/consoleTypes";
-import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type ChangesView, type KnowledgeView, type SetupStep, type ViewerMode } from "./lib/appRoutes";
+import { formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type ChangesView, type KnowledgeView, type SettingsSection, type SetupStep, type ViewerMode } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { deriveAppWorkflowState, derivePublicationState, selectedRunIssueCopy } from "./lib/appDerived";
@@ -62,7 +61,6 @@ export default function App() {
   const [knowledgeError, setKnowledgeError] = useState("");
   const [currentArtifactPath, setCurrentArtifactPath] = useState("");
   const [currentArtifactContent, setCurrentArtifactContent] = useState("");
-  const [briefSkipConfirmationOpen, setBriefSkipConfirmationOpen] = useState(false);
   const unsavedDraftRef = useRef(false);
   const restoredRouteRunRef = useRef<string | null>(null);
   const restoredArtifactRef = useRef<string | null>(null);
@@ -87,6 +85,8 @@ export default function App() {
   const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
+  const routeFocusKey = [route.destination, route.taskView, route.taskId, route.attemptId, route.changesView, route.knowledgeView, route.settingsSection, route.setupStep, route.source].filter(Boolean).join(":");
+  const previousRouteFocusKey = useRef(routeFocusKey);
 
   const navigateRoute = useCallback((nextRoute: AppRoute, replace = false) => {
     if (!replace && route.destination === "setup" && nextRoute.destination !== "setup" && unsavedDraftRef.current && !window.confirm("Leave Setup? Unsaved workspace or editor changes will be lost.")) return;
@@ -96,17 +96,29 @@ export default function App() {
     setActiveStageState(stageForRoute(nextRoute));
   }, [route.destination]);
 
+  useEffect(() => {
+    if (previousRouteFocusKey.current === routeFocusKey) return;
+    previousRouteFocusKey.current = routeFocusKey;
+    if (!/jsdom/i.test(window.navigator.userAgent)) window.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+    let cancelled = false;
+    let attempts = 0;
+    const focusHeading = () => {
+      if (cancelled) return;
+      const heading = document.querySelector<HTMLElement>('[data-route-heading="true"]') ?? document.querySelector<HTMLElement>('.product-content h1');
+      if (heading) {
+        if (!heading.hasAttribute("tabindex")) heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+      }
+      else if (attempts++ < 5) window.setTimeout(focusHeading, 25);
+    };
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(focusHeading);
+    else window.setTimeout(focusHeading, 0);
+    return () => { cancelled = true; };
+  }, [routeFocusKey]);
+
   const navigateDestination = useCallback((nextDestination: WorkflowDestination, replace = false) => {
     navigateRoute({ destination: nextDestination, invalid: [] }, replace);
   }, [navigateRoute]);
-
-  const setActiveStage = useCallback((stage: StageId) => {
-    const nextDestination = destinationForStage(stage);
-    const nextRoute: AppRoute = nextDestination === route.destination ? { ...route, invalid: [] } : { destination: nextDestination, invalid: [] };
-    if (nextDestination === "setup") nextRoute.setupStep = stage === "readiness" ? "runner" : stage === "charter" ? "brief" : "sources";
-    if (nextDestination === "changes") nextRoute.changesView = stage === "publish" ? "publish" : stage === "proposals" ? "proposals" : "overview";
-    navigateRoute(nextRoute);
-  }, [navigateRoute, route]);
 
   function handleDestinationChange(nextDestination: WorkflowDestination) {
     const hasExplicitRunContext = Boolean(route.runId && (route.source === "snapshot" || (route.destination === "tasks" && route.taskView === "legacy")));
@@ -129,6 +141,7 @@ export default function App() {
     setBusy,
     setError,
     publicationContext: destination === "changes" && route.source === "snapshot" ? { taskId: route.taskId, attemptId: route.attemptId, runId: route.runId } : undefined,
+    loadPublicationDiff: () => runExplorer.loadGitDiff({ runId: null }),
   });
 
   const {
@@ -227,7 +240,6 @@ export default function App() {
     wizardRules,
     wizardStatus,
     wizardContractLoaded,
-    wizardContractReady,
     gitMessage,
     proposalBranch,
     gitStatus,
@@ -507,10 +519,10 @@ export default function App() {
     return true;
   }
 
-  async function handleOnboardingRunFirstAnalysis() {
+  async function handleOnboardingCreateFirstTask() {
     const entered = await handleOnboardingEnterConsole();
     if (entered) {
-      await startFirstRun("analysis");
+      navigateRoute({ destination: "tasks", taskView: "new", invalid: [] });
     }
   }
 
@@ -611,24 +623,6 @@ export default function App() {
   function handleSetupRuntimeProviderChange(value: string) {
     setSetupRuntimeProvider(value);
     clearFirstRunReadiness();
-  }
-
-  async function handleSetupFirstRun(nextStage: StageId = "analysis") {
-    if (!wizardContractReady) {
-      setBriefSkipConfirmationOpen(true);
-      return;
-    }
-    await startFirstRun(nextStage);
-  }
-
-  async function startFirstRun(nextStage: StageId = "analysis") {
-    setFirstRunStatus("");
-    const startedRunID = await handleRunPipeline("init");
-    if (startedRunID) {
-      setFirstRunStatus("First analysis started. Results will update as the run finishes.");
-      setActiveStage(nextStage);
-      navigateRoute({ destination: "tasks", taskView: "legacy", runId: startedRunID, runRequested: true, invalid: [] });
-    }
   }
 
   async function handleRunPipelineFromRuns(pipeline: "init" | "refresh", intent: "start" | "queue" = "start") {
@@ -953,22 +947,6 @@ export default function App() {
         doctorResult={setupDoctorResult}
         setupRuntime={setupRuntime}
         setupRuntimeProvider={setupRuntimeProvider}
-        briefReady={wizardContractReady}
-        briefPanel={
-          <WizardContractPanel
-            busy={busy}
-            wizardProjectName={wizardProjectName}
-            wizardScope={wizardScope}
-            wizardNfr={wizardNfr}
-            wizardRules={wizardRules}
-            wizardStatus={wizardStatus}
-            onProjectNameChange={setWizardProjectName}
-            onScopeChange={setWizardScope}
-            onNfrChange={setWizardNfr}
-            onRulesChange={setWizardRules}
-            onSave={() => void handleSaveStep0WizardContract()}
-          />
-        }
         firstRunStatus={firstRunStatus}
         onWorkspacePathChange={setOnboardingWorkspacePath}
         onCreateWorkspaceChange={setOnboardingCreateWorkspace}
@@ -985,7 +963,7 @@ export default function App() {
         onSaveRuntime={() => void handleOnboardingSaveRuntime()}
         onCheckDoctor={() => void handleSetupDoctorCheck()}
         onEnterConsole={() => void handleOnboardingEnterConsole()}
-        onRunFirstAnalysis={() => void handleOnboardingRunFirstAnalysis()}
+        onCreateFirstTask={() => void handleOnboardingCreateFirstTask()}
       />
     );
   }
@@ -1025,7 +1003,7 @@ export default function App() {
 	    onOpenStudio={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: filters, invalid: [] })}
 	    onBackToAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
 	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
-	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", taskId, invalid: [] })}
+	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", taskId, invalid: [] })}
 	    onOpenChanges={(taskId, attemptId, runId) => navigateRoute({ destination: "changes", taskId, attemptId, runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] })}
 	    onOutcomeSettled={handleTaskOutcomeSettled}
 	  /> : null}
@@ -1086,13 +1064,13 @@ export default function App() {
 		  workspaceHealth={workspaceHealthReport}
 		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
 		  error={knowledgeError}
-		  view={route.knowledgeView ?? "documents"}
+		  view={route.knowledgeView ?? "map"}
 		  selectedEntityID={route.entity}
 		  selectedArtifactPath={route.artifact}
 		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
 		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] })}
 			  onDocumentChange={(artifact) => navigateRoute(
-			    { ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "documents", source: "current", artifact, invalid: [] },
+			    { ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "map", source: "current", artifact, invalid: [] },
 			    destination === "knowledge" && !route.artifact,
 			  )}
 		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
@@ -1103,13 +1081,21 @@ export default function App() {
 	  ) : null}
 	  {destination === "settings" ? (
 	    <SettingsPage
+	      activeSection={route.settingsSection ?? "workspace"}
 	      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
 	      workspaceValid={validateResult?.ok === true}
 	      runtimeLabel={runtimeLabel}
+	      setupRuntime={setupRuntime}
+	      setupRuntimeProvider={setupRuntimeProvider}
 	      runtimeSettingsPanel={runtimeSettingsPanel}
 	      onOpenSetup={() => handleDestinationChange("setup")}
 	      onOpenChanges={() => handleDestinationChange("changes")}
 	      onOpenRuns={() => handleDestinationChange("tasks")}
+	      onRuntimeChange={setSetupRuntime}
+	      onRuntimeProviderChange={setSetupRuntimeProvider}
+	      onSaveRuntime={() => void handleOnboardingSaveRuntime()}
+	      busy={busy}
+	      onSectionChange={(section: SettingsSection) => navigateRoute({ ...route, destination: "settings", settingsSection: section, invalid: [] })}
 	    />
 	  ) : null}
 
@@ -1145,7 +1131,7 @@ export default function App() {
           onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
           onValidateWorkspace={() => void handleValidateWorkspaceWithHealth()}
           onCheckDoctor={() => void handleSetupDoctorCheck()}
-          onRunFirstAnalysis={() => void handleSetupFirstRun("analysis")}
+          onCreateTask={() => navigateRoute({ destination: "tasks", taskView: "new", invalid: [] })}
           runtimeSettingsPanel={runtimeSettingsPanel}
           artifactCount={artifactCount}
           workspaceHealthReport={workspaceHealthReport}
@@ -1176,9 +1162,6 @@ export default function App() {
           onEditorSelectionChange={(path) => void handleEditorSelectionChange(path)}
           onEditorContentChange={setSelectedEditorContent}
           onSaveEditor={() => void handleSaveSelectedEditorArtifact()}
-          wizardContractReady={wizardContractReady}
-          onCreateTask={() => navigateRoute({ destination: "tasks", taskView: "new", invalid: [] })}
-          onStart={() => void handleSetupFirstRun("analysis")}
         />
       ) : null}
 
@@ -1213,7 +1196,7 @@ export default function App() {
           onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRunInRuns(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "documents", source: "current", invalid: [] })}
+		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })}
         />
         </LegacyRunPage>
       ) : null}
@@ -1224,15 +1207,20 @@ export default function App() {
       <AppOverlays
         askOpen={askOpen}
         gitConfirmation={gitConfirmation}
-        briefSkipConfirmationOpen={briefSkipConfirmationOpen}
         busy={busy}
         onCloseAsk={() => setAskOpen(false)}
         onOpenAskCitation={(path) => void handleAskCitation(path)}
         onProposalCreated={(proposal) => void handleQAProposalCreated(proposal)}
         onCancelGitAction={cancelGitAction}
         onConfirmGitAction={() => void confirmGitAction()}
-        onCancelBriefSkip={() => setBriefSkipConfirmationOpen(false)}
-        onConfirmBriefSkip={() => { setBriefSkipConfirmationOpen(false); void startFirstRun("analysis"); }}
+        gitConfirmationContext={{
+          taskId: route.taskId,
+          attemptId: route.attemptId,
+          runId: route.runId,
+          commitMessage: gitMessage,
+          openQuestions,
+          evidenceIdentity: runStatus?.runtime_mode === "fake" ? "demo" : "live",
+        }}
       />
     </>
   );

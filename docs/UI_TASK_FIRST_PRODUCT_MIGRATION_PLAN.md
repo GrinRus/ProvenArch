@@ -1,6 +1,6 @@
 # Task-first Product UI — migration plan
 
-Статус: **implementation wave complete through design-QA Q0–Q9; deterministic Q10 closure in progress**, 2026-08-21.
+Статус: **implementation wave and deterministic design-QA Q10 closure complete**, 2026-08-23.
 
 Целевой UX зафиксирован в [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
 Epic 23 в [`BACKLOG.md`](BACKLOG.md) является acceptance backlog. Этот документ задаёт dependency

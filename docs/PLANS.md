@@ -9704,9 +9704,8 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 
 ### Current layer
 
-Implementation/review. Q0–Q9 implementation slices are complete; Q10 is in progress with full
-deterministic checks, embedded-asset parity, responsive/accessibility smoke and final live UI
-comparison still required.
+Implementation/review. Q0–Q10 implementation slices are complete; deterministic Q10 checks,
+embedded-asset parity, responsive/accessibility smoke and final live UI comparison are accepted.
 
 ### Context
 
@@ -10085,3 +10084,19 @@ schema/contract decision instead of inventing frontend state.
   the final live matrix is 28/28, mobile touch targets are 0 below 44px, Lighthouse is 100/100/100
   on desktop and mobile, and mock E2E remains 8/8. Q10 is accepted and the product-design QA result
   is `passed`.
+- 2026-08-23: Q10 priority closure completed against the fresh UI audit. Changes now exposes one
+  review workbench without a duplicate H1; Architecture Documents select `exports.home_path` (or
+  the named/canonical Architecture Home) before alphabetical fallback; Task outcomes show
+  `Unavailable`/explicit produced counts when semantic comparison is unavailable instead of a zero
+  delta; route transitions reset scroll and focus the new heading; Inbox advanced filters and empty
+  lifecycle groups are collapsed; Settings Advanced runtime controls are closed by default. Focused
+  component coverage, full UI (47 files/258 tests), mock E2E (8/8), desktop/mobile overflow and
+  critical axe checks passed. Source repositories remain unchanged.
+- 2026-08-23: Final task-first audit remediation completed. Guided Setup now hands off only to New
+  Task; New Task is goal-first with a visible Start Task action; Architecture defaults to semantic
+  Map; Findings expose selected evidence-rich detail; Changes keeps one compact selected change-set
+  workbench; Publish confirmation and refresh share the authoritative full-workspace Git inventory;
+  Settings runner presets are selectable and saveable. Focused suites (128 tests), full UI (47
+  files/258 tests), deterministic mock E2E (8/8), contracts, Go, Python (274 tests), lint, build and
+  embedded parity pass with the pinned Node.js 22.21.1 candidate at
+  `/tmp/provenarch-node-22.21.1-bin`.

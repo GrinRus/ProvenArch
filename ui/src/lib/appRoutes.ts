@@ -2,6 +2,7 @@ import type { StageId } from "./consoleTypes";
 import type { WorkflowDestination } from "./workflowState";
 
 export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
+export type SettingsSection = "workspace" | "sources" | "runners" | "runtime" | "git" | "diagnostics";
 export type KnowledgeView = "documents" | "diagrams" | "model" | "findings" | "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
 export type TaskRouteView = "inbox" | "new" | "detail" | "attempt" | "studio" | "legacy";
@@ -27,6 +28,7 @@ export type AppRoute = {
   attemptId?: string;
   taskFilters?: TaskFilters;
   knowledgeView?: KnowledgeView;
+  settingsSection?: SettingsSection;
   changesView?: ChangesView;
   source?: RouteSource;
   artifact?: string;
@@ -40,6 +42,7 @@ export const destinationPaths: Record<WorkflowDestination, string> = {
 };
 
 const setupSteps = new Set<SetupStep>(["workspace", "sources", "brief", "runner", "review"]);
+const settingsSections = new Set<SettingsSection>(["workspace", "sources", "runners", "runtime", "git", "diagnostics"]);
 const knowledgeViews = new Set<KnowledgeView>(["documents", "diagrams", "model", "findings", "map", "overview", "catalog", "flows", "evidence"]);
 const changesViews = new Set<ChangesView>(["overview", "evidence", "findings", "proposals", "diff", "publish"]);
 const sources = new Set<RouteSource>(["snapshot", "current"]);
@@ -82,7 +85,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
 	const legacy = params.get("view") ?? segments[1];
 	const migrated = legacy === "atlas" ? "map" : legacy === "entities" ? "catalog" : legacy === "artifacts" ? "evidence" : legacy;
 	if (migrated && knowledgeViews.has(migrated as KnowledgeView)) route.knowledgeView = migrated as KnowledgeView;
-	else { route.knowledgeView = "documents"; if (legacy) invalid.push("view"); }
+	else { route.knowledgeView = "map"; if (legacy) invalid.push("view"); }
 	route.source = enumParam(params, "source", new Set<RouteSource>(["current"]), "current", invalid);
 	route.taskId = taskParam(params, invalid);
 	route.entity = textParam(params, "entity");
@@ -98,6 +101,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
     route.artifact = textParam(params, "artifact");
     route.mode = enumParam(params, "mode", viewerModes, "rendered", invalid);
   }
+  if (destination === "settings") route.settingsSection = enumParam(params, "section", settingsSections, "workspace", invalid);
   return route;
 }
 
@@ -122,7 +126,7 @@ export function formatAppRoute(route: AppRoute): string {
   const params = new URLSearchParams();
   if (route.destination === "setup") params.set("step", route.setupStep ?? "workspace");
   if (route.destination === "knowledge") {
-    params.set("view", route.knowledgeView ?? "documents");
+    params.set("view", route.knowledgeView ?? "map");
     params.set("source", "current");
     if (route.taskId) params.set("task", route.taskId);
     if (route.entity) params.set("entity", route.entity);
@@ -137,6 +141,7 @@ export function formatAppRoute(route: AppRoute): string {
     if (route.artifact) params.set("artifact", route.artifact);
     params.set("mode", route.mode ?? "rendered");
   }
+  if (route.destination === "settings" && route.settingsSection && route.settingsSection !== "workspace") params.set("section", route.settingsSection);
   const query = params.toString();
   return `${destinationPaths[route.destination]}${query ? `?${query}` : ""}`;
 }
@@ -192,7 +197,9 @@ function attemptParam(params: URLSearchParams, invalid: string[]): string | unde
 
 function parseTaskRoute(segments: string[], route: AppRoute, invalid: string[]): void {
   route.taskView = "inbox";
-  if (segments.length === 1) return;
+  // The service serves the console shell from `/`; treat that root as the
+  // canonical Task Inbox instead of surfacing a spurious invalid-route state.
+  if (segments.length === 0 || segments.length === 1) return;
   if (segments.length === 2 && segments[1] === "legacy") {
     route.taskView = "legacy";
     return;
