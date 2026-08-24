@@ -1,7 +1,7 @@
 import type { StageId } from "./consoleTypes";
 import type { WorkflowDestination } from "./workflowState";
 
-export type SetupStep = "workspace" | "sources" | "brief" | "runner" | "review";
+export type SetupStep = "workspace" | "sources" | "runner" | "review";
 export type SettingsSection = "workspace" | "sources" | "runners" | "runtime" | "git" | "diagnostics";
 export type KnowledgeView = "documents" | "diagrams" | "model" | "findings" | "map" | "overview" | "catalog" | "flows" | "evidence" | "atlas" | "entities" | "artifacts";
 export type ChangesView = "overview" | "evidence" | "findings" | "proposals" | "diff" | "publish";
@@ -41,7 +41,7 @@ export const destinationPaths: Record<WorkflowDestination, string> = {
   setup: "/setup", tasks: "/tasks", knowledge: "/architecture", changes: "/changes", settings: "/settings",
 };
 
-const setupSteps = new Set<SetupStep>(["workspace", "sources", "brief", "runner", "review"]);
+const setupSteps = new Set<SetupStep>(["workspace", "sources", "runner", "review"]);
 const settingsSections = new Set<SettingsSection>(["workspace", "sources", "runners", "runtime", "git", "diagnostics"]);
 const knowledgeViews = new Set<KnowledgeView>(["documents", "diagrams", "model", "findings", "map", "overview", "catalog", "flows", "evidence"]);
 const changesViews = new Set<ChangesView>(["overview", "evidence", "findings", "proposals", "diff", "publish"]);
@@ -75,7 +75,7 @@ export function parseAppRoute(location: Pick<Location, "pathname" | "search">, c
     route.taskView = segments.length === 1 ? "legacy" : "inbox";
   }
 
-  if (destination === "setup") route.setupStep = enumParam(params, "step", setupSteps, "workspace", invalid);
+  if (destination === "setup") route.setupStep = setupStepParam(params, invalid);
   if (destination === "tasks") {
     route.taskFilters = parseTaskFilters(params, invalid);
     if (legacyRunPath || segments[0] === "runs") return route;
@@ -151,7 +151,7 @@ export function destinationFromPath(pathname: string, consoleReady: boolean): Wo
 }
 
 export function destinationForStage(stage: StageId): WorkflowDestination {
-  if (stage === "source" || stage === "readiness" || stage === "charter") return "setup";
+  if (stage === "source" || stage === "readiness") return "setup";
   if (stage === "analysis" || stage === "ask") return "tasks";
   return "changes";
 }
@@ -163,7 +163,7 @@ export function defaultStageForDestination(destination: WorkflowDestination): St
 }
 
 export function stageForRoute(route: AppRoute): StageId {
-  if (route.destination === "setup") return route.setupStep === "runner" ? "readiness" : route.setupStep === "brief" || route.setupStep === "review" ? "charter" : "source";
+  if (route.destination === "setup") return route.setupStep === "runner" ? "readiness" : route.setupStep === "review" ? "review" : "source";
   if (route.destination === "tasks" && route.taskView === "legacy") return "analysis";
   if (route.destination === "changes") return route.changesView === "publish" ? "publish" : route.changesView === "proposals" ? "proposals" : "review";
   return defaultStageForDestination(route.destination);
@@ -175,6 +175,14 @@ function enumParam<T extends string>(params: URLSearchParams, key: string, allow
   if (allowed.has(value as T)) return value as T;
   invalid.push(key);
   return fallback;
+}
+
+function setupStepParam(params: URLSearchParams, invalid: string[]): SetupStep {
+  const value = params.get("step");
+  // `brief` was the pre-task-first contract editor. Keep old bookmarks safe by
+  // landing on the canonical review step, never by rendering the retired UI.
+  if (value === "brief") return "review";
+  return enumParam(params, "step", setupSteps, "workspace", invalid);
 }
 
 function textParam(params: URLSearchParams, key: string): string | undefined {

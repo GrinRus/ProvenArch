@@ -214,6 +214,8 @@ critical axe violations and screenshot artifacts on failure.
   containers.
 - `/home` and `/runs` are no longer product destinations; old run links canonicalize to the explicit
   `/tasks/legacy/<run_id>` read-only migration surface without creating a Task.
+- Retired `/setup?step=brief` bookmarks canonicalize to `/setup?step=review`; the old Charter/Baseline
+  setup surface is not rendered or kept as a compatibility shell.
 - Remove Home and Analyze components/routes/selectors in the same accepted cutover slice; do not
   keep hidden equivalents.
 - Old design assets `ui-console-v2`, `ui-architecture-change-review` and `ui-product-shell` are
