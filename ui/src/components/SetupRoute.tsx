@@ -1,12 +1,10 @@
 import type { ReactNode } from "react";
 
-import { CharterStagePanel, ReadinessStagePanel, SourceStagePanel } from "./StagePanels";
+import { ReadinessStagePanel, SourceStagePanel } from "./StagePanels";
 import { GuidedSetupPage, GuidedSetupReview } from "./ProductPages";
-import { WizardContractPanel } from "./WizardContractPanel";
 import type {
   Diagnostic,
   DoctorResponse,
-  EditableArtifactOption,
   GuidedRepo,
   RuntimeExecutionValues,
   RuntimePermissionValues,
@@ -58,26 +56,6 @@ export type SetupRouteProps = {
   runtimeExecutionEffective: RuntimeExecutionValues;
   runtimePermissionEffective: RuntimePermissionValues;
   runtimeStepProviderEffective: Partial<RuntimeStepProviderValues>;
-  wizardProjectName: string;
-  wizardScope: string;
-  wizardNfr: string;
-  wizardRules: string;
-  gitStatus: string;
-  proposalBranch: string;
-  wizardStatus: string;
-  onProjectNameChange: (value: string) => void;
-  onScopeChange: (value: string) => void;
-  onNfrChange: (value: string) => void;
-  onRulesChange: (value: string) => void;
-  onSaveWizardContract: () => void;
-  baselineBundleWarnings: Diagnostic[];
-  baselineEditorArtifacts: EditableArtifactOption[];
-  selectedEditorPath: string;
-  selectedEditorContent: string;
-  editorStatus: string;
-  onEditorSelectionChange: (path: string) => void;
-  onEditorContentChange: (value: string) => void;
-  onSaveEditor: () => void;
   onCreateTask: () => void;
 };
 
@@ -122,26 +100,6 @@ export function SetupRoute({
   runtimeExecutionEffective,
   runtimePermissionEffective,
   runtimeStepProviderEffective,
-  wizardProjectName,
-  wizardScope,
-  wizardNfr,
-  wizardRules,
-  gitStatus,
-  proposalBranch,
-  wizardStatus,
-  onProjectNameChange,
-  onScopeChange,
-  onNfrChange,
-  onRulesChange,
-  onSaveWizardContract,
-  baselineBundleWarnings,
-  baselineEditorArtifacts,
-  selectedEditorPath,
-  selectedEditorContent,
-  editorStatus,
-  onEditorSelectionChange,
-  onEditorContentChange,
-  onSaveEditor,
   onCreateTask,
 }: SetupRouteProps) {
   return (
@@ -198,41 +156,6 @@ export function SetupRoute({
           runtimeExecutionEffective={runtimeExecutionEffective}
           runtimePermissionEffective={runtimePermissionEffective}
           runtimeStepProviderEffective={runtimeStepProviderEffective}
-        />
-      ) : null}
-
-      {step === "brief" ? (
-        <CharterStagePanel
-          wizardProjectName={wizardProjectName}
-          wizardScope={wizardScope}
-          wizardNfr={wizardNfr}
-          wizardRules={wizardRules}
-          gitStatus={gitStatus}
-          proposalBranch={proposalBranch}
-          wizardPanel={
-            <WizardContractPanel
-              busy={busy}
-              wizardProjectName={wizardProjectName}
-              wizardScope={wizardScope}
-              wizardNfr={wizardNfr}
-              wizardRules={wizardRules}
-              wizardStatus={wizardStatus}
-              onProjectNameChange={onProjectNameChange}
-              onScopeChange={onScopeChange}
-              onNfrChange={onNfrChange}
-              onRulesChange={onRulesChange}
-              onSave={onSaveWizardContract}
-            />
-          }
-          busy={busy}
-          baselineBundleWarnings={baselineBundleWarnings}
-          baselineEditorArtifacts={baselineEditorArtifacts}
-          selectedEditorPath={selectedEditorPath}
-          selectedEditorContent={selectedEditorContent}
-          editorStatus={editorStatus}
-          onEditorSelectionChange={onEditorSelectionChange}
-          onEditorContentChange={onEditorContentChange}
-          onSave={onSaveEditor}
         />
       ) : null}
 

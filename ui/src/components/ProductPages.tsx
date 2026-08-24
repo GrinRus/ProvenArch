@@ -14,13 +14,13 @@ export function GuidedSetupPage({ step, onStepChange, children }: { step: SetupS
     <section className="guided-setup" data-testid="guided-setup-page">
       <header className="setup-page-heading">
         <div><p className="eyebrow">Workspace setup</p><h1>Prepare your first architecture task</h1><p className="hint">Connect sources, define the question and confirm local readiness before analysis writes to the workspace.</p></div>
-        <span className="setup-progress">{guidedSetupSteps.findIndex((item) => item.id === (step === "brief" ? "review" : step)) + 1} of {guidedSetupSteps.length}</span>
+        <span className="setup-progress">{guidedSetupSteps.findIndex((item) => item.id === step) + 1} of {guidedSetupSteps.length}</span>
       </header>
       <div className="setup-workbench">
         <nav className="setup-stepper" aria-label="Guided setup steps">
-          {guidedSetupSteps.map((item, index) => { const displayStep = step === "brief" ? "review" : step; const activeIndex = guidedSetupSteps.findIndex((current) => current.id === displayStep); return <button key={item.id} type="button" className={item.id === displayStep ? "is-active" : index < activeIndex ? "is-complete" : ""} data-testid={item.id === "workspace" ? "stage-source" : item.id === "runner" ? "stage-readiness" : `setup-step-${item.id}`} aria-current={item.id === displayStep ? "page" : undefined} onClick={() => onStepChange(item.id)}><span className="setup-step-marker" aria-hidden="true">{index + 1}</span><span><strong>{item.label}</strong><small>{setupStepHint(item.id)}</small></span></button>; })}
+          {guidedSetupSteps.map((item, index) => { const activeIndex = guidedSetupSteps.findIndex((current) => current.id === step); return <button key={item.id} type="button" className={item.id === step ? "is-active" : index < activeIndex ? "is-complete" : ""} data-testid={item.id === "workspace" ? "stage-source" : item.id === "runner" ? "stage-readiness" : `setup-step-${item.id}`} aria-current={item.id === step ? "page" : undefined} onClick={() => onStepChange(item.id)}><span className="setup-step-marker" aria-hidden="true">{index + 1}</span><span><strong>{item.label}</strong><small>{setupStepHint(item.id)}</small></span></button>; })}
         </nav>
-        <main className="setup-step-content">{children}</main>
+        <div className="setup-step-content">{children}</div>
       </div>
     </section>
   );
@@ -29,7 +29,6 @@ export function GuidedSetupPage({ step, onStepChange, children }: { step: SetupS
 function setupStepHint(step: SetupStep): string {
   if (step === "workspace") return "Attach a local workspace";
   if (step === "sources") return "Choose repositories and scope";
-  if (step === "brief") return "Set the architecture question";
   if (step === "runner") return "Check provider and permissions";
   return "Review the plan and start";
 }

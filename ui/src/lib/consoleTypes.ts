@@ -1,4 +1,4 @@
-export type StageId = "source" | "readiness" | "charter" | "analysis" | "review" | "proposals" | "ask" | "publish";
+export type StageId = "source" | "readiness" | "analysis" | "review" | "proposals" | "ask" | "publish";
 
 export type StageStatus = "done" | "active" | "blocked" | "pending";
 

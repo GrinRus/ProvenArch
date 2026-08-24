@@ -224,22 +224,10 @@ export default function App() {
     manifestContent,
     hasUnsavedManifestDraft,
     manifestStatus,
-    baselineEditorArtifacts,
-    baselineBundleWarnings,
     workspaceRootPath,
-    selectedEditorPath,
-    selectedEditorContent,
     hasUnsavedEditorDraft,
-    selectedEditorLoadedPath,
-    editorStatus,
     guidedRepos,
     guidedDocsImportsPath,
-    wizardProjectName,
-    wizardScope,
-    wizardNfr,
-    wizardRules,
-    wizardStatus,
-    wizardContractLoaded,
     gitMessage,
     proposalBranch,
     gitStatus,
@@ -248,25 +236,15 @@ export default function App() {
     bootstrapWorkspaceSetup,
     setManifestContent,
     setGuidedDocsImportsPath,
-    setWizardProjectName,
-    setWizardScope,
-    setWizardNfr,
-    setWizardRules,
-    setSelectedEditorContent,
     setGitMessage,
     setProposalBranch,
     updateGuidedRepo,
-    loadSelectedEditorContent,
-    loadWizardContract,
     handleAddGuidedRepo,
     handleRemoveGuidedRepo,
     handleApplyGuidedWorkspaceSetup,
     handleSaveGuidedWorkspaceSetup,
     handleSaveManifest,
     handleValidateWorkspace,
-    handleSaveStep0WizardContract,
-    handleEditorSelectionChange,
-    handleSaveSelectedEditorArtifact,
     handleGitCommit,
     handleCreateProposalBranch,
     confirmGitAction,
@@ -305,19 +283,6 @@ export default function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [consoleReady]);
-
-  useEffect(() => {
-    if (activeStage !== "charter") {
-      return;
-    }
-    const wizardContractPathAvailable = baselineEditorArtifacts.some((artifact) => artifact.path === "charter/wizard/step0-contract.json");
-    if (!wizardContractLoaded && wizardContractPathAvailable) {
-      void loadWizardContract();
-    }
-    if (selectedEditorPath && selectedEditorLoadedPath !== selectedEditorPath) {
-      void loadSelectedEditorContent(selectedEditorPath);
-    }
-  }, [activeStage, baselineEditorArtifacts, loadSelectedEditorContent, loadWizardContract, selectedEditorLoadedPath, selectedEditorPath, wizardContractLoaded]);
 
   async function bootstrapApp() {
     setError(null);
@@ -1142,26 +1107,6 @@ export default function App() {
           runtimeExecutionEffective={runtimeExecutionEffective}
           runtimePermissionEffective={runtimePermissionEffective}
           runtimeStepProviderEffective={runtimeStepProviderEffective}
-          wizardProjectName={wizardProjectName}
-          wizardScope={wizardScope}
-          wizardNfr={wizardNfr}
-          wizardRules={wizardRules}
-          gitStatus={gitStatus}
-          proposalBranch={proposalBranch}
-          wizardStatus={wizardStatus}
-          onProjectNameChange={setWizardProjectName}
-          onScopeChange={setWizardScope}
-          onNfrChange={setWizardNfr}
-          onRulesChange={setWizardRules}
-          onSaveWizardContract={() => void handleSaveStep0WizardContract()}
-          baselineBundleWarnings={baselineBundleWarnings}
-          baselineEditorArtifacts={baselineEditorArtifacts}
-          selectedEditorPath={selectedEditorPath}
-          selectedEditorContent={selectedEditorContent}
-          editorStatus={editorStatus}
-          onEditorSelectionChange={(path) => void handleEditorSelectionChange(path)}
-          onEditorContentChange={setSelectedEditorContent}
-          onSaveEditor={() => void handleSaveSelectedEditorArtifact()}
         />
       ) : null}
 
