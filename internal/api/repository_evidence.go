@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,8 +50,7 @@ func (s *Server) handleRepositoryEvidence(writer http.ResponseWriter, request *h
 		writeError(writer, status, code, err.Error())
 		return
 	}
-	absolute, err := resolveRepositoryEvidencePath(root, relPath)
-	if err != nil {
+	if err := validateRepositoryEvidencePath(root, relPath); err != nil {
 		if errors.Is(err, errRepositoryEvidencePathOutsideRoot) {
 			writeError(writer, http.StatusBadRequest, "path_invalid", err.Error())
 			return
@@ -62,18 +62,21 @@ func (s *Server) handleRepositoryEvidence(writer http.ResponseWriter, request *h
 		writeError(writer, http.StatusNotFound, "evidence_unreadable", err.Error())
 		return
 	}
-	// codeql[go/path-injection] absolute is canonicalized and checked against the configured repository root before reading.
-	content, err := os.ReadFile(absolute)
+	content, err := readRepositoryEvidenceFile(root, relPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, errRepositoryEvidencePathOutsideRoot) {
+			writeError(writer, http.StatusBadRequest, "path_invalid", err.Error())
+			return
+		}
+		if errors.Is(err, errRepositoryEvidencePathNotFound) || errors.Is(err, os.ErrNotExist) {
 			writeError(writer, http.StatusNotFound, "evidence_not_found", fmt.Sprintf("repository evidence %s:%s was not found", repoName, relPath))
 			return
 		}
+		if errors.Is(err, errRepositoryEvidenceTooLarge) {
+			writeError(writer, http.StatusRequestEntityTooLarge, "evidence_too_large", "repository evidence exceeds the 2 MiB viewer read budget")
+			return
+		}
 		writeError(writer, http.StatusNotFound, "evidence_unreadable", err.Error())
-		return
-	}
-	if int64(len(content)) > maxRepositoryEvidenceReadBytes {
-		writeError(writer, http.StatusRequestEntityTooLarge, "evidence_too_large", "repository evidence exceeds the 2 MiB viewer read budget")
 		return
 	}
 	writeJSON(writer, http.StatusOK, repositoryEvidenceResponse{Repo: repoName, Path: relPath, Content: string(content)})
@@ -128,42 +131,63 @@ func normalizeRepositoryEvidencePath(value string) (string, error) {
 }
 
 var errRepositoryEvidencePathOutsideRoot = errors.New("repository evidence path must stay within the repository")
+var errRepositoryEvidencePathNotFound = errors.New("repository evidence path was not found")
+var errRepositoryEvidenceTooLarge = errors.New("repository evidence exceeds the read budget")
 
-func resolveRepositoryEvidencePath(root string, relPath string) (string, error) {
+func validateRepositoryEvidencePath(root string, relPath string) error {
 	rootAbsolute, err := filepath.Abs(root)
 	if err != nil {
-		return "", fmt.Errorf("resolve repository root: %w", err)
+		return fmt.Errorf("resolve repository root: %w", err)
 	}
 	rootCanonical, err := filepath.EvalSymlinks(rootAbsolute)
 	if err != nil {
-		return "", fmt.Errorf("resolve repository root symlinks: %w", err)
+		return fmt.Errorf("resolve repository root symlinks: %w", err)
 	}
 
-	// codeql[go/path-injection] relPath is normalized above and the joined path is
-	// checked against both the lexical and symlink-resolved repository roots below.
 	candidate := filepath.Join(rootAbsolute, filepath.FromSlash(relPath))
 	candidateAbsolute, err := filepath.Abs(candidate)
 	if err != nil {
-		return "", fmt.Errorf("resolve repository evidence path: %w", err)
+		return fmt.Errorf("resolve repository evidence path: %w", err)
 	}
 	if !repositoryEvidencePathWithinRoot(rootAbsolute, candidateAbsolute) {
-		return "", errRepositoryEvidencePathOutsideRoot
+		return errRepositoryEvidencePathOutsideRoot
 	}
 
 	candidateCanonical, err := filepath.EvalSymlinks(candidateAbsolute)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", errRepositoryEvidencePathNotFound
+			return errRepositoryEvidencePathNotFound
 		}
-		return "", fmt.Errorf("resolve repository evidence path symlinks: %w", err)
+		return fmt.Errorf("resolve repository evidence path symlinks: %w", err)
 	}
 	if !repositoryEvidencePathWithinRoot(rootCanonical, candidateCanonical) {
-		return "", errRepositoryEvidencePathOutsideRoot
+		return errRepositoryEvidencePathOutsideRoot
 	}
-	return candidateCanonical, nil
+	return nil
 }
 
-var errRepositoryEvidencePathNotFound = errors.New("repository evidence path was not found")
+func readRepositoryEvidenceFile(root string, relPath string) ([]byte, error) {
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open repository root: %w", err)
+	}
+	defer rootHandle.Close()
+
+	file, err := rootHandle.Open(filepath.FromSlash(relPath))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, maxRepositoryEvidenceReadBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read repository evidence: %w", err)
+	}
+	if int64(len(content)) > maxRepositoryEvidenceReadBytes {
+		return nil, errRepositoryEvidenceTooLarge
+	}
+	return content, nil
+}
 
 func repositoryEvidencePathWithinRoot(root string, candidate string) bool {
 	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
