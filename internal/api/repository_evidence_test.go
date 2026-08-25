@@ -45,3 +45,25 @@ func TestRepositoryEvidenceRejectsMissingOrEscapingPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryEvidenceRejectsSymlinkEscapes(t *testing.T) {
+	server := newTestServer(t)
+	repo := server.getWorkspace().Manifest.Repos[0]
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("create outside directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("not repository evidence"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo.Path, "linked-outside")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/repository-evidence?repo=payments-service&path=linked-outside%2Fsecret.txt", nil)
+	server.handleRepositoryEvidence(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("symlink escape status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+}

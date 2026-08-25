@@ -49,7 +49,19 @@ func (s *Server) handleRepositoryEvidence(writer http.ResponseWriter, request *h
 		writeError(writer, status, code, err.Error())
 		return
 	}
-	absolute := filepath.Join(root, filepath.FromSlash(relPath))
+	absolute, err := resolveRepositoryEvidencePath(root, relPath)
+	if err != nil {
+		if errors.Is(err, errRepositoryEvidencePathOutsideRoot) {
+			writeError(writer, http.StatusBadRequest, "path_invalid", err.Error())
+			return
+		}
+		if errors.Is(err, errRepositoryEvidencePathNotFound) {
+			writeError(writer, http.StatusNotFound, "evidence_not_found", fmt.Sprintf("repository evidence %s:%s was not found", repoName, relPath))
+			return
+		}
+		writeError(writer, http.StatusNotFound, "evidence_unreadable", err.Error())
+		return
+	}
 	content, err := os.ReadFile(absolute)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -112,4 +124,50 @@ func normalizeRepositoryEvidencePath(value string) (string, error) {
 		return "", errors.New("repository evidence path must stay within the repository")
 	}
 	return clean, nil
+}
+
+var errRepositoryEvidencePathOutsideRoot = errors.New("repository evidence path must stay within the repository")
+
+func resolveRepositoryEvidencePath(root string, relPath string) (string, error) {
+	rootAbsolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root: %w", err)
+	}
+	rootCanonical, err := filepath.EvalSymlinks(rootAbsolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository root symlinks: %w", err)
+	}
+
+	// codeql[go/path-injection] relPath is normalized above and the joined path is
+	// checked against both the lexical and symlink-resolved repository roots below.
+	candidate := filepath.Join(rootAbsolute, filepath.FromSlash(relPath))
+	candidateAbsolute, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository evidence path: %w", err)
+	}
+	if !repositoryEvidencePathWithinRoot(rootAbsolute, candidateAbsolute) {
+		return "", errRepositoryEvidencePathOutsideRoot
+	}
+
+	candidateCanonical, err := filepath.EvalSymlinks(candidateAbsolute)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errRepositoryEvidencePathNotFound
+		}
+		return "", fmt.Errorf("resolve repository evidence path symlinks: %w", err)
+	}
+	if !repositoryEvidencePathWithinRoot(rootCanonical, candidateCanonical) {
+		return "", errRepositoryEvidencePathOutsideRoot
+	}
+	return candidateCanonical, nil
+}
+
+var errRepositoryEvidencePathNotFound = errors.New("repository evidence path was not found")
+
+func repositoryEvidencePathWithinRoot(root string, candidate string) bool {
+	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	if err != nil || relative == "." || relative == ".." {
+		return false
+	}
+	return !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
