@@ -489,3 +489,37 @@ Verification:
 No actionable P0/P1/P2 design QA finding remains for the current MVP scope.
 
 final result: passed
+
+### Pass 8 — post-closure UI cycle
+
+Date: 2026-08-25
+Layer: implementation / responsive and runtime QA
+Scope: stabilize the current Changes/Architecture evidence slice and reduce initial route cost.
+
+Implemented and verified:
+
+- ArchitectureMap is loaded only when the Map workbench is opened; the initial Knowledge route
+  dropped from approximately 1.5 MB to 47 KB. The graph implementation remains a route-local
+  chunk and is not loaded by Documents, Findings or the initial shell.
+- Map rendering waits for a measurable canvas and a completed layout before mounting React Flow.
+  The recoverable zero-size container warning is handled at the integration boundary, while actual
+  layout errors remain visible to the user.
+- Existing repository evidence, exact Task/Attempt Changes identity and legacy task-history
+  normalization remain covered by source and contract tests.
+- Desktop 1440×980 and mobile 390×844 Architecture captures remain readable, with no horizontal
+  overflow or clipped primary controls. Mock recovery E2E reports 8/8 passed and the Architecture
+  recovery route reports no browser console errors or React Flow warnings.
+
+Verification:
+
+- UI typecheck passed.
+- Full UI suite: 47 files / 253 tests passed.
+- Deterministic mock E2E: 8/8 scenarios passed.
+- Production UI build passed; initial `KnowledgePage` chunk is 47.22 KB, while the heavy
+  `ArchitectureMap` chunk is loaded only on the Map route.
+
+No actionable P0/P1/P2 design QA finding was introduced or reopened in this cycle. The remaining
+large route-local diagram chunk is a performance follow-up, not a task-flow or visual-fidelity
+blocker.
+
+final result: passed

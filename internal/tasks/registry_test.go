@@ -62,6 +62,67 @@ func TestRegistryPersistsEmptyDiagnosticsAsAnArrayAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestRegistryNormalizesEmptyRepositoryPathsAcrossRestart(t *testing.T) {
+	root := workspace.Root{Path: t.TempDir()}
+	registry, err := NewRegistry(root, fixedClock())
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	candidate := readHistoryFixture(t)
+	candidate.Tasks[0].Scope.Repositories[0].Paths = nil
+	candidate.Attempts[0].IntentSnapshot.Scope.Repositories[0].Paths = nil
+	candidate.Attempts[0].EffectiveRuntime.Scope.Repositories[0].Paths = nil
+	if err := registry.Replace(candidate); err != nil {
+		t.Fatalf("persist history with workspace-root scope: %v", err)
+	}
+
+	for _, path := range []string{HistoryPath, HistoryPath + ".last-good"} {
+		raw, readErr := root.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", path, readErr)
+		}
+		if bytes.Contains(raw, []byte(`"paths": null`)) {
+			t.Fatalf("%s persisted repository paths as null: %s", path, raw)
+		}
+		if _, parseErr := ParseHistory(raw); parseErr != nil {
+			t.Fatalf("parse persisted %s: %v", path, parseErr)
+		}
+	}
+	if _, err := NewRegistry(root, fixedClock()); err != nil {
+		t.Fatalf("restart registry with workspace-root scope: %v", err)
+	}
+}
+
+func TestRegistryMigratesLegacyNullRepositoryPathsOnLoad(t *testing.T) {
+	root := workspace.Root{Path: t.TempDir()}
+	candidate := readHistoryFixture(t)
+	raw, err := MarshalHistory(candidate)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	raw = bytes.ReplaceAll(raw, []byte(`"paths":[]`), []byte(`"paths":null`))
+	if err := root.WriteFileAtomic(HistoryPath, raw); err != nil {
+		t.Fatalf("write legacy history: %v", err)
+	}
+	registry, err := NewRegistry(root, fixedClock())
+	if err != nil {
+		t.Fatalf("load legacy history: %v", err)
+	}
+	if len(registry.Snapshot().Tasks) != 1 {
+		t.Fatalf("legacy history was not loaded: %#v", registry.Snapshot())
+	}
+	migrated, err := root.ReadFile(HistoryPath)
+	if err != nil {
+		t.Fatalf("read migrated history: %v", err)
+	}
+	if bytes.Contains(migrated, []byte(`"paths":null`)) {
+		t.Fatalf("legacy null paths were not migrated: %s", migrated)
+	}
+	if _, err := ParseHistory(migrated); err != nil {
+		t.Fatalf("migrated history is invalid: %v", err)
+	}
+}
+
 func TestRegistryRecoversMalformedCurrentFromLastGood(t *testing.T) {
 	root := workspace.Root{Path: t.TempDir()}
 	valid := readHistoryFixture(t)

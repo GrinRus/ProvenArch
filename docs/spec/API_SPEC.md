@@ -765,6 +765,41 @@ fallback rather than retrying an unbounded read.
 **404**
 - `artifact_not_found`
 
+### GET `/api/repository-evidence?repo=<logical-name>&path=<repo-relative>`
+
+Reads a bounded, read-only source file from the configured repository checkout. This endpoint is
+separate from `/api/artifacts`: `repo:path` references are source authority, while artifact paths
+are bound-workspace authority. The endpoint never writes or refreshes a checkout; fetch-backed
+repositories are readable only when their local ACP checkout is already available.
+
+The response is JSON so the UI can keep the logical repository/path identity alongside the source
+bytes:
+
+```json
+{
+  "repo": "payments-service",
+  "path": "src/main.go",
+  "content": "package payments\n"
+}
+```
+
+Reads are bounded to 2 MiB for interactive viewer safety.
+
+**400**
+- `repository_required`
+- `path_invalid`
+
+**404**
+- `repository_not_found`
+- `repository_source_unavailable`
+- `evidence_not_found`
+- `evidence_unreadable`
+
+**405** — любой метод кроме `GET`.
+
+**413**
+- `evidence_too_large`
+
 ### POST `/api/artifacts/write`
 Безопасная запись editable артефактов.
 

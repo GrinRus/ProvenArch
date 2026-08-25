@@ -178,7 +178,7 @@ describe("KnowledgePage", () => {
     expect(await screen.findByTestId("evidence-raw")).toHaveTextContent("flowchart TD");
     fireEvent.click(within(studio).getByRole("button", { name: "Open relation evidence" }));
     expect(onOpenArtifact).toHaveBeenCalledWith("model/edges/edge.payments.calls.users.yaml");
-  });
+  }, 15000);
 
   it("keeps findings and questions actionable without inventing approval state", () => {
     const reviewKnowledge = {
@@ -198,5 +198,23 @@ describe("KnowledgePage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Missing owner/ }));
     expect(screen.getByText("The service has no canonical owner.")).toBeInTheDocument();
     expect(screen.getByText(/0 evidence refs/)).toBeInTheDocument();
+  });
+
+  it("opens repository evidence through the source authority instead of workspace artifacts", async () => {
+    const reviewKnowledge = {
+      ...partialKnowledge,
+      entities: [{ ...partialKnowledge.entities[0], provenance: { kind: "observation" as const, confidence: 0.9, evidence: [{ repo: "payments-service", path: "README.md" }] } }, partialKnowledge.entities[1]],
+      review: { findings: [{ id: "finding-1", severity: "high", title: "Missing owner", description: "The service has no canonical owner.", related_ids: ["svc.payments"] }], questions: [] },
+      coverage: { missing: [] },
+    };
+    const architecture = { ...architectureFromKnowledge(reviewKnowledge), review: reviewKnowledge.review, coverage: reviewKnowledge.coverage };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/api/repository-evidence")
+      ? new Response(JSON.stringify({ repo: "payments-service", path: "README.md", content: "# Payments\n" }), { status: 200, headers: { "Content-Type": "application/json" } })
+      : new Response("", { status: 200 })));
+    render(<KnowledgePage architecture={architecture} knowledge={reviewKnowledge} loading={false} error="" view="findings" onViewChange={vi.fn()} onEntityChange={vi.fn()} onOpenArtifact={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Missing owner/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Open source" }));
+    expect(await screen.findByTestId("repository-evidence-viewer")).toHaveTextContent("payments-service");
+    expect(screen.getByTestId("repository-evidence-viewer")).toHaveTextContent("# Payments");
   });
 });

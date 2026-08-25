@@ -10100,3 +10100,10 @@ schema/contract decision instead of inventing frontend state.
   files/258 tests), deterministic mock E2E (8/8), contracts, Go, Python (274 tests), lint, build and
   embedded parity pass with the pinned Node.js 22.21.1 candidate at
   `/tmp/provenarch-node-22.21.1-bin`.
+- 2026-08-25: Post-closure UI cycle completed. Repository evidence keeps source authority separate
+  from workspace artifacts; Changes preserves exact Task/Attempt identity; legacy null repository
+  paths normalize to schema-valid arrays on restart. ArchitectureMap is lazy-loaded so the initial
+  Knowledge route is 47 KB instead of 1.5 MB, and map rendering waits for a measurable container
+  while suppressing the recoverable React Flow zero-size warning. Full UI tests (47 files/253 tests),
+  targeted typecheck/build, desktop/mobile Architecture captures and mock E2E (8/8) pass; the
+  remaining large map chunk is route-local and does not block the initial shell.

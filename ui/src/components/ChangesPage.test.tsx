@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ArchitectureComparison, RunListItem, RunReviewContract } from "../lib/appContracts";
+import type { ProductTask } from "../lib/taskApi";
 import { ChangesPage } from "./ChangesPage";
 
 const runs: RunListItem[] = [
@@ -10,26 +11,26 @@ const runs: RunListItem[] = [
   { run_id: "run-failed", pipeline: "refresh", status: "failed", started_at: "2026-07-15T00:00:02Z", error_code: "runtime_failed" },
   { run_id: "qa-1", pipeline: "qa", status: "succeeded", started_at: "2026-07-15T00:00:03Z", authoritative_index: true },
 ];
+const tasks: ProductTask[] = [
+  { task_id: "task-good", title: "Review payments", goal: "Review the payment architecture", updated_at: "2026-07-15T00:00:00Z", outcome: { state: "available", attempt_id: "attempt-good", run_id: "run-good" } } as ProductTask,
+];
 
 describe("ChangesPage", () => {
   it("routes only successful indexed analysis runs to architecture review", () => {
     const onSelectChangeReview = vi.fn();
     const onOpenRunStudio = vi.fn();
-    render(<ChangesPage runs={runs} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={onSelectChangeReview} onOpenRunStudio={onOpenRunStudio}>content</ChangesPage>);
+    render(<ChangesPage runs={runs} tasks={tasks} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={onSelectChangeReview} onOpenRunStudio={onOpenRunStudio}>content</ChangesPage>);
     expect(screen.getByTestId("review-packages")).not.toHaveTextContent("qa-1");
-    expect(screen.getAllByText("Publication: Unknown")).toHaveLength(3);
-    fireEvent.click(screen.getByRole("button", { name: "Review architecture" }));
-    expect(onSelectChangeReview).toHaveBeenCalledWith("run-good");
-    const studioButtons = screen.getAllByRole("button", { name: "Open recovery" });
-    fireEvent.click(studioButtons[0]);
-    fireEvent.click(studioButtons[1]);
-    expect(onOpenRunStudio.mock.calls.flat()).toEqual(expect.arrayContaining(["run-no-index", "run-failed"]));
+    expect(screen.getAllByText("Publication: Unknown")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Review Task" }));
+    expect(onSelectChangeReview).toHaveBeenCalledWith("run-good", "task-good", "attempt-good");
+    expect(screen.queryByText("qa-1")).not.toBeInTheDocument();
   });
 });
 
 it("explains no-op refresh packages", () => {
   const noopRuns: RunListItem[] = [{ run_id: "run-noop", pipeline: "refresh", status: "succeeded", started_at: "2026-07-15T12:00:00Z", authoritative_index: true, refresh_summary: { mode: "no_op", decision: "unchanged_candidate", baseline_run_id: "run-base", reason_codes: ["source_revisions_unchanged"], artifact_path: "reports/taskruns/run-noop/refresh-execution.json", updated: 0, preserved: 3, removed: 0, uncertain: 0 } }];
-  render(<ChangesPage runs={noopRuns} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
+  render(<ChangesPage runs={noopRuns} tasks={[{ ...tasks[0], task_id: "task-noop", title: "No-op refresh", outcome: { state: "available", attempt_id: "attempt-noop", run_id: "run-noop" } }]} selectedRunID={null} selectedEvidenceStatus="idle" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
   expect(screen.getByText("No changes in analysis scope")).toBeInTheDocument();
 });
 
@@ -45,7 +46,7 @@ it("fails closed when the promoted comparison belongs to another run", () => {
       gaps: { added: [], changed: [], removed: [] },
     },
   };
-  render(<ChangesPage runs={runs} selectedRunID="run-selected" selectedEvidenceStatus="idle" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} architectureComparison={comparison} architectureComparisonMismatch>content</ChangesPage>);
+  render(<ChangesPage runs={runs} tasks={tasks} selectedRunID="run-selected" selectedEvidenceStatus="idle" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} architectureComparison={comparison} architectureComparisonMismatch>content</ChangesPage>);
   expect(screen.getByText("Comparison unavailable for selected run")).toBeInTheDocument();
   expect(screen.queryByText("What changed in the architecture")).not.toBeInTheDocument();
   expect(screen.getByText("The promoted architecture comparison belongs to another run, so no current delta is shown here.")).toBeInTheDocument();
@@ -65,7 +66,7 @@ it("renders a run-pinned initial summary instead of a baseline delta", () => {
     authority: { mode: "promoted_run_snapshot", source_run_id: "run-good" },
     generated_at: "2026-08-04T20:00:00Z",
   };
-  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
+  render(<ChangesPage runs={runs} tasks={tasks} selectedRunID="run-good" selectedEvidenceStatus="available" view="findings" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
   expect(screen.getByText("Initial architecture summary")).toBeInTheDocument();
   expect(screen.getByTestId("run-pinned-review-summary")).toHaveTextContent("fake");
   expect(screen.queryByText("What changed in the architecture")).not.toBeInTheDocument();
@@ -83,7 +84,7 @@ it("keeps current workspace evidence read-only and does not reuse a run review",
     authority: { mode: "promoted_run_snapshot", source_run_id: "run-good" },
     generated_at: "2026-08-04T20:00:00Z",
   };
-  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" sourceMode="current" view="evidence" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
+  render(<ChangesPage runs={runs} tasks={tasks} selectedRunID="run-good" selectedEvidenceStatus="available" sourceMode="current" view="evidence" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()} runReview={review}>content</ChangesPage>);
   expect(screen.getByTestId("changes-read-only-badge")).toHaveTextContent("Read-only workspace");
   expect(screen.getByTestId("stage-evidence")).toHaveAttribute("aria-current", "page");
   expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
@@ -91,7 +92,7 @@ it("keeps current workspace evidence read-only and does not reuse a run review",
 });
 
 it("keeps failed runs in Run Studio instead of presenting a publishable review", () => {
-  render(<ChangesPage runs={runs} selectedRunID="run-failed" selectedEvidenceStatus="available" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
+  render(<ChangesPage runs={runs} tasks={tasks} selectedRunID="run-failed" selectedEvidenceStatus="available" view="overview" onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
   expect(screen.getByText("Recovery is required before review")).toBeInTheDocument();
   expect(screen.getByTestId("changes-open-run-studio")).toBeInTheDocument();
   expect(screen.queryByTestId("stage-publish")).not.toBeInTheDocument();
@@ -99,10 +100,10 @@ it("keeps failed runs in Run Studio instead of presenting a publishable review",
 
 it("keeps Changes scoped to the exact Task identity without latest-run fallback", () => {
   const onOpenTask = vi.fn();
-  render(<ChangesPage runs={runs} selectedRunID="run-good" selectedEvidenceStatus="available" view="overview" taskId="task-opaque-23" onOpenTask={onOpenTask} onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
+  render(<ChangesPage runs={runs} tasks={tasks} selectedRunID="run-good" selectedEvidenceStatus="available" view="overview" taskId="task-opaque-23" onOpenTask={onOpenTask} onViewChange={vi.fn()} onSelectChangeReview={vi.fn()} onOpenRunStudio={vi.fn()}>content</ChangesPage>);
   const context = screen.getByTestId("task-changes-context");
   expect(context).toHaveTextContent("task-opaque-23");
-  expect(context).toHaveTextContent("No latest-run fallback");
-  fireEvent.click(screen.getByRole("button", { name: "Back to Task" }));
+  expect(context).toHaveTextContent("Selected Task snapshot");
+  fireEvent.click(screen.getByRole("button", { name: "View Task" }));
   expect(onOpenTask).toHaveBeenCalledWith("task-opaque-23");
 });

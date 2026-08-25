@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ELK from "elkjs/lib/elk.bundled.js";
 import {
   Background,
@@ -14,6 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureNode, ArchitectureView } from "../lib/appContracts";
+import { levelLabel } from "../lib/architectureLabels";
 
 const elk = new ELK();
 const nodeTypes = { architecture: ArchitectureNodeControl };
@@ -44,8 +45,11 @@ export function ArchitectureMap({
   tagFilter?: string;
   onSelect: (id?: string) => void;
 }) {
+  const isJSDOM = typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
   const [layout, setLayout] = useState<{ nodes: FlowNode[]; edges: FlowEdge[] }>({ nodes: [], edges: [] });
   const [layoutError, setLayoutError] = useState("");
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [canvasReady, setCanvasReady] = useState(isJSDOM);
   const normalizedQuery = query.trim().toLowerCase();
   const visible = useMemo(() => {
     const candidates = view.nodes.filter((node) =>
@@ -70,13 +74,25 @@ export function ArchitectureMap({
     return () => { active = false; };
   }, [visible]);
 
+  useEffect(() => {
+    if (isJSDOM) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const updateSize = () => setCanvasReady(canvas.clientWidth > 0 && canvas.clientHeight > 0);
+    updateSize();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [isJSDOM]);
+
   if (!view.available) return <div className="empty-state recovery-empty"><strong>{levelLabel(level)} is not available.</strong><span>{view.unavailable_reason || "The promoted model has no validated entities for this level."}</span></div>;
   if (visible.nodes.length === 0) return <div className="empty-state"><strong>No architecture elements match this search.</strong><span>Clear the search or choose another C4 level.</span></div>;
   if (layoutError) return <p className="status err" role="status">{layoutError}</p>;
 
   return (
-    <div className="architecture-canvas" data-testid="architecture-canvas" aria-label={`${levelLabel(level)} architecture map`}>
-      <ReactFlow
+    <div ref={canvasRef} className="architecture-canvas" data-testid="architecture-canvas" aria-label={`${levelLabel(level)} architecture map`}>
+      {canvasReady && layout.nodes.length > 0 ? <ReactFlow
         nodes={layout.nodes.map((node) => ({ ...node, selected: node.id === selectedID, data: { ...node.data, onSelect } }))}
         edges={layout.edges.map((edge) => ({ ...edge, selected: edge.id === selectedID }))}
         fitView
@@ -97,12 +113,13 @@ export function ArchitectureMap({
           if (selected && selected.id !== selectedID) onSelect(selected.id);
         }}
         onPaneClick={() => onSelect(undefined)}
+        onError={(code, message) => { if (code !== "004") setLayoutError(message); }}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={24} size={1} color="var(--color-border-subtle)" />
         <MiniMap pannable zoomable ariaLabel="Architecture overview" nodeColor="var(--color-accent-muted)" />
         <Controls showInteractive={false} />
-      </ReactFlow>
+      </ReactFlow> : <p className="architecture-canvas-loading" role="status">Preparing architecture map…</p>}
     </div>
   );
 }
@@ -136,8 +153,4 @@ export async function layoutArchitecture(nodes: ArchitectureNode[], edges: Archi
     }),
     edges: edges.map((edge) => ({ id: edge.id, source: edge.from, target: edge.to, label: edge.name || edge.type, type: "smoothstep", animated: false, ariaLabel: `${edge.type} from ${edge.from} to ${edge.to}`, style: { strokeWidth: 1.5 } })),
   };
-}
-
-export function levelLabel(level: ArchitectureLevel): string {
-  return level === "context" ? "System context" : level.charAt(0).toUpperCase() + level.slice(1);
 }

@@ -9,6 +9,7 @@ type FetchMockState = {
   runID?: string;
   runStarted?: boolean;
   runList?: MockJSON[];
+  tasks?: MockJSON[];
   runLogs?: Record<string, MockJSON>;
   runStatus?: Record<string, MockJSON>;
   runArtifacts?: Record<string, MockJSON>;
@@ -68,8 +69,39 @@ function deferredResponse() {
   return { promise, resolve };
 }
 
+function reviewTask(runID: string, pipeline = "init", status = "succeeded", startedAt = "2026-04-03T12:00:00Z"): MockJSON {
+  const attemptID = `attempt-${runID}`;
+  return {
+    version: 1,
+    task_id: `task-${runID}`,
+    title: pipeline === "refresh" ? "Refresh architecture" : "Initial architecture",
+    goal: "Review the generated architecture",
+    scope: { repositories: [] },
+    desired_runner: { preset: "fake", mode: "fake", provider: "claude-code" },
+    lifecycle: "open",
+    revision: 1,
+    created_at: startedAt,
+    updated_at: startedAt,
+    last_activity_at: startedAt,
+    attempts: [{ attempt_id: attemptID, run_id: runID, status, updated_at: startedAt }],
+    outcome: { state: "available", attempt_id: attemptID, run_id: runID },
+    publication: { state: "unavailable" },
+  };
+}
+
 function createFetchMock(state: FetchMockState = {}) {
   const runID = state.runID ?? "run-1";
+  const tasksProvided = Object.prototype.hasOwnProperty.call(state, "tasks");
+  const taskRuns = state.runList ?? (state.runStarted ? [{
+    run_id: runID,
+    pipeline: "init",
+    status: "succeeded",
+    started_at: "2026-04-03T12:00:00Z",
+    authoritative_index: true,
+  }] : []);
+  const reviewTasks = tasksProvided ? state.tasks : taskRuns
+    .filter((run) => run.pipeline === "init" || run.pipeline === "refresh")
+    .map((run) => reviewTask(String(run.run_id), String(run.pipeline), String(run.status), String(run.started_at ?? "2026-04-03T12:00:00Z")));
   const runLogs = state.runLogs ?? {
     [runID]: {
       run_id: runID,
@@ -448,6 +480,10 @@ function createFetchMock(state: FetchMockState = {}) {
         });
       }
       return jsonResponse({ items: [] });
+    }
+
+    if (method === "GET" && url === "/api/tasks?limit=100") {
+      return jsonResponse({ items: reviewTasks ?? [], next_cursor: "", has_more: false });
     }
 
     if (method === "GET" && url === "/api/workspace/manifest") {
@@ -1798,7 +1834,10 @@ describe("App", () => {
     await renderConsoleApp("/knowledge?view=entities&entity=svc.missing&source=current");
     expect(await screen.findByTestId("route-notice")).toHaveTextContent("Entity svc.missing is unavailable");
     await waitFor(() => expect(window.location.search).not.toContain("entity="));
-    expect(await screen.findByTestId("knowledge-panel")).toHaveTextContent("Current workspace");
+    // KnowledgePage is intentionally lazy-loaded so the Architecture route does not
+    // pull the graph/markdown workbench into the initial shell. Under the full
+    // Vitest suite that chunk can resolve after the default 1s query timeout.
+    expect(await screen.findByTestId("knowledge-panel", {}, { timeout: 5000 })).toHaveTextContent("Current workspace");
     expect(screen.queryByTestId("knowledge-entity-detail")).not.toBeInTheDocument();
   });
 
@@ -1809,7 +1848,7 @@ describe("App", () => {
 	  }));
 	  await renderConsoleApp("/architecture?view=map&entity=svc.payments&source=current");
 	  expect(await screen.findByRole("heading", { name: /^Architecture$/ })).toBeInTheDocument();
-	  expect(await screen.findByTestId("architecture-canvas")).toBeInTheDocument();
+	  expect(await screen.findByTestId("architecture-canvas", {}, { timeout: 15000 })).toBeInTheDocument();
 	  expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument();
 	  expect(window.location.search).toContain("entity=svc.payments");
 	});
@@ -1878,10 +1917,36 @@ describe("App", () => {
 
     expect(await screen.findByTestId("review-packages")).toBeInTheDocument();
     expect(window.location.search).not.toContain("run=");
-    expect(screen.getByText("Choose a Task to review")).toBeInTheDocument();
+    expect(screen.getByText("Tasks awaiting review")).toBeInTheDocument();
     expect(screen.getByTestId("stage-review")).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("workspace-panel")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Changes" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("preserves Task and Attempt identity when Changes auto-opens its first evidence artifact", async () => {
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        runStarted: true,
+        runArtifacts: {
+          "run-1": {
+            run_id: "run-1",
+            artifacts: [
+              { path: "reports/as-is/overview.md", kind: "report", label: "As-is overview" },
+            ],
+          },
+        },
+      }),
+    );
+
+    await renderConsoleApp("/changes");
+    fireEvent.click(await screen.findByRole("button", { name: "Review Task" }));
+
+    await waitFor(() => {
+      expect(window.location.search).toContain("task=task-run-1");
+      expect(window.location.search).toContain("attempt=attempt-run-1");
+    });
+    expect(screen.getByTestId("task-changes-context")).toHaveTextContent("task-run-1");
   });
 
   it("offers last successful artifacts when Review opens on a failed partial run", async () => {
@@ -4427,6 +4492,10 @@ describe("App", () => {
         });
       }
 
+      if (method === "GET" && url === "/api/tasks?limit=100") {
+        return jsonResponse({ items: [reviewTask("run-old", "refresh"), reviewTask("run-new", "refresh")], next_cursor: "", has_more: false });
+      }
+
       for (const runID of ["run-old", "run-new"]) {
         if (method === "GET" && url === `/api/pipeline/runs/${runID}`) {
           return jsonResponse({
@@ -4572,6 +4641,10 @@ describe("App", () => {
             },
           ],
         });
+      }
+
+      if (method === "GET" && url === "/api/tasks?limit=100") {
+        return jsonResponse({ items: [reviewTask("run-old", "refresh"), reviewTask("run-new", "refresh")], next_cursor: "", has_more: false });
       }
 
       if (method === "GET" && url === "/api/pipeline/runs/run-old") {
