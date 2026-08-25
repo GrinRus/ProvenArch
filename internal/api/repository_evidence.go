@@ -62,6 +62,7 @@ func (s *Server) handleRepositoryEvidence(writer http.ResponseWriter, request *h
 		writeError(writer, http.StatusNotFound, "evidence_unreadable", err.Error())
 		return
 	}
+	// codeql[go/path-injection] absolute is canonicalized and checked against the configured repository root before reading.
 	content, err := os.ReadFile(absolute)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
