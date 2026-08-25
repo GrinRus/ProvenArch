@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -129,8 +130,11 @@ func (r *Registry) Update(mutator func(*History) error) error {
 func (r *Registry) load() error {
 	current, currentErr := r.root.ReadFile(HistoryPath)
 	if currentErr == nil {
-		if parsed, parseErr := ParseHistory(current); parseErr == nil {
+		if parsed, migrated, parseErr := parseHistoryWithNormalization(current); parseErr == nil {
 			r.snapshot = parsed
+			if migrated {
+				r.persistNormalizedHistory(parsed)
+			}
 			return nil
 		} else {
 			currentErr = parseErr
@@ -139,9 +143,12 @@ func (r *Registry) load() error {
 
 	lastGood, lastGoodErr := r.root.ReadLastGoodFile(HistoryPath)
 	if lastGoodErr == nil {
-		parsed, parseErr := ParseHistory(lastGood)
+		parsed, migrated, parseErr := parseHistoryWithNormalization(lastGood)
 		if parseErr == nil {
 			r.snapshot = parsed
+			if migrated {
+				r.persistNormalizedHistory(parsed)
+			}
 			r.addDiagnosticLocked(fmt.Sprintf("recovered task history from %s", HistoryPath+".last-good"))
 			if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
 				r.addDiagnosticLocked(fmt.Sprintf("current task history unavailable: %v", currentErr))
@@ -162,6 +169,90 @@ func (r *Registry) load() error {
 		lastGoodErr = errors.New("last-good task history is unavailable")
 	}
 	return fmt.Errorf("load task history failed: current=%v last_good=%v", currentErr, lastGoodErr)
+}
+
+func parseHistoryWithNormalization(raw []byte) (History, bool, error) {
+	parsed, err := ParseHistory(raw)
+	if err == nil {
+		return parsed, false, nil
+	}
+	normalized, changed, normalizeErr := normalizeLegacyRepositoryPaths(raw)
+	if normalizeErr != nil || !changed {
+		return History{}, false, err
+	}
+	parsed, normalizedErr := ParseHistory(normalized)
+	if normalizedErr != nil {
+		return History{}, false, err
+	}
+	return parsed, true, nil
+}
+
+func normalizeLegacyRepositoryPaths(raw []byte) ([]byte, bool, error) {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	normalizeScope := func(value any) {
+		scope, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		repositories, ok := scope["repositories"].([]any)
+		if !ok {
+			return
+		}
+		for _, item := range repositories {
+			repository, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if paths, present := repository["paths"]; present && paths == nil {
+				repository["paths"] = []any{}
+				changed = true
+			}
+		}
+	}
+	if tasks, ok := document["tasks"].([]any); ok {
+		for _, item := range tasks {
+			if task, ok := item.(map[string]any); ok {
+				normalizeScope(task["scope"])
+			}
+		}
+	}
+	if attempts, ok := document["attempts"].([]any); ok {
+		for _, item := range attempts {
+			if attempt, ok := item.(map[string]any); ok {
+				if intent, ok := attempt["intent_snapshot"].(map[string]any); ok {
+					normalizeScope(intent["scope"])
+				}
+				if runtime, ok := attempt["effective_runtime"].(map[string]any); ok {
+					normalizeScope(runtime["scope"])
+				}
+			}
+		}
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	normalized, err := json.Marshal(document)
+	return normalized, true, err
+}
+
+func (r *Registry) persistNormalizedHistory(history History) {
+	raw, err := MarshalHistory(history)
+	if err != nil {
+		r.addDiagnosticLocked(fmt.Sprintf("normalize task history failed: %v", err))
+		return
+	}
+	if err := r.writeFile(r.root, HistoryPath, raw); err != nil {
+		r.addDiagnosticLocked(fmt.Sprintf("persist normalized task history failed: %v", err))
+		return
+	}
+	if err := r.writeFile(r.root, HistoryPath+".last-good", raw); err != nil {
+		r.addDiagnosticLocked(fmt.Sprintf("persist normalized task history last-good failed: %v", err))
+	}
+	r.addDiagnosticLocked("normalized legacy null repository paths in task history")
 }
 
 func (r *Registry) addDiagnosticLocked(message string) {

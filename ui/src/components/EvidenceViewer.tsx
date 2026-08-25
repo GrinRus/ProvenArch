@@ -9,7 +9,7 @@ type EvidenceViewerProps = {
   path: string;
   content: string;
   runId?: string | null;
-  sourceMode: "run_snapshot" | "promoted_current";
+  sourceMode: "run_snapshot" | "promoted_current" | "repository";
   demo?: boolean;
   provenance?: "demo" | "live" | "unknown";
   status?: "available" | "partial" | "unavailable" | "error";
@@ -58,7 +58,7 @@ export function EvidenceViewer({ path, content, runId, sourceMode, demo, provena
   return (
     <section className="evidence-viewer" data-testid="evidence-viewer">
       <header className="evidence-source-header">
-        <div><strong>{path || "Evidence"}</strong><span>{sourceMode === "run_snapshot" ? `Run snapshot · ${runId ?? "unknown run"}` : "Current workspace"}</span></div>
+        <div><strong>{path || "Evidence"}</strong><span>{sourceMode === "run_snapshot" ? `Run snapshot · ${runId ?? "unknown run"}` : sourceMode === "repository" ? "Repository source · read-only" : "Current workspace"}</span></div>
         <span className={evidenceProvenance === "demo" ? "status warn" : evidenceProvenance === "live" ? "status ok" : "status"}>{provenanceLabel} evidence</span>
       </header>
       {status !== "available" ? <p className={status === "partial" ? "status warn" : "status err"} role="status">Evidence state: {status}.</p> : null}

@@ -762,7 +762,15 @@ func cloneRepositories(value []RepositoryScope) []RepositoryScope {
 	clone := make([]RepositoryScope, len(value))
 	for index, item := range value {
 		clone[index] = item
-		clone[index].Paths = append([]string(nil), item.Paths...)
+		// The schema requires paths to be an array, including for the valid
+		// workspace-root case where the array is empty. Normalizing nil here
+		// prevents json.Marshal from persisting that case as `null` and makes
+		// every cloned/persisted Task contract restart-safe.
+		if item.Paths == nil {
+			clone[index].Paths = []string{}
+		} else {
+			clone[index].Paths = append([]string{}, item.Paths...)
+		}
 	}
 	return clone
 }

@@ -1,14 +1,18 @@
 import type { ReactNode } from "react";
 
 import type { ArchitectureComparison, RunListItem, RunReviewContract } from "../lib/appContracts";
+import type { ProductTask } from "../lib/taskApi";
 import type { ChangesView } from "../lib/appRoutes";
-import { buildChangeReviewModel } from "../features/workbench/viewModels";
+import { buildChangeReviewModel, type ChangeReviewItem } from "../features/workbench/viewModels";
 import { Button, PageHeader, RouteTabs } from "./SemanticPrimitives";
 
 export function ChangesPage({
   runs,
+  tasks = [],
+  tasksStatus = "loaded",
+  tasksError = "",
+  onRetryTasks,
   selectedRunID,
-  selectedEvidenceStatus,
   sourceMode = "snapshot",
   view,
   onViewChange,
@@ -23,12 +27,16 @@ export function ChangesPage({
   children,
 }: {
   runs: RunListItem[];
+  tasks?: ProductTask[];
+  tasksStatus?: "idle" | "loading" | "loaded" | "error";
+  tasksError?: string;
+  onRetryTasks?: () => void;
   selectedRunID: string | null;
   selectedEvidenceStatus: string;
   sourceMode?: "snapshot" | "current";
   view: ChangesView;
   onViewChange: (view: ChangesView) => void;
-  onSelectChangeReview: (id: string) => void;
+  onSelectChangeReview: (id: string, taskId?: string, attemptId?: string) => void;
   onOpenRunStudio: (id: string) => void;
   architectureComparison?: ArchitectureComparison;
   architectureComparisonMismatch?: boolean;
@@ -38,7 +46,7 @@ export function ChangesPage({
   onOpenTask?: (taskId: string) => void;
   children: ReactNode;
 }) {
-  const reviewCandidates = buildChangeReviewModel(runs, selectedRunID, selectedEvidenceStatus);
+  const reviewCandidates = buildChangeReviewModel(tasks, runs);
   const readOnlyWorkspace = sourceMode === "current";
   const changeViews = (readOnlyWorkspace ? ["evidence"] : ["overview", "evidence", "findings", "proposals", "diff"]) as ChangesView[];
   const selectedRun = selectedRunID ? runs.find((run) => run.run_id === selectedRunID) : undefined;
@@ -55,13 +63,16 @@ export function ChangesPage({
         : <Button tone="primary" data-testid="stage-publish" aria-current={view === "publish" ? "page" : undefined} onClick={() => onViewChange("publish")}>{view === "publish" ? "Publication review" : "Continue to publish"}</Button>;
   return (
     <section className="changes-page" data-testid="changes-page">
+      <nav className="changes-breadcrumb" aria-label="Breadcrumb">
+        <span>Architecture</span><span aria-hidden="true">/</span><span>Changes</span><span aria-hidden="true">/</span><strong>{readOnlyWorkspace ? "Evidence" : "Review"}</strong>
+      </nav>
       <PageHeader
-        title={readOnlyWorkspace ? "Current workspace evidence" : !selectedRunReviewable && selectedRunID ? "Run needs recovery" : effectiveRunReview?.review_kind === "initial" ? "Review initial architecture" : "Review architecture update"}
-        purpose={readOnlyWorkspace ? "Inspect the current workspace without mixing it with a historical run snapshot." : "Review the selected Task snapshot, confirm semantic evidence, then publish the complete workspace to Git."}
-        source={sourceMode === "current" ? "Current workspace · read-only" : selectedRunID ? "Selected Task snapshot" : "Choose a Task to review"}
+        title="Changes"
+        purpose={readOnlyWorkspace ? "Inspect the current workspace evidence without mixing it with a historical Task snapshot." : "Review what changed in the current architecture before committing."}
+        source={undefined}
         action={pageAction}
       />
-      {taskId ? <aside className="task-changes-context" data-testid="task-changes-context" aria-label="Task Changes context"><div><p className="eyebrow">Task context</p><strong>Changes for the selected Task</strong><p><code>{taskId}</code> · Attempt <code>{attemptId || "unavailable"}</code> · exact selected run identity only</p><span className="hint">No latest-run fallback; Current workspace evidence and historical snapshot publication stay distinct.</span></div>{onOpenTask ? <button type="button" className="ui-button tone-neutral" onClick={() => onOpenTask(taskId)}>Back to Task</button> : null}</aside> : null}
+      {taskId ? <aside className="task-changes-context" data-testid="task-changes-context" aria-label="Task Changes context"><div><strong>Selected Task snapshot</strong><span className="hint"><code>{taskId}</code> · Attempt <code>{attemptId || "unavailable"}</code> · Review confirms evidence before publication.</span></div>{onOpenTask ? <button type="button" className="ui-button tone-neutral" onClick={() => onOpenTask(taskId)}>View Task</button> : null}</aside> : null}
       <RouteTabs
         label="Changes views"
         value={view}
@@ -74,16 +85,22 @@ export function ChangesPage({
         <aside className="panel review-packages" data-testid="review-packages">
           <h2>Tasks awaiting review</h2>
           <p className="hint">Choose a completed architecture Task to inspect its evidence and publication decision.</p>
-          {reviewCandidates.length === 0 ? <p className="empty-state">No completed Tasks are available.</p> : <ul className="compact-list">{reviewCandidates.map((run) => {
-            const taskLabel = run.pipeline === "refresh" ? "Refresh architecture" : "Initial architecture";
-            const statusLabel = run.status === "succeeded" ? "Ready for review" : run.status === "running" ? "In progress" : run.status === "queued" ? "Queued" : "Needs recovery";
-            return <li key={run.run_id}><div><strong>{taskLabel}</strong><span>{statusLabel}</span><span>{refreshLabel(run)}</span><span>Publication: Unknown</span><details><summary>Technical identity</summary><code>{run.run_id}</code></details></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id)}>Review architecture</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open recovery</button>}</li>;
+          {tasksStatus === "loading" ? <p className="status info" role="status">Loading completed Tasks…</p> : tasksStatus === "error" ? <div className="empty-state"><p>Task review list is unavailable.</p><p className="hint">{tasksError || "Try again to restore exact Task identity."}</p>{onRetryTasks ? <button type="button" onClick={onRetryTasks}>Retry Tasks</button> : null}</div> : reviewCandidates.length === 0 ? <p className="empty-state">No completed Tasks are available.</p> : <ul className="compact-list">{reviewCandidates.map((run) => {
+            const statusLabel = run.action === "review" ? "Ready for review" : "Needs recovery";
+            return <li key={run.task_id}><div><strong>{run.task_title}</strong><span>{statusLabel}</span><span>{reviewCandidateSummary(run)}</span><span>Publication: Unknown</span><details><summary>Technical identity</summary><code>{run.task_id} · {run.attempt_id} · {run.run_id}</code></details></div>{run.action === "review" ? <button type="button" onClick={() => onSelectChangeReview(run.run_id, run.task_id, run.attempt_id)}>Review Task</button> : <button type="button" onClick={() => onOpenRunStudio(run.run_id)}>Open recovery</button>}</li>;
           })}</ul>}
         </aside>
       ) : null}
       {children}
     </section>
   );
+}
+
+function reviewCandidateSummary(candidate: ChangeReviewItem): string {
+  if (candidate.refresh_summary?.mode === "no_op") return "No changes in analysis scope";
+  if (candidate.refresh_summary?.mode === "affected_only") return `Affected scope refresh · ${candidate.refresh_summary.updated} updated · ${candidate.refresh_summary.preserved} preserved · ${candidate.refresh_summary.uncertain} uncertain`;
+  if (candidate.refresh_summary?.mode === "full") return `Full refresh · ${candidate.refresh_summary.updated} updated · ${candidate.refresh_summary.preserved} preserved · ${candidate.refresh_summary.uncertain} uncertain`;
+  return candidate.task_goal;
 }
 
 function UnavailableRunReview() {
@@ -145,14 +162,6 @@ function ReviewDeltaStrip({ comparison, review }: { comparison: NonNullable<RunR
 function ChangeCategory({ category, changes }: { category: string; changes: { added: Array<{ id: string; name: string }>; changed: Array<{ id: string; name: string }>; removed: Array<{ id: string; name: string }> } }) {
   const items = [...changes.added.map((item) => ({ ...item, state: "added" })), ...changes.changed.map((item) => ({ ...item, state: "changed" })), ...changes.removed.map((item) => ({ ...item, state: "removed" }))];
   return <article><h3>{category}</h3><dl><div><dt>Added</dt><dd>{changes.added.length}</dd></div><div><dt>Changed</dt><dd>{changes.changed.length}</dd></div><div><dt>Removed</dt><dd>{changes.removed.length}</dd></div></dl>{items.length > 0 ? <ul>{items.slice(0, 6).map((item) => <li key={`${item.state}:${item.id}`}><span className={`change-state ${item.state}`}>{item.state}</span><strong>{item.name || item.id}</strong></li>)}</ul> : <p className="empty-state">No semantic changes.</p>}</article>;
-}
-
-function refreshLabel(run: RunListItem): string {
-  if (run.pipeline !== "refresh") return "Initial architecture build";
-  if (!run.refresh_summary) return "Refresh details unavailable";
-  if (run.refresh_summary.mode === "no_op") return "No changes in analysis scope";
-  const title = run.refresh_summary.mode === "affected_only" ? "Affected scope refresh" : "Full refresh";
-  return `${title} · ${run.refresh_summary.updated} updated · ${run.refresh_summary.preserved} preserved · ${run.refresh_summary.uncertain} uncertain`;
 }
 
 function label(view: ChangesView): string {

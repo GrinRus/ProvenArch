@@ -39,6 +39,7 @@ import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { deriveAppWorkflowState, derivePublicationState, selectedRunIssueCopy } from "./lib/appDerived";
 import { type WorkflowDestination } from "./lib/workflowState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
+import { useTaskReviewCandidates } from "./hooks/useTaskReviewCandidates";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
 import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
@@ -137,6 +138,7 @@ export default function App() {
     setBusy,
     setError,
   });
+  const taskReviewCandidates = useTaskReviewCandidates(destination === "changes" && !route.runId && !route.taskId && route.source !== "current");
   const workspaceSetup = useWorkspaceSetup({
     setBusy,
     setError,
@@ -606,6 +608,8 @@ export default function App() {
     const artifactKey = [...nonDiagramArtifacts, ...diagramArtifacts].find((artifact) => artifact.path === path)?.id || path;
     navigateRoute({
       destination: "changes",
+      taskId: route.taskId,
+      attemptId: route.attemptId,
       runId: runId ?? undefined,
       runRequested: Boolean(runId),
       changesView: route.destination === "changes" ? route.changesView ?? "overview" : "evidence",
@@ -615,7 +619,7 @@ export default function App() {
       invalid: [],
     });
     await openArtifact;
-  }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.changesView, route.destination, route.mode, runId]);
+  }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.attemptId, route.changesView, route.destination, route.mode, route.taskId, runId]);
 
   const handleOpenCurrentArtifact = useCallback(async (path: string) => {
     const content = await loadArtifactText(path);
@@ -977,11 +981,15 @@ export default function App() {
 		  view={route.changesView ?? "overview"}
 		  source={route.source ?? "snapshot"}
 		page={{
-			runs: runList,
+			 runs: runList,
+			 tasks: taskReviewCandidates.tasks,
+			 tasksStatus: taskReviewCandidates.status,
+			 tasksError: taskReviewCandidates.error,
+			 onRetryTasks: taskReviewCandidates.reload,
 			selectedRunID: selectedChangesRunId,
 			selectedEvidenceStatus: evidenceSnapshot.status,
 			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
-			onSelectChangeReview: (id: string) => { navigateRoute({ destination: "changes", runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
+				onSelectChangeReview: (id: string, taskId?: string, attemptId?: string) => { navigateRoute({ destination: "changes", taskId, attemptId, runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
 			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
 			architectureComparison: selectedChangesComparison,
 			architectureComparisonMismatch: Boolean(selectedChangesRunId && architectureComparisonMismatch),

@@ -59,6 +59,14 @@ export async function loadArtifactText(path: string): Promise<string | null> {
   return response.text();
 }
 
+export type RepositoryEvidence = { repo: string; path: string; content: string };
+
+export async function loadRepositoryEvidenceAPI(repo: string, path: string): Promise<RepositoryEvidence | null> {
+  const response = await fetch(`/api/repository-evidence?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`);
+  if (!response.ok) return null;
+  return response.json() as Promise<RepositoryEvidence>;
+}
+
 export async function validateWorkspaceAPI(): Promise<ValidateResponse> {
   const response = await fetch("/api/workspace/validate", {
     method: "POST",

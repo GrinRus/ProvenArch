@@ -151,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/runtime/permissions", s.handleRuntimePermissions)
 	mux.HandleFunc("/api/runtime/profile", s.handleRuntimeProfile)
 	mux.HandleFunc("/api/artifacts", s.handleArtifacts)
+	mux.HandleFunc("/api/repository-evidence", s.handleRepositoryEvidence)
 	mux.HandleFunc("/api/artifacts/write", s.handleArtifactsWrite)
 	mux.HandleFunc("/api/knowledge", s.handleKnowledge)
 	mux.HandleFunc("/api/architecture", s.handleArchitecture)
