@@ -369,7 +369,7 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			Observed: dedupeStrings(observed),
 			Missing:  dedupeStrings(missing),
 			Notes: []string{
-				"Runtime recovery is limited to manifest reconstruction from provider-authored markdown and bounded scoped evidence.",
+				"Manifest reconstruction is limited to provider-authored markdown and bounded scoped evidence.",
 				"Downstream quality gates still decide whether recovered artifacts are complete enough for acceptance.",
 			},
 		},
@@ -385,7 +385,7 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			ID:          "finding." + questionIDStem + ".manifest_recovery_applied",
 			Severity:    "medium",
 			Title:       "Collect manifest recovered from authored documents",
-			Description: fmt.Sprintf("The provider wrote collect markdown that identified %s but did not complete shard-pack-manifest.json during the primary or manifest-only repair process. Runtime recovery reconstructed the manifest from the provider-authored documents so downstream validation can surface remaining quality gaps instead of accepting an empty shard.", observedNames),
+			Description: fmt.Sprintf("The provider wrote collect markdown that identified %s but did not complete shard-pack-manifest.json during the primary or manifest-only repair process. The orchestrator reconstructed the manifest from the provider-authored documents so downstream validation can surface remaining quality gaps instead of accepting an empty shard.", observedNames),
 			RuleID:      "rule.collect_manifest.runtime_recovery",
 			RelatedIDs:  append([]string{shardEntityID}, termEntityIDs[:minInt(len(termEntityIDs), 4)]...),
 			Provenance: contracts.Provenance{

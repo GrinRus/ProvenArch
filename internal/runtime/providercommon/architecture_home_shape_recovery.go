@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -135,6 +136,132 @@ func writeArchitectureHomeAtomic(target string, content []byte, mode os.FileMode
 func architectureHomeSHA256(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
+}
+
+// normalizeArchitectureHomePlaceholderReferences replaces provider-authored
+// repository shorthand such as `repo:services/...` with one concrete,
+// existing evidence path. The strict Architecture Home validator deliberately
+// rejects wildcard/ellipsis references; this recovery keeps that contract
+// intact while making a narrow, deterministic repair for an otherwise useful
+// document. References that are not explicit `/...` placeholders are left
+// untouched so genuine missing evidence still reaches provider recovery.
+func normalizeArchitectureHomePlaceholderReferences(raw []byte, repoRoots map[string]string) ([]byte, []string, bool) {
+	text := string(raw)
+	var replacements []string
+	var out strings.Builder
+	changed := false
+	for cursor := 0; cursor < len(text); {
+		start := strings.IndexByte(text[cursor:], '`')
+		if start < 0 {
+			out.WriteString(text[cursor:])
+			break
+		}
+		start += cursor
+		out.WriteString(text[cursor : start+1])
+		end := strings.IndexByte(text[start+1:], '`')
+		if end < 0 {
+			out.WriteString(text[start+1:])
+			break
+		}
+		end += start + 1
+		token := text[start+1 : end]
+		replacement := token
+		if scope, rel, ok := splitArchitectureHomeRepoReference(token); ok && strings.HasSuffix(rel, "/...") {
+			if root, exists := repoRoots[scope]; exists {
+				if concrete, ok := concreteArchitectureHomeEvidencePath(root, strings.TrimSuffix(rel, "/...")); ok {
+					replacement = scope + ":" + concrete
+					replacements = append(replacements, token+" -> "+replacement)
+				}
+			}
+		}
+		out.WriteString(replacement)
+		out.WriteByte('`')
+		if replacement != token {
+			changed = true
+		}
+		cursor = end + 1
+	}
+	if !changed {
+		return raw, nil, false
+	}
+	sort.Strings(replacements)
+	return []byte(out.String()), replacements, true
+}
+
+func splitArchitectureHomeRepoReference(token string) (string, string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(token), ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	scope := strings.TrimSpace(parts[0])
+	rel := filepath.ToSlash(strings.TrimSpace(parts[1]))
+	if scope == "" || rel == "" || strings.HasPrefix(rel, "/") {
+		return "", "", false
+	}
+	return scope, rel, true
+}
+
+func concreteArchitectureHomeEvidencePath(root, prefix string) (string, bool) {
+	root = filepath.Clean(strings.TrimSpace(root))
+	prefix = filepath.ToSlash(strings.TrimSpace(prefix))
+	if root == "" || root == "." || prefix == "" || prefix == "." || strings.HasPrefix(prefix, "../") || prefix == ".." {
+		return "", false
+	}
+	base := filepath.Join(root, filepath.FromSlash(prefix))
+	info, err := os.Stat(base)
+	if err != nil {
+		return "", false
+	}
+	if !info.IsDir() {
+		return prefix, true
+	}
+	// Prefer a direct README, then the lexicographically first nested README,
+	// and finally the first regular file. All candidates are concrete paths.
+	if candidate, ok := architectureHomeDirectReadme(base, prefix); ok {
+		return candidate, true
+	}
+	var readmes, files []string
+	_ = filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry == nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != base && entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.EqualFold(filepath.Base(path), "README.md") {
+			readmes = append(readmes, rel)
+		} else {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	sort.Strings(readmes)
+	if len(readmes) > 0 {
+		return readmes[0], true
+	}
+	sort.Strings(files)
+	if len(files) > 0 {
+		return files[0], true
+	}
+	return "", false
+}
+
+func architectureHomeDirectReadme(base, prefix string) (string, bool) {
+	for _, name := range []string{"README.md", "README"} {
+		candidate := filepath.Join(base, name)
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return filepath.ToSlash(filepath.Join(prefix, name)), true
+		}
+	}
+	return "", false
 }
 
 func markArchitectureHomeInlineHeadingsRecovered(result acpruntime.Result, report architectureHomeInlineHeadingRecoveryReport) acpruntime.Result {

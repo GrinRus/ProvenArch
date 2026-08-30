@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
@@ -110,6 +111,34 @@ func TestWriteArchitectureHomeAtomicCleansTempAfterReplaceFailure(t *testing.T) 
 	}
 	if len(entries) != 1 || entries[0].Name() != "overview.md" || !entries[0].IsDir() {
 		t.Fatalf("atomic write left partial files: %#v", entries)
+	}
+}
+
+func TestNormalizeArchitectureHomePlaceholderReferencesUsesConcreteEvidence(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, rel := range []string{"devenv/README.md", "ee/api/scim/README.md", "nodejs/src/ingestion/doctor/README.md"} {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("evidence\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := []byte("See `posthog:devenv/...`, `posthog:ee/...`, and `posthog:nodejs/src/...`.\n")
+	repaired, replacements, changed := normalizeArchitectureHomePlaceholderReferences(raw, map[string]string{"posthog": root})
+	if !changed || len(replacements) != 3 {
+		t.Fatalf("changed=%v replacements=%v, want three deterministic replacements", changed, replacements)
+	}
+	got := string(repaired)
+	for _, want := range []string{"posthog:devenv/README.md", "posthog:ee/api/scim/README.md", "posthog:nodejs/src/ingestion/doctor/README.md"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("repaired overview missing %q: %s", want, got)
+		}
+	}
+	if _, _, changedAgain := normalizeArchitectureHomePlaceholderReferences(repaired, map[string]string{"posthog": root}); changedAgain {
+		t.Fatal("normalization must be idempotent")
 	}
 }
 

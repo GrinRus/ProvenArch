@@ -1285,14 +1285,28 @@ Semantic admission also rejects unknown envelope fields, incompatible duplicate 
 snapshots and dangling edge endpoints. Exact entity observations from the same logical repository
 may be merged only after the deterministic type/ID-leaf/name compatibility check; canonical
 `svc.*`/`system.*`/`db.*`/`team.*`/`infra.*` prefixes may normalize only their documented compatible type families
-(`svc.*`/`system.*`: service/application/system/dependency vocabulary, `db.*`: datastore/stateful-workload/database-workload,
-`team.*`: team/owner-group/repository-owners, `infra.*`: infrastructure/runtime-platform/platform/compute-platform/kubernetes-cluster);
+(`svc.*`: service/application/system/dependency/backend-service/kubernetes-service/platform/domain/component/application-component/service-group/repository/api-gateway/service-suite/service-landscape/service-system/service-domain/data-service; `system.*`: system/application/service/backend-service/kubernetes-service; `db.*`: datastore/stateful-workload/database-workload,
+`team.*`: team/owner-group/repository-owners/owner-team/review-owner/review-team/approval-owner/ownership-policy, `infra.*`: infrastructure/runtime-platform/platform/compute-platform/kubernetes-cluster/datastore/database-infrastructure/message-broker/messaging-infrastructure/coordination-service/coordination-infrastructure/change-data-capture-service);
 `external.system.*` IDs may merge only when both same-repository names match a documented
 product/acronym alias set (for example `gke` with `Google Kubernetes Engine` or `Google Cloud
 GKE`).
+
+For `svc.*`, the provider `application-surface` type is normalized to the canonical `service`
+family. For exact `svc.*.clickhouse` IDs, `datastore` and `analytical-database` are also normalized to `service` when the
+same logical repository reports one ID through both vocabularies; the usual repository and
+ID-leaf/name compatibility checks still apply.
+The exact `datastore.*.objectstorage` ID leaf also accepts the narrow `object store` name alias;
+the exact `datastore.*.clickhouse` ID leaf accepts only the documented `analytics`,
+`preaggregation`, and `session recording` role aliases;
+an exact `store.<suffix>` endpoint alias is rewritten to `datastore.<suffix>` only when that
+canonical entity exists; this canonical namespace mapping takes precedence over a conflicting
+provider-supplied alias on another datastore entity;
+other datastore name disagreements remain hard collisions.
 A repeated weak
 edge ID from the same logical repository and relation type may be re-keyed from its endpoint pair
-before the final identity check; incompatible edge type/repository collisions remain hard failures.
+before the final identity check. The route relation aliases `route`, `routes`, `routes-to`, and
+`routes to` normalize to canonical `routes_to` for this compatibility check; incompatible edge
+type/repository collisions remain hard failures.
 Unresolved finding/question references remain explicit advisory gaps.
 
 **200**

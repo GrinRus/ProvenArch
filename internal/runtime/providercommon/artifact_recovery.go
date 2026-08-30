@@ -2,9 +2,11 @@ package providercommon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -75,15 +77,21 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 	canRetryZeroOutputPreArtifact := zeroOutputPreArtifactStall &&
 		policy.RetryZeroOutputPreArtifactStallOnce &&
 		policy.RetryInvalidOrMissingArtifactsOnce
+	var validationErr error
+	bootstrapDraftStall := false
 	if policy.AcceptValidArtifactsAfterStop {
 		if err := adapter.ValidateArtifacts(task); err == nil {
 			emitRetryCompletedDiagnostic(task, adapter.Provider(), stalled.Diagnostic.StallPhase, "artifact_only")
 			return true, result, nil
-		} else if zeroOutputPreArtifactStall && !canRetryZeroOutputPreArtifact {
+		} else {
+			validationErr = err
+			bootstrapDraftStall = shouldRetryDraftBootstrapAfterInitialStall(task, stalled.Diagnostic, err)
+		}
+		if zeroOutputPreArtifactStall && !canRetryZeroOutputPreArtifact {
 			emitZeroOutputPreArtifactStallDiagnostic(task, adapter.Provider(), stalled.Diagnostic, "pre_artifact_fail_fast")
 			return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "stall", result, "provider unavailable after zero-output pre-artifact stall", runErr)
-		} else if !zeroOutputPreArtifactStall {
-			if recovered, recoveredResult, recoveredErr := recoverFocusedArtifactRepair(ctx, task, adapter, result, err, "stall"); recovered {
+		} else if !zeroOutputPreArtifactStall && !bootstrapDraftStall {
+			if recovered, recoveredResult, recoveredErr := recoverFocusedArtifactRepair(ctx, task, adapter, result, validationErr, "stall"); recovered {
 				return true, recoveredResult, recoveredErr
 			}
 		}
@@ -99,6 +107,12 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "stall", "runtime stalled before valid artifacts were available", runErr)
 	}
 	retryPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
+	if bootstrapDraftStall {
+		// The initial provider invocation left only runtime bootstrap files in
+		// place. Treat them as stale for the fresh process so the retry must
+		// author the draft rather than immediately re-observing the scaffold.
+		retryPolicy.FreshArtifactMutationAfter = time.Now().UTC()
+	}
 	if stalled.Diagnostic.StallPhase == StallPhasePreArtifact && retryPolicy.RetryPreArtifactStallWindow > 0 {
 		retryPolicy.PreArtifactStallWindow = retryPolicy.RetryPreArtifactStallWindow
 		retryPolicy.PreArtifactWallClockWindow = retryPolicy.RetryPreArtifactStallWindow
@@ -112,6 +126,8 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 				if err := adapter.ValidateArtifacts(task); err == nil {
 					emitRetryCompletedDiagnostic(task, adapter.Provider(), retryStalled.Diagnostic.StallPhase, "fresh_process_artifact_only")
 					return true, retryResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverDraftAfterSilentPreArtifactRetry(ctx, task, adapter, retryResult, retryStalled.Diagnostic); recovered {
+					return true, recoveredResult, recoveredErr
 				} else if recovered, recoveredResult, recoveredErr := recoverFocusedArtifactRepair(ctx, task, adapter, retryResult, err, "retry"); recovered {
 					return true, recoveredResult, recoveredErr
 				}
@@ -135,6 +151,119 @@ func recoverAfterStall(ctx context.Context, task acpruntime.Task, adapter Provid
 	}
 	emitRetryCompletedDiagnostic(task, adapter.Provider(), stalled.Diagnostic.StallPhase, "fresh_process")
 	return true, retryResult, nil
+}
+
+// recoverDraftAfterSilentPreArtifactRetry gives a draft one final full
+// provider invocation when both the initial call and its transport retry
+// stalled silently before writing any artifacts. A focused repair prompt is
+// intentionally skipped in this state: it is a narrower prompt that can
+// consume the last budget while producing only the bootstrap scaffold. The
+// hard invocation budget remains three (initial, retry, final fresh process).
+func recoverDraftAfterSilentPreArtifactRetry(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, diagnostic StallDiagnostic) (bool, acpruntime.Result, error) {
+	policy := adapter.RecoveryPolicy(task)
+	if !runtimedrafts.IsDraftStep(task.StepID) ||
+		!shouldClassifySilentNoFreshArtifactRepairStall(policy, result, diagnostic) {
+		return false, acpruntime.Result{}, nil
+	}
+	if budget := ProviderInvocationBudgetFromContext(ctx); budget != nil && budget.Snapshot().Remaining <= 0 {
+		return false, acpruntime.Result{}, nil
+	}
+	beforeWriteRoot, snapshotErr := snapshotWriteRootFiles(task.WriteRoot)
+	if snapshotErr != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_manifest_missing_recovery", "draft manifest recovery write_root precheck failed", snapshotErr)
+	}
+	beforeDraftRoot, snapshotErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if snapshotErr != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_manifest_missing_recovery", "draft manifest recovery draft_final_root precheck failed", snapshotErr)
+	}
+
+	retryPolicy := normalizeActivityPolicy(adapter.ActivityPolicy(task))
+	if retryPolicy.RetryPreArtifactStallWindow > 0 {
+		retryPolicy.PreArtifactStallWindow = retryPolicy.RetryPreArtifactStallWindow
+		retryPolicy.PreArtifactWallClockWindow = retryPolicy.RetryPreArtifactStallWindow
+	}
+	emitDiagnostic(task, "draft zero-output pre-artifact retry will use a final fresh provider process", map[string]any{
+		"provider":       string(adapter.Provider()),
+		"recovery_mode":  "fresh_process",
+		"recovery_stage": "repeated_silent_pre_artifact_stall",
+		"severity":       "warning",
+	})
+	finalResult, finalErr := runProviderCommandWithTransition(ctx, task, adapter, retryPolicy, "transport_retry")
+	if finalErr != nil {
+		var finalStalled StallError
+		if errors.As(finalErr, &finalStalled) {
+			if policy.AcceptValidArtifactsAfterStop {
+				if err := adapter.ValidateArtifacts(task); err == nil {
+					emitRetryCompletedDiagnostic(task, adapter.Provider(), finalStalled.Diagnostic.StallPhase, "final_fresh_process_artifact_only")
+					return true, finalResult, nil
+				} else if recovered, recoveredResult, recoveredErr := recoverDraftManifestShapeDeterministically(task, adapter, finalResult, beforeWriteRoot, beforeDraftRoot, err, "draft_manifest_missing_after_final_fresh_process"); recovered {
+					return true, recoveredResult, recoveredErr
+				}
+			}
+			if shouldClassifySilentNoFreshArtifactRepairStall(policy, finalResult, finalStalled.Diagnostic) ||
+				shouldClassifySilentRetryExhaustionUnavailable(policy, task, finalResult) {
+				return true, acpruntime.Result{}, wrapProviderUnavailable(adapter, task, "retry", finalResult, "provider unavailable after repeated silent pre-artifact stalls", finalErr)
+			}
+			return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, finalResult, "retry", "final fresh-process retry stalled before producing valid draft artifacts", finalErr)
+		}
+		return true, acpruntime.Result{}, classifyCommandFailure(adapter, task, finalResult, finalErr)
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		if recovered, recoveredResult, recoveredErr := recoverDraftManifestShapeDeterministically(task, adapter, finalResult, beforeWriteRoot, beforeDraftRoot, err, "draft_manifest_missing_after_final_fresh_process"); recovered {
+			return true, recoveredResult, recoveredErr
+		}
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, finalResult, "retry", "final fresh-process retry produced invalid draft artifacts", err)
+	}
+	emitRetryCompletedDiagnostic(task, adapter.Provider(), diagnostic.StallPhase, "final_fresh_process")
+	return true, finalResult, nil
+}
+
+// shouldRetryDraftBootstrapAfterInitialStall keeps the first recovery attempt
+// provider-authored. A draft bootstrap is an execution scaffold, not usable
+// output; spending the initial retry on focused repair can exhaust the
+// provider before it gets a chance to write the requested documents. This is
+// intentionally limited to the initial post-artifact stall path. Enrichment
+// stages still reject unchanged/scaffold content as a contract failure.
+func shouldRetryDraftBootstrapAfterInitialStall(task acpruntime.Task, diagnostic StallDiagnostic, validationErr error) bool {
+	if diagnostic.StallPhase != StallPhasePostArtifact || !runtimedrafts.IsDraftStep(task.StepID) {
+		return false
+	}
+	if isDraftBootstrapOnlyValidationFailure(validationErr) {
+		return true
+	}
+	// Providers sometimes write the markdown outputs before the manifest. In
+	// that state validation reports only the missing manifest; a focused repair
+	// can replace otherwise useful content with its bootstrap scaffold and burn
+	// the remaining invocation budget. Prefer a fresh provider process whenever
+	// the draft already has authored files, while retaining the bootstrap-only
+	// check for callers that do not expose an authored-file diagnostic.
+	if !classifyValidationIssues(validationErr).Has(issueMissingArtifact) {
+		return false
+	}
+	return diagnostic.AuthoredFileCount > 0 || draftFinalRootHasBootstrapOnlyContent(task)
+}
+
+func draftFinalRootHasBootstrapOnlyContent(task acpruntime.Task) bool {
+	root := strings.TrimSpace(task.DraftFinalRoot)
+	if root == "" {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	markdownCount := 0
+	for _, entry := range entries {
+		if entry.IsDir() || strings.ToLower(filepath.Ext(entry.Name())) != ".md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if err != nil || !runtimedrafts.DraftTextBootstrapOnly(string(raw)) {
+			return false
+		}
+		markdownCount++
+	}
+	return markdownCount > 0
 }
 
 func recoverFocusedArtifactRepair(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, stage string) (bool, acpruntime.Result, error) {
@@ -1075,6 +1204,15 @@ func recoverDraftArtifactRepair(ctx context.Context, task acpruntime.Task, adapt
 	if !policy.RepairDraftArtifactsOnce || !runtimedrafts.IsDraftStep(task.StepID) {
 		return false, acpruntime.Result{}, nil
 	}
+	// A provider can leave authored markdown behind while failing to create the
+	// runtime draft manifest (a common post-artifact stall shape). In that
+	// state, the bootstrap repair heredoc would consume the final recovery
+	// invocation and leave only scaffold content. Go straight to the bounded
+	// enrichment prompt so the provider can create the manifest and rewrite the
+	// authored markdown in one call.
+	if shouldRecoverDraftMissingManifestWithEnrichment(task, validationErr) {
+		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, draftRepairEnrichmentStage(stage, validationErr))
+	}
 	if shouldRecoverDraftRepairValidationWithEnrichment(task, validationErr) {
 		return recoverDraftArtifactEnrichment(ctx, task, adapter, result, validationErr, draftRepairEnrichmentStage(stage, validationErr))
 	}
@@ -1198,6 +1336,28 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	beforeDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
 	if err != nil {
 		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "draft_artifact_enrichment", "draft enrichment draft_final_root precheck failed", err)
+	}
+	if recovered, recoveredResult, recoveredErr := recoverArchitectureHomePlaceholderReferences(task, adapter, result, validationErr, beforeWriteRoot, beforeDraftRoot); recovered {
+		return true, recoveredResult, recoveredErr
+	}
+	// A provider can leave only the bootstrap proposal scaffold after a
+	// successful analysis.  Repeatedly asking the provider to rewrite that
+	// scaffold is both expensive and unreliable (especially for headless
+	// providers that return no output after the first attempt).  When the
+	// validation failure is limited to bootstrap/finding linkage, produce a
+	// small evidence-linked proposal pair locally.  This keeps the recovery
+	// deterministic while still requiring the normal adapter validation below.
+	if shouldUseDeterministicProposalDraftFallback(task, validationErr) {
+		if fallbackErr := writeDeterministicProposalDraft(task); fallbackErr == nil {
+			if outcomeErr := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, adapter.ValidateArtifacts(task), validationErr, stage); outcomeErr == nil {
+				emitDiagnostic(task, "deterministic proposal draft fallback completed", map[string]any{
+					"provider":      adapter.Provider(),
+					"recovery_mode": "draft_artifact_deterministic_fallback",
+					"step_id":       task.StepID,
+				})
+				return true, result, nil
+			}
+		}
 	}
 
 	emitFocusedArtifactRepairScheduledDiagnostic(task, adapter.Provider(), "draft_artifact_enrichment", stage, runtimeArtifactSnapshot(task), validationErr)
@@ -1349,6 +1509,75 @@ func recoverDraftArtifactEnrichment(ctx context.Context, task acpruntime.Task, a
 	return true, enrichmentResult, nil
 }
 
+// recoverArchitectureHomePlaceholderReferences repairs only explicit `/...`
+// repository references in an Architecture Home overview. The validator
+// remains strict for all other missing references; this path simply converts
+// provider shorthand into a concrete existing evidence file before spending
+// another provider invocation on enrichment.
+func recoverArchitectureHomePlaceholderReferences(task acpruntime.Task, adapter ProviderAdapter, result acpruntime.Result, validationErr error, beforeWriteRoot, beforeDraftRoot writeRootFileSnapshot) (bool, acpruntime.Result, error) {
+	stepID := strings.TrimSpace(task.StepID)
+	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
+		return false, acpruntime.Result{}, nil
+	}
+	if !isArchitectureHomeRepositoryReferenceError(validationErr) {
+		return false, acpruntime.Result{}, nil
+	}
+	manifest, _, err := runtimedrafts.Load(task.WriteRoot, runtimedrafts.AsIsManifestFile)
+	if err != nil {
+		return false, acpruntime.Result{}, nil
+	}
+	overviewPath := ""
+	for _, output := range manifest.Outputs {
+		if filepath.ToSlash(path.Clean(strings.TrimSpace(output.CanonicalPath))) != "reports/as-is/overview.md" {
+			continue
+		}
+		if overviewPath != "" {
+			return false, acpruntime.Result{}, nil
+		}
+		overviewPath = filepath.Join(filepath.Clean(task.DraftFinalRoot), filepath.Clean(output.Path))
+	}
+	if overviewPath == "" {
+		return false, acpruntime.Result{}, nil
+	}
+	original, err := os.ReadFile(overviewPath)
+	if err != nil {
+		return false, acpruntime.Result{}, nil
+	}
+	repaired, replacements, changed := normalizeArchitectureHomePlaceholderReferences(original, collectTaskRepoRoots(task))
+	if !changed || len(replacements) == 0 {
+		return false, acpruntime.Result{}, nil
+	}
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(overviewPath); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeArchitectureHomeAtomic(overviewPath, repaired, mode); err != nil {
+		return true, acpruntime.Result{}, classifyArtifactFailure(adapter, task, result, "architecture_home_placeholder_recovery", "Architecture Home placeholder recovery could not write overview", err)
+	}
+	if err := adapter.ValidateArtifacts(task); err != nil {
+		_ = writeArchitectureHomeAtomic(overviewPath, original, mode)
+		return false, acpruntime.Result{}, nil
+	}
+	if err := validateDraftArtifactEnrichmentOutcome(task, beforeWriteRoot, beforeDraftRoot, nil, validationErr, "draft_artifact_enrichment_architecture_home_placeholder_recovery"); err != nil {
+		_ = writeArchitectureHomeAtomic(overviewPath, original, mode)
+		return false, acpruntime.Result{}, nil
+	}
+	emitDiagnostic(task, "Architecture Home placeholder references recovered", map[string]any{
+		"provider":        adapter.Provider(),
+		"recovery_mode":   "architecture_home_placeholder_recovery",
+		"replacements":    append([]string(nil), replacements...),
+		"operator_review": true,
+	})
+	if result.Diagnostics == nil {
+		result.Diagnostics = map[string]any{}
+	}
+	result.Diagnostics["architecture_home_placeholder_recovery"] = map[string]any{
+		"recovery_mode": "architecture_home_placeholder_recovery",
+		"replacements":  append([]string(nil), replacements...),
+	}
+	return true, result, nil
+}
+
 const minDraftArtifactEnrichmentPreArtifactWindow = 3 * time.Minute
 
 func draftArtifactEnrichmentActivityPolicy(task acpruntime.Task, policy ActivityPolicy) ActivityPolicy {
@@ -1389,7 +1618,7 @@ func targetedArchitectureHomeRewriteIsValid(task acpruntime.Task, beforeDraftRoo
 	if stepID != "init.step2.asis_docs" && stepID != "refresh.step2.asis_docs" {
 		return false
 	}
-	if !classifyValidationIssues(recoveryCause).Has(issueDraftArchitectureHome) {
+	if !classifyValidationIssues(recoveryCause).Has(issueDraftArchitectureHome) && !isArchitectureHomeRepositoryReferenceError(recoveryCause) {
 		return false
 	}
 	afterDraftRoot, err := snapshotWriteRootFiles(task.DraftFinalRoot)
@@ -1399,6 +1628,13 @@ func targetedArchitectureHomeRewriteIsValid(task acpruntime.Task, beforeDraftRoo
 	beforeState, beforeExists := beforeDraftRoot["overview.md"]
 	afterState, afterExists := afterDraftRoot["overview.md"]
 	return afterExists && (beforeExists != afterExists || beforeState != afterState)
+}
+
+func isArchitectureHomeRepositoryReferenceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "architecture home repository reference")
 }
 
 func shouldRetryDraftWriteSetCleanupEnrichment(stage string, task acpruntime.Task, beforeWriteRoot writeRootFileSnapshot, beforeDraftRoot writeRootFileSnapshot, err error) bool {
@@ -1942,6 +2178,303 @@ func shouldRecoverDraftRepairValidationWithEnrichment(task acpruntime.Task, err 
 		issueDraftEmptyShardEvidence,
 		issueDraftMarkerCleanup,
 	)
+}
+
+func shouldRecoverDraftMissingManifestWithEnrichment(task acpruntime.Task, err error) bool {
+	if err == nil || !runtimedrafts.IsDraftStep(task.StepID) {
+		return false
+	}
+	issues := classifyValidationIssues(err)
+	if !issues.Has(issueMissingArtifact) {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	if !strings.Contains(text, "read runtime draft manifest") &&
+		!strings.Contains(text, "parse runtime draft manifest") {
+		return false
+	}
+	// Only take this path when the provider left authored markdown behind. A
+	// truly silent run must retain the existing provider-unavailable recovery
+	// classification rather than being converted into an enrichment failure.
+	snapshot, snapshotErr := snapshotWriteRootFiles(task.DraftFinalRoot)
+	if snapshotErr != nil {
+		return false
+	}
+	for path := range snapshot {
+		if strings.EqualFold(filepath.Ext(path), ".md") {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldUseDeterministicProposalDraftFallback(task acpruntime.Task, err error) bool {
+	if err == nil || (task.StepID != "init.step4.proposals" && task.StepID != "refresh.step4.proposals") {
+		return false
+	}
+	issues := classifyValidationIssues(err)
+	// Only replace the recovery scaffold itself.  Substantive provider-authored
+	// proposals that need linkage/section cleanup must still go through the
+	// focused provider enrichment path.
+	if issues.Has(issueDraftBootstrap) {
+		return proposalDraftHasRecoveryScaffold(task)
+	}
+	// A provider can produce a fully formed-looking proposal while claiming
+	// that no structured findings exist.  That claim is still a recovery
+	// scaffold when the current-run findings report is non-empty: retaining it
+	// would discard actionable finding IDs and repeatedly invoke enrichment.
+	if !issues.Has(issueDraftFindingLinkage) || !proposalDraftClaimsNoStructuredFindings(task) {
+		return false
+	}
+	return true
+}
+
+func proposalDraftClaimsNoStructuredFindings(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.DraftFinalRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel != "proposal.md" && rel != "changelog.md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return false
+		}
+		lower := strings.ToLower(string(raw))
+		if strings.Contains(lower, "no structured finding summary") ||
+			strings.Contains(lower, "no structured findings") ||
+			strings.Contains(lower, "no actionable finding was available") {
+			return true
+		}
+	}
+	return false
+}
+
+func proposalDraftHasRecoveryScaffold(task acpruntime.Task) bool {
+	root := filepath.Clean(strings.TrimSpace(task.DraftFinalRoot))
+	if root == "" || root == "." {
+		return false
+	}
+	found := false
+	for _, output := range loadAllowedDraftOutputs(task) {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(output.Path)))
+		if rel != "proposal.md" && rel != "changelog.md" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			return false
+		}
+		lower := strings.ToLower(string(raw))
+		if !strings.Contains(lower, "runtime draft recovery initialized") &&
+			!strings.Contains(lower, "drafted required runtime artifacts") &&
+			!strings.Contains(lower, "draft surface initialized") {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+type deterministicProposalFinding struct {
+	id       string
+	severity string
+	related  string
+	evidence string
+}
+
+// writeDeterministicProposalDraft writes a minimal, operator-facing proposal
+// pair from the current findings markdown. It is deliberately limited to the
+// two proposal outputs and is used only when the provider left bootstrap-only
+// content behind. The normal draft validator remains the source of truth.
+func writeDeterministicProposalDraft(task acpruntime.Task) error {
+	findingsText, _ := readProposalFindingsMarkdown(task)
+	findings := parseDeterministicProposalFindings(findingsText)
+	shardLine := deterministicProposalShardCompleteness(task)
+
+	var proposal strings.Builder
+	proposal.WriteString("# Runtime Recommendations\n\n")
+	proposal.WriteString("## Decision / recommended operator action\n")
+	proposal.WriteString("The analysis findings require explicit follow-up actions before the proposal package is accepted.\n\n")
+	proposal.WriteString("## Evidence used\n")
+	proposal.WriteString("- reports/findings/findings.md\n")
+	for _, finding := range findings {
+		if finding.evidence != "" {
+			proposal.WriteString("- ")
+			proposal.WriteString(finding.evidence)
+			proposal.WriteByte('\n')
+		}
+	}
+	if shardLine != "" {
+		proposal.WriteString("- ")
+		proposal.WriteString(shardLine)
+		proposal.WriteByte('\n')
+	}
+	proposal.WriteString("\n## Proposed changes or follow-up plan\n")
+	if len(findings) == 0 {
+		proposal.WriteString("- No actionable proposal evidence was present in the findings; keep the operator decision anchored to reports/findings/findings.md.\n")
+	} else {
+		proposal.WriteString("### Top Actionable Findings\n")
+		for _, finding := range findings {
+			severity := finding.severity
+			if severity == "" {
+				severity = "low"
+			}
+			affected := finding.related
+			if affected == "" {
+				affected = finding.evidence
+			}
+			if affected == "" {
+				affected = "reports/findings/findings.md"
+			}
+			action := "monitor the documented gap and confirm ownership"
+			if severity == "high" || severity == "medium" {
+				action = "document an owner and acceptance evidence for the affected surface"
+			}
+			fmt.Fprintf(&proposal, "- Finding ID: `%s`; Severity: `%s`; Affected surface/path: %s; Recommended operator action: %s; Residual gap: implementation and operational ownership remain to be confirmed.\n", finding.id, severity, affected, action)
+		}
+	}
+	proposal.WriteString("\n## Risks, gaps, and out-of-scope notes\n")
+	proposal.WriteString("- The recommendations are limited to the evidence recorded in reports/findings/findings.md; implementation acceptance remains an operator decision.\n")
+	if shardLine != "" {
+		proposal.WriteString("- ")
+		proposal.WriteString(shardLine)
+		proposal.WriteByte('\n')
+	}
+
+	var changelog strings.Builder
+	changelog.WriteString("# Runtime Proposal Changelog\n\n")
+	changelog.WriteString("## Updated architecture/proposal surfaces\n")
+	changelog.WriteString("- proposals/runtime-recommendations.md records evidence-linked follow-up actions.\n\n")
+	changelog.WriteString("## Findings/proposals summary\n")
+	if len(findings) == 0 {
+		changelog.WriteString("- No actionable proposal evidence was present in the findings; no source change is approved by this artifact.\n")
+	} else {
+		for _, finding := range findings {
+			fmt.Fprintf(&changelog, "- Finding ID: `%s` is linked to a documented follow-up action.\n", finding.id)
+		}
+	}
+	changelog.WriteString("\n## Evidence index or citation references\n- reports/findings/findings.md\n")
+	if shardLine != "" {
+		changelog.WriteString("- ")
+		changelog.WriteString(shardLine)
+		changelog.WriteByte('\n')
+	}
+	changelog.WriteString("\n## Residual coverage gaps\n- Operational ownership and implementation acceptance require confirmation outside this proposal artifact.\n")
+
+	root := filepath.Clean(strings.TrimSpace(task.DraftFinalRoot))
+	if root == "" || root == "." {
+		return errors.New("draft proposal root is empty")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(root, "proposal.md"), []byte(proposal.String()), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "changelog.md"), []byte(changelog.String()), 0o644)
+}
+
+func readProposalFindingsMarkdown(task acpruntime.Task) (string, bool) {
+	root := filepath.Clean(strings.TrimSpace(task.DraftFinalRoot))
+	if root == "" || root == "." {
+		return "", false
+	}
+	candidates := []string{
+		filepath.Join(root, "reports", "findings", "findings.md"),
+		filepath.Join(root, "..", "final", "reports", "findings", "findings.md"),
+		filepath.Join(root, "..", "..", "final", "reports", "findings", "findings.md"),
+		filepath.Join(root, "..", "..", "..", "staging", "final", "reports", "findings", "findings.md"),
+	}
+	for _, candidate := range candidates {
+		if raw, err := os.ReadFile(filepath.Clean(candidate)); err == nil {
+			return string(raw), true
+		}
+	}
+	return "", false
+}
+
+func parseDeterministicProposalFindings(markdown string) []deterministicProposalFinding {
+	findings := []deterministicProposalFinding{}
+	current := deterministicProposalFinding{}
+	flush := func() {
+		if strings.TrimSpace(current.id) != "" {
+			findings = append(findings, current)
+		}
+		current = deterministicProposalFinding{}
+	}
+	for _, rawLine := range strings.Split(markdown, "\n") {
+		line := strings.TrimSpace(rawLine)
+		lower := strings.ToLower(line)
+		switch {
+		case strings.HasPrefix(lower, "- id:"):
+			flush()
+			current.id = deterministicProposalFieldValue(line[len("- id:"):])
+		case strings.HasPrefix(lower, "- severity:"):
+			current.severity = strings.ToLower(deterministicProposalFieldValue(line[len("- severity:"):]))
+		case strings.HasPrefix(lower, "- related ids:"):
+			current.related = deterministicProposalFieldValue(line[len("- related ids:"):])
+		case strings.HasPrefix(lower, "- evidence:"):
+			current.evidence = deterministicProposalFieldValue(line[len("- evidence:"):])
+		}
+	}
+	flush()
+	seen := map[string]struct{}{}
+	unique := findings[:0]
+	for _, finding := range findings {
+		if _, ok := seen[finding.id]; ok {
+			continue
+		}
+		seen[finding.id] = struct{}{}
+		unique = append(unique, finding)
+	}
+	return unique
+}
+
+func deterministicProposalFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	value = strings.Trim(value, "` \t:;,")
+	return strings.TrimSpace(value)
+}
+
+func deterministicProposalShardCompleteness(task acpruntime.Task) string {
+	root := filepath.Clean(filepath.Join(strings.TrimSpace(task.DraftFinalRoot), "..", "..", "..", ".."))
+	pattern := filepath.Join(root, strings.TrimSpace(task.RunID)+"-*-step1-collect-shard-summary-*.json")
+	matches, _ := filepath.Glob(pattern)
+	for _, match := range matches {
+		raw, err := os.ReadFile(match)
+		if err != nil {
+			continue
+		}
+		var summary struct {
+			Items []struct {
+				Status string `json:"status"`
+			} `json:"items"`
+		}
+		if json.Unmarshal(raw, &summary) != nil || len(summary.Items) == 0 {
+			continue
+		}
+		failed, incomplete := 0, 0
+		for _, item := range summary.Items {
+			switch strings.ToLower(strings.TrimSpace(item.Status)) {
+			case "succeeded":
+			case "failed":
+				failed++
+			default:
+				incomplete++
+			}
+		}
+		return fmt.Sprintf("Shard completeness: %d/%d succeeded; failed=%d incomplete=%d", len(summary.Items)-failed-incomplete, len(summary.Items), failed, incomplete)
+	}
+	return ""
 }
 
 func draftRepairEnrichmentStage(stage string, err error) string {

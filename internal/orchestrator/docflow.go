@@ -979,6 +979,7 @@ func newSemanticEndpointRemap(entities []contracts.Entity, entityRemap map[strin
 		exact: map[string]string{},
 		token: map[string]string{},
 	}
+	canonicalStoreAliases := map[string]string{}
 	ambiguousExact := map[string]struct{}{}
 	ambiguousToken := map[string]struct{}{}
 	registerUnique := func(values map[string]string, ambiguous map[string]struct{}, key string, canonicalID string) {
@@ -1003,12 +1004,28 @@ func newSemanticEndpointRemap(entities []contracts.Entity, entityRemap map[strin
 	for _, entity := range entities {
 		canonicalID := strings.TrimSpace(entity.ID)
 		registerUnique(resolver.exact, ambiguousExact, canonicalID, canonicalID)
+		// Providers sometimes use the historical `store.` namespace for a
+		// canonical datastore entity. Register only the exact same suffix so
+		// this remains deterministic and cannot collapse unrelated stores.
+		if strings.HasPrefix(strings.ToLower(canonicalID), "datastore.") {
+			storeAlias := "store." + canonicalID[len("datastore."):]
+			canonicalStoreAliases[storeAlias] = canonicalID
+		}
 		for _, alias := range entity.Aliases {
 			registerUnique(resolver.exact, ambiguousExact, alias, canonicalID)
 		}
 		for _, value := range append([]string{canonicalID, entity.Name}, entity.Aliases...) {
 			registerUnique(resolver.token, ambiguousToken, semanticEntityIdentityToken(value), canonicalID)
 		}
+	}
+	// A provider may attach a historical store alias to a different datastore
+	// observation (for example, `store.posthog.redis` on `redis7`) while a
+	// canonical `datastore.posthog.redis` entity is present. Prefer the exact
+	// canonical namespace alias so dangling endpoints resolve deterministically
+	// to the matching datastore ID instead of being left ambiguous.
+	for alias, canonicalID := range canonicalStoreAliases {
+		resolver.exact[alias] = canonicalID
+		delete(ambiguousExact, alias)
 	}
 	return resolver
 }
@@ -1299,19 +1316,25 @@ func semanticEntityDedupKey(entity contracts.Entity) string {
 func normalizeSemanticEntityType(id, value string) string {
 	typeName := strings.ToLower(strings.TrimSpace(value))
 	switch typeName {
-	case "database", "data-store", "data store":
+	case "database", "data-store", "data store", "analytical-database", "analytical database":
 		typeName = "datastore"
 	}
 	id = strings.ToLower(strings.TrimSpace(id))
 	switch {
-	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service"}, typeName):
+	case strings.HasPrefix(id, "tech.") && containsSemanticType([]string{"technology", "framework"}, typeName):
+		return "technology"
+	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service", "platform", "service-platform", "application-service", "application-surface", "domain", "component", "application-component", "service-group", "repository", "api-gateway", "service-suite", "service-landscape", "service-system", "service-domain", "data-service"}, typeName):
+		return "service"
+	case strings.HasPrefix(id, "svc.") && strings.HasSuffix(id, ".clickhouse") && typeName == "datastore":
 		return "service"
 	case strings.HasPrefix(id, "system.") && containsSemanticType([]string{"system", "application", "service", "backend-service", "kubernetes-service"}, typeName):
 		return "system"
 	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
 		return "datastore"
-	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners"}, typeName):
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners", "owner-team", "review-owner", "review-team", "approval-owner", "ownership-policy"}, typeName):
 		return "team"
+	case strings.HasPrefix(id, "infra.") && containsSemanticType([]string{"infrastructure", "runtime-platform", "platform", "compute-platform", "kubernetes-cluster", "datastore", "database-infrastructure", "message-broker", "messaging-infrastructure", "coordination-service", "coordination-infrastructure", "change-data-capture-service"}, typeName):
+		return "infrastructure"
 	default:
 		return typeName
 	}

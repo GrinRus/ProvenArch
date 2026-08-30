@@ -19,6 +19,9 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
+    // Full-suite jsdom runs can be slower on the trusted live-gate host than
+    // isolated files; keep async UI assertions from failing on scheduler load.
+    testTimeout: 15000,
     css: true,
     coverage: {
       provider: "v8",

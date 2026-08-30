@@ -197,6 +197,10 @@ func TestTaskAttemptAdmissionIsIdempotentAndLinksExactRun(t *testing.T) {
 	if conflict.StatusCode != http.StatusConflict {
 		t.Fatalf("expected idempotency conflict, got %d", conflict.StatusCode)
 	}
+	// The admission starts an asynchronous fake run. Wait for its terminal
+	// projection before the test's TempDir cleanup so final history writes have
+	// completed and cannot race directory removal.
+	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
 	run, ok := server.getService().GetRun(firstPayload.Attempt.RunID)
 	if !ok || run.TaskID != created.TaskID || run.AttemptID != firstPayload.Attempt.AttemptID {
 		t.Fatalf("run linkage missing: ok=%v run=%+v", ok, run)
@@ -482,6 +486,10 @@ func TestTaskAttemptChildRejectsEditedForeignScopeBeforePersistence(t *testing.T
 	if len(listed.Items) != 1 {
 		t.Fatalf("foreign child was persisted despite scope rejection: %+v", listed.Items)
 	}
+	// Retry admission starts an asynchronous fake run. Wait for its terminal
+	// projection before TempDir cleanup so final history writes cannot race
+	// directory removal.
+	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
 }
 
 func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {

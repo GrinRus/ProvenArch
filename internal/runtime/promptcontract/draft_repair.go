@@ -304,6 +304,13 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	lines = append(lines,
 		"DRAFT ENRICHMENT TARGETS:",
 	)
+	if draftEnrichmentManifestMayBeMissing(validationErr) {
+		lines = append(lines,
+			"- The runtime draft manifest may be absent after the previous provider attempt. If the exact manifest target is missing, create it before rewriting markdown using the normative skeleton below; preserve its outputs[] paths exactly and do not add fields.",
+			"NORMATIVE DRAFT MANIFEST SKELETON:",
+			skeleton,
+		)
+	}
 	if len(outputs) == 0 {
 		lines = append(lines, "- Read the existing draft manifest outputs[] and enrich every referenced markdown draft file.")
 	} else {
@@ -498,6 +505,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 					fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
 					"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
 					"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
+					"- Copy the exact literal planned=<n> succeeded=<n> failed=<n> incomplete=<n> from the validator error or typed summary into summary.md and architect-summary.md; a table with separate Metric/Count rows is not sufficient.",
 					"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
 					"- The operator decision summary must say what is complete now, what residual artifact-quality risks remain, and what the operator should inspect next without suggesting nonexistent shard failures.",
 				)
@@ -563,6 +571,15 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines, fmt.Sprintf(`- Previous draft artifact validation failure: %s`, compactDraftEnrichmentHint(validationErr.Error())))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func draftEnrichmentManifestMayBeMissing(validationErr error) bool {
+	if validationErr == nil {
+		return false
+	}
+	text := strings.ToLower(validationErr.Error())
+	return strings.Contains(text, "read runtime draft manifest") ||
+		strings.Contains(text, "parse runtime draft manifest")
 }
 
 func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
