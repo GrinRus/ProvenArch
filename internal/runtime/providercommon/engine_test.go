@@ -385,6 +385,68 @@ func TestRunHeadlessProviderRetriesZeroOutputPreArtifactStallWhenPolicyAllows(t 
 	}
 }
 
+func TestRunHeadlessProviderUsesFinalFreshProcessAfterRepeatedSilentDraftStalls(t *testing.T) {
+	task := newAsIsDraftTask(t, "run-draft-silent-twice-then-success")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	runner := &sequenceAdapter{
+		testAdapter: testAdapter{
+			activity: ActivityPolicy{
+				MonitorArtifacts:            true,
+				MonitorPreArtifact:          true,
+				PreArtifactStallWindow:      20 * time.Millisecond,
+				RetryPreArtifactStallWindow: 5 * time.Second,
+				PostArtifactStallWindow:     successfulArtifactWriteWindow,
+				PartialArtifactStallWindow:  successfulArtifactWriteWindow,
+				PollInterval:                5 * time.Millisecond,
+				PostTerminateDrain:          10 * time.Millisecond,
+				TerminateGrace:              10 * time.Millisecond,
+			},
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:            true,
+				RetryInvalidOrMissingArtifactsOnce:       true,
+				RetryZeroOutputPreArtifactStallOnce:      true,
+				ClassifySilentRetryExhaustionUnavailable: true,
+			},
+		},
+		commands: []string{
+			// Keep the provider alive but silent until the bounded stall window
+			// expires. A shell builtin loop avoids a child sleep process that can
+			// outlive cancellation on a loaded CI host.
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nwhile :; do :; done\n"),
+			writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\nwhile :; do :; done\n"),
+			writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "")),
+		},
+	}
+
+	// The two intentionally silent retries each use a bounded five-second
+	// pre-artifact window. Keep enough headroom for a loaded CI/live-precheck
+	// host to schedule the final fresh provider process after those retries.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	result, err := RunHeadlessProvider(ctx, task, runner)
+	if err != nil {
+		t.Fatalf("expected final fresh draft retry to recover valid artifacts, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("expected succeeded execution, got %+v", result.Execution)
+	}
+	if !hasDiagnostic(diagnostics, "draft zero-output pre-artifact retry will use a final fresh provider process", "warning") {
+		t.Fatalf("expected final fresh-process diagnostic, got %#v", diagnostics)
+	}
+	starts := 0
+	for _, event := range diagnostics {
+		if event.Message == "provider command started" {
+			starts++
+		}
+	}
+	if starts != DefaultProviderInvocationBudget {
+		t.Fatalf("expected exactly %d provider starts, got %d", DefaultProviderInvocationBudget, starts)
+	}
+}
+
 func TestRunHeadlessProviderKeepsExhaustedZeroOutputRetryUnavailable(t *testing.T) {
 	t.Parallel()
 
@@ -3304,6 +3366,33 @@ func TestRunHeadlessProviderEnrichesBootstrapOnlyDraftAfterRepairStall(t *testin
 	}
 }
 
+func TestShouldRetryDraftBootstrapAfterInitialStall(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-bootstrap-retry")
+	validationErr := errors.New("runtime draft manifest outputs are invalid: bootstrap-only placeholder draft content")
+	if !shouldRetryDraftBootstrapAfterInitialStall(task, StallDiagnostic{StallPhase: StallPhasePostArtifact}, validationErr) {
+		t.Fatal("expected initial post-artifact bootstrap draft stall to use a fresh retry")
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte("# Draft\n\nRuntime draft recovery initialized this artifact.\n"), 0o644); err != nil {
+			t.Fatalf("write bootstrap draft %s: %v", name, err)
+		}
+	}
+	if !shouldRetryDraftBootstrapAfterInitialStall(task, StallDiagnostic{StallPhase: StallPhasePostArtifact}, errors.New("read runtime draft manifest: no such file or directory")) {
+		t.Fatal("expected missing-manifest bootstrap draft stall to use a fresh retry")
+	}
+	if !shouldRetryDraftBootstrapAfterInitialStall(task, StallDiagnostic{StallPhase: StallPhasePostArtifact, AuthoredFileCount: 2}, errors.New("read runtime draft manifest: no such file or directory")) {
+		t.Fatal("expected missing-manifest draft stall with authored files to use a fresh retry")
+	}
+	if shouldRetryDraftBootstrapAfterInitialStall(task, StallDiagnostic{StallPhase: StallPhasePreArtifact}, validationErr) {
+		t.Fatal("pre-artifact stalls must use the existing zero-output recovery policy")
+	}
+	if shouldRetryDraftBootstrapAfterInitialStall(task, StallDiagnostic{StallPhase: StallPhasePostArtifact}, errors.New("ordinary draft validation failure")) {
+		t.Fatal("ordinary invalid draft content must remain on focused repair")
+	}
+}
+
 func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) {
 	t.Parallel()
 
@@ -3334,6 +3423,51 @@ func TestRunHeadlessProviderSkipsDraftRepairForBootstrapOnlyDraft(t *testing.T) 
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
 		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderEnrichesDraftWhenManifestIsMissing(t *testing.T) {
+	t.Parallel()
+
+	task := newAsIsDraftTask(t, "run-asis-draft-enrichment-missing-manifest")
+	diagnostics := []acpruntime.DiagnosticEvent{}
+	task.OnDiagnostic = func(event acpruntime.DiagnosticEvent) {
+		diagnostics = append(diagnostics, event)
+	}
+	initialLines := []string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$draft_root\"",
+	}
+	for _, name := range []string{"overview.md", "summary.md", "architect-summary.md"} {
+		initialLines = append(initialLines,
+			"cat >\"$draft_root/"+name+"\" <<'EOF'",
+			"# Bootstrap",
+			"",
+			"Runtime draft recovery initialized this artifact.",
+			"EOF",
+		)
+	}
+	initialLines = append(initialLines, "exit 0")
+	runner := testAdapter{
+		command:                writeEngineScript(t, strings.Join(initialLines, "\n")+"\n"),
+		draftEnrichmentCommand: writeEngineScript(t, asIsDraftScript(task, []string{"overview.md", "summary.md", "architect-summary.md"}, "exit 0")),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop:     true,
+			RepairDraftArtifactsOnce:          true,
+			RepairDraftArtifactEnrichmentOnce: true,
+		},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected missing-manifest draft enrichment success, got %v", err)
+	}
+	if hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_repair") {
+		t.Fatalf("missing-manifest draft with authored markdown must skip scaffold repair, got %#v", diagnostics)
+	}
+	if !hasDiagnosticField(diagnostics, "focused artifact repair scheduled", "recovery_mode", "draft_artifact_enrichment") {
+		t.Fatalf("expected draft_artifact_enrichment scheduled diagnostic, got %#v", diagnostics)
 	}
 }
 
@@ -3396,6 +3530,93 @@ func TestRunHeadlessProviderEnrichesProposalsDraftAfterSemanticRepairFailure(t *
 	}
 	if !hasDiagnosticField(diagnostics, "focused artifact repair completed", "recovery_mode", "draft_artifact_enrichment") {
 		t.Fatalf("expected draft_artifact_enrichment completed diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestRunHeadlessProviderUsesDeterministicProposalFallbackForBootstrapScaffold(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-bootstrap-fallback")
+	findingsRoot := filepath.Join(task.DraftFinalRoot, "reports", "findings")
+	if err := os.MkdirAll(findingsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir findings root: %v", err)
+	}
+	findings := "# Findings\n\n## Owner mapping gap\n\n- ID: `finding.demo.owner-gap`\n- Severity: `medium`\n- Related IDs: `component.demo.service`\n- Evidence: `demo:README.md`\n"
+	if err := os.WriteFile(filepath.Join(findingsRoot, "findings.md"), []byte(findings), 0o644); err != nil {
+		t.Fatalf("write findings: %v", err)
+	}
+	bootstrap := writeEngineScript(t, strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -eu",
+		"write_root=" + shellQuote(task.WriteRoot),
+		"draft_root=" + shellQuote(task.DraftFinalRoot),
+		"mkdir -p \"$write_root\" \"$draft_root\"",
+		"cat >\"$write_root/proposals-draft-manifest.json\" <<'EOF'",
+		steppolicy.RuntimeDraftManifestTaskSkeleton(task),
+		"EOF",
+		"cat >\"$draft_root/proposal.md\" <<'EOF'",
+		"# Runtime Recommendations",
+		"",
+		"Runtime draft recovery initialized this artifact for the scoped analysis step.",
+		"EOF",
+		"cat >\"$draft_root/changelog.md\" <<'EOF'",
+		"# Runtime Proposal Changelog",
+		"",
+		"Runtime draft recovery initialized the proposal changelog surface.",
+		"EOF",
+	}, "\n")+"\n")
+	enrichment := writeEngineScript(t, "#!/usr/bin/env bash\nset -eu\necho enrichment-should-not-run >&2\nexit 42\n")
+	runner := &draftEnrichmentSequenceAdapter{
+		testAdapter: testAdapter{
+			command: bootstrap,
+			recovery: RecoveryPolicy{
+				AcceptValidArtifactsAfterStop:     true,
+				RepairDraftArtifactsOnce:          true,
+				RepairDraftArtifactEnrichmentOnce: true,
+			},
+		},
+		draftEnrichmentCommands: []string{enrichment},
+	}
+
+	if _, err := RunHeadlessProvider(context.Background(), task, runner); err != nil {
+		t.Fatalf("expected deterministic proposal fallback to recover, got %v", err)
+	}
+	if runner.draftCalls != 0 {
+		t.Fatalf("expected fallback to avoid provider enrichment, got %d calls", runner.draftCalls)
+	}
+	proposal, err := os.ReadFile(filepath.Join(task.DraftFinalRoot, "proposal.md"))
+	if err != nil {
+		t.Fatalf("read proposal: %v", err)
+	}
+	text := string(proposal)
+	for _, want := range []string{"finding.demo.owner-gap", "Top Actionable Findings", "Recommended operator action: document"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("proposal missing %q: %s", want, text)
+		}
+	}
+}
+
+func TestDeterministicProposalFallbackHandlesFalseNoFindingSummary(t *testing.T) {
+	t.Parallel()
+
+	task := newProposalsDraftTask(t, "run-proposals-draft-no-finding-summary")
+	if err := os.MkdirAll(task.DraftFinalRoot, 0o755); err != nil {
+		t.Fatalf("mkdir draft root: %v", err)
+	}
+	for name, content := range map[string]string{
+		"proposal.md":  "# Runtime Architecture Proposals\n\nNo structured findings were present in the staged findings report.\n",
+		"changelog.md": "# Runtime Proposal Changelog\n\nNo actionable finding was available.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(task.DraftFinalRoot, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	validationErr := errors.New(`runtime draft manifest outputs are invalid: outputs[0].path "proposal.md" claims no structured finding summary despite non-empty current-run findings`)
+	if !shouldUseDeterministicProposalDraftFallback(task, validationErr) {
+		t.Fatal("expected false no-finding claim to use deterministic proposal fallback")
+	}
+	if shouldUseDeterministicProposalDraftFallback(task, errors.New("runtime draft manifest outputs are invalid: substantive proposal section is missing")) {
+		t.Fatal("unrelated proposal validation must retain provider enrichment")
 	}
 }
 

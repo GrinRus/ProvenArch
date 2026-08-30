@@ -132,6 +132,60 @@ func TestValidateSemanticIDCollisionsAllowsSameRepoWeakEdgeIDRekey(t *testing.T)
 	}
 }
 
+func TestValidateSemanticIDCollisionsAllowsRouteEdgeTypeAliases(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}},
+		}
+	}
+	left := contracts.Edge{
+		ID:         "edge.posthog.proxy.routes-web",
+		Type:       "routes",
+		From:       "component.posthog.proxy",
+		To:         "service.posthog.web",
+		Provenance: evidence("docker-compose.base.yml"),
+	}
+	right := contracts.Edge{
+		ID:         "edge.posthog.proxy.routes-web",
+		Type:       "routes_to",
+		From:       "component.posthog.proxy",
+		To:         "component.posthog.web",
+		Provenance: evidence("docker-compose.dev.yml"),
+	}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{left}},
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{right}},
+	); err != nil {
+		t.Fatalf("same-repo route relation aliases should be rekeyed during normalization, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsRejectsUnrelatedEdgeType(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}},
+		}
+	}
+	left := contracts.Edge{
+		ID:         "edge.posthog.proxy.routes-web",
+		Type:       "routes",
+		From:       "component.posthog.proxy",
+		To:         "service.posthog.web",
+		Provenance: evidence("docker-compose.base.yml"),
+	}
+	right := left
+	right.Type = "calls"
+	right.Provenance = evidence("docker-compose.dev.yml")
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{left}},
+		contracts.SemanticSnapshot{Edges: []contracts.Edge{right}},
+	); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("unrelated edge relation types should remain a collision, got %v", err)
+	}
+}
+
 func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T) {
 	evidence := func(path string) contracts.Provenance {
 		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "bank-of-anthos", Path: path}}}
@@ -139,21 +193,157 @@ func TestValidateSemanticIDCollisionsAllowsCanonicalIDTypeFamilies(t *testing.T)
 	observations := []contracts.SemanticSnapshot{
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "platform", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service-platform", Name: "Bank of Anthos platform", Provenance: evidence("docker-compose.yml")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application-service", Name: "Bank of Anthos application service", Provenance: evidence("settings.gradle")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "component", Name: "Bank of Anthos", Provenance: evidence("package.json")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application-component", Name: "Bank of Anthos", Provenance: evidence("playwright/package.json")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service-group", Name: "Bank of Anthos", Provenance: evidence("README.adoc")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "repository", Name: "Bank of Anthos repository", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "api-gateway", Name: "Bank of Anthos API gateway", Provenance: evidence("gateway/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service-suite", Name: "Bank of Anthos service suite", Provenance: evidence("services/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service-landscape", Name: "Bank of Anthos service landscape", Provenance: evidence("docs/architecture.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "service-system", Name: "Bank of Anthos service system", Provenance: evidence("docs/system.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "data-service", Name: "Bank of Anthos data service", Provenance: evidence("data/README.md")}}},
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos.balance-reader", Type: "dependency", Name: "Balance Reader", Provenance: evidence("src/ledger/ledgerwriter/README.md")}}},
 		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos.balance-reader", Type: "service", Name: "Balance Reader", Provenance: evidence("src/ledger/balancereader/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "domain", Name: "Bank of Anthos", Provenance: evidence("docs/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-security", Type: "owner-team", Name: "security", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-security", Type: "review-owner", Name: "security", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-security", Type: "review-team", Name: "security team", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-security", Type: "approval-owner", Name: "security", Provenance: evidence(".github/CODEOWNERS")}}},
+		{Entities: []contracts.Entity{{ID: "svc.ftgo.application", Type: "service-domain", Name: "FTGO application", Provenance: evidence("README.adoc")}}},
+		{Entities: []contracts.Entity{{ID: "svc.bank.of.anthos", Type: "application-surface", Name: "Bank of Anthos", Provenance: evidence("package.json")}}},
 		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "system", Name: "Bank of Anthos application", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "system.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")}}},
 		{Entities: []contracts.Entity{{ID: "db.bank.of.anthos.accounts", Type: "datastore", Name: "Accounts database", Provenance: evidence("README.md")}}},
+		{Entities: []contracts.Entity{{ID: "datastore.posthog.objectstorage", Type: "datastore", Name: "S3-compatible Ducklake object store", Provenance: evidence("devenv/duckgres.yaml")}}},
+		{Entities: []contracts.Entity{{ID: "datastore.posthog.objectstorage", Type: "datastore", Name: "PostHog object storage service", Provenance: evidence("docker-compose.base.yml")}}},
+		{Entities: []contracts.Entity{{ID: "datastore.posthog.clickhouse", Type: "datastore", Name: "ClickHouse analytics store", Provenance: evidence("docker-compose.base.yml")}}},
+		{Entities: []contracts.Entity{{ID: "datastore.posthog.clickhouse", Type: "datastore", Name: "Session recording metadata store", Provenance: evidence("nodejs/src/session-recording/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "datastore.posthog.clickhouse", Type: "datastore", Name: "ClickHouse preaggregation tables", Provenance: evidence("products/analytics_platform/backend/lazy_computation/README.md")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-maintainers", Type: "team", Name: "maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "repository-owners", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "team.bank.of.anthos.default-owners", Type: "team", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")}}},
 		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.gke", Type: "runtime-platform", Name: "Google Kubernetes Engine", Provenance: evidence("README.md")}}},
 		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.gke", Type: "infrastructure", Name: "Google Kubernetes Engine infrastructure", Provenance: evidence("iac/tf-anthos-gke/README.md")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.kafka", Type: "message-broker", Name: "Kafka broker", Provenance: evidence("docker-compose.yml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.kafka", Type: "messaging-infrastructure", Name: "Kafka messaging infrastructure", Provenance: evidence("kubernetes/kafka.yaml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.mysql", Type: "datastore", Name: "MySQL database", Provenance: evidence("docker-compose.yml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.mysql", Type: "database-infrastructure", Name: "MySQL database infrastructure", Provenance: evidence("deploy/mysql.yaml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.zookeeper", Type: "coordination-service", Name: "ZooKeeper", Provenance: evidence("docker-compose.yml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.bank.of.anthos.zookeeper", Type: "coordination-infrastructure", Name: "ZooKeeper coordination infrastructure", Provenance: evidence("kubernetes/zookeeper.yaml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.ftgo.cdc", Type: "infrastructure", Name: "Eventuate CDC service", Provenance: evidence("docker-compose.yml")}}},
+		{Entities: []contracts.Entity{{ID: "infra.ftgo.cdc", Type: "change-data-capture-service", Name: "Eventuate CDC service", Provenance: evidence("docker-compose.yml")}}},
 	}
 	if err := ValidateSemanticIDCollisions(observations...); err != nil {
 		t.Fatalf("canonical ID type families should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsServicePrefixAliases(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "ftgo-application", Path: path}}}
+	}
+	observations := []contracts.SemanticSnapshot{
+		{Entities: []contracts.Entity{{ID: "service.ftgo.application", Type: "service-system", Name: "FTGO example application", Provenance: evidence("README.adoc")}}},
+		{Entities: []contracts.Entity{{ID: "service.ftgo.application", Type: "application", Name: "FTGO application", Provenance: evidence("skaffold.yaml")}}},
+		{Entities: []contracts.Entity{{ID: "service.ftgo.application", Type: "service-landscape", Name: "FTGO example microservice application", Provenance: evidence("README.adoc")}}},
+		{Entities: []contracts.Entity{{ID: "svc.ftgo.api-gateway", Type: "service", Name: "API Gateway", Provenance: evidence("README.adoc")}}},
+		{Entities: []contracts.Entity{{ID: "svc.ftgo.api-gateway", Type: "gateway", Name: "API Gateway", Provenance: evidence("docker-compose.yml")}}},
+	}
+	if err := ValidateSemanticIDCollisions(observations...); err != nil {
+		t.Fatalf("same-repo service-prefix aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsTechTechnologyFrameworkAliases(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{ID: "tech.django", Type: "technology", Name: "Django", Provenance: evidence("products/README.md")}
+	right := contracts.Entity{ID: "tech.django", Type: "framework", Name: "Django", Provenance: evidence("pyproject.toml")}
+	if err := ValidateSemanticIDCollisions(contracts.SemanticSnapshot{Entities: []contracts.Entity{left}}, contracts.SemanticSnapshot{Entities: []contracts.Entity{right}}); err != nil {
+		t.Fatalf("same-repo tech technology/framework aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsSvcDatastoreServiceAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "svc.posthog.clickhouse",
+		Type:       "datastore",
+		Name:       "ClickHouse analytics store",
+		Provenance: evidence("docker-compose.base.yml"),
+	}
+	right := left
+	right.Type = "service"
+	right.Provenance = evidence("docker-compose.dev-full.yml")
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err != nil {
+		t.Fatalf("same-repo svc datastore/service aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsSvcClickhouseAnalyticalDatabaseAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "svc.posthog.clickhouse",
+		Type:       "analytical-database",
+		Name:       "Local ClickHouse analytical database",
+		Provenance: evidence("devenv/README.md"),
+	}
+	right := contracts.Entity{
+		ID:         "svc.posthog.clickhouse",
+		Type:       "service",
+		Name:       "PostHog ClickHouse migration and topology surface",
+		Provenance: evidence("clickhouse/migrations/README.md"),
+	}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err != nil {
+		t.Fatalf("same-repo svc clickhouse analytical-database/service aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsCaptureLogsNameOrderAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "svc.posthog.capture-logs",
+		Type:       "service",
+		Name:       "Capture logs and traces service",
+		Provenance: evidence("docker-compose.base.yml"),
+	}
+	right := left
+	right.Name = "PostHog OTLP log capture service"
+	right.Provenance = evidence("rust/capture-logs/README.md")
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err != nil {
+		t.Fatalf("same-repo capture-logs name-order aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsRejectsUnrelatedDatastoreName(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.SemanticSnapshot{Entities: []contracts.Entity{{ID: "datastore.posthog.clickhouse", Type: "datastore", Name: "ClickHouse", Provenance: evidence("docker-compose.base.yml")}}}
+	right := contracts.SemanticSnapshot{Entities: []contracts.Entity{{ID: "datastore.posthog.clickhouse", Type: "datastore", Name: "Kafka broker", Provenance: evidence("docker-compose.dev.yml")}}}
+	if err := ValidateSemanticIDCollisions(left, right); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("unrelated datastore names should remain a collision, got %v", err)
 	}
 }
 

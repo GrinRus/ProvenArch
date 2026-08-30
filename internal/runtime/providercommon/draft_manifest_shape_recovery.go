@@ -1,6 +1,7 @@
 package providercommon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,9 +13,10 @@ import (
 )
 
 // recoverDraftManifestShapeDeterministically restores only the normative draft
-// manifest envelope after a provider writes malformed JSON or unknown fields.
-// The authored markdown remains untouched and is still validated by the adapter;
-// this recovery must never turn invalid document content into a pass.
+// manifest envelope after a provider writes malformed JSON, unknown fields, or
+// the authored draft files but no manifest. The authored markdown remains
+// untouched and is still validated by the adapter; this recovery must never turn
+// invalid document content into a pass.
 func recoverDraftManifestShapeDeterministically(
 	task acpruntime.Task,
 	adapter ProviderAdapter,
@@ -25,10 +27,11 @@ func recoverDraftManifestShapeDeterministically(
 	stage string,
 ) (bool, acpruntime.Result, error) {
 	issues := classifyValidationIssues(validationErr)
-	if !issues.HasAny(issueDraftManifestParse, issueDraftUnknownField) {
+	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
+	manifestMissing := strings.TrimSpace(manifestFile) != "" && strings.TrimSpace(task.WriteRoot) != "" && collectDraftManifestFileMissing(task, manifestFile)
+	if !issues.HasAny(issueDraftManifestParse, issueDraftUnknownField) && !(issues.Has(issueMissingArtifact) && manifestMissing) {
 		return false, acpruntime.Result{}, nil
 	}
-	manifestFile := runtimedrafts.ManifestFileForStep(task.StepID)
 	if strings.TrimSpace(manifestFile) == "" || strings.TrimSpace(task.WriteRoot) == "" {
 		return false, acpruntime.Result{}, nil
 	}
@@ -48,14 +51,27 @@ func recoverDraftManifestShapeDeterministically(
 	if result.Diagnostics == nil {
 		result.Diagnostics = map[string]any{}
 	}
+	recoveryMode := "draft_artifact_manifest_shape_recovery"
+	if manifestMissing {
+		recoveryMode = "draft_artifact_manifest_missing_recovery"
+	}
 	result.Diagnostics["draft_manifest_shape_recovery"] = map[string]any{
-		"recovery_mode":            "draft_artifact_manifest_shape_recovery",
+		"recovery_mode":            recoveryMode,
 		"provider_authored":        false,
 		"manifest_file":            manifestFile,
 		"stage":                    stage,
 		"operator_review_required": true,
 	}
 	return true, result, nil
+}
+
+func collectDraftManifestFileMissing(task acpruntime.Task, manifestFile string) bool {
+	root := strings.TrimSpace(task.WriteRoot)
+	if root == "" || strings.TrimSpace(manifestFile) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(filepath.Clean(root), manifestFile))
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func writeDraftManifestShapeAtomically(target string, content []byte) error {

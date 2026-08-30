@@ -38,9 +38,10 @@ type collectManifestTaskIdentityRecoveryReport struct {
 }
 
 var collectManifestProvenanceKindAliases = map[string]string{
-	"observed": "observation",
-	"inferred": "inference",
-	"asserted": "assertion",
+	"observed":            "observation",
+	"inferred":            "inference",
+	"inferred_from_build": "inference",
+	"asserted":            "assertion",
 }
 
 func recoverCollectManifestTaskIdentity(task acpruntime.Task, validationErr error) (collectManifestTaskIdentityRecoveryReport, error) {

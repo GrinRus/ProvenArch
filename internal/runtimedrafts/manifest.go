@@ -348,7 +348,7 @@ func ValidateOutputContent(draftRoot string, manifest Manifest, stepID string, r
 			continue
 		}
 		text := string(raw)
-		if runtimeDraftTextBootstrapOnly(text) {
+		if DraftTextBootstrapOnly(text) {
 			problems = append(problems, fmt.Sprintf("outputs[%d].path %q references bootstrap-only placeholder draft content", idx, output.Path))
 		}
 		if strings.TrimSpace(stepID) == "init.step0.constitution" && runtimeDraftStep0TextHasDownstreamEvidenceLeak(text) {
@@ -669,7 +669,11 @@ func isAllowedProposalsCanonicalPath(canonicalPath string) bool {
 	return strings.HasPrefix(clean, "proposals/") || strings.HasPrefix(clean, "reports/changelog/")
 }
 
-func runtimeDraftTextBootstrapOnly(text string) bool {
+// DraftTextBootstrapOnly reports whether markdown contains only the runtime
+// recovery/bootstrap scaffold markers. Provider recovery uses this when a
+// provider wrote draft files before the manifest, so validation may otherwise
+// surface only the missing-manifest error.
+func DraftTextBootstrapOnly(text string) bool {
 	lower := strings.ToLower(text)
 	hardMarkers := []string{
 		"provider wrote this draft artifact",
@@ -729,6 +733,12 @@ func runtimeDraftTextBootstrapOnly(text string) bool {
 		}
 	}
 	return false
+}
+
+// runtimeDraftTextBootstrapOnly is kept as an internal compatibility helper
+// for package-local validators and tests.
+func runtimeDraftTextBootstrapOnly(text string) bool {
+	return DraftTextBootstrapOnly(text)
 }
 
 var liveRunIDPattern = regexp.MustCompile(`\brun_[0-9]{8}_[0-9]{6}_[0-9]{3}\b`)

@@ -83,6 +83,7 @@ func TestDocFirstFilesystemPolicyDefinesSharedCollectRepairSurface(t *testing.T)
 		`The final collect pair must not be seed-only, scaffold-only, or copied unchanged from the skeleton`,
 		`The final collect markdown must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"`,
 		`The final collect markdown must not mention bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or runtime repair mechanics`,
+		`Collect authored markdown must never publish internal execution paths such as .acp/repos/, reports/taskruns/, staging/final/, staging/shards/, write_root, or draft_final_root`,
 		`After writing the evidence-backed pair, avoid broad repository exploration; only minimal manifest/JSON repair needed for the current shard is allowed afterwards.`,
 		`After writing shard-pack-manifest.json, do NOT continue broad list_directory/read_file sweeps across repo roots.`,
 		`Do NOT read reports/taskruns/**, raw runtime logs, or previously generated shard-pack-manifest.json files as schema examples during collect.`,

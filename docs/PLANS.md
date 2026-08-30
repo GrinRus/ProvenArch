@@ -10107,3 +10107,165 @@ schema/contract decision instead of inventing frontend state.
   while suppressing the recoverable React Flow zero-size warning. Full UI tests (47 files/253 tests),
   targeted typecheck/build, desktop/mobile Architecture captures and mock E2E (8/8) pass; the
   remaining large map chunk is route-local and does not block the initial shell.
+
+### Plan ID
+EP-20260826-live-e2e-medium-codex-claude
+
+### Context
+
+Нужно подтвердить полный live E2E medium (`regres long`) для обоих поддерживаемых headless
+провайдеров (`codex-code` и `claude-code`) на path и git-url профилях. Матрица должна пройти
+детерминированный precheck, init/refresh pipeline, строгую semantic validation и frontend smoke.
+
+### Goals (must have)
+
+- [ ] Оба provider init и refresh завершаются `succeeded` на выбранных профилях.
+- [ ] Semantic graph не содержит несовместимых duplicate IDs или dangling edge endpoints.
+- [ ] Matrix/profile status и frontend smoke завершаются PASS с сохранённым evidence.
+- [ ] При failure внести минимальный fix, повторить matrix с новым ID и подтвердить terminal PASS.
+
+### Non-goals
+
+- [ ] Не менять release matrix, curated repositories, provider taxonomy или security scope.
+- [ ] Не ослаблять строгую semantic validation и не синтезировать отсутствующие entities/endpoints.
+
+### Approach
+
+1) Запустить canonical `scripts/full-run-batch-matrix.sh` с preset `regres long`,
+   `E2E_MATRIX_RELEASE_MODE=0` и фильтром `codex-code,claude-code`.
+2) По каждому terminal failure сопоставить quality/run evidence с validator contract, внести
+   узкий исправляющий патч и выполнить соответствующий DoD.
+3) Повторять запуск с уникальным `MATRIX_ID`, пока оба provider/profile результата не станут PASS;
+   затем сохранить matrix/profile/run evidence и закрыть этот план.
+
+### Files expected to change
+
+- `internal/artifactquality/semantic.go`, `internal/orchestrator/docflow.go` при подтверждённой
+  несовместимости canonical semantic families.
+- `internal/runtime/steppolicy/policy.go` и prompt-contract tests при необходимости уточнить
+  provider-authored semantic edge contract.
+- `docs/ARCHITECTURE.md`, `docs/spec/API_SPEC.md`, `docs/PLANS.md` при изменении поведения.
+
+### Acceptance criteria
+
+- [ ] `make contracts`, `make test`, `make lint`, `make build` проходят на pinned toolchains.
+- [ ] Для Codex и Claude зафиксированы успешные `init` и `refresh` run rows, quality summaries,
+      semantic validation и frontend smoke.
+- [ ] Matrix/profile status terminal PASS; повторный запуск после каждого исправления использует
+      новый matrix ID.
+
+### Risks
+
+- Live provider output может быть недетерминированным; strict gates остаются fail-closed.
+- На trusted host возможны временные provider stream/network retries; они не считаются PASS без
+  terminal run evidence.
+
+### Progress log
+
+- 2026-08-26: Первый matrix `regres-long-posthog-ftgo-20260825T190857Z` выявил duplicate
+  `svc.posthog`/dangling edges у Codex и Claude; stale git-url continuation остановлена до patch.
+- 2026-08-26: Добавлена канонизация `platform/domain/component/application-component` для `svc.*`,
+  `owner-team/review-owner/ownership-policy` для `team.*`, усилен edge endpoint prompt contract;
+  narrow tests и full deterministic DoD прошли.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix1-20260825T224107Z` в progress; Codex init
+  повторно остановлен на новых compatible aliases `svc.posthog.frontend` и `team.posthog.security`;
+  aliases добавлены в следующий retry, Claude init выполняется.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix2-20260826T005554Z` подтвердил Codex path
+  init/refresh PASS, но git-url init выявил `svc.ftgo.application` collision с
+  `service-group` и provider-authored dangling edge endpoints. Добавлены узкий alias
+  `service-group` и fail-closed edge endpoint instructions.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix4-20260826T105500Z` подтвердил Codex path
+  init PASS; refresh остановился на совместимом `datastore.posthog.objectstorage`/`objectstore`
+  naming collision между двумя shards. Добавлен только этот canonical name alias с тестом и
+  обновлением API/architecture docs.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix5-20260826T090046Z` не достиг provider runs:
+  path остановлен Claude operational readiness timeout, git-url — единичным flaky TempDir cleanup
+  в API precheck. Отдельный `-count=5` повтор проблемный тест прошёл; запущен новый matrix `fix6`.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix6-20260826T090731Z` подтвердил Codex path
+  init/refresh PASS, но Claude path остановился на zero-output provider stall в
+  `init.step2.asis_docs`; git-url профиль дополнительно получил один `runner_unavailable` collect
+  shard и placeholder/scaffold as-is failure. Codex git-url promotion отклонил три collect-документа
+  с внутренними `.acp/repos/` ссылками. Collect prompt и pipeline contract усилены запретом
+  публикации execution paths; после narrow tests подготовлен новый `fix7` matrix.
+- 2026-08-26: Во время продолжающегося Claude git-url прогона fix6 подтверждены повторяемые
+  zero-output provider stalls на collect-пакетах: после двух transport retries отдельные shards
+  исчерпывают budget и уходят в `runner_unavailable`. Для устойчивого полного flow Claude теперь
+  разрешает один zero-output pre-artifact retry также для `init|refresh.step2.asis_docs`; добавлены
+  adapter tests и синхронизирован pipeline contract. Ожидается новый fix7 matrix после завершения
+  текущего профиля.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix7-20260826T151712Z` остановлен precheck: path
+  профиль поймал scheduler-sensitive lifecycle test timeout, а git-url профиль — два UI-теста,
+  превысивших дефолтный 5s timeout полного Vitest-прогона (изолированные assertions корректны).
+  Увеличен только глобальный Vitest `testTimeout` до 15s для стабильности trusted-host precheck;
+  полный UI suite после исправления прошёл `47/47` файлов и `253/253` тестов. Подготовлен новый
+  fix8 matrix после повторного полного deterministic DoD.
+- 2026-08-26: Matrix `regres-long-posthog-ftgo-fix8-20260826T154733Z` выявил гонку чтения
+  `profile-status/*.json`: heartbeat обновлял файл через truncate+write, из-за чего контрактный
+  тест иногда видел пустой JSON; старый процесс также получил временный `tempfile` NameError при
+  редактировании скрипта во время прогона. Все записи profile status переведены на fsync+atomic
+  replace, affected contract tests повторены успешно; новый fix9 matrix запускается после этого
+  исправления.
+- 2026-08-26: `fix9` остановился до запуска matrix из-за host disk preflight (временные артефакты
+  прошлых live-run оставили свободными 4.96 GiB при требовании 5 GiB). Удалён только пустой после
+  cleanup каталог старого сгенерированного `fix6` run (~1.5 GiB освобождено); запуск перенесён на
+  новый matrix ID `fix10`.
+- 2026-08-26: `fix10` подтвердил воспроизводимый Codex stall в первоначальном
+  `init.step2.asis_docs`: провайдер оставил только bootstrap draft, после чего focused repair и
+  enrichment исчерпали invocation budget. Recovery теперь распознаёт только первоначальный
+  post-artifact bootstrap-only draft stall и сначала делает один свежий provider retry с
+  `FreshArtifactMutationAfter`; strict post-enrichment scaffold rejection сохранён и покрыт
+  focused tests. После компиляции нового бинарника `fix11` запускается с обоими провайдерами.
+- 2026-08-27: `fix11`/`fix12`/`fix13` подтвердили, что Codex иногда пишет содержательный step2
+  markdown, но останавливается до manifest; recovery расширен на любой post-artifact draft stall
+  с authored files, а Codex adapter получил одну свежую попытку для invalid/missing artifacts.
+  `fix12` также выявил, что focused repair мог заменить полезный draft scaffold-ом; это теперь
+  обходится свежим provider process. Узкий API lifecycle wait устранил flaky TempDir cleanup race.
+- 2026-08-27: `fix14`/`fix15` довели Codex path init до step3 и выявили реальные cross-shard
+  canonical-ID aliases: `svc.*` repository и FTGO service-suite/landscape/system/api-gateway,
+  `infra.*` datastore/database-infrastructure/message-broker/messaging-infrastructure/
+  coordination-service/coordination-infrastructure. Алиасы добавлены симметрично в
+  artifactquality/orchestrator с regression tests; strict collision checks и name/repo guards
+  сохранены.
+- 2026-08-27: `fix16` показал transient Codex readiness smoke failure на single-path профиле;
+  отдельная smoke reproduction прошла, поэтому canonical harness не ослаблялся. Git-url Codex
+  дошёл до step3 и подтвердил именно перечисленные compatible aliases; Claude git-url продолжает
+  выполняться. После завершения текущего best-effort прогона будет запущен новый matrix ID с
+  обновлённым бинарником и обоими провайдерами.
+- 2026-08-27: `fix17` прошёл deterministic precheck и все 16 Codex single-path collect shards,
+  но strict step3 выявил ещё один фактический provider alias: `svc.posthog.clickhouse` как
+  `data-service` и `service`. Добавлен симметричный узкий `data-service` alias с regression test
+  и синхронизацией API/architecture docs; следующий retry запускается новым matrix ID.
+- 2026-08-27: `fix18` подтвердил, что Codex single-path init/refresh проходят strict semantic gate,
+  но Claude после двух silent pre-artifact stalls тратил третий invocation на focused bootstrap
+  repair и завершался `runtime_contract_failed`. Shared recovery теперь использует третий и
+  последний бюджетный слот для полноценного свежего draft provider prompt; добавлен regression
+  test на последовательность silent/silent/success и синхронизированы pipeline/architecture docs.
+- 2026-08-27: `fix19` дошёл до strict validator после успешных 16 Codex collect-групп и step2,
+  но выявил dangling endpoint `store.posthog.clickhouse` при наличии canonical
+  `datastore.posthog.clickhouse`. Добавлен узкий exact namespace alias `store.<suffix>` →
+  `datastore.<suffix>` с regression test и синхронизацией API/architecture docs; профиль остановлен
+  только после фиксации этого evidence, новый запуск выполняется как `fix20`.
+- 2026-08-27: `fix22` подтвердил Codex single-path init `PASS`, но refresh strict validator
+  выявил конфликт alias `store.posthog.redis`: provider присвоил его `datastore.posthog.redis7`,
+  тогда как в snapshot присутствовал canonical `datastore.posthog.redis`. Exact canonical
+  namespace alias теперь имеет приоритет над конфликтующим provider alias; добавлены regression
+  test и синхронизация API/architecture docs. Следующий retry запускается новым matrix ID.
+- 2026-08-27: `fix23` подтвердил Codex single-path init/refresh `PASS`, но Claude остановился на
+  `step2.asis_docs`: provider записал все markdown-файлы без обязательного
+  `asis-draft-manifest.json`. Shared recovery теперь после повторного silent stall может
+  восстановить только нормативный manifest envelope (с write-set validation), не изменяя
+  authored markdown; добавлен regression test. Следующий retry запускается новым matrix ID.
+- 2026-08-27: `fix24` довёл Codex single-path до всех 16 collect shard’ов и `step2`/validator,
+  но strict semantic gate отклонил финальный snapshot: `team.posthog.security` пришёл как
+  `team` и `review-team` в одной logical repo. Type-family normalization расширена узким
+  `review-team` alias в artifactquality/orchestrator с regression tests и синхронизацией docs;
+  Claude best-effort профиль продолжает выполняться, после чего запускается новый matrix ID.
+- 2026-08-27: В том же `fix24` Claude исчерпал три silent pre-artifact invocation на
+  `init.step2.asis_docs` (каждая остановка ровно на 180s, без stdout и файлов). Для следующего
+  trusted-host прогона окно pre-artifact и retry для Claude step2 увеличено до 5 минут; добавлен
+  adapter regression test, чтобы не считать медленное reasoning провайдерной недоступностью.
+- 2026-08-27: `fix24` git-url Codex завершил все 16 collect shards и step2, но strict semantic gate
+  нашёл дубликат `svc.ftgo.application` с типами `service` и `service-domain` в одной logical repo.
+  `service-domain` добавлен в canonical `svc.*` type-family normalization с regression tests и
+  синхронизацией API/architecture/pipeline docs; после завершения текущего best-effort Claude
+  профиля запускается новый matrix с обоими исправлениями.

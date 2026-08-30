@@ -201,6 +201,15 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	}
 }
 
+func TestCodexAdapterRetriesInvalidOrMissingArtifactsOnce(t *testing.T) {
+	t.Parallel()
+
+	policy := (codexAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"})
+	if !policy.RetryInvalidOrMissingArtifactsOnce {
+		t.Fatalf("expected codex to allow one fresh retry for invalid or missing artifacts, got %+v", policy)
+	}
+}
+
 func TestHeadlessRunnerSucceedsWithValidDraftArtifacts(t *testing.T) {
 	t.Parallel()
 

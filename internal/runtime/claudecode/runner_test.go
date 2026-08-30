@@ -81,8 +81,13 @@ func TestClaudeAdapterClassifiesSilentRetryExhaustionAsUnavailable(t *testing.T)
 	}
 
 	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"})
-	if policy.RetryZeroOutputPreArtifactStallOnce {
-		t.Fatalf("claude as-is zero-output pre-artifact fail-fast behavior must remain unchanged, got %+v", policy)
+	if !policy.RetryZeroOutputPreArtifactStallOnce {
+		t.Fatalf("expected claude as-is zero-output pre-artifact stall to be retryable, got %+v", policy)
+	}
+
+	policy = (claudeAdapter{}).RecoveryPolicy(acpruntime.Task{StepID: "refresh.step2.asis_docs"})
+	if !policy.RetryZeroOutputPreArtifactStallOnce {
+		t.Fatalf("expected refresh as-is zero-output pre-artifact stall to be retryable, got %+v", policy)
 	}
 }
 
@@ -117,10 +122,10 @@ func TestClaudeAdapterUsesExtendedPreArtifactWindowForArtifactSteps(t *testing.T
 	if !policy.MonitorArtifacts || !policy.MonitorPreArtifact {
 		t.Fatalf("expected claude draft artifact monitoring, got %+v", policy)
 	}
-	if got, want := policy.PreArtifactStallWindow, 180*time.Second; got != want {
+	if got, want := policy.PreArtifactStallWindow, 5*time.Minute; got != want {
 		t.Fatalf("expected claude draft pre-artifact window %s, got %s", want, got)
 	}
-	if got, want := policy.RetryPreArtifactStallWindow, time.Duration(0); got != want {
+	if got, want := policy.RetryPreArtifactStallWindow, 5*time.Minute; got != want {
 		t.Fatalf("expected claude draft retry pre-artifact window %s, got %s", want, got)
 	}
 	if policy.PostArtifactStallWindow != 0 || policy.PartialArtifactStallWindow != 0 {

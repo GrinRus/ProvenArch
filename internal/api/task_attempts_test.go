@@ -51,6 +51,10 @@ func TestTaskAttemptAdmissionIsIdempotentAndLinksExactRun(t *testing.T) {
 	if conflict.StatusCode != http.StatusConflict {
 		t.Fatalf("expected idempotency conflict, got %d", conflict.StatusCode)
 	}
+	// The admission starts an asynchronous fake run. Wait for its terminal
+	// projection before the test's TempDir cleanup so final history writes have
+	// completed and cannot race directory removal.
+	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
 	run, ok := server.getService().GetRun(firstPayload.Attempt.RunID)
 	if !ok || run.TaskID != created.TaskID || run.AttemptID != firstPayload.Attempt.AttemptID {
 		t.Fatalf("run linkage missing: ok=%v run=%+v", ok, run)
@@ -85,6 +89,10 @@ func TestTaskAttemptRetryCreatesChildAttempt(t *testing.T) {
 	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == firstPayload.Attempt.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != firstPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
 		t.Fatalf("retry did not create child attempt: status=%d payload=%+v", retry.StatusCode, retryPayload)
 	}
+	// Retry admission starts an asynchronous fake run. Wait for its terminal
+	// projection before TempDir cleanup so final history writes cannot race
+	// directory removal.
+	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
 }
 
 func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {

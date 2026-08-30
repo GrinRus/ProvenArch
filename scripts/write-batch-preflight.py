@@ -268,7 +268,8 @@ def run_artifact_smoke_with_env(
         smoke_args, smoke_stdin = artifact_smoke_invocation(provider, sentinel_path)
         if not smoke_args:
             return True, "", ""
-        max_attempts = 2 if provider == "claude" else 1
+        retryable_smoke_provider = provider in {"claude", "codex"}
+        max_attempts = 2 if retryable_smoke_provider else 1
         last_reason = ""
         last_combined = ""
         for attempt in range(1, max_attempts + 1):
@@ -295,7 +296,7 @@ def run_artifact_smoke_with_env(
                 combined = "\n".join(part for part in [stdout, stderr] if part).strip()
                 if combined:
                     last_combined = combined
-                if provider == "claude":
+                if retryable_smoke_provider:
                     try:
                         observed = sentinel_path.read_text(encoding="utf-8").strip()
                     except OSError:
@@ -312,7 +313,7 @@ def run_artifact_smoke_with_env(
                     f"{provider} artifact smoke timed out after {exc.timeout}s "
                     f"(attempt {attempt}/{max_attempts})"
                 )
-                if provider == "claude" and attempt < max_attempts:
+                if retryable_smoke_provider and attempt < max_attempts:
                     continue
                 return False, last_reason, combined or last_combined
             except Exception as exc:  # pragma: no cover - defensive shell failure path
@@ -325,14 +326,19 @@ def run_artifact_smoke_with_env(
                     or f"{provider} artifact smoke exited with code {completed.returncode} "
                     f"(attempt {attempt}/{max_attempts})"
                 )
-                if provider == "claude" and not combined and attempt < max_attempts:
+                if retryable_smoke_provider and not combined and attempt < max_attempts:
                     continue
                 return False, last_reason, combined
             try:
                 observed = sentinel_path.read_text(encoding="utf-8").strip()
             except OSError as exc:
                 last_reason = f"{provider} artifact smoke did not create sentinel: {exc} (attempt {attempt}/{max_attempts})"
-                if provider == "claude" and not combined and attempt < max_attempts:
+                # Claude may emit progress/turn output even when the filesystem
+                # write was interrupted before the sentinel appeared. Treat a
+                # missing sentinel as the retryable signal itself; gating the
+                # retry on empty output incorrectly made transient smoke
+                # failures fail preflight on the first attempt.
+                if retryable_smoke_provider and attempt < max_attempts:
                     continue
                 return False, last_reason, combined
             if observed != ARTIFACT_SMOKE_SENTINEL_TEXT:

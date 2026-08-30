@@ -163,12 +163,13 @@ func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activi
 
 func (a codexAdapter) RecoveryPolicy(_ acpruntime.Task) providercommon.RecoveryPolicy {
 	return providercommon.RecoveryPolicy{
-		AcceptValidArtifactsAfterStop:     true,
-		RepairCollectManifestOnce:         true,
-		RepairCollectArtifactPairOnce:     true,
-		RepairValidatorVerdictOnce:        true,
-		RepairDraftArtifactsOnce:          true,
-		RepairDraftArtifactEnrichmentOnce: true,
+		AcceptValidArtifactsAfterStop:      true,
+		RetryInvalidOrMissingArtifactsOnce: true,
+		RepairCollectManifestOnce:          true,
+		RepairCollectArtifactPairOnce:      true,
+		RepairValidatorVerdictOnce:         true,
+		RepairDraftArtifactsOnce:           true,
+		RepairDraftArtifactEnrichmentOnce:  true,
 	}
 }
 
