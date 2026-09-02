@@ -310,6 +310,9 @@ func emitCollectManifestDeterministicRecoveryCompletedDiagnostic(task acpruntime
 		"edge_count":     report.EdgeCount,
 		"evidence_path":  strings.TrimSpace(report.EvidencePath),
 	}
+	if strings.TrimSpace(report.RecoveryCause) != "" {
+		fields["recovery_cause"] = report.RecoveryCause
+	}
 	emitDiagnostic(task, "collect manifest runtime recovery completed", fields)
 }
 

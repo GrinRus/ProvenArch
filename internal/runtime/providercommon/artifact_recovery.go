@@ -905,6 +905,9 @@ func markCollectManifestRuntimeRecovered(result acpruntime.Result, report collec
 		"evidence_path":            strings.TrimSpace(report.EvidencePath),
 		"operator_review_required": true,
 	}
+	if strings.TrimSpace(report.RecoveryCause) != "" {
+		result.Diagnostics["collect_manifest_runtime_recovery"].(map[string]any)["recovery_cause"] = report.RecoveryCause
+	}
 	warning := "runtime_recovery: collect_manifest_runtime_recovery reconstructed shard-pack-manifest.json from provider-authored markdown; treat as recovery evidence, not normal provider-authored manifest success"
 	if !containsRuntimeWarning(result.Execution.Warnings, warning) {
 		result.Execution.Warnings = append(result.Execution.Warnings, warning)
