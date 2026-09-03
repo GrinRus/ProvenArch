@@ -185,6 +185,7 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		lines = append(lines,
 			"- The heredoc as-is files are bootstrap-only repair targets, not valid final content.",
 			"- Before final exit, replace recovery scaffold text with evidence-backed as-is content from read_context_roots.",
+			"- PATH SAFETY FOR STEP2: the provider process working directory is the exact draft_final_root. Use Path.cwd() (or ./overview.md, ./summary.md, and ./architect-summary.md) for markdown writes; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
 			"- Final action must be: ensure asis-draft-manifest.json and every referenced draft file exist and no referenced draft file contains unchanged bootstrap/recovery scaffold.",
 		)
 		lines = append(lines, "AS-IS DRAFT MANIFEST CANONICAL SHAPE:")
@@ -300,6 +301,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
 			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts in the literal key=value shape planned=<n> succeeded=<n> failed=<n> incomplete=<n> and an explicit no-shard-coverage-blocker statement. A prose or slash form such as \"Shard completeness: 16/16 succeeded\" is not sufficient. Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
 			"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
+			"- PATH SAFETY FOR STEP2 ENRICHMENT: this provider process runs with cwd equal to draft_final_root. Use Path.cwd() for overview.md, summary.md, and architect-summary.md; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Locate typed summaries under taskruns_dir using run_dir.name + \"*shard-summary*.json\". If a script needs current-run evidence, pass the exact run id as an argument or derive it from Path.cwd(); do not hardcode a guessed or abbreviated /private/tmp path.",
 		)
 	}
 	lines = append(lines,
@@ -622,6 +624,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		"- If typed shard-summary items[] is readable, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
 		"- When typed shard-summary shows all shards succeeded, write the exact key=value literal from items[].status in summary.md and architect-summary.md (for example: \"planned=16 succeeded=16 failed=0 incomplete=0\"). Do not use slash notation such as \"Shard completeness: 16/16 succeeded\" as a substitute; also state that current-run shard coverage is not a blocker.",
 		"- Do not infer shard counts from lexical occurrences of failed/error in markdown or manifests.",
+		"- PATH SAFETY FOR STEP2 RETRY: the provider process cwd is the exact draft_final_root. Use Path.cwd() for the three markdown targets; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
 		"- Required markdown overwrite targets:",
 	)
 	markdownTargets := 0
@@ -810,6 +813,11 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- Do not list metadata-only JSON keys such as `\"version\": 1`, `\"run_id\"`, `\"pipeline\"`, `\"generated_at\"`, or `\"citation_index_path\"` as evidence bullets.",
 			"- Banned final markdown markers: Runtime draft recovery initialized; Draft surface initialized; Treat this as diagnostic evidence until; Use collected shard manifests; Runtime proposal surface initialized; Current run evidence should be reviewed; placeholder; bootstrap-only; recovery pass; enrichment read; bounded staged evidence; current draft manifest; draft_final_root; replace placeholder; replaced placeholder; replacing placeholders.",
 			"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
+		)
+	}
+	if strings.TrimSpace(task.StepID) == "init.step2.asis_docs" || strings.TrimSpace(task.StepID) == "refresh.step2.asis_docs" {
+		lines = append(lines,
+			"- PATH SAFETY FOR STEP2 RETRY: the provider process cwd is the exact draft_final_root. Use Path.cwd() for the three markdown targets; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
 		)
 	}
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
