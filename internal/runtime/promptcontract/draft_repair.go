@@ -298,7 +298,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines,
 			"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
 			"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
-			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts and an explicit no-shard-coverage-blocker statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\" Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
+			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts in the literal key=value shape planned=<n> succeeded=<n> failed=<n> incomplete=<n> and an explicit no-shard-coverage-blocker statement. A prose or slash form such as \"Shard completeness: 16/16 succeeded\" is not sufficient. Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
 			"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
 		)
 	}
@@ -379,6 +379,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			steppolicy.ArchitectureHomeProcessNarrationPolicyLine(),
 			"- summary.md must contain: planned/succeeded/failed shard completeness; evidence density/readability notes; key citations or staged artifact refs; and remaining gaps.",
 			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
+			"- The required completeness format is literal key=value tokens separated by single spaces: planned=<n> succeeded=<n> failed=<n> incomplete=<n>. A prose or slash form such as 'Shard completeness: 16/16 succeeded' is not sufficient; when typed status is 16/16/0/0, write exactly 'planned=16 succeeded=16 failed=0 incomplete=0' in both summary.md and architect-summary.md.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
 			"- Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence. Current-run markdown may mention only current_run_id taskrun paths.",
 			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not observed, not found, or unavailable.",
@@ -619,7 +620,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 	}
 	lines = append(lines,
 		"- If typed shard-summary items[] is readable, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
-		"- When typed shard-summary shows all shards succeeded, write this exact class of statement in summary.md and architect-summary.md: \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+		"- When typed shard-summary shows all shards succeeded, write the exact key=value literal from items[].status in summary.md and architect-summary.md (for example: \"planned=16 succeeded=16 failed=0 incomplete=0\"). Do not use slash notation such as \"Shard completeness: 16/16 succeeded\" as a substitute; also state that current-run shard coverage is not a blocker.",
 		"- Do not infer shard counts from lexical occurrences of failed/error in markdown or manifests.",
 		"- Required markdown overwrite targets:",
 	)
@@ -851,7 +852,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- summary.md must state shard completeness from typed shard status when visible plus evidence density/readability and gaps.",
 			"- architect-summary.md must state what is complete, what is missing, and what the operator should inspect or decide next.",
 			"- If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
-			"- When typed shard-summary shows all shards succeeded, summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+			"- When typed shard-summary shows all shards succeeded, summary.md and architect-summary.md must include the exact key=value completeness literal planned=<n> succeeded=<n> failed=<n> incomplete=<n> (for example, planned=16 succeeded=16 failed=0 incomplete=0) and an explicit no-shard-coverage-blocker statement; do not substitute slash notation such as \"Shard completeness: 16/16 succeeded\".",
 			"- Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
 			"- Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 			"- Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
