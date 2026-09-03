@@ -894,8 +894,12 @@ func currentRunShardCompletenessPromptLine(task acpruntime.Task) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		`- Current-run typed shard completeness observed from %q: planned=%d succeeded=%d failed=%d incomplete=%d. Copy this exact key=value literal into summary.md and architect-summary.md when shard status is mentioned; do not substitute slash notation such as %d/%d succeeded.`,
+		`- AUTHORITATIVE CURRENT-RUN COUNTS: typed shard completeness observed from %q is planned=%d succeeded=%d failed=%d incomplete=%d. Copy this exact key=value literal byte-for-byte into both summary.md and architect-summary.md before any prose: planned=%d succeeded=%d failed=%d incomplete=%d. Treat this literal as authoritative even if a helper script cannot resolve the long path because of quoting or a path typo; never fall back to planned=unknown/failed=unknown when these counts are supplied, and do not substitute slash notation such as %d/%d succeeded.`,
 		filepath.ToSlash(path),
+		counts.Planned,
+		counts.Succeeded,
+		counts.Failed,
+		counts.Incomplete,
 		counts.Planned,
 		counts.Succeeded,
 		counts.Failed,
