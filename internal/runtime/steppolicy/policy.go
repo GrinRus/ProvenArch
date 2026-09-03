@@ -542,6 +542,8 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"Run at most one bounded current-run evidence read/list command as the next action. Then immediately run one mechanically simple direct-literal write command that writes all three markdown targets first and the manifest last.",
 		"Do not emit an assistant message, status sentence, or analysis-only response before this command; the first provider item must be command_execution.",
 		"Do not run a second read-only preflight, broad repo sweep, sibling taskrun inspection, prior-report templating, or analysis-only response before the writes.",
+		"The bounded read/list command must not use `for f` loops, shell variables, command substitution, nested quote interpolation, or generated scripts; invoke only simple literal path checks/reads. If that one read command fails, do not retry it: immediately run the direct-literal write command with conservative evidence-backed content and explicit gaps.",
+		"The direct-literal write command must not use loops, shell variables, command substitution, awk/jq/Python/Node, or dynamically assembled heredoc delimiters; use one simple /bin/zsh -lc command with literal absolute targets and single-quoted heredocs.",
 		"AS-IS FIRST-PASS WRITE SEQUENCE:",
 		asIsFirstPassWriteSequence(task),
 		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing markdown from observed evidence instead of copying scaffold prose.",
