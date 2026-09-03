@@ -174,6 +174,11 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		"- Every outputs[].path must be relative to draft_final_root and every referenced draft file must exist before exit.",
 		"- Absolute target checks must use write_root/draft_final_root exactly; relative CWD checks are invalid.",
 	)
+	if strings.TrimSpace(task.StepID) == "init.step1.collect" || strings.TrimSpace(task.StepID) == "refresh.step1.collect" {
+		lines = append(lines,
+			"- PATH SAFETY FOR COLLECT REPAIR: the provider process working directory is the exact write_root for this shard. Set write_root = Path.cwd() and write the authored document plus shard-pack-manifest.json as Path.cwd()/filename; do not manually retype, shorten, or reconstruct any long /private/tmp/... batch or taskrun path. Read repository evidence only through the exact read_context_roots supplied in this task, passed as arguments rather than abbreviated hardcoded paths.",
+		)
+	}
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		lines = append(lines,
