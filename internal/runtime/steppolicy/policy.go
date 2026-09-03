@@ -244,6 +244,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
+			`- PATH SAFETY FOR COLLECT: the provider process working directory is the exact write_root for this shard. Set write_root = Path.cwd() and write the authored document plus shard-pack-manifest.json as Path.cwd()/<filename>; do not manually retype, shorten, or reconstruct any long /private/tmp/... batch or taskrun path. Read repository evidence only through the exact read_context_roots supplied in this task; pass those roots as arguments instead of hardcoding guessed or abbreviated paths.`,
+			`- If a validation command needs the repository root, derive it from the exact read_context_roots value or pass that value as a positional argument; never copy a similarly named batch path with omitted timestamp/profile segments.`,
 			`- The first collect filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write of the authored document plus shard-pack-manifest.json.`,
 			`- Cap the bounded evidence read/list to at most 8 representative files and at most the first 6000 bytes from each file; oversized files are truncated or skipped while the work unit continues.`,
 			`- Do not run analysis-only narration, status/progress text, todo/planning, broad repository sweeps, or any second read-only preflight before the direct literal write command.`,
