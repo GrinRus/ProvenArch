@@ -157,13 +157,23 @@ Task/Attempt/run identities when present, action, branch/base/head identity, exa
 inventory fingerprint and resulting commit/branch identity. The association does not claim that all
 committed files belong exclusively to one Task.
 
+Because Git mutation and task-history persistence are separate filesystem transactions, a contextual
+commit or branch action first persists a compact publication-intent marker in the ACP Git metadata
+journal. The marker is removed after the registry transaction that links the resulting publication to
+both the Task and Attempt; either ordering remains recoverable on restart. If the process stops after
+the Git side effect, server/workspace attach may reconcile the marker only when the exact recorded
+parent/head (and commit message for a commit) or target branch identity proves that operation;
+otherwise the marker remains pending and publication stays unavailable. A clean tree, latest commit
+or recency never completes this recovery implicitly, and the journal never becomes a workspace
+publication artifact.
+
 ## 11) Compatibility and failure behavior
 
 - Current run APIs remain readable during migration and for legacy history.
 - Invalid Task/Attempt/scope/runner identity fails before provider execution.
 - Registry persistence failure leaves the previously durable Task view authoritative.
-- Partial Task/run linkage is surfaced as a recovery diagnostic; API/UI cannot silently attach the
-  Attempt to a different run.
+- Partial Task/run linkage is surfaced as a durable recovery marker/diagnostic; API/UI cannot
+  silently attach the Attempt to a different run or infer a successful publication.
 - Historical Task registry versions require an explicit dual-read decision before a writer version
   change.
 

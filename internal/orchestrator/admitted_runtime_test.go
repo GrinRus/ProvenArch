@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/fakeruntime"
@@ -57,6 +58,63 @@ func TestRunUsesAdmittedRuntimeSnapshotForEveryProviderTask(t *testing.T) {
 			t.Fatalf("provider task used mutable/default runtime settings: %+v", task)
 		}
 	}
+}
+
+func TestQueuedRunCopiesAdmittedRuntimeSnapshotBeforeCallerMutation(t *testing.T) {
+	t.Parallel()
+	ws := createWorkspace(t)
+	release := make(chan struct{})
+	runner := &countingBlockingRunner{release: release}
+	service := NewService(
+		WithHistoryWorkspace(ws),
+		WithRunner(runner),
+	)
+	activeRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	})
+	if err != nil {
+		t.Fatalf("start active run: %v", err)
+	}
+	waitForRunnerCalls(t, runner, 1, asyncRunnerStartTimeout)
+
+	steps := map[string]acpruntime.Provider{}
+	for _, step := range []string{
+		acpruntime.StepProviderStep0Constitution,
+		acpruntime.StepProviderStep1Collect,
+		acpruntime.StepProviderStep2AsIs,
+		acpruntime.StepProviderStep3Findings,
+		acpruntime.StepProviderStep4Proposals,
+	} {
+		steps[step] = acpruntime.ProviderClaudeCode
+	}
+	snapshot := &acpruntime.AdmittedRuntimeSnapshot{
+		Mode:             acpruntime.RuntimeModeFake,
+		StepProviders:    steps,
+		RepositoryScopes: []string{"original-scope"},
+	}
+	queuedRunID, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:       ws,
+		Pipeline:        PipelineRefresh,
+		Intent:          RunIntentQueue,
+		RuntimeSnapshot: snapshot,
+		NonInteractive:  true,
+	})
+	if err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+	if queuedRunID == activeRunID {
+		t.Fatalf("expected distinct queued run id")
+	}
+	snapshot.RepositoryScopes[0] = "mutated-after-admission"
+
+	close(release)
+	queued := waitForRunTerminalInfo(t, service, queuedRunID, 5*time.Second)
+	if len(queued.RepositoryScopes) != 1 || queued.RepositoryScopes[0] != "original-scope" {
+		t.Fatalf("queued run adopted caller mutation: %+v", queued.RepositoryScopes)
+	}
+	waitForServiceQuiescent(t, service, 2*time.Second)
 }
 
 type recordingSnapshotRunner struct {

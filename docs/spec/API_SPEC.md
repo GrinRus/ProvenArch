@@ -1381,7 +1381,10 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 {
   "message": "chore: update ACP workspace artifacts",
   "expected_fingerprint": "<sha256>",
-  "expected_head_oid": "abc123"
+  "expected_head_oid": "abc123",
+  "task_id": "task_20260811_0001",
+  "attempt_id": "attempt_20260811_0001",
+  "run_id": "run_20260811_0001"
 }
 ```
 
@@ -1403,6 +1406,13 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 }
 ```
 
+When the optional `task_id`/`attempt_id`/`run_id` triple is complete, the server prepares a durable
+Git metadata publication intent before mutation and returns the linked publication on success. An
+intent/journal failure returns `500 publication_intent_failed` before Git is touched; a registry
+linkage failure returns `500 publication_linkage_failed` after the Git side effect, with recovery
+performed on a later server/workspace attach when strict identity proof is available. Partial context
+is rejected as `400 publication_context_invalid`.
+
 ### POST `/api/git/proposal-branch`
 Создаёт или переключает proposal-branch в bound workspace repo.
 
@@ -1422,6 +1432,10 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 ```json
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
+
+The proposal-branch request accepts the same optional exact Task/Attempt/run triple and follows the
+same durable intent, strict recovery and `publication_intent_failed`/`publication_linkage_failed`
+error boundary.
 
 Обе mutation операции сериализованы общей admission lease с run/session mutations и запрещены,
 пока service имеет active или queued work (`409 run_active`). Несовпадение подтверждённых branch/HEAD/base/inventory
@@ -1715,3 +1729,13 @@ inventory fingerprint in both the Task and Attempt registry records. Without the
 the response explicitly returns `publication.state=unavailable`; no latest-run, clean-worktree,
 branch-recency or legacy fallback is allowed. Existing full-workspace mutation scope and stale
 confirmation protections are unchanged.
+
+For contextual Git mutations, the server first writes a durable publication-intent marker to the ACP
+Git metadata journal (`acp-publication-journal.json`). The marker is removed after the registry
+transaction that writes the successful Task/Attempt linkage; either ordering remains recoverable on
+restart. If the process stops after Git changes but before linkage, a later server/workspace attach
+may recover the exact association only from the recorded pre-mutation identity plus strict
+commit-parent/message or target-branch proof; otherwise the marker remains pending and the publication
+stays unavailable. A linkage write failure therefore cannot report `Published` or silently attach
+another run, while the Git commit/branch remains recoverable and the journal stays outside the
+workspace publication scope.

@@ -24,6 +24,7 @@ func CloneAdmittedRuntimeSnapshot(value *AdmittedRuntimeSnapshot) *AdmittedRunti
 	clone.StepProviderSources = cloneStepProviderSources(value.StepProviderSources)
 	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
 	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
+	clone.RepositoryScopes = append([]string(nil), value.RepositoryScopes...)
 	return &clone
 }
 
