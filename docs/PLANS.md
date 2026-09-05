@@ -74,7 +74,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-02 golden selection hardening in progress; later rows remain dependency/stabilization gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02 merged; next row remains dependency/authorization/stabilization gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -137,10 +137,11 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01 merged; REM-02 is the current slice.
+Status: active — REM-01 and REM-02 merged; REM-03 is dependency/authorization gated.
 
-Next action: Deliver the implemented REM-02 slice, then repeat the stabilization and dependency checks
-before selecting the next ready row; REM-25 remains blocked by REM-03..24.
+Next action: Obtain explicit authority for REM-03B and repeat the stabilization/dependency checks
+after the next stabilization merge; select the first ready row only when its full acceptance boundary
+is unblocked. REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -223,7 +224,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | Order | ID | Priority | Result / acceptance boundary | Depends on | Initial readiness |
 | --- | --- | --- | --- | --- | --- |
 | 1 | REM-01 | P0 | Release verifier принимает только полное, свежее и связанное с release tag/source SHA evidence; stale, fabricated, incomplete, mismatched assessment и over-broad waiver fixtures fail closed. | none | merged in PR #269 |
-| 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | implemented; PR pending |
+| 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | merged in PR #274 |
 | 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
@@ -425,7 +426,7 @@ ambiguous; record the exact blocker and do not substitute a weaker freshness che
   был squash-merged в `main` как `6dbbed79d95e1f3f1673c9a882a48611945aa242`; после merge выполнен
   `git fetch origin main --prune`, рабочее дерево чистое.
 
-### REM-02 slice plan (implemented; awaiting delivery)
+### REM-02 slice plan (merged)
 
 **Goal.** Закрыть P1 false-green boundary golden workflow: CI должен доказуемо обнаруживать каждый
 ожидаемый deterministic test case и завершаться ошибкой, если тест переименован, удалён, пропущен
@@ -477,6 +478,9 @@ valid list/pass проходит; renamed/removed test не проходит lis
 - 2026-09-05: Полный Python discovery (308) и UI suite были запущены; один unrelated Claude probe
   classification test и два UI timeout под общей нагрузкой дали flake, каждый изолированный rerun
   прошёл. Эти внешние flakes не затрагивают REM-02 paths; required CI остаётся финальным gate.
+- 2026-09-05: PR #274 (`ci: fail closed on golden test selection`) прошёл повторный required CI после
+  review fix и был squash-merged в `main` как `2c382a235073e9a364efbecc11b7fe0ed07ac225`; после
+  merge выполнен `git fetch origin main --prune`, рабочее дерево чистое.
 
 ## EP-20260811-task-attempt-contracts
 
