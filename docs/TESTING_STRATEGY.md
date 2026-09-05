@@ -245,7 +245,7 @@ Baseline scenario set:
 - workspace sandbox root для integration tests без записи вне test workspace
 - internal runtime/orchestration seams:
   - `internal/runtimeprofile` keeps runtime profile patch validation/merge/manifest rewrite shared below API adapters
-  - `RuntimeTaskExecutor` keeps task envelope/timeout/heartbeat/provider execution behavior characterization-covered without coupling it to sharding planner tests
+  - `defaultRuntimeTaskExecutor` keeps task envelope/timeout/heartbeat/provider execution behavior characterization-covered without coupling it to sharding planner tests
   - `run_finalization.go`, `step_handlers.go` and `artifact_registry.go` keep terminal status, step dispatch and artifact list behavior in narrow files while existing async/docflow/sharding tests preserve external run contracts
   - `sharding_coordinator.go`, `sharding_scheduler.go`, `sharding_summary_store.go`, `sharding_artifacts.go` and `sharding_planner.go` keep planning, scheduling, summary/checkpoint persistence, artifact materialization and apply/replay coordination in separate files while preserving the existing sharding characterization tests
   - `ShardSummaryStore` keeps persisted shard-summary/checkpoint behavior covered separately from scheduler ordering and apply/replay coordinator behavior
