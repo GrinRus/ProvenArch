@@ -75,7 +75,7 @@ Remediation program и release gates остаются отдельными scope
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved code cleanup, documentation archival and deterministic verification; PR delivery |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06 merged; REM-07 is the current independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08 merged; REM-09 is the current independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -170,9 +170,9 @@ Base is fresh `origin/main` `6dbbed79`. The separate stabilization checkout has 
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06 and REM-07 merged; REM-08 is the current independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07 and REM-08 merged; REM-09 is the current independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Reproduce and deliver REM-08 with its immutable queued-Attempt admission invariant,
+Next action: Reproduce and deliver REM-09 with immutable remote/moving Git-ref identity,
 then repeat stabilization/dependency checks before selecting the next ready row; keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
@@ -264,8 +264,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
 | 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
 | 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | merged in PR #279 |
-| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | ready; current slice |
-| 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
+| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | merged in PR #281 |
+| 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready; current slice |
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | blocked-by-dependency |
 | 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | blocked-by-dependency |
 | 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | blocked-by-dependency |
@@ -636,7 +636,7 @@ if watcher count is not quiescent after shutdown.
   `main` as `079f9b51c95622abb6fc417234df52b0f1a36d0a`; fresh fetch confirms `origin/main` at the
   merge commit. REM-07 is closed and REM-08 is the next ready independent P1 slice.
 
-### REM-08 slice plan (in progress)
+### REM-08 slice plan (merged)
 
 **Goal.** Сохранить immutable admission context queued Attempt до фактического запуска и после
 перезапуска сервиса либо продолжить с тем же exact context, либо fail-closed с понятной диагностикой;
@@ -684,6 +684,8 @@ existing queue/restart semantics regress.
 - 2026-09-05: Added deep snapshot cloning at async admission plus runtime and orchestrator regression
   tests for caller mutation. Added API restart rehearsal proving queued Attempt terminal diagnostic,
   exact identity and immutable intent/effective runtime are preserved.
+- 2026-09-05: PR #281 passed all 11 required checks and merged as `02086568a785284dbbecadd14c4ecb658961227a`;
+  fresh `origin/main` was fetched. REM-08 is closed and REM-09 is the next independent ready slice.
 
 ## EP-20260811-task-attempt-contracts
 
