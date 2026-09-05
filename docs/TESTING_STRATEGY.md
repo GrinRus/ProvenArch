@@ -331,6 +331,18 @@ Release workflow hardening:
   `ACP_RELEASE_MATRIX_IDS` for composite release evidence, or the compatible single-matrix
   `ACP_RELEASE_VERDICT_PATH` / `ACP_RELEASE_MATRIX_ID`; the write-enabled GoReleaser/provenance job has
   `needs: verify-release-evidence`.
+- release verdicts use schema version 2 and must carry clean-tree/generator provenance, a valid,
+  fresh `source_sha`, canonical `baseline`/`parallel-default` execution settings, zero runtime-flow
+  issue counters/provider-budget exhaustion/artifact-quality findings, complete two-sweep/two-profile/
+  provider records, non-empty per-record artifacts with SHA-256 digests, and matching Provider
+  Matrix/Run Details plus tracked verdict/profile-matrix artifacts. The tag workflow
+  passes `--tag "$GITHUB_REF_NAME" --source-sha "$GITHUB_SHA"`; qualification source must be an
+  ancestor of that exact tag commit, so evidence from an unrelated history fails closed. SWE
+  assessments must match the matrix/source SHA, include assessor and timestamp, reference the exact
+  verdict file, and be `accepted`.
+- owner waivers are limited to the exact tracked
+  `reports/release_owner_waiver_<tag>.json` payload and remain `UNQUALIFIED PRERELEASE`; unknown
+  fields, extra waived requirements, missing tag binding, or a tag/source mismatch are rejected.
 - GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 

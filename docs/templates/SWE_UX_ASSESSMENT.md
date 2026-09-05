@@ -5,11 +5,12 @@
 ## Decision
 - matrix_id:
 - decision: accepted|rejected|inconclusive|blocked
+- source_sha:
 - assessed_by:
 - assessed_at_utc:
 
 ## Evidence Inspected
-- release verdict:
+- release verdict: release_verdict_<matrix-id>.json
 - execution reports:
 - frontend result JSON:
 - screenshots:
