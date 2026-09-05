@@ -748,6 +748,77 @@ unrelated stabilization overlap.
 - 2026-09-05: PR #283 passed all 11 required checks and merged as `1155f12afdc3c99a5a62cbeee4f21131d51a5e5c`;
   fresh `origin/main` was fetched. REM-09 is closed and REM-10 is the next independent ready slice.
 
+### REM-10 slice plan (in progress)
+
+**Goal.** Сделать публикацию Git и связь с точным Task/Attempt/run recoverable при частичном сбое:
+commit или branch mutation не должен теряться, а Task/Attempt не должен показывать ложный
+`Published`, если запись linkage не завершилась.
+
+**Finding / baseline.** На свежем `origin/main=9a235cda` оба Git mutation handler'а сначала выполняют
+необратимый `git commit`/`git checkout -b`, а затем вызывают `recordTaskPublication`. Если после
+Git side effect запись `task-history.json` падает (ошибка диска, transient write fault или crash
+между операциями), response возвращает `publication_linkage_failed`, но durable registry не содержит
+ни association, ни recovery marker. Повтор операции не может надёжно восстановить уже созданный
+commit, а UI/Task history не имеют доказуемой границы между `Published` и `unavailable`.
+
+**Readiness / parallel stabilization.** REM-09 и plan-sync PR #284 merged в `origin/main=9a235cda`.
+Соседний тред `Проверь UI и UX проекта` проверен непосредственно перед срезом: revision 30,
+`blocked/idle`; его незакоммиченные semantic/docflow/live изменения остаются в отдельном checkout.
+REM-10 не изменяет stabilization-owned paths (`docs/ARCHITECTURE.md`, semantic/docflow runtime и
+live diagnostics) и не зависит от их незавершённого gate. REM-03B остаётся authorization-gated и
+release-blocking.
+
+**Non-goals.** Не менять Task/Attempt JSON schema, Git publication scope, stale-confirmation policy,
+provider/runtime behavior, release settings, UI copy, remote network behavior или Git history.
+Не обещать cross-process rollback Git mutation: recovery должна либо доказать exact operation по
+сохранённой identity, либо оставить explicit pending/unavailable state.
+
+**Affected paths.** `internal/api/task_publication.go`, `internal/api/server.go`, Git mutation/API
+tests, `docs/spec/TASK_SPEC.md`/`docs/spec/API_SPEC.md` only where the recoverable boundary needs
+clarification, and this ExecPlan. No schema or fixture shape changes are expected.
+
+**Implementation boundary.** Перед Git side effect atomically persist a compact, structured
+publication-intent marker in the ACP Git metadata journal (`acp-publication-journal.json`), containing
+exact context, action, target branch and confirmed pre-mutation Git identity/fingerprint. On
+successful linkage, remove that marker after the registry transaction that writes Task and Attempt
+publication; either ordering remains recoverable on restart. On Git failure or no-op, clear the marker
+best-effort without changing a prior linked publication. On server/workspace attach, inspect pending
+markers and auto-link only when a strict proof exists: commit HEAD is exactly one commit over the
+recorded parent with the recorded message, or branch action has the exact target branch and recorded
+HEAD; otherwise keep the marker and leave publication unavailable for explicit recovery. The journal lives in
+`.git` metadata and never becomes a workspace publication artifact.
+The handlers remain fail-closed and never synthesize a publication from recency or a clean tree.
+
+**Acceptance / regression.** Context/journal persistence failure before Git prevents mutation; a
+simulated crash after Git and before linkage leaves a durable intent and a later server reconciliation restores the
+exact Task/Attempt publication for both commit and branch actions; ambiguous or failed Git state
+does not become `linked`; no-op/failure paths do not leave stale intents when cleanup succeeds. Existing
+exact-context, partial-context and stale-confirmation tests remain green. Focused API/tasks tests,
+`-race` checks and full deterministic DoD (`make contracts`, `make test`, `make lint`, `make build`)
+pass without live provider/network execution.
+
+**Rollback / stop condition.** Stop if intent persistence is not atomic, if a pending marker can be
+mistaken for a successful publication, if recovery links an unrelated commit/branch, if normal
+publication leaves permanent control-file drift, or if the slice touches stabilization-owned paths.
+Roll back on Task/Attempt schema drift, changed Git scope or any failure to preserve a previously
+linked publication during a failed subsequent mutation.
+
+- 2026-09-05: Reproduced the partial boundary on `origin/main=9a235cda`: Git mutation is durable
+  before `recordTaskPublication`, while linkage failure returns 500 without a durable recovery
+  record. Neighbor stabilization remains revision 30 `blocked/idle`; no path overlap.
+- 2026-09-05: Implemented an atomic-write Git metadata journal for contextual commit/branch
+  intents. Handlers prepare the journal before side effects, clear it on Git failure/no-op, and
+  remove it after successful Task/Attempt linkage; restart reconciliation requires exact branch/head
+  or one-parent commit plus message proof and leaves ambiguous state unavailable. Added API
+  regressions for commit recovery, branch recovery, ambiguous commit fail-closed behavior and clean
+  no-op cleanup. Full API/tasks tests, race recovery subset, docs guidance checks, contracts and
+  lint/build pass; full Go suite passes and the Python suite has only the known Node 22.22.3 override
+  mismatch in four toolchain fixture assertions (pinned 22.21.1 isolated tests pass).
+- 2026-09-05: Full `go test -race ./internal/api` was attempted after the slice; it remains blocked
+  by pre-existing parallel-runtime races in `internal/orchestrator/pipelineExecution.addArtifacts`
+  observed by unrelated API lifecycle tests. The REM-10 recovery race subset is green and no race
+  touches the journal paths.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.

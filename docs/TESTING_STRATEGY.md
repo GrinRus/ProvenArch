@@ -150,6 +150,7 @@ Baseline scenario set:
   - Attempt registry watchers are server-owned: run cancellation and server shutdown publish the terminal Attempt before watcher cancellation, repeated shutdown is safe, and the watcher WaitGroup is quiescent without goroutine/race leaks
   - coherent API session generation tests cover request-scoped workspace/service/runtime snapshots, direct/onboarding effective runtime readback, `409` conflicts for workspace switch/runtime switch/runtime profile mutation during active async work, unchanged manifest on conflict, and concurrent polling plus mutation attempts under `go test -race ./internal/api`
   - initial async run queueing returns a history persistence error before launching the background run when `run-history.json` cannot be written
+  - contextual Git commit/proposal-branch publication prepares an atomic `.git/acp-publication-journal.json` intent, clears it on Git no-op/failure, and restart reconciliation links only exact parent/message or branch/head matches; ambiguous pending intents remain unavailable
   - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
   - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - runtime timeout control:
