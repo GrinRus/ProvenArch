@@ -291,11 +291,15 @@ Implemented additional jobs:
   - covers Go formatting, ShellCheck for production shell scripts and UI typecheck in one
     local/CI-equivalent entrypoint
 - `golden`
-  - `TestScenarioFixturesDeterministicInitPipeline`
-  - `TestScenarioFixtureLayoutExists`
-  - `TestScenarioRunnerFixturesContractAndSemantics`
-  - `TestScenarioDomainTaskEnvelopesDeterministic`
-  - `TestDeterministicSnapshotScopeExcludesRunSpecificArtifacts`
+  - `scripts/run-golden-tests.sh` first checks that every expected test is present in the compiled
+    package, then runs the exact anchored selection as JSON and requires a `pass` event for every
+    test. A rename/removal or Go's successful `[no tests to run]` result is therefore a failure.
+  - `TestScenarioFixturesHaveTrackedGoldenSnapshots`
+  - `TestPersistPromotedArchitectureSnapshotCopiesOnlyArchitectureRoots`
+  - `TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts`
+  - `TestRefreshSelectivelyReplaysUnaffectedBaselineShards`
+  - `TestRunProgressUsesOnlyDeterministicPipelineSteps`
+  - `TestWriteRefreshMaterializationRecordsPreservedAndRemoved`
 - `smoke-cli`
   - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
   - `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
