@@ -128,6 +128,7 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 		generation:         1,
 	}
 	server.reconcileTaskAttemptsAfterRestart(service, taskRegistry)
+	server.reconcilePendingTaskPublications(taskRegistry)
 	return server
 }
 
@@ -371,6 +372,7 @@ func (s *Server) resetTaskRegistryLocked(ws workspace.Root) {
 	s.taskRegistryErr = err
 	if err == nil {
 		s.reconcileTaskAttemptsAfterRestart(s.service, registry)
+		s.reconcilePendingTaskPublications(registry)
 	}
 }
 
@@ -1269,13 +1271,21 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 		writeError(writer, http.StatusConflict, "stale_git_confirmation", "workspace Git state changed after confirmation")
 		return
 	}
+	if publicationContext.provided() {
+		if err := prepareTaskPublication(registry, ws, publicationContext, "commit", "", message, state); err != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_intent_failed", err.Error())
+			return
+		}
+	}
 	if _, err := runGit(request.Context(), ws.Path, "add", "-A"); err != nil {
+		_ = clearTaskPublicationIntent(ws, publicationContext, "commit")
 		writeError(writer, http.StatusBadRequest, "git_add_failed", err.Error())
 		return
 	}
 	output, err := runGit(request.Context(), ws.Path, "commit", "-m", message)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "nothing to commit") {
+			_ = clearTaskPublicationIntent(ws, publicationContext, "commit")
 			writeJSON(writer, http.StatusOK, map[string]any{
 				"ok":          true,
 				"status":      "no_changes",
@@ -1284,6 +1294,7 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 			})
 			return
 		}
+		_ = clearTaskPublicationIntent(ws, publicationContext, "commit")
 		writeError(writer, http.StatusBadRequest, "git_commit_failed", err.Error())
 		return
 	}
@@ -1295,7 +1306,7 @@ func (s *Server) handleGitCommit(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 		publication = buildTaskPublication("commit", publicationContext, state, after)
-		if err := recordTaskPublication(registry, publicationContext, publication); err != nil {
+		if err := recordTaskPublication(registry, ws, publicationContext, publication); err != nil {
 			writeError(writer, http.StatusInternalServerError, "publication_linkage_failed", err.Error())
 			return
 		}
@@ -1380,8 +1391,15 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 		writeError(writer, http.StatusConflict, "stale_git_confirmation", "workspace Git state changed after confirmation")
 		return
 	}
+	if publicationContext.provided() {
+		if err := prepareTaskPublication(registry, ws, publicationContext, "branch", branch, "", state); err != nil {
+			writeError(writer, http.StatusInternalServerError, "publication_intent_failed", err.Error())
+			return
+		}
+	}
 	if _, err := runGit(request.Context(), ws.Path, "checkout", "-b", branch); err != nil {
 		if _, fallbackErr := runGit(request.Context(), ws.Path, "checkout", branch); fallbackErr != nil {
+			_ = clearTaskPublicationIntent(ws, publicationContext, "branch")
 			writeError(writer, http.StatusBadRequest, "git_branch_failed", err.Error())
 			return
 		}
@@ -1394,7 +1412,7 @@ func (s *Server) handleGitProposalBranch(writer http.ResponseWriter, request *ht
 			return
 		}
 		publication = buildTaskPublication("branch", publicationContext, state, after)
-		if err := recordTaskPublication(registry, publicationContext, publication); err != nil {
+		if err := recordTaskPublication(registry, ws, publicationContext, publication); err != nil {
 			writeError(writer, http.StatusInternalServerError, "publication_linkage_failed", err.Error())
 			return
 		}
