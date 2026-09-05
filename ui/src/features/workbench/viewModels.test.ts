@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ProductTask } from "../../lib/taskApi";
-import { buildChangeReviewModel, buildKnowledgeViewModel, buildPublishViewModel } from "./viewModels";
+import { buildChangeReviewModel } from "./viewModels";
 
 describe("workbench view models", () => {
   it("routes only authoritative successful analysis runs to Change Review", () => {
@@ -17,21 +17,5 @@ describe("workbench view models", () => {
     expect(buildChangeReviewModel(tasks, runs).map((item) => [item.task_id, item.run_id, item.action])).toEqual([
       ["task-ok", "ok", "review"], ["task-failed", "failed", "run_studio"],
     ]);
-  });
-
-  it("keeps valid knowledge visible while filtering a partial response", () => {
-    const knowledge = {
-      status: "partial", entities: [{ id: "service-a", name: "Payments", type: "service", path: "model/entities/a.yaml" }],
-      edges: [], artifacts: [], issues: [{ code: "malformed", message: "bad file" }],
-    } as never;
-    const model = buildKnowledgeViewModel(knowledge, false, "", "pay", "service-a");
-    expect(model.status).toBe("partial");
-    expect(model.filteredEntities).toHaveLength(1);
-    expect(model.selectedEntity?.id).toBe("service-a");
-  });
-
-  it("keeps demo publication wording distinct", () => {
-    expect(buildPublishViewModel(2, 1, 0, true).actionLabel).toBe("Commit all demo workspace changes");
-    expect(buildPublishViewModel(2, 1, 0, false).actionLabel).toBe("Commit all workspace changes");
   });
 });

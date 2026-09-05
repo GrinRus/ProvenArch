@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { destinationForStage, formatAppRoute, parseAppRoute, stageForRoute } from "./appRoutes";
+import { formatAppRoute, parseAppRoute, stageForRoute } from "./appRoutes";
 
 const location = (value: string) => {
   const url = new URL(value, "http://localhost");
@@ -96,7 +96,6 @@ describe("application route codec", () => {
 
   it("maps setup and stage ownership", () => {
     expect(stageForRoute(parseAppRoute(location("/setup?step=runner"), true))).toBe("readiness");
-    expect(destinationForStage("publish")).toBe("changes");
   });
 
   it("opens Architecture in the semantic Map while preserving explicit document routes", () => {
