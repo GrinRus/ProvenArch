@@ -684,16 +684,17 @@ make build
 Для любого UI diff дополнительно:
 
 ```bash
-bash scripts/verify-ui-deterministic-build.sh WORKTREE
+make verify-ui-determinism UI_SOURCE=WORKTREE
 ```
 
-`make verify-ui-determinism` проверяет `HEAD`, поэтому выполняется после commit или на проверяемом
-commit в CI. `internal/api/ui_dist` версионируется; порядок подготовки change set фиксирован:
+`make verify-ui-determinism` по умолчанию проверяет текущий worktree; для commit указывается
+`UI_SOURCE=HEAD` или точный ref. Общая процедура находится в [CONTRIBUTING](../CONTRIBUTING.md).
+`internal/api/ui_dist` версионируется; порядок подготовки change set:
 
 1. `make build` пересобирает source UI и embedded bundle;
-2. regenerated `internal/api/ui_dist` просматривается и включается в тот же staged change set;
-3. `make verify-ui-dist` доказывает отсутствие unstaged расхождения bundle;
-4. после commit выполняется `make verify-ui-determinism`.
+2. `make verify-ui-dist` сравнивает временную сборку с working-tree bundle без его перезаписи;
+3. `make verify-ui-determinism` проверяет текущие source edits без требования commit;
+4. regenerated `internal/api/ui_dist` просматривается и включается в тот же change set.
 
 Source UI без свежего embedded bundle не принят.
 

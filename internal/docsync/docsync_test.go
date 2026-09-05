@@ -305,20 +305,8 @@ func TestArtifactOwnershipTaxonomyDocumented(t *testing.T) {
 
 func TestActivePlansHaveOpenGoals(t *testing.T) {
 	t.Parallel()
-
-	active := extractAfter(t, readDoc(t, "docs/PLANS.md"), "## Active Plans")
-	for _, section := range splitPlanSections(active) {
-		lines := strings.Split(section, "\n")
-		if len(lines) < 2 {
-			continue
-		}
-		planID := strings.TrimSpace(lines[1])
-		goals := extractBetween(t, section, "### Goals (must have)", "\n### ")
-		checked := strings.Count(goals, "- [x]")
-		open := strings.Count(goals, "- [ ]")
-		if checked > 0 && open == 0 {
-			t.Fatalf("expected active plan %s to keep at least one open goal or move to docs/archive", planID)
-		}
+	for _, err := range activePlanErrors(readDoc(t, "docs/PLANS.md")) {
+		t.Error(err)
 	}
 }
 
@@ -891,23 +879,6 @@ func extractAfter(t *testing.T, content string, marker string) string {
 		t.Fatalf("expected content to include marker %q", marker)
 	}
 	return content[idx+len(marker):]
-}
-
-func splitPlanSections(content string) []string {
-	parts := strings.Split(content, "\n### Plan ID\n")
-	sections := make([]string, 0, len(parts))
-	for idx, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if idx == 0 && !strings.HasPrefix(part, "### Plan ID\n") {
-			continue
-		}
-		part = strings.TrimPrefix(part, "### Plan ID\n")
-		sections = append(sections, "### Plan ID\n"+part)
-	}
-	return sections
 }
 
 func assertContains(t *testing.T, content string, needle string) {

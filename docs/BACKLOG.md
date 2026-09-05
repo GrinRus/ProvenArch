@@ -4,7 +4,10 @@
 Для MVP-эпиков `Suggested PR slices` зафиксированы прямо в этом файле.
 Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake runner + recorded artifacts и не требует live headless provider binaries.
 
-Статус выполнения и текущие активные engineering slices ведутся в `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix) и `docs/PLANS.md`; этот файл остаётся reference/acceptance backlog, а не единственным active tracker.
+Статус выполнения ведётся в [Canonical Stakeholder Matrix](STAKEHOLDER_DOC.md#0-canonical-stakeholder-matrix-source-of-truth),
+а текущая работа и её зависимости — в [индексе активных планов](PLANS.md#active-plan-index).
+Этот файл остаётся reference/acceptance backlog: наличие описанного slice не означает, что его нужно
+начать или что он ещё не реализован.
 
 ## Epic 1 — Управление workspace
 Acceptance:
@@ -2435,7 +2438,11 @@ selected-run snapshot that fails provider-free integrity checks. Technical `PASS
 must move toward the orchestrator; provider-authored findings and questions remain advisory semantic
 input and never bypass deterministic validation.
 
-### Confirmed gaps on current `main`
+### Historical entry gaps (before W24 implementation)
+
+The following findings motivated the epic. They describe its entry baseline, not current `main`;
+the implementation notes under each slice and the canonical stakeholder matrix record the resulting
+state. W24G remains deferred and trusted live qualification remains separate.
 
 - validator artifact admission parses `validator-verdict.json`, but does not bind its `run_id` or
   `checked_paths` to the current runtime task;

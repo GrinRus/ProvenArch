@@ -9,18 +9,30 @@ RUNTIME ?= fake
 REPO_NAME ?= primary-repo
 DOCS_IMPORTS_PATH ?= ./docs/imports
 STRESS_TEST ?= TestStartAsyncRunRequiresExplicitQueueAndSupersedesPendingRefresh
+UI_SOURCE ?= WORKTREE
 
-.PHONY: bootstrap contracts test test-stress lint build offline-closure verify-readable-fixtures verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
+# Targets share installed dependencies and generated UI assets within one worktree.
+# Parallelize independent worktrees, not install/check/build targets in this checkout.
+.NOTPARALLEL:
+
+.PHONY: bootstrap preflight contracts contracts-install contracts-check test test-stress lint build offline-closure verify-agent-guidance verify-readable-fixtures verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 
 bootstrap:
-	$(GO) mod tidy
-	$(NPM) ci --prefix $(UI_DIR)
+	bash ./scripts/setup-dev.sh
 
-contracts:
+preflight:
+	bash ./scripts/dev-preflight.sh
+
+contracts-install:
 	$(NPM) ci --prefix $(CONTRACT_TOOLS_DIR) --ignore-scripts --audit=false --fund=false
+
+contracts: contracts-install
+	$(MAKE) contracts-check
+
+contracts-check:
 	ACP_CONTRACT_TOOLS_BIN="$(CURDIR)/$(CONTRACT_TOOLS_DIR)/node_modules/.bin" bash ./scripts/validate-contracts.sh
 
-test: contracts
+test: contracts-check
 	$(GO) test ./...
 	$(PYTHON) -m unittest discover -s scripts/tests -p '*_test.py'
 	$(NPM) run test --prefix $(UI_DIR) -- --run
@@ -71,8 +83,11 @@ offline-closure:
 verify-readable-fixtures:
 	$(PYTHON) ./scripts/verify-readable-fixture-drift.py
 
+verify-agent-guidance:
+	$(GO) test ./internal/docsync
+
 verify-ui-determinism:
-	bash ./scripts/verify-ui-deterministic-build.sh HEAD
+	bash ./scripts/verify-ui-deterministic-build.sh "$(UI_SOURCE)"
 
 verify-ui-dist:
 	bash ./scripts/check-ui-dist-fresh.sh
