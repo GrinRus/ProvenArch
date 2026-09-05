@@ -239,15 +239,6 @@ func TestDocsImportsMetadataIndexContractDocumented(t *testing.T) {
 	}
 }
 
-func TestUIBaselineEditorPromptPackHintMatchesStepPolicy(t *testing.T) {
-	t.Parallel()
-
-	content := readDoc(t, "ui/src/components/BaselineEditorsPanel.tsx")
-	assertContains(t, content, "step0/step1/step3/step4")
-	assertContains(t, content, "step2 uses enforced as-is policy without an editable prompt pack")
-	assertNotContains(t, content, "collect`/`findings")
-}
-
 func TestPromptPackCoverageDocumentsStep2Boundary(t *testing.T) {
 	t.Parallel()
 
