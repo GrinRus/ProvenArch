@@ -11,13 +11,12 @@ import { useRunSelection } from "./useRunSelection";
 import { useGitDiff } from "./useGitDiff";
 
 type UseRunExplorerOptions = {
-  setBusy: (busy: boolean) => void;
   setError: (message: string | null) => void;
 };
 
-export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
+export function useRunExplorer({ setError }: UseRunExplorerOptions) {
   const [state, dispatch] = useReducer(runExplorerReducer, initialRunExplorerState);
-  const { runId, runStatus, runList, coordination, runActionStatus, cancelBusy } = state;
+  const { runId, runStatus, runList, coordination, runActionStatus } = state;
   const artifactsState = useRunArtifacts();
   const logsState = useRunLogs({ runId });
   const gitDiffState = useGitDiff();
@@ -83,10 +82,6 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
       dispatch({ type: "setRunActionStatus", runActionStatus: nextRunActionStatus }),
     []
   );
-  const setCancelBusy = useCallback(
-    (nextCancelBusy: boolean) => dispatch({ type: "setCancelBusy", cancelBusy: nextCancelBusy }),
-    []
-  );
   const clearRunSelection = useCallback(() => {
     dispatch({ type: "setRunID", runId: null });
     dispatch({ type: "setRunStatus", runStatus: null });
@@ -106,25 +101,18 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
   const {
     bootstrapRuns,
     pollRunUpdates,
-    handleRunPipeline,
     handleSelectRun,
-    handleCancelSelectedRun,
-    handleCancelRun,
   } = useRunActions({
     dispatch,
     runId,
     runStatus,
-    coordination,
-    selectedRunIsActive,
     runLogsEOF,
-    setBusy,
     setError,
     setRunID,
     setRunStatus,
     setRunList,
     setCoordination,
     setRunActionStatus,
-    setCancelBusy,
     resetRunLogs,
     fetchRunLogs,
     fetchRunLogsUntilEOF,
@@ -155,7 +143,6 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     runLogsMode,
     setRunLogsMode,
     runActionStatus,
-    cancelBusy,
     coverageSummary,
     openQuestions,
     evidenceSnapshot,
@@ -179,10 +166,7 @@ export function useRunExplorer({ setBusy, setError }: UseRunExplorerOptions) {
     clearRunSelection,
     fetchRunReviewSummary,
     loadGitDiff,
-    handleRunPipeline,
     handleSelectRun,
-    handleCancelSelectedRun,
-    handleCancelRun,
     handleOpenArtifact,
     handleCopyRunLogs,
     handleDownloadRunLogs,

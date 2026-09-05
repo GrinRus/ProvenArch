@@ -275,11 +275,6 @@ export type RunProgress = {
 
 export type RetryLineage = { parent_run_id: string; reason: string; requested_step: string; effective_start_step: string; requested_scopes?: string[]; effective_scopes?: string[]; reused_inputs?: string[] };
 
-export type RunStartResponse = {
-  run_id: string;
-  status: string;
-};
-
 export type RunStatusResponse = {
   run_id: string;
   pipeline: string;
@@ -371,11 +366,6 @@ export type Artifact = {
   source_mode?: "run_snapshot" | "promoted_current";
 };
 
-export type ArtifactsResponse = {
-  run_id: string;
-  artifacts: Artifact[];
-};
-
 export type RunSnapshotIssue = {
   code: string;
   message: string;
@@ -441,7 +431,6 @@ export type RunReviewSummaryResponse = {
   review?: RunReviewContract;
 };
 
-export type RetryPlanResponse = { parent_run_id: string; pipeline: string; requested_step: string; effective_start_step: string; requested_scopes: string[]; effective_scopes?: string[]; reused_inputs: string[]; execute_steps: string[]; invalidated_steps: string[]; estimated_units: number; widened: boolean; widen_reason?: string; plan_hash: string };
 
 export type GitDiffFile = {
   path: string;
@@ -520,14 +509,6 @@ export type GuidedRepo = {
   ref: string;
   analysis_include: string;
   analysis_exclude: string;
-};
-
-export type WizardContract = {
-  version: number;
-  project_name: string;
-  scope: string;
-  nfr_priorities: string[];
-  rules: string[];
 };
 
 export type RuntimeTimeoutKey =
@@ -711,8 +692,6 @@ export const runtimeTimeoutLabels: Record<RuntimeTimeoutKey, string> = {
   ui_cancel_poll_timeout_sec: "runtime.profile.timeouts.ui_cancel_poll_timeout_sec",
 };
 
-export const runtimeExecutionKeys: RuntimeExecutionKey[] = ["strategy", "max_parallel_tasks", "failure_policy", "shard_discovery_mode"];
-
 export const defaultRuntimeExecutionValues: RuntimeExecutionValues = {
   strategy: "sequential",
   max_parallel_tasks: 1,
@@ -744,8 +723,6 @@ export const runtimeStepProviderLabels: Record<(typeof runtimeStepProviderOrder)
   step4_proposals: "runtime.profile.steps.step4_proposals.provider",
   qa: "runtime.profile.steps.qa.provider",
 };
-
-export const runtimePermissionKeys: RuntimePermissionKey[] = ["mode", "approval_channel"];
 
 export const defaultRuntimePermissionValues: RuntimePermissionValues = {
   mode: "trusted_full_access",

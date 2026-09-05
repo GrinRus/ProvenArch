@@ -82,7 +82,6 @@ export default function App() {
   const [onboardingWorkspacePath, setOnboardingWorkspacePath] = useState("");
   const [onboardingCreateWorkspace, setOnboardingCreateWorkspace] = useState(true);
   const [consoleReady, setConsoleReady] = useState(false);
-  const [analysisFocusSignal] = useState(0);
   const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
@@ -135,7 +134,6 @@ export default function App() {
     setError,
   });
   const runExplorer = useRunExplorer({
-    setBusy,
     setError,
   });
   const taskReviewCandidates = useTaskReviewCandidates(destination === "changes" && !route.runId && !route.taskId && route.source !== "current");
@@ -196,7 +194,6 @@ export default function App() {
     selectedArtifact,
     selectedArtifactContent,
     runActionStatus,
-    cancelBusy,
     coverageSummary,
     openQuestions,
     evidenceSnapshot,
@@ -213,10 +210,7 @@ export default function App() {
     bootstrapRuns,
     clearRunSelection,
     loadGitDiff,
-    handleRunPipeline,
     handleSelectRun,
-    handleCancelSelectedRun,
-    handleCancelRun,
     handleOpenArtifact,
   } = runExplorer;
 
@@ -227,7 +221,6 @@ export default function App() {
     hasUnsavedManifestDraft,
     manifestStatus,
     workspaceRootPath,
-    hasUnsavedEditorDraft,
     guidedRepos,
     guidedDocsImportsPath,
     gitMessage,
@@ -254,8 +247,8 @@ export default function App() {
   } = workspaceSetup;
 
   useEffect(() => {
-    unsavedDraftRef.current = hasUnsavedManifestDraft || hasUnsavedEditorDraft;
-  }, [hasUnsavedEditorDraft, hasUnsavedManifestDraft]);
+    unsavedDraftRef.current = hasUnsavedManifestDraft;
+  }, [hasUnsavedManifestDraft]);
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -590,13 +583,6 @@ export default function App() {
   function handleSetupRuntimeProviderChange(value: string) {
     setSetupRuntimeProvider(value);
     clearFirstRunReadiness();
-  }
-
-  async function handleRunPipelineFromRuns(pipeline: "init" | "refresh", intent: "start" | "queue" = "start") {
-    const startedRunID = await handleRunPipeline(pipeline, intent);
-    if (startedRunID && intent !== "queue") {
-      navigateRoute({ destination: "tasks", taskView: "legacy", runId: startedRunID, runRequested: true, invalid: [] });
-    }
   }
 
   const handleSetupStepChange = useCallback((step: SetupStep) => {
@@ -1122,9 +1108,6 @@ export default function App() {
         <LegacyRunPage coordination={coordination} selectedRunID={route.runId}>
         <AnalysisStagePanel
           detailMode={Boolean(route.runId)}
-          readOnly
-          busy={busy}
-          cancelBusy={cancelBusy}
           runId={runId}
           runStatus={runStatus}
           runList={runList}
@@ -1143,10 +1126,6 @@ export default function App() {
           gitDiff={gitDiff}
           gitDiffStatus={gitDiffStatus}
           onLoadGitDiff={handleLoadGitDiff}
-          focusBlockerSignal={analysisFocusSignal}
-          onRunPipeline={(pipeline, intent) => void handleRunPipelineFromRuns(pipeline, intent)}
-          onCancelSelectedRun={() => void handleCancelSelectedRun()}
-          onCancelRun={(id) => void handleCancelRun(id)}
           onSelectRun={(id) => void handleSelectRunInRuns(id)}
           onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
 		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })}

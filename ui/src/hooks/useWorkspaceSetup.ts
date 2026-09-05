@@ -1,8 +1,7 @@
-import { useBaselineEditor } from "./useBaselineEditor";
+import { useWorkspaceIdentity } from "./useWorkspaceIdentity";
 import { useGitActions } from "./useGitActions";
 import type { GitPublicationContext } from "../lib/workspaceApi";
 import { useManifestEditor } from "./useManifestEditor";
-import { useWizardEditor } from "./useWizardEditor";
 import type { GitDiffResponse } from "../lib/appContracts";
 
 type UseWorkspaceSetupOptions = {
@@ -14,19 +13,17 @@ type UseWorkspaceSetupOptions = {
 
 export function useWorkspaceSetup({ setBusy, setError, publicationContext, loadPublicationDiff }: UseWorkspaceSetupOptions) {
   const manifestEditor = useManifestEditor({ setBusy, setError });
-  const baselineEditor = useBaselineEditor({ setBusy, setError });
-  const wizardEditor = useWizardEditor({ setBusy, setError });
+  const workspaceIdentity = useWorkspaceIdentity();
   const gitActions = useGitActions({ setBusy, setError, publicationContext, loadPublicationDiff });
 
   async function bootstrapWorkspaceSetup() {
     await manifestEditor.loadManifest();
-    await baselineEditor.loadBaselineBundle();
+    await workspaceIdentity.loadWorkspaceIdentity();
   }
 
   return {
     ...manifestEditor,
-    ...baselineEditor,
-    ...wizardEditor,
+    ...workspaceIdentity,
     ...gitActions,
     bootstrapWorkspaceSetup,
   };

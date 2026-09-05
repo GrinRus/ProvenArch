@@ -1,7 +1,4 @@
-import { useEffect, useState } from "react";
-
-import type { RetryPlanResponse, RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
-import { calculateRetryPlan, startTargetedRetry } from "../lib/runApi";
+import type { RunReviewSummaryResponse, RunStatusResponse } from "../lib/appContracts";
 import { StatusBadge } from "./ConsolePrimitives";
 
 export function StructuredRunProgress({ runStatus, review, onReviewDetails }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; onReviewDetails?: () => void }) {
@@ -31,60 +28,26 @@ export function RunResultPanel({ review, onExploreArchitecture }: { review: RunR
   </section>;
 }
 
-export function TargetedRerunPanel({ runStatus, review, busy, readOnly = false, onRetryStarted }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; readOnly?: boolean; onRetryStarted: (runID: string) => void }) {
-  const steps = terminalRerunSteps(review?.pipeline || runStatus?.pipeline);
-  const [step, setStep] = useState(steps[steps.length - 1] ?? "");
-  const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
-  const [status, setStatus] = useState("");
-  const [working, setWorking] = useState(false);
-	useEffect(() => { setStep(steps[steps.length - 1] ?? ""); setPlan(null); setStatus(""); }, [review?.pipeline, runStatus?.run_id]);
-  if (!runStatus || runStatus.status !== "succeeded" || steps.length === 0) return null;
-  async function calculate() { setWorking(true); setStatus(""); try { setPlan(await calculateRetryPlan(runStatus!.run_id, step)); } catch (error) { setStatus(error instanceof Error ? error.message : "Rerun planning failed"); } finally { setWorking(false); } }
-  async function start() { if (!plan) return; setWorking(true); setStatus(""); try { const response = await startTargetedRetry(runStatus!.run_id, plan); onRetryStarted(response.run_id); } catch (error) { const message = error instanceof Error ? error.message : "Targeted rerun failed to start"; if (message.toLowerCase().includes("retry inputs changed")) { setPlan(null); setStatus("The rerun plan is stale because sources or parent artifacts changed. Calculate it again, or start a full run if you intended to change the source baseline."); } else { setStatus(message); } } finally { setWorking(false); } }
+export function TargetedRerunPanel({ runStatus, review }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null }) {
+  const pipeline = review?.pipeline || runStatus?.pipeline;
+  if (!runStatus || runStatus.status !== "succeeded" || !["init", "refresh"].includes(pipeline ?? "")) return null;
   return <section className="targeted-rerun" data-testid="targeted-rerun-panel">
     <div><p className="eyebrow">Selective rerun</p><h2>Repeat only the work you need</h2><p>Choose a completed pipeline step. ProvenArch will create an auditable child run and automatically include every invalidated downstream step.</p></div>
-    {readOnly ? <p className="status info" data-testid="legacy-read-only-rerun">Selective reruns are unavailable for legacy evidence.</p> : <label>Start from step<select value={step} onChange={(event) => { setStep(event.target.value); setPlan(null); setStatus(""); }}>{steps.map((item) => <option key={item} value={item}>{stepPurpose(item)}</option>)}</select></label>}
-    {plan ? <RetryPlanPreview plan={plan} /> : null}
-    {status ? <p className="status err" role="status">{status}</p> : null}
-    {!readOnly ? <div className="actions"><button type="button" onClick={() => void (plan ? start() : calculate())} disabled={busy || working}>{working ? "Working…" : plan ? "Start targeted rerun" : "Review rerun plan"}</button></div> : null}
+    <p className="status info" data-testid="legacy-read-only-rerun">Selective reruns are unavailable for legacy evidence.</p>
   </section>;
 }
 
-export function RecoveryPanel({ runStatus, review, busy, readOnly = false, onRetryStarted, onReviewDetails }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null; busy: boolean; readOnly?: boolean; onRetryStarted: (runID: string) => void; onReviewDetails: () => void }) {
-  const [plan, setPlan] = useState<RetryPlanResponse | null>(null);
-  const [status, setStatus] = useState("");
-  const [working, setWorking] = useState(false);
+export function RecoveryPanel({ runStatus, review }: { runStatus: RunStatusResponse | null; review: RunReviewSummaryResponse | null }) {
   const recovery = review?.recovery ?? legacyRecovery(runStatus);
   if (!runStatus || !recovery || !["failed", "canceled"].includes(runStatus.status)) return null;
-  async function calculate() { setWorking(true); setStatus(""); try { setPlan(await calculateRetryPlan(runStatus!.run_id, recovery?.failed_step, recovery?.failed_scopes)); } catch (error) { setStatus(error instanceof Error ? error.message : "Retry planning failed"); } finally { setWorking(false); } }
-  async function start() { if (!plan) return; setWorking(true); setStatus(""); try { const response = await startTargetedRetry(runStatus!.run_id, plan); onRetryStarted(response.run_id); } catch (error) { const message = error instanceof Error ? error.message : "Targeted retry failed to start"; if (message.toLowerCase().includes("retry inputs changed")) { setPlan(null); setStatus("The retry plan is stale because sources or parent artifacts changed. Calculate it again, or start a full run if you intended to change the source baseline."); } else { setStatus(message); } } finally { setWorking(false); } }
   return <section className="structured-recovery" data-testid="analysis-failure-recovery">
     <div className="section-heading-row"><div><p className="eyebrow">Recovery</p><h2>{recovery.title}</h2></div><StatusBadge tone="error">{recovery.category}</StatusBadge></div>
     <p className="recovery-explanation">{recovery.explanation || "No additional provider explanation was recorded."}</p>
     <dl className="recovery-impact"><div><dt>Impact</dt><dd>{recovery.impact}</dd></div><div><dt>Evidence retained</dt><dd>{recovery.retained_evidence}</dd></div><div><dt>Recommended fix</dt><dd>{recovery.recommended_fix}</dd></div><div><dt>Failed step</dt><dd>{recovery.failed_step || "Not identified"}</dd></div></dl>
-    {plan ? <RetryPlanPreview plan={plan} /> : null}
-    {status ? <p className="status err" role="status">{status}</p> : null}
-    {readOnly ? <p className="status info" data-testid="legacy-read-only-recovery">Retry and run mutation are unavailable for legacy evidence. Technical details remain readable.</p> : <div className="actions"><button type="button" data-testid="analysis-retry-run-btn" onClick={() => void (plan ? start() : calculate())} disabled={busy || working || !recovery.can_retry}>{working ? "Working…" : plan ? "Start targeted retry" : "Calculate retry plan"}</button><button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewDetails}>Open technical details</button></div>}
+    <p className="status info" data-testid="legacy-read-only-recovery">Retry and run mutation are unavailable for legacy evidence. Technical details remain readable.</p>
     {!recovery.can_retry ? <p className="disabled-reason">Retry is unavailable because the backend could not establish a safe dependency closure.</p> : null}
     <details><summary>Technical error</summary><code>{recovery.technical_code || runStatus.error_code || "unclassified"}</code></details>
   </section>;
-}
-
-function RetryPlanPreview({ plan }: { plan: RetryPlanResponse }) {
-  const requestedLabel = stepPurpose(plan.requested_step);
-  const effectiveLabel = stepPurpose(plan.effective_start_step);
-  return <div className="retry-plan" data-testid="retry-plan">
-    <h3>Safe retry plan</h3>
-    {plan.widened ? <p className="status warn">{plan.widen_reason}</p> : null}
-    <p className="retry-plan-reason">Requested <strong>{requestedLabel}</strong>. {plan.widened ? `Validated inputs require execution to restart at ${effectiveLabel}.` : "Every dependent downstream result must be rebuilt so the architecture stays internally consistent."}</p>
-    <div className="retry-plan-columns">
-      <div><span>Reuse after validation</span><strong>{plan.reused_inputs.length ? plan.reused_inputs.join(" → ") : "Nothing from this attempt"}</strong></div>
-      <div><span>Execute in child run</span><strong>{plan.execute_steps.join(" → ")}</strong></div>
-      <div><span>Invalidated dependency closure</span><strong>{plan.invalidated_steps.length ? plan.invalidated_steps.join(" → ") : "No downstream results"}</strong></div>
-      <div><span>Effective scope</span><strong>{plan.effective_scopes?.length ? plan.effective_scopes.join(", ") : "Whole configured workspace"}</strong></div>
-    </div>
-    <p><strong>{plan.estimated_units}</strong> estimated execution unit(s), including planned steps and any selected shard scopes, will run under a new auditable child run ID.</p>
-  </div>;
 }
 
 function outcomeTitle(state: NonNullable<RunReviewSummaryResponse["result"]>["state"], kind?: "initial" | "refresh") { return state === "completed" ? kind === "initial" ? "Architecture baseline ready" : "Architecture updated" : state === "completed_with_gaps" ? kind === "initial" ? "Baseline ready with gaps" : "Architecture updated with gaps" : state === "canceled" ? "Analysis canceled" : "Analysis needs recovery"; }
@@ -95,7 +58,6 @@ function formatTime(value?: string) { if (!value) return "not reported"; const d
 function formatElapsed(start?: string, finish?: string | null) { const started = start ? new Date(start).getTime() : Number.NaN; const finished = finish ? new Date(finish).getTime() : Date.now(); if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return "not available"; const seconds = Math.floor((finished - started) / 1000); const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remainder = seconds % 60; return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`; }
 function formatDuration(milliseconds: number) { const seconds = Math.max(0, Math.floor(milliseconds / 1000)); const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remainder = seconds % 60; return hours > 0 ? `${hours}h ${minutes}m` : minutes > 0 ? `${minutes}m ${remainder}s` : `${remainder}s`; }
 function stepPurpose(step?: string) { if (!step) return "Waiting to start"; if (step.includes("collect")) return "Collecting repository evidence"; if (step.includes("asis")) return "Building architecture model and diagrams"; if (step.includes("findings")) return "Validating findings and coverage"; if (step.includes("proposals")) return "Preparing proposals and promotion"; return "Establishing architecture scope"; }
-function terminalRerunSteps(pipeline?: string) { return pipeline === "refresh" ? ["refresh.step1.collect", "refresh.step2.asis_docs", "refresh.step3.findings", "refresh.step4.proposals"] : pipeline === "init" ? ["init.step0.constitution", "init.step1.collect", "init.step2.asis_docs", "init.step3.findings", "init.step4.proposals"] : []; }
 
 function legacyPresentationPhase(runStatus: RunStatusResponse) {
   if (runStatus.error_code === "run_canceled") return "canceled";

@@ -146,16 +146,6 @@ export function formatAppRoute(route: AppRoute): string {
   return `${destinationPaths[route.destination]}${query ? `?${query}` : ""}`;
 }
 
-export function destinationFromPath(pathname: string, consoleReady: boolean): WorkflowDestination {
-  return parseAppRoute({ pathname, search: "" } as Location, consoleReady).destination;
-}
-
-export function destinationForStage(stage: StageId): WorkflowDestination {
-  if (stage === "source" || stage === "readiness") return "setup";
-  if (stage === "analysis" || stage === "ask") return "tasks";
-  return "changes";
-}
-
 export function defaultStageForDestination(destination: WorkflowDestination): StageId {
   if (destination === "setup") return "source";
   if (destination === "tasks" || destination === "changes" || destination === "knowledge") return "review";

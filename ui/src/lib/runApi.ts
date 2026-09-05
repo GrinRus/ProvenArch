@@ -1,16 +1,8 @@
 import { fetchJSON, getErrorMessage } from "./api";
-import type { RetryPlanResponse, RunListResponse, RunReviewSummaryResponse, RunSnapshotResponse, RunStartResponse, RunStatusResponse } from "./appContracts";
+import type { RunListResponse, RunReviewSummaryResponse, RunSnapshotResponse, RunStatusResponse } from "./appContracts";
 
 export async function listPipelineRuns(limit = 100, init?: RequestInit): Promise<RunListResponse> {
   return fetchJSON<RunListResponse>(`/api/pipeline/runs?limit=${limit}`, init);
-}
-
-export async function startPipelineRun(pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<RunStartResponse> {
-  return fetchJSON<RunStartResponse>(`/api/pipeline/${pipeline}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trigger: "ui", intent, commit: false, create_proposal_branch: false }),
-  });
 }
 
 export async function getPipelineRunStatus(id: string, allowMissing = false, init?: RequestInit): Promise<RunStatusResponse | null> {
@@ -43,36 +35,4 @@ export async function getPipelineRunReviewSummary(
 
 export async function getPipelineRunSnapshot(id: string, init?: RequestInit): Promise<RunSnapshotResponse> {
   return fetchJSON<RunSnapshotResponse>(`/api/pipeline/runs/${id}/snapshot`, init);
-}
-
-export type CancelRunResponse =
-  | { status: 202; payload: unknown }
-  | { status: 404; payload: unknown }
-  | { status: 409; payload: unknown };
-
-export async function requestRunCancel(runId: string): Promise<CancelRunResponse> {
-  const response = await fetch(`/api/pipeline/runs/${runId}/cancel`, {
-    method: "POST",
-  });
-  const payload = await response.json();
-  if (response.status === 202 || response.status === 404 || response.status === 409) {
-    return { status: response.status, payload } as CancelRunResponse;
-  }
-  throw new Error(getErrorMessage(payload, "failed to cancel selected run"));
-}
-
-export async function calculateRetryPlan(runId: string, stepId?: string, scopeIds: string[] = []): Promise<RetryPlanResponse> {
-  return fetchJSON<RetryPlanResponse>(`/api/pipeline/runs/${encodeURIComponent(runId)}/retry-plan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ step_id: stepId, scope_ids: scopeIds }),
-  });
-}
-
-export async function startTargetedRetry(runId: string, plan: RetryPlanResponse): Promise<RunStartResponse & { parent_run_id: string }> {
-  return fetchJSON<RunStartResponse & { parent_run_id: string }>(`/api/pipeline/runs/${encodeURIComponent(runId)}/retry`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ step_id: plan.requested_step, scope_ids: plan.requested_scopes, plan_hash: plan.plan_hash }),
-  });
 }
