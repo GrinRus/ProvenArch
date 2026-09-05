@@ -1,9 +1,11 @@
 # Что ACP может взять из подхода Karpathy LLM Wiki
 
+> Archived 2026-09-05 from `docs/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md`. This dated research/design proposal is retained as rationale, not an active implementation plan or current contract. Implemented health, citation and Ask-to-Proposal behavior is described in the [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md); future proposals still need an explicit slice.
+
 Дата: 2026-06-18
 
 Источник контекста:
-- `docs/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md`
+- `docs/archive/research/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md`
 - Karpathy gist: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 - текущие ACP specs: `docs/spec/PIPELINE_SPEC.md`, `docs/spec/MODEL_SPEC.md`, `docs/spec/WORKSPACE_SPEC.md`
 

@@ -1,9 +1,11 @@
 # Architecture Change Review — superseded UX/UI exploration
 
+> Archived 2026-09-05 from `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`. This superseded design record is retained for decision traceability; use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) for implementation acceptance. Original historical claims below are preserved.
+
 Статус: **superseded historical exploration; not implementation acceptance**, 2026-07-15.
 
 Единственный актуальный planned UX baseline —
-[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md). Этот документ сохранён для
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](../../UI_TASK_FIRST_PRODUCT_DESIGN.md). Этот документ сохранён для
 decision traceability Epic 20; он не задаёт новые acceptance criteria и не должен использоваться
 как визуальный источник реализации.
 
@@ -809,7 +811,7 @@ separate: source identity must not be confused with success/failure.
 
 The former seven-screen PNG set was removed on 2026-08-11 to prevent it competing with the
 task-first target. The current 13-screen inventory is maintained only in
-[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](../../UI_TASK_FIRST_PRODUCT_DESIGN.md).
 
 ## 17. Implementation sequence and Epic 20 mapping
 

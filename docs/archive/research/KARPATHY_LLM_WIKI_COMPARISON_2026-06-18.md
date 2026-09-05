@@ -1,5 +1,7 @@
 # Karpathy LLM Wiki vs ProvenArch
 
+> Archived 2026-09-05 from `docs/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md`. This dated research/design proposal is retained as rationale, not an active implementation plan or current contract. Implemented health, citation and Ask-to-Proposal behavior is described in the [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md); future proposals still need an explicit slice.
+
 Date: 2026-06-18
 
 ## Scope

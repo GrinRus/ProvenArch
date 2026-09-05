@@ -1,5 +1,7 @@
 # Karpathy LLM Wiki x ProvenArch: integration design
 
+> Archived 2026-09-05 from `docs/KARPATHY_PROVENARCH_INTEGRATION_DESIGN_2026-07-09.md`. This dated research/design proposal is retained as rationale, not an active implementation plan or current contract. Implemented health, citation and Ask-to-Proposal behavior is described in the [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md); future proposals still need an explicit slice.
+
 Дата: 2026-07-09
 
 ## Назначение
@@ -9,8 +11,8 @@
 Документ не меняет product contract сам по себе. Он является decision/design surface для следующих implementation slices.
 
 Связанные документы:
-- `docs/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md`
-- `docs/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md`
+- `docs/archive/research/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md`
+- `docs/archive/research/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md`
 - `docs/PLANS.md` -> `EP-20260623-karpathy-adoption-roadmap`
 - `README.md`
 - `docs/ARCHITECTURE.md`

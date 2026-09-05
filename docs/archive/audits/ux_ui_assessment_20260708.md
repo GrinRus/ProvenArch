@@ -1,5 +1,7 @@
 # UX/UI Assessment - 2026-07-08
 
+> Archived 2026-09-05 from `reports/ux_ui_assessment_20260708.md`. This is a dated UX/QA evidence log, not the current product specification or release verdict. Use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) and [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md). Historical commands and local evidence paths below are preserved; `/tmp` captures are expired or untracked and private `/Users` paths are nonportable. Their availability is not a prerequisite or a claim of this archive.
+
 This report is product UX evidence for the ACP operator console. It is not release readiness evidence and does not replace `release_verdict_<matrix-id>.json`.
 
 ## Product Context
@@ -12,9 +14,9 @@ This report is product UX evidence for the ACP operator console. It is not relea
 
 ## Evidence Inspected
 
-- Project docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/spec/PIPELINE_SPEC.md`, `docs/UI_CONSOLE_V2_DESIGN.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+- Project docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/spec/PIPELINE_SPEC.md`, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
 - Current implementation: `ui/src/components/AppShell.tsx`, `RightInspector.tsx`, `ActivityDrawer.tsx`, `ActiveRunStrip.tsx`, `StagePanels.tsx`, `styles.css`.
-- Existing UX report: `reports/ux_current_state_20260707.md`.
+- Existing UX report: `docs/archive/audits/ux_current_state_20260707.md`.
 - Fresh fake-runtime rendered smoke:
   - build: `ACP_NODE_TOOL_CANDIDATES=/Users/griogrii_riabov/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build`
   - server: `./bin/acp serve --workspace /tmp/provenarch-ui-ux-smoke-workspace.JRJ01W --auto-init --repo-name provenarch --repo-path <repo> --runtime fake --listen 127.0.0.1:18180`

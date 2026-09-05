@@ -1,15 +1,17 @@
 # Architecture Change Review — superseded migration record
 
+> Archived 2026-09-05 from `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`. This superseded design record is retained for decision traceability; use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) for implementation acceptance. Original historical claims below are preserved.
+
 Статус: **superseded historical Epic 20 migration record**, 2026-07-15.
 
 Актуальный planned cutover описан в
-[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md) и Epic 23.
+[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](../../UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md) и Epic 23.
 Ниже сохранена историческая последовательность решений Epic 20; она не задаёт acceptance для
 нового UI.
 
 Этот документ задаёт порядок доставки Epic 20. Он не создаёт второй backlog и не переименовывает
-существующие slice `20A–20N`: [`BACKLOG.md`](BACKLOG.md) остаётся acceptance backlog,
-[`PLANS.md`](PLANS.md) — журналом активного slice, а этот файл — decision-complete картой всего
+существующие slice `20A–20N`: [`BACKLOG.md`](../../BACKLOG.md) остаётся acceptance backlog,
+[`PLANS.md`](../../PLANS.md) — журналом активного slice, а этот файл — decision-complete картой всего
 переезда.
 
 До принятия `20I1` продукт использует Console V2. После принятия `20I1` единственной оболочкой
@@ -63,25 +65,25 @@ boundary или фактический full-workspace `git add -A` contract.
 | Что проверяем | Каноническая ссылка | Как использовать |
 | --- | --- | --- |
 | Целевой UX/UI | [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) | Jobs, IA, URL state, four-axis model, screen/state inventory, interaction, responsive и accessibility acceptance |
-| Scope и зависимости | [`BACKLOG.md` — Epic 20](BACKLOG.md) | Единственные slice ID `20A–20N`, их acceptance и dependency order |
-| Активный slice | [`PLANS.md`](PLANS.md) | Один текущий reviewable ExecPlan и factual progress log |
-| Runtime pipeline | [`spec/PIPELINE_SPEC.md`](spec/PIPELINE_SPEC.md) | Staging, validator, automatic promotion, read-only inputs и failure semantics |
-| HTTP wire contract | [`spec/API_SPEC.md`](spec/API_SPEC.md) | Канонический документированный wire contract; зарегистрированный handler остаётся evidence для ещё не описанного legacy behavior, которое contract-first slice обязан сначала внести в spec |
-| Workspace contract | [`spec/WORKSPACE_SPEC.md`](spec/WORKSPACE_SPEC.md), [`workspace.schema.json`](../schemas/workspace.schema.json) | Persisted setup/runtime profile; изменения требуют полного contract sync |
-| Run snapshot | [`final-run-index.schema.json`](../schemas/final-run-index.schema.json), [`citation-index.schema.json`](../schemas/citation-index.schema.json) | Run identity, staged document paths, citations и fail-closed evidence reads |
-| Schema explanation | [`APPENDIX_SCHEMAS.md`](APPENDIX_SCHEMAS.md) | Human-readable schema map; обновляется вместе со schema/spec slice |
-| Implemented shell | [`README.md`](../README.md), [`ARCHITECTURE.md`](ARCHITECTURE.md) | Что реально доступно в текущем binary до принятого cutover |
+| Scope и зависимости | [`BACKLOG.md` — Epic 20](../../BACKLOG.md) | Единственные slice ID `20A–20N`, их acceptance и dependency order |
+| Активный slice | [`PLANS.md`](../../PLANS.md) | Один текущий reviewable ExecPlan и factual progress log |
+| Runtime pipeline | [`spec/PIPELINE_SPEC.md`](../../spec/PIPELINE_SPEC.md) | Staging, validator, automatic promotion, read-only inputs и failure semantics |
+| HTTP wire contract | [`spec/API_SPEC.md`](../../spec/API_SPEC.md) | Канонический документированный wire contract; зарегистрированный handler остаётся evidence для ещё не описанного legacy behavior, которое contract-first slice обязан сначала внести в spec |
+| Workspace contract | [`spec/WORKSPACE_SPEC.md`](../../spec/WORKSPACE_SPEC.md), [`workspace.schema.json`](../../../schemas/workspace.schema.json) | Persisted setup/runtime profile; изменения требуют полного contract sync |
+| Run snapshot | [`final-run-index.schema.json`](../../../schemas/final-run-index.schema.json), [`citation-index.schema.json`](../../../schemas/citation-index.schema.json) | Run identity, staged document paths, citations и fail-closed evidence reads |
+| Schema explanation | [`APPENDIX_SCHEMAS.md`](../../APPENDIX_SCHEMAS.md) | Human-readable schema map; обновляется вместе со schema/spec slice |
+| Implemented shell | [`README.md`](../../../README.md), [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Что реально доступно в текущем binary до принятого cutover |
 | Historical V2 | [`UI_CONSOLE_V2_DESIGN.md`](UI_CONSOLE_V2_DESIGN.md) | Traceability и current-shell lineage; не target acceptance |
-| Implemented/planned status | [`STAKEHOLDER_DOC.md`](STAKEHOLDER_DOC.md) | Каноническая stakeholder matrix |
-| Deterministic QA | [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) | Required provider-free gates, fixtures, embedded UI bundle policy |
-| Trusted release gate | [`RELEASE_LIVE_E2E_RUNBOOK.md`](RELEASE_LIVE_E2E_RUNBOOK.md) | Только pre-release trusted-machine validation после deterministic gates |
-| Предыдущий UX evidence | [`ux_current_state_20260707.md`](../reports/ux_current_state_20260707.md), [`ux_ui_assessment_20260708.md`](../reports/ux_ui_assessment_20260708.md) | Проверка, что новый slice закрывает исходную task-level проблему, а не только меняет стиль |
-| Repo operating rules | [`AGENTS.md`](../AGENTS.md) | Local-first boundary, contract sync и обязательный DoD |
+| Implemented/planned status | [`STAKEHOLDER_DOC.md`](../../STAKEHOLDER_DOC.md) | Каноническая stakeholder matrix |
+| Deterministic QA | [`TESTING_STRATEGY.md`](../../TESTING_STRATEGY.md) | Required provider-free gates, fixtures, embedded UI bundle policy |
+| Trusted release gate | [`RELEASE_LIVE_E2E_RUNBOOK.md`](../../RELEASE_LIVE_E2E_RUNBOOK.md) | Только pre-release trusted-machine validation после deterministic gates |
+| Предыдущий UX evidence | [`ux_current_state_20260707.md`](../audits/ux_current_state_20260707.md), [`ux_ui_assessment_20260708.md`](../audits/ux_ui_assessment_20260708.md) | Проверка, что новый slice закрывает исходную task-level проблему, а не только меняет стиль |
+| Repo operating rules | [`AGENTS.md`](../../../AGENTS.md) | Local-first boundary, contract sync и обязательный DoD |
 
 ### 3.2 Retired reference screens
 
 Former Epic 20 PNGs were removed on 2026-08-11. Visual review for future implementation uses only
-the 13-screen inventory in [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md).
+the 13-screen inventory in [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](../../UI_TASK_FIRST_PRODUCT_DESIGN.md).
 
 ### 3.3 Внешние interaction references
 
@@ -688,7 +690,7 @@ make verify-ui-determinism UI_SOURCE=WORKTREE
 ```
 
 `make verify-ui-determinism` по умолчанию проверяет текущий worktree; для commit указывается
-`UI_SOURCE=HEAD` или точный ref. Общая процедура находится в [CONTRIBUTING](../CONTRIBUTING.md).
+`UI_SOURCE=HEAD` или точный ref. Общая процедура находится в [CONTRIBUTING](../../../CONTRIBUTING.md).
 `internal/api/ui_dist` версионируется; порядок подготовки change set:
 
 1. `make build` пересобирает source UI и embedded bundle;
@@ -727,7 +729,7 @@ live `init-inspect` меняет только UI journey/selectors/screenshots, 
 taxonomy и snapshot frontend workspace.
 
 Pre-release gate запускается только по
-[`RELEASE_LIVE_E2E_RUNBOOK.md`](RELEASE_LIVE_E2E_RUNBOOK.md) и skill `acp-e2e-live-gate`:
+[`RELEASE_LIVE_E2E_RUNBOOK.md`](../../RELEASE_LIVE_E2E_RUNBOOK.md) и skill `acp-e2e-live-gate`:
 
 - только `scripts/full-run-batch-matrix.sh`;
 - canonical `baseline + parallel-default` sweeps;

@@ -1,5 +1,7 @@
 # UX/UI Assessment - 2026-07-24
 
+> Archived 2026-09-05 from `reports/ux_ui_assessment_20260724.md`. This is a dated UX/QA evidence log, not the current product specification or release verdict. Use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) and [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md). Historical commands and local evidence paths below are preserved; `/tmp` captures are expired or untracked and private `/Users` paths are nonportable. Their availability is not a prerequisite or a claim of this archive.
+
 This report is product UX evidence for the ACP operator console. It is not release readiness evidence and does not replace `release_verdict_<matrix-id>.json`.
 
 ## Product Context
@@ -8,12 +10,12 @@ This report is product UX evidence for the ACP operator console. It is not relea
 - Pipeline: `operator CLI/UI -> Go orchestrator -> runtime provider (fake | claude-code | qwen-code | codex-code) -> staged artifacts -> validator -> arch-workspace files`.
 - Primary users: architects, tech leads and local operators running ACP on their own machine.
 - Current shell: primary navigation `Home / Runs / Knowledge / Changes`, contextual Guided Setup (`Workspace -> Sources -> Analysis brief -> Runner & readiness -> Review & start`), global read-only `Ask`, Git mutations only in `Publish`.
-- Quality bar (from `docs/UI_CONSOLE_V2_DESIGN.md`): a first-time user understands the next action, current blocker, generated evidence and recovery path without reading raw logs first.
-- Prior UX lineage: `reports/ux_current_state_20260707.md` (shell density findings), `reports/ux_ui_assessment_20260708.md` (33 implemented improvement slices). This assessment re-audits the redesigned shell fresh, as a black-box user.
+- Quality bar (from `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`): a first-time user understands the next action, current blocker, generated evidence and recovery path without reading raw logs first.
+- Prior UX lineage: `docs/archive/audits/ux_current_state_20260707.md` (shell density findings), `docs/archive/audits/ux_ui_assessment_20260708.md` (33 implemented improvement slices). This assessment re-audits the redesigned shell fresh, as a black-box user.
 
 ## Evidence Inspected
 
-- Docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/UI_CONSOLE_V2_DESIGN.md`, prior UX reports (2026-07-07, 2026-07-08).
+- Docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`, prior UX reports (2026-07-07, 2026-07-08).
 - Mock e2e gate: `npm run e2e:mock` (7 scenarios) — 7 passed / 0 skipped.
 - Build: `ACP_NODE_TOOL_CANDIDATES=$HOME/.local/share/provenarch/toolchains/node-v22.21.1-darwin-arm64/bin make build`.
 - Server: `./bin/acp serve --workspace /tmp/acp-ux-audit-ws --auto-init --repo-name provenarch --repo-path <repo> --runtime fake --listen 127.0.0.1:18180`.

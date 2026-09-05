@@ -4,6 +4,7 @@ ExecPlan помогает агентам доставлять многошаго
 Файл хранит шаблон, индекс текущей работы и незакрытые планы с явным следующим действием.
 Завершённая инженерная работа и старые status/queue snapshots сохраняются в архиве.
 
+Исторические design/research/audit документы перечислены в [индексе архива](archive/README.md).
 Исторические и закрытые планы вынесены в архив:
 - `docs/archive/PLANS_ARCHIVE_2026-04.md`
 - `docs/archive/PLANS_ARCHIVE_2026-05.md`
@@ -1679,8 +1680,8 @@ still not understand what ProvenArch will read, where it will write, whether the
 actually effective, or what happens after the button is pressed.
 
 This plan refines the existing Epic 20 migration rather than replacing it. It follows
-`docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and
-`docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`, especially `20I1`, `20J1`, `20J2`, `20K`,
+`docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and
+`docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`, especially `20I1`, `20J1`, `20J2`, `20K`,
 `20L` and `20N`. Existing schema, validator-gated promotion, read-only source repository boundary,
 single-workspace server session, process-scoped runtime/provider selection and full-workspace Git
 publication remain authoritative.
@@ -1898,7 +1899,7 @@ Home / Runs / Knowledge / Changes
 - `ui/src/features/changes/ChangesWorkspace.tsx`
 - `ui/src/lib/workflowState.ts`, `ui/src/lib/appRoutes.ts`, onboarding/runtime view models
 - focused component tests, `ui/src/App.test.tsx`, fixture-driven Playwright mock scenarios
-- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and migration-plan acceptance where the final
+- `docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md` and migration-plan acceptance where the final
   evidence/publish navigation decision is refined
 - `docs/spec/API_SPEC.md` and contract fixtures only if Analysis brief launcher persistence or
   another required readback is genuinely absent
@@ -3892,7 +3893,7 @@ Status: active — retained scope; reconcile current implementation before selec
 Next action: Reconcile the recorded open criterion with current code/status before selecting work: Adopt Karpathy's "compiled knowledge artifact" framing for ACP without changing runtime contracts.
 
 ### Context
-The Karpathy LLM Wiki analysis in `docs/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md` and `docs/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md` concluded that ACP should not become a free-form personal/wiki system. The useful import is narrower: treat accepted architecture knowledge as a maintained, Git-versioned, provenance-backed artifact that compounds through explicit review.
+The Karpathy LLM Wiki analysis in `docs/archive/research/KARPATHY_LLM_WIKI_COMPARISON_2026-06-18.md` and `docs/archive/research/KARPATHY_ADOPTION_ANALYSIS_2026-06-18.md` concluded that ACP should not become a free-form personal/wiki system. The useful import is narrower: treat accepted architecture knowledge as a maintained, Git-versioned, provenance-backed artifact that compounds through explicit review.
 
 Current ACP already has the stronger foundation needed for this:
 - source repos and imported docs are raw/read-only inputs;
@@ -4159,7 +4160,7 @@ multi-run proof work; do not duplicate landed code.
 - `ui/src/App.tsx` and/or the touched Review/Publish context component
 - `ui/src/App.test.tsx`
 - deterministic `historical-run-snapshot` UI/Playwright scenario for same-path multi-run evidence
-- `docs/ARCHITECTURE.md`, `docs/UI_CONSOLE_V2_DESIGN.md` and testing docs only where the
+- `docs/ARCHITECTURE.md`, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and testing docs only where the
   implemented source-mode behavior needs synchronization
 
 ### Acceptance criteria

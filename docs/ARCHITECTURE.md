@@ -476,14 +476,16 @@ Execution modes:
 
 ## Outcome-first product surfaces
 
-- `Home` summarizes the promoted architecture, latest run and one next action.
+- `Tasks` presents user intent, selected-task preview and the latest Attempt outcome before
+  runtime diagnostics. `Architecture` owns current promoted knowledge; historical evidence and
+  Git publication belong to the explicitly selected package in `Changes`.
 - `Architecture` reads `GET /api/architecture` and renders Context/Container/Component through a
   read-only React Flow canvas with deterministic ELK layout; Code is an advanced level scoped to a
   selected service. Structured semantic findings/questions/coverage enrich node and edge inspectors,
   while repository, type, canonical owner and model tag/domain filters apply identically to the
   canvas and mobile list. Missing lower-level evidence remains an explicit reason rather than an empty drill-down. Model YAML
   remains authority and Mermaid remains a Git-friendly export.
-- `Runs` presents structured step/unit progress, result/promotion effect and typed recovery before
+- Attempt diagnostics under `Tasks` present structured step/unit progress, result/promotion effect and typed recovery before
   raw diagnostics. After any terminal analysis run, targeted retry/rerun creates a new child run,
   validates every reused collect shard, hashes the complete parent staging tree and never edits
   parent taskrun history. Completed runs expose an explicit step selector; failed/canceled runs
@@ -496,4 +498,5 @@ Execution modes:
 
 ## Progress tracking
 - Каноническая матрица stakeholder-статусов: `docs/STAKEHOLDER_DOC.md` → **Canonical Stakeholder Matrix (source of truth)**.
-- `docs/PLANS.md` содержит инженерный ExecPlan и синхронизированный operational mirror статусов.
+- `docs/PLANS.md` хранит индекс текущей работы, зависимости и незакрытые gates; завершённые
+  планы и прежние status snapshots находятся в [архиве](archive/README.md).

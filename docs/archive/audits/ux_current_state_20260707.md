@@ -1,5 +1,7 @@
 # UX Current State - 2026-07-07
 
+> Archived 2026-09-05 from `reports/ux_current_state_20260707.md`. This is a dated UX/QA evidence log, not the current product specification or release verdict. Use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) and [current architecture](../../ARCHITECTURE.md) and [status matrix](../../STAKEHOLDER_DOC.md). Historical commands and local evidence paths below are preserved; `/tmp` captures are expired or untracked and private `/Users` paths are nonportable. Their availability is not a prerequisite or a claim of this archive.
+
 Diagnostic pass over Console V2. This is UX/live-smoke evidence only, not release readiness and not a machine release verdict.
 
 ## Smoke Evidence
