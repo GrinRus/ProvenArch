@@ -18,8 +18,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtimedrafts"
 )
 
-var ErrRunnerUnavailable = errors.New("codex-code runner is unavailable")
-
 type HeadlessRunner struct {
 	Command string
 	Args    []string

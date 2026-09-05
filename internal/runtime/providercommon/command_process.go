@@ -21,10 +21,6 @@ import (
 	"github.com/GrinRus/ProvenArch/internal/runtime/secretredact"
 )
 
-func runProviderCommand(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy) (acpruntime.Result, error) {
-	return runProviderCommandWithTransition(ctx, task, adapter, policy, "normal")
-}
-
 func runProviderCommandWithTransition(ctx context.Context, task acpruntime.Task, adapter ProviderAdapter, policy ActivityPolicy, transition string) (acpruntime.Result, error) {
 	spec, err := adapter.CommandSpec(task)
 	if err != nil {

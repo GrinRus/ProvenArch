@@ -119,13 +119,6 @@ func sha256Hex(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ScanSelectedRunWithCandidate uses the same provider-free scanner against an
-// in-memory orchestrator technical candidate before effective-verdict
-// persistence. This keeps audit authority acyclic.
-func ScanSelectedRunWithCandidate(ws workspace.Root, runID string, candidate contracts.ValidatorVerdict) Report {
-	return ScanSelectedRunWithCandidateAndRepoRoots(ws, runID, candidate, nil)
-}
-
 // ScanSelectedRunWithCandidateAndRepoRoots runs the selected-run scanner with
 // the resolved repository roots from the current execution. This is required
 // for managed git_url sources: the manifest intentionally keeps the source

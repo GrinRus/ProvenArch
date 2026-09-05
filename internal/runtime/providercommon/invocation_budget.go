@@ -57,10 +57,6 @@ func ProviderInvocationBudgetFromContext(ctx context.Context) *ProviderInvocatio
 	return budget
 }
 
-func WithProviderInvocationTransition(ctx context.Context, transition string) context.Context {
-	return context.WithValue(ctx, invocationTransitionContextKey{}, normalizeInvocationTransition(transition))
-}
-
 func ProviderInvocationTransitionFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return "normal"

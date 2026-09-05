@@ -10,68 +10,10 @@ import (
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
-	"github.com/GrinRus/ProvenArch/internal/model"
+
 	"github.com/GrinRus/ProvenArch/internal/slugutil"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
-
-func renderDomainRuntimeOutput(
-	domainID string,
-	repoScope string,
-	taskEnvelopePath string,
-	runtimeSummary string,
-	apply model.ApplyReport,
-	questionIDs []string,
-	findingIDs []string,
-	unresolved []string,
-) string {
-	builder := strings.Builder{}
-	builder.WriteString(fmt.Sprintf("# Domain Analyst Output: %s\n\n", domainID))
-	builder.WriteString(fmt.Sprintf("- canonical_domain_id: `%s`\n", domainID))
-	builder.WriteString(fmt.Sprintf("- repo_scope: `%s`\n", repoScopeOrUnknown(repoScope)))
-	builder.WriteString(fmt.Sprintf("- task_envelope: `%s`\n", taskEnvelopePath))
-	if strings.TrimSpace(runtimeSummary) == "" {
-		builder.WriteString("- runtime_summary: `none`\n")
-	} else {
-		builder.WriteString(fmt.Sprintf("- runtime_summary: `%s`\n", runtimeSummary))
-	}
-	builder.WriteString(fmt.Sprintf("- model_entity_upserts: %d\n", apply.UpsertedEntities))
-	builder.WriteString(fmt.Sprintf("- model_edge_upserts: %d\n", apply.UpsertedEdges))
-	builder.WriteString(fmt.Sprintf("- related_findings: %s\n", renderBacktickList(findingIDs)))
-	builder.WriteString(fmt.Sprintf("- emitted_questions: %s\n", renderBacktickList(questionIDs)))
-	builder.WriteString(fmt.Sprintf("- unresolved: %s\n", renderPlainList(unresolved)))
-	return builder.String()
-}
-
-func (e *pipelineExecution) renderArchitectSummary() string {
-	builder := strings.Builder{}
-	builder.WriteString("# Architect Aggregation Summary\n\n")
-	builder.WriteString(fmt.Sprintf("- total findings: %d\n", len(e.findings)))
-	builder.WriteString(fmt.Sprintf("- total questions: %d\n", len(e.questions)))
-	builder.WriteString(fmt.Sprintf("- analyzed domains: %d\n", len(e.domainRuns)))
-
-	domainIDs := make([]string, 0, len(e.domainRuns))
-	for domainID := range e.domainRuns {
-		domainIDs = append(domainIDs, domainID)
-	}
-	sort.Strings(domainIDs)
-	if len(domainIDs) == 0 {
-		builder.WriteString("- domain_outputs: none\n")
-		return builder.String()
-	}
-
-	builder.WriteString("- domain_outputs:\n")
-	for _, domainID := range domainIDs {
-		domainRun := e.domainRuns[domainID]
-		builder.WriteString(fmt.Sprintf("  - `%s` (%s)\n", domainID, repoScopeOrUnknown(domainRun.RepoScope)))
-		builder.WriteString(fmt.Sprintf("    - output_path: `%s`\n", domainRun.OutputPath))
-		builder.WriteString(fmt.Sprintf("    - task_envelope: `%s`\n", domainRun.TaskEnvelope))
-		builder.WriteString(fmt.Sprintf("    - related_findings: %s\n", renderBacktickList(domainRun.FindingIDs)))
-		builder.WriteString(fmt.Sprintf("    - emitted_questions: %s\n", renderBacktickList(domainRun.QuestionIDs)))
-		builder.WriteString(fmt.Sprintf("    - unresolved: %s\n", renderPlainList(domainRun.Unresolved)))
-	}
-	return builder.String()
-}
 
 func extractQuestionIDs(questions []contracts.Question) []string {
 	ids := make([]string, 0, len(questions))

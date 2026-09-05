@@ -139,35 +139,6 @@ func (c Compiler) WriteFindings(findings []contracts.Finding, renderCtx ReportRe
 	}, nil
 }
 
-func (c Compiler) WriteDocArtifacts(artifactsInput []contracts.DocArtifact) ([]Artifact, error) {
-	if len(artifactsInput) == 0 {
-		return nil, nil
-	}
-	artifacts := append([]contracts.DocArtifact(nil), artifactsInput...)
-	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].ID < artifacts[j].ID })
-
-	content := strings.Builder{}
-	content.WriteString("# Doc Artifact Metadata\n\n")
-	for _, artifact := range artifacts {
-		content.WriteString(fmt.Sprintf("## %s\n\n", artifact.Title))
-		content.WriteString(fmt.Sprintf("- ID: `%s`\n", artifact.ID))
-		content.WriteString(fmt.Sprintf("- Kind: `%s`\n", artifact.Kind))
-		content.WriteString(fmt.Sprintf("- Path: `%s`\n", artifact.Path))
-		if strings.TrimSpace(artifact.Format) != "" {
-			content.WriteString(fmt.Sprintf("- Format: `%s`\n", artifact.Format))
-		}
-		content.WriteString("\n")
-	}
-
-	path := "reports/taskruns/doc-artifacts.md"
-	if err := c.workspace.WriteFile(path, []byte(content.String())); err != nil {
-		return nil, err
-	}
-	return []Artifact{
-		{Path: path, Kind: "taskrun", Label: "Doc Artifact Metadata"},
-	}, nil
-}
-
 func (c Compiler) WriteDomainOutputs(domainReports map[string]string) ([]Artifact, error) {
 	var artifacts []Artifact
 	domains := make([]string, 0, len(domainReports))
