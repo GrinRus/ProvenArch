@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -115,6 +116,65 @@ func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestAttemptWatcherStopsAfterRunCancellation(t *testing.T) {
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "watcher-cancel")
+	response := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"watcher-cancel-key"}`)
+	var payload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		response.Body.Close()
+		t.Fatalf("decode admission: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("admission failed: status=%d payload=%+v", response.StatusCode, payload)
+	}
+	waitForAttemptStatus(t, server, payload.Attempt.AttemptID, producttasks.AttemptRunning)
+	if err := server.getService().CancelRun(payload.Attempt.RunID); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	waitForTerminalAttempt(t, server, payload.Attempt.AttemptID)
+	waitForAttemptWatchers(t, server)
+}
+
+func TestAttemptWatcherStopsWithServerShutdown(t *testing.T) {
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "watcher-shutdown")
+	response := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"watcher-shutdown-key"}`)
+	var payload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		response.Body.Close()
+		t.Fatalf("decode admission: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("admission failed: status=%d payload=%+v", response.StatusCode, payload)
+	}
+	waitForAttemptStatus(t, server, payload.Attempt.AttemptID, producttasks.AttemptRunning)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown server: %v", err)
+	}
+	waitForAttemptWatchers(t, server)
+	history := server.taskRegistry.Snapshot()
+	attempt, ok := findAttempt(history, created.TaskID, payload.Attempt.AttemptID)
+	if !ok || attempt.Status != producttasks.AttemptCanceled {
+		t.Fatalf("shutdown did not publish canceled Attempt: ok=%v attempt=%+v", ok, attempt)
+	}
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatalf("repeated shutdown: %v", err)
+	}
+}
+
 func TestMissingRuntimeRunIsReconciledAsUnavailable(t *testing.T) {
 	t.Parallel()
 	attempt := readAttemptFixture(t)
@@ -189,4 +249,32 @@ func waitForTerminalAttempt(t *testing.T, server *Server, attemptID string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("attempt %s did not reach terminal state; coordination=%+v", attemptID, server.getService().Coordination())
+}
+
+func waitForAttemptStatus(t *testing.T, server *Server, attemptID string, want producttasks.AttemptStatus) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, attempt := range server.taskRegistry.Snapshot().Attempts {
+			if attempt.AttemptID == attemptID && attempt.Status == want {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("attempt %s did not reach %s before timeout; coordination=%+v", attemptID, want, server.getService().Coordination())
+}
+
+func waitForAttemptWatchers(t *testing.T, server *Server) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		server.attemptWatchWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("attempt watcher did not become quiescent")
+	}
 }

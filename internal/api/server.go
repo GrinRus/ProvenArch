@@ -33,21 +33,24 @@ import (
 )
 
 type Server struct {
-	mu                sync.RWMutex
-	admissionMu       sync.Mutex
-	workspace         workspace.Root
-	workspacePath     string
-	workspaceSelected bool
-	runtimeSelected   bool
-	launcherMode      bool
-	consoleEntered    bool
-	service           *orchestrator.Service
-	taskRegistry      *producttasks.Registry
-	taskRegistryErr   error
-	runtimeConfig     ServerRuntimeConfig
-	serviceFactory    ServiceFactory
-	generation        uint64
-	admissionHook     func(string)
+	mu                 sync.RWMutex
+	admissionMu        sync.Mutex
+	attemptWatchCtx    context.Context
+	attemptWatchCancel context.CancelFunc
+	attemptWatchWG     sync.WaitGroup
+	workspace          workspace.Root
+	workspacePath      string
+	workspaceSelected  bool
+	runtimeSelected    bool
+	launcherMode       bool
+	consoleEntered     bool
+	service            *orchestrator.Service
+	taskRegistry       *producttasks.Registry
+	taskRegistryErr    error
+	runtimeConfig      ServerRuntimeConfig
+	serviceFactory     ServiceFactory
+	generation         uint64
+	admissionHook      func(string)
 }
 
 type ServerRuntimeConfig struct {
@@ -68,7 +71,10 @@ type BuildInfo struct {
 
 type ServiceFactory func(workspace.Root, ServerRuntimeConfig) *orchestrator.Service
 
-const defaultServerShutdownTimeout = 10 * time.Second
+const (
+	defaultServerShutdownTimeout = 10 * time.Second
+	attemptWatcherShutdownGrace  = 500 * time.Millisecond
+)
 
 var errSessionMutationConflict = errors.New("workspace or runtime cannot change while a run is active or queued")
 var errRuntimeSwitchRequiresRestart = errors.New("runtime switch requires server restart after entering Console")
@@ -99,21 +105,24 @@ func NewServer(ws workspace.Root, service *orchestrator.Service) *Server {
 
 func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runtimeConfig ServerRuntimeConfig) *Server {
 	runtimeConfig = normalizeServerRuntimeConfig(runtimeConfig, ServerRuntimeConfig{})
+	attemptWatchCtx, attemptWatchCancel := context.WithCancel(context.Background())
 	if service != nil {
 		service.SetRuntimeMode(runtimeConfig.Mode)
 	}
 	taskRegistry, taskRegistryErr := producttasks.NewRegistry(ws, time.Now)
 	server := &Server{
-		workspace:         ws,
-		workspacePath:     ws.Path,
-		workspaceSelected: true,
-		runtimeSelected:   true,
-		runtimeConfig:     runtimeConfig,
-		service:           service,
-		taskRegistry:      taskRegistry,
-		taskRegistryErr:   taskRegistryErr,
-		consoleEntered:    true,
-		generation:        1,
+		attemptWatchCtx:    attemptWatchCtx,
+		attemptWatchCancel: attemptWatchCancel,
+		workspace:          ws,
+		workspacePath:      ws.Path,
+		workspaceSelected:  true,
+		runtimeSelected:    true,
+		runtimeConfig:      runtimeConfig,
+		service:            service,
+		taskRegistry:       taskRegistry,
+		taskRegistryErr:    taskRegistryErr,
+		consoleEntered:     true,
+		generation:         1,
 	}
 	server.reconcileTaskAttemptsAfterRestart(service, taskRegistry)
 	return server
@@ -121,10 +130,13 @@ func NewServerWithRuntime(ws workspace.Root, service *orchestrator.Service, runt
 
 func NewLauncherServer(runtimeConfig ServerRuntimeConfig, factory ServiceFactory) *Server {
 	runtimeConfig = normalizeServerRuntimeConfig(runtimeConfig, ServerRuntimeConfig{})
+	attemptWatchCtx, attemptWatchCancel := context.WithCancel(context.Background())
 	return &Server{
-		launcherMode:   true,
-		runtimeConfig:  runtimeConfig,
-		serviceFactory: factory,
+		attemptWatchCtx:    attemptWatchCtx,
+		attemptWatchCancel: attemptWatchCancel,
+		launcherMode:       true,
+		runtimeConfig:      runtimeConfig,
+		serviceFactory:     factory,
 	}
 }
 
@@ -215,11 +227,50 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Admission and shutdown share the same lease. This prevents a request from
+	// registering a new watcher while Shutdown is canceling and waiting for the
+	// existing watcher set.
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	service := s.getService()
 	if service == nil {
+		if s.attemptWatchCancel != nil {
+			s.attemptWatchCancel()
+			s.attemptWatchCancel = nil
+		}
+		s.attemptWatchWG.Wait()
 		return nil
 	}
-	return service.Shutdown(ctx)
+
+	// Let the orchestrator publish cancellation/terminal state first. Watchers
+	// remain alive during that transition so the exact Attempt state can be
+	// mirrored before their lifecycle context is canceled below.
+	serviceErr := service.Shutdown(ctx)
+
+	// Give watchers a bounded grace period to mirror the terminal state just
+	// published by the orchestrator. A broken Task-history writer must not make
+	// server shutdown wait forever; the lifecycle context remains the fallback.
+	watchersDone := make(chan struct{})
+	go func() {
+		s.attemptWatchWG.Wait()
+		close(watchersDone)
+	}()
+	graceTimer := time.NewTimer(attemptWatcherShutdownGrace)
+	defer graceTimer.Stop()
+	select {
+	case <-watchersDone:
+	case <-graceTimer.C:
+	}
+	if s.attemptWatchCancel != nil {
+		s.attemptWatchCancel()
+		s.attemptWatchCancel = nil
+	}
+	s.attemptWatchWG.Wait()
+	return serviceErr
 }
 
 func firstError(errs ...error) error {

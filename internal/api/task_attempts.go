@@ -313,12 +313,26 @@ func (s *Server) watchAdmittedAttempt(service *orchestrator.Service, registry *p
 	if service == nil || registry == nil || strings.TrimSpace(runID) == "" || strings.TrimSpace(attemptID) == "" {
 		return
 	}
+	watchCtx := s.attemptWatchCtx
+	if watchCtx == nil {
+		return
+	}
+	s.attemptWatchWG.Add(1)
 	go func() {
+		defer s.attemptWatchWG.Done()
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticker.C:
+			}
 			info, ok := service.GetRun(runID)
 			if !ok {
+				return
+			}
+			if watchCtx.Err() != nil {
 				return
 			}
 			history := registry.Snapshot()
@@ -331,6 +345,9 @@ func (s *Server) watchAdmittedAttempt(service *orchestrator.Service, registry *p
 			if err := registry.Update(func(candidate *producttasks.History) error { return updateAttemptFromRun(candidate, info) }); err != nil {
 				// A transient current/last-good write failure must not permanently
 				// abandon the watcher; the next state transition retries the publish.
+				if watchCtx.Err() != nil {
+					return
+				}
 				continue
 			}
 			if info.Status != orchestrator.RunStatusQueued && info.Status != orchestrator.RunStatusRunning {

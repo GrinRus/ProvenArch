@@ -74,7 +74,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06 merged; REM-07 is the current independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -137,7 +137,7 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the current independent P1 slice while REM-03B remains authorization-gated.
 
 Next action: Deliver REM-07 with its watcher lifecycle invariant, then repeat stabilization/dependency
 checks before selecting the next ready row; keep release status explicitly blocked until REM-03B is
@@ -229,7 +229,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
 | 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
-| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | blocked-by-dependency |
+| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | ready; current slice |
 | 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | blocked-by-dependency |
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | blocked-by-dependency |
@@ -537,6 +537,59 @@ Task/Attempt linkage is absent. Do not touch stabilization-owned paths.
   hung in `git add -A` under concurrent worktree load.
 - 2026-09-05: PR #276 passed all required deterministic CI contexts and was squash-merged into `main`
   as `99c019fca9535cd0906648a2f02af0d57c2b1e61`; `origin/main` was fetched and verified clean.
+
+### REM-07 slice plan (in progress)
+
+**Goal.** Привязать Attempt registry watchers к жизненному циклу API server: watcher должен
+останавливаться на server shutdown, завершаться после terminal run/cancel и не оставлять
+неуправляемые goroutine или race при повторном запуске/закрытии.
+
+**Finding / baseline.** На свежем `origin/main` `watchAdmittedAttempt` запускает `go` без context,
+WaitGroup или cancellation ownership. Цикл выходит только при успешной terminal синхронизации или
+потере run; при shutdown он не получает сигнал и `Server.Shutdown` не ожидает его завершения. При
+неуспешной записи Task history terminal watcher может продолжать тикать после закрытия сервера.
+
+**Readiness.** REM-06 merged as `99c019f`; REM-07 depends only on that lifecycle invariant. Neighbor
+stabilization remains external/blocked at revision 30; no owned semantic/docflow/live paths overlap
+this slice. REM-03B remains explicitly authorization-gated and release-blocking.
+
+**Non-goals.** Не менять Attempt/Task schema или API shape, run retention semantics, provider
+runtime, stabilization-owned paths, GitHub settings, or release policy. Do not add a new watcher
+backend or polling interval redesign.
+
+**Affected paths.** `internal/api/server.go`, `internal/api/task_attempts.go`, focused API watcher
+tests, this ExecPlan and the lifecycle bullet in `docs/TESTING_STRATEGY.md` if wording needs
+clarification. No schema/fixture output changes are expected.
+
+**Implementation boundary.** Give `Server` an owned watcher context, cancellation and WaitGroup;
+register every watcher before launching it; make the loop select on context and ticker; cancel and
+wait watchers from `Server.Shutdown` while holding the admission lease so no new watcher can race
+with Wait. Preserve retry-on-transient Task history write failures until terminal success or server
+cancellation.
+
+**Acceptance / regression.** A running Attempt is mirrored to terminal state; cancellation and
+server shutdown leave no active watcher; repeated Shutdown is safe; `go test ./internal/api` and
+`go test -race ./internal/api` pass. Full DoD remains `make contracts`, `make test`, `make lint`,
+`make build`; no live provider/network execution is required.
+
+**Rollback / stop condition.** Stop if shutdown waits indefinitely on a provider or registry write,
+if a watcher updates a replaced workspace session, or if cancellation suppresses a terminal Attempt
+update that can still be durably published. Roll back if race detection shows Add/Wait overlap or
+if watcher count is not quiescent after shutdown.
+
+- 2026-09-05: Fresh base `origin/main=15c29fc2587402b8f235bfc82de93461ead31241`; neighbor status
+  revision 30 remains blocked/idle with separate uncommitted stabilization changes. No path overlap.
+- 2026-09-05: Baseline code review confirms watcher ownership is absent: `watchAdmittedAttempt`
+  starts an untracked ticker goroutine and `Server.Shutdown` delegates only to orchestrator service
+  shutdown. Focused lifecycle regression will establish the pre-fix leak/quiescence behavior.
+- 2026-09-05: Implemented server-owned watcher context/cancel/WaitGroup under the admission lease;
+  shutdown now lets orchestrator terminalization publish first, gives watchers a bounded 500ms grace
+  window, then cancels and waits. Cancellation and shutdown/repeated-shutdown tests pass, including
+  terminal Attempt mirroring and watcher quiescence.
+- 2026-09-05: Focused API and `-race` API suites pass. `make contracts`, `make lint` and `make build`
+  pass. Full `make test` completed all Go packages except one unrelated load-sensitive
+  `internal/runtime/providercommon/TestRunHeadlessProviderRespectsGlobalInvocationBudget` assertion;
+  the failing test passes in an isolated rerun, so the failure is not in REM-07 paths.
 
 ## EP-20260811-task-attempt-contracts
 
