@@ -339,10 +339,6 @@ func (s *Server) getWorkspacePath() string {
 	return s.sessionSnapshot().WorkspacePath
 }
 
-func (s *Server) hasReadyWorkspace() bool {
-	return s.sessionSnapshot().ready()
-}
-
 func (s *Server) getService() *orchestrator.Service {
 	return s.sessionSnapshot().Service
 }
@@ -366,14 +362,6 @@ func (s *Server) resetTaskRegistryLocked(ws workspace.Root) {
 	if err == nil {
 		s.reconcileTaskAttemptsAfterRestart(s.service, registry)
 	}
-}
-
-func (s *Server) getRuntimeConfig() ServerRuntimeConfig {
-	return s.sessionSnapshot().RuntimeConfig
-}
-
-func (s *Server) isRuntimeSelected() bool {
-	return s.sessionSnapshot().RuntimeSelected
 }
 
 func (s *Server) serviceHasInFlightWorkLocked() bool {

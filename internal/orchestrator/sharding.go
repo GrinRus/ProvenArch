@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"strings"
 	"sync"
 
@@ -31,10 +30,6 @@ type ShardPlanResult struct {
 	SemanticGraph []runtimeShardPlanGraphEdge
 }
 
-type ShardPlanner interface {
-	PlanRuntimeShards(input ShardPlanInput) ShardPlanResult
-}
-
 type defaultShardPlanner struct{}
 
 type ShardScheduleRequest struct {
@@ -44,10 +39,6 @@ type ShardScheduleRequest struct {
 	SummaryState     *runtimeShardSummaryState
 	Options          runtimeShardExecutionOptions
 	TaskSuffixPrefix string
-}
-
-type ShardScheduler interface {
-	ScheduleRuntimeShardRuns(ctx context.Context, request ShardScheduleRequest) ([]runtimeShardRunResult, error)
 }
 
 type defaultShardScheduler struct {

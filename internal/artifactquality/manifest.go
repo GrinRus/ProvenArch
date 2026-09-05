@@ -1,10 +1,6 @@
 package artifactquality
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/GrinRus/ProvenArch/internal/contracts"
@@ -20,30 +16,6 @@ type ManifestAssessment struct {
 	RepoSpecificCitationCount int
 	GenericRuntimeSummaryOnly bool
 	Rich                      bool
-}
-
-func LoadManifestAssessment(writeRoot string) (ManifestAssessment, error) {
-	writeRoot = strings.TrimSpace(writeRoot)
-	if writeRoot == "" {
-		return ManifestAssessment{}, nil
-	}
-	manifestPath := filepath.Join(writeRoot, shardPackManifestFile)
-	raw, err := os.ReadFile(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return ManifestAssessment{}, nil
-		}
-		return ManifestAssessment{}, err
-	}
-	return AssessManifestBytes(raw)
-}
-
-func AssessManifestBytes(raw []byte) (ManifestAssessment, error) {
-	manifest, err := contracts.ParseShardPackManifest(raw)
-	if err != nil {
-		return ManifestAssessment{}, err
-	}
-	return AssessManifest(manifest), nil
 }
 
 func AssessManifest(manifest contracts.ShardPackManifest) ManifestAssessment {
@@ -108,109 +80,4 @@ func HasRepoSpecificCitationSurface(manifest contracts.ShardPackManifest) bool {
 func IsGenericRuntimeSummaryCitation(id string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(id))
 	return normalized == "cite.runtime-summary" || strings.HasPrefix(normalized, "cite.runtime-summary.")
-}
-
-type WriteRootSnapshot struct {
-	root      string
-	backupDir string
-	existed   bool
-}
-
-func SnapshotWriteRoot(root string) (*WriteRootSnapshot, error) {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return &WriteRootSnapshot{}, nil
-	}
-
-	snapshot := &WriteRootSnapshot{root: root}
-	info, err := os.Stat(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return snapshot, nil
-		}
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("write_root is not a directory: %s", root)
-	}
-
-	backupDir, err := os.MkdirTemp("", "acp-write-root-snapshot-*")
-	if err != nil {
-		return nil, err
-	}
-	snapshot.backupDir = backupDir
-	snapshot.existed = true
-	if err := copyDirectoryContents(root, backupDir); err != nil {
-		_ = os.RemoveAll(backupDir)
-		return nil, err
-	}
-	return snapshot, nil
-}
-
-func (s *WriteRootSnapshot) Restore() error {
-	if s == nil || strings.TrimSpace(s.root) == "" {
-		return nil
-	}
-	if err := os.RemoveAll(s.root); err != nil {
-		return err
-	}
-	if !s.existed {
-		return nil
-	}
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
-		return err
-	}
-	return copyDirectoryContents(s.backupDir, s.root)
-}
-
-func (s *WriteRootSnapshot) Cleanup() error {
-	if s == nil || strings.TrimSpace(s.backupDir) == "" {
-		return nil
-	}
-	return os.RemoveAll(s.backupDir)
-}
-
-func copyDirectoryContents(src string, dst string) error {
-	entries := []string{}
-	if err := filepath.Walk(strings.TrimSpace(src), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == src {
-			return nil
-		}
-		entries = append(entries, path)
-		return nil
-	}); err != nil {
-		return err
-	}
-	sort.Strings(entries)
-	for _, path := range entries {
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-			return err
-		}
-	}
-	return nil
 }

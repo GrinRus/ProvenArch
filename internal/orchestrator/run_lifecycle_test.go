@@ -644,39 +644,47 @@ func TestTerminalGuardPersistsFailedHistoryOnContextCancellation(t *testing.T) {
 	}
 }
 
-func TestLoadHistoryFallsBackToLastGoodWhenCurrentIsMalformed(t *testing.T) {
-	ws := createWorkspace(t)
-	startedAt := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
-	service := NewService(WithHistoryWorkspace(ws))
-	if err := service.storeRun(runRecord{
-		info: RunInfo{
-			RunID:     "run_recovered_history",
-			Pipeline:  string(PipelineInit),
-			Status:    RunStatusSucceeded,
-			StartedAt: startedAt,
-		},
-		artifacts: []Artifact{{Path: "reports/as-is/overview.md", Kind: "report", Label: "Overview"}},
-	}); err != nil {
-		t.Fatalf("store run history: %v", err)
-	}
+func TestLoadHistoryFallsBackToLastGood(t *testing.T) {
+	for _, current := range []string{"malformed", "missing"} {
+		t.Run(current, func(t *testing.T) {
+			ws := createWorkspace(t)
+			startedAt := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+			service := NewService(WithHistoryWorkspace(ws))
+			if err := service.storeRun(runRecord{
+				info: RunInfo{
+					RunID:     "run_recovered_history",
+					Pipeline:  string(PipelineInit),
+					Status:    RunStatusSucceeded,
+					StartedAt: startedAt,
+				},
+				artifacts: []Artifact{{Path: "reports/as-is/overview.md", Kind: "report", Label: "Overview"}},
+			}); err != nil {
+				t.Fatalf("store run history: %v", err)
+			}
 
-	if err := os.WriteFile(filepath.Join(ws.Path, runHistoryPath), []byte("{malformed current history\n"), 0o644); err != nil {
-		t.Fatalf("corrupt current history: %v", err)
-	}
+			if current == "missing" {
+				if err := os.Remove(filepath.Join(ws.Path, runHistoryPath)); err != nil {
+					t.Fatalf("remove current history: %v", err)
+				}
+			} else if err := os.WriteFile(filepath.Join(ws.Path, runHistoryPath), []byte("{malformed current history\n"), 0o644); err != nil {
+				t.Fatalf("corrupt current history: %v", err)
+			}
 
-	recovered := NewService(WithHistoryWorkspace(ws))
-	info, ok := recovered.GetRun("run_recovered_history")
-	if !ok {
-		t.Fatalf("expected run to be loaded from last-good history")
-	}
-	if info.Status != RunStatusSucceeded {
-		t.Fatalf("expected recovered run status %s, got %s", RunStatusSucceeded, info.Status)
-	}
-	if len(recovered.historyRecoveryDiagnostics) == 0 {
-		t.Fatalf("expected recovery diagnostic")
-	}
-	if !strings.Contains(recovered.historyRecoveryDiagnostics[0], runHistoryPath+".last-good") {
-		t.Fatalf("expected diagnostic to name last-good path, got %v", recovered.historyRecoveryDiagnostics)
+			recovered := NewService(WithHistoryWorkspace(ws))
+			info, ok := recovered.GetRun("run_recovered_history")
+			if !ok {
+				t.Fatalf("expected run to be loaded from last-good history")
+			}
+			if info.Status != RunStatusSucceeded {
+				t.Fatalf("expected recovered run status %s, got %s", RunStatusSucceeded, info.Status)
+			}
+			if len(recovered.historyRecoveryDiagnostics) == 0 {
+				t.Fatalf("expected recovery diagnostic")
+			}
+			if !strings.Contains(recovered.historyRecoveryDiagnostics[0], runHistoryPath+".last-good") {
+				t.Fatalf("expected diagnostic to name last-good path, got %v", recovered.historyRecoveryDiagnostics)
+			}
+		})
 	}
 }
 

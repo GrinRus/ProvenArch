@@ -497,19 +497,6 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artif
 	return s.runWithID(ctx, request, runID)
 }
 
-func (s *Service) ValidateRuntime(ctx context.Context, manifests ...workspace.Manifest) error {
-	manifest := workspace.Manifest{}
-	if len(manifests) > 0 {
-		manifest = manifests[0]
-	}
-	resolved, err := s.ResolveStepProviderProfile(manifest)
-	if err != nil {
-		return err
-	}
-	resolver := newStepRunnerResolver(s.runnerFactory, resolved.Effective)
-	return resolver.Preflight(ctx)
-}
-
 func (s *Service) runWithID(ctx context.Context, request RunRequest, runID string) (finalInfo RunInfo, finalArtifacts []Artifact, finalErr error) {
 	_ = s.cleanupRunLogs()
 	now := s.clock().UTC()

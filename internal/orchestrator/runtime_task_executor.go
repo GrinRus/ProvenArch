@@ -25,10 +25,6 @@ type RuntimeTaskRequest struct {
 	ContextPackPath string
 }
 
-type RuntimeTaskExecutor interface {
-	RunRuntimeTask(ctx context.Context, request RuntimeTaskRequest) (runtimePreparedExecution, error)
-}
-
 type defaultRuntimeTaskExecutor struct {
 	execution *pipelineExecution
 }
