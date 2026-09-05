@@ -454,7 +454,7 @@ snapshots имеют валидные SHA-256 и все перечисленны
 получает compiled test list через pinned repository
 Go wrapper и требует exact presence каждого переданного имени. Затем он выполняет anchored `-run`
 selection с `-json` и требует top-level `pass` event для каждого имени; `skip`, `fail`, zero-match,
-duplicate или malformed test name блокируют job. Golden workflow передаёт один явный список из пяти
+duplicate или malformed test name блокируют job. Golden workflow передаёт один явный список из шести
 актуальных deterministic tests, поэтому rename/removal не может тихо превратиться в зелёный check.
 
 **Regression strategy.** Contract tests проверяют workflow и runner с provider-free fake Go command:
