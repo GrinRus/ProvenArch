@@ -32,10 +32,6 @@ func runProviderCommandWithTransition(ctx context.Context, task acpruntime.Task,
 	return runCommandSpecWithTransition(ctx, task, spec, policy, transition)
 }
 
-func runCommandSpec(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy) (acpruntime.Result, error) {
-	return runCommandSpecWithTransition(ctx, task, spec, policy, ProviderInvocationTransitionFromContext(ctx))
-}
-
 func runCommandSpecWithTransition(ctx context.Context, task acpruntime.Task, spec CommandSpec, policy ActivityPolicy, transition string) (acpruntime.Result, error) {
 	commandDiag := newProviderCommandDiagnostics(spec, task, policy)
 	transition = normalizeInvocationTransition(transition)

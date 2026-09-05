@@ -190,19 +190,6 @@ func (c Compiler) WriteDomainTaskEnvelopes(envelopes []DomainTaskEnvelope) ([]Ar
 	return artifacts, nil
 }
 
-func (c Compiler) WriteArchitectSummary(summary string, renderCtx ReportRenderContext) ([]Artifact, error) {
-	path := "reports/agent-outputs/architect/summary.md"
-	content := strings.Builder{}
-	writeAnalysisBanner(&content, renderCtx)
-	content.WriteString(summary)
-	if err := c.workspace.WriteFile(path, []byte(content.String())); err != nil {
-		return nil, err
-	}
-	return []Artifact{
-		{Path: path, Kind: "agent-output", Label: "Architect Summary"},
-	}, nil
-}
-
 func (c Compiler) WriteIterationChangelog(runID string, pipeline string, artifacts []Artifact, startedAt time.Time, finishedAt time.Time) (Artifact, error) {
 	datePart := finishedAt.UTC().Format("2006-01-02")
 	path := fmt.Sprintf("reports/changelog/%s-%s.md", datePart, sanitizeProposalSlug(runID))

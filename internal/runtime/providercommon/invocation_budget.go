@@ -14,7 +14,6 @@ const DefaultProviderInvocationBudget = 3
 var ErrProviderInvocationBudgetExceeded = errors.New("provider invocation budget exhausted")
 
 type invocationBudgetContextKey struct{}
-type invocationTransitionContextKey struct{}
 
 // ProviderInvocationBudget bounds provider process starts for one runtime
 // execution unit. The budget is intentionally shared by the normal call and
@@ -55,13 +54,6 @@ func ProviderInvocationBudgetFromContext(ctx context.Context) *ProviderInvocatio
 	}
 	budget, _ := ctx.Value(invocationBudgetContextKey{}).(*ProviderInvocationBudget)
 	return budget
-}
-
-func ProviderInvocationTransitionFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return "normal"
-	}
-	return normalizeInvocationTransition(fmt.Sprint(ctx.Value(invocationTransitionContextKey{})))
 }
 
 func (b *ProviderInvocationBudget) Reserve(transition string) (ProviderInvocationReservation, error) {

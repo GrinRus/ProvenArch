@@ -128,10 +128,6 @@ func ScanSelectedRunWithCandidateAndRepoRoots(ws workspace.Root, runID string, c
 	return scanWithRepoRoots(ws, runID, "selected_run", &candidate, repoRoots)
 }
 
-func ScanPromotedRun(ws workspace.Root, runID string) Report {
-	return scanWithRepoRoots(ws, runID, "promoted_current", nil, nil)
-}
-
 func scan(ws workspace.Root, runID string, scope string, candidate *contracts.ValidatorVerdict) Report {
 	return scanWithRepoRoots(ws, runID, scope, candidate, nil)
 }

@@ -134,7 +134,7 @@ func writeInlineArchitectureHomeArtifacts(t *testing.T, task acpruntime.Task) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runCommandSpec(context.Background(), task, spec, ActivityPolicy{}); err != nil {
+	if _, err := runCommandSpecWithTransition(context.Background(), task, spec, ActivityPolicy{}, "normal"); err != nil {
 		t.Fatalf("write inline Architecture Home artifacts: %v", err)
 	}
 }

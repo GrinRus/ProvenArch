@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
-	"path"
+
 	"sort"
 	"strings"
 
@@ -276,86 +276,4 @@ func filterResolvedValidatorIssues(issues []contracts.ValidatorIssue) ([]contrac
 		filtered = append(filtered, issue)
 	}
 	return filtered, resolved
-}
-
-func (e *pipelineExecution) reconcileEvidenceAdvisoryOnlyVerdict(verdict *contracts.ValidatorVerdict) (bool, error) {
-	if verdict == nil || e.citationIndex == nil || !strings.EqualFold(strings.TrimSpace(verdict.Verdict), "FAIL") {
-		return false, nil
-	}
-
-	issues, ok := evidenceAdvisoryIssues(verdict.Issues, e.citationIndex.Citations)
-	if !ok {
-		return false, nil
-	}
-	if len(issues) == 0 && len(verdict.Findings) == 0 && len(verdict.Questions) == 0 {
-		return false, nil
-	}
-
-	verdictCandidate, err := cloneValidatorVerdict(*verdict)
-	if err != nil {
-		return false, fmt.Errorf("clone evidence-advisory validator verdict: %w", err)
-	}
-	verdictCandidate.Verdict = "PASS"
-	verdictCandidate.Issues = issues
-	verdictCandidate.Summary = appendValidatorRepairNote(
-		verdictCandidate.Summary,
-		"source-evidence observations remain advisory after deterministic staged artifact validation",
-	)
-
-	verdictRaw, err := json.MarshalIndent(&verdictCandidate, "", "  ")
-	if err != nil {
-		return false, fmt.Errorf("marshal evidence-advisory validator verdict: %w", err)
-	}
-	verdictRaw = append(verdictRaw, '\n')
-	repairedVerdict, err := contracts.ParseValidatorVerdict(verdictRaw)
-	if err != nil {
-		return false, fmt.Errorf("parse evidence-advisory validator verdict: %w", err)
-	}
-	*verdict = repairedVerdict
-	return true, nil
-}
-
-func evidenceAdvisoryIssues(issues []contracts.ValidatorIssue, citations []contracts.DocumentCitation) ([]contracts.ValidatorIssue, bool) {
-	citationsByID := make(map[string]contracts.DocumentCitation, len(citations))
-	for _, citation := range citations {
-		citationID := strings.TrimSpace(citation.ID)
-		if citationID != "" {
-			citationsByID[citationID] = citation
-		}
-	}
-
-	reconciled := append([]contracts.ValidatorIssue(nil), issues...)
-	for idx := range reconciled {
-		issue := &reconciled[idx]
-		switch strings.ToLower(strings.TrimSpace(issue.Severity)) {
-		case "warning":
-			continue
-		case "error":
-		default:
-			return nil, false
-		}
-		if strings.TrimSpace(issue.DocumentID) != "" {
-			return nil, false
-		}
-
-		issuePath := normalizedEvidencePath(issue.Path)
-		if issuePath == "" {
-			return nil, false
-		}
-		citationID := strings.TrimSpace(issue.CitationID)
-		citation, exists := citationsByID[citationID]
-		if citationID == "" || !exists || normalizedEvidencePath(citation.Path) != issuePath {
-			return nil, false
-		}
-		issue.Severity = "warning"
-	}
-	return reconciled, true
-}
-
-func normalizedEvidencePath(value string) string {
-	clean := path.Clean(strings.TrimSpace(strings.ReplaceAll(value, "\\", "/")))
-	if clean == "." || clean == "" || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
-		return ""
-	}
-	return strings.TrimPrefix(clean, "./")
 }

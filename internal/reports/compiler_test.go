@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GrinRus/ProvenArch/internal/contracts"
 )
 
 func TestWriteCoverageIncompleteAnalysisUsesExplicitUnknownLanguage(t *testing.T) {
@@ -88,7 +90,7 @@ func TestWriteFindingsIncompleteAnalysisDoesNotClaimNoFindings(t *testing.T) {
 	}
 }
 
-func TestWriteArchitectSummaryIncludesIncompleteBanner(t *testing.T) {
+func TestWriteFindingsIncludesIncompleteBannerAndBody(t *testing.T) {
 	t.Parallel()
 
 	ws := writeReportsWorkspace(t)
@@ -107,19 +109,19 @@ func TestWriteArchitectSummaryIncludesIncompleteBanner(t *testing.T) {
 		Reasons:    []string{"collect_all_shards_failed", "findings_skipped_due_to_unusable_collect"},
 	}
 
-	if _, err := compiler.WriteArchitectSummary("# Architect Aggregation Summary\n\n- total findings: 0\n", renderCtx); err != nil {
-		t.Fatalf("write architect summary: %v", err)
+	if _, err := compiler.WriteFindings([]contracts.Finding{{ID: "finding.owner", Title: "Owner is unknown", Severity: "medium"}}, renderCtx); err != nil {
+		t.Fatalf("write findings: %v", err)
 	}
 
-	content, err := os.ReadFile(filepath.Join(ws.Path, "reports/agent-outputs/architect/summary.md"))
+	content, err := os.ReadFile(filepath.Join(ws.Path, "reports/findings/findings.md"))
 	if err != nil {
-		t.Fatalf("read architect summary: %v", err)
+		t.Fatalf("read findings: %v", err)
 	}
 	text := string(content)
 	if !strings.Contains(text, "Analysis incomplete.") {
 		t.Fatalf("expected incomplete-analysis banner, got:\n%s", text)
 	}
-	if !strings.Contains(text, "# Architect Aggregation Summary") {
-		t.Fatalf("expected architect summary body to remain present, got:\n%s", text)
+	if !strings.Contains(text, "## Owner is unknown") {
+		t.Fatalf("expected finding body to remain present, got:\n%s", text)
 	}
 }
