@@ -234,6 +234,72 @@ repos:
 	assertFileContent(t, filepath.Join(resolved[0].Path, "README.md"), "# source v1\n")
 }
 
+func TestResolveRepoSourcesGitURLMovingBranchUsesFreshRemoteCommit(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for resolver tests")
+	}
+
+	tmp := t.TempDir()
+	sourceRepo := filepath.Join(tmp, "source-repo")
+	bareRepo := filepath.Join(tmp, "remote.git")
+	workspaceRoot := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(sourceRepo, 0o755); err != nil {
+		t.Fatalf("create source repo: %v", err)
+	}
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace root: %v", err)
+	}
+
+	runGit(t, tmp, "init", "--bare", bareRepo)
+	runGit(t, bareRepo, "symbolic-ref", "HEAD", "refs/heads/main")
+	runGit(t, sourceRepo, "init", "-b", "main")
+	runGit(t, sourceRepo, "config", "user.email", "acp@example.local")
+	runGit(t, sourceRepo, "config", "user.name", "ACP")
+	runGit(t, sourceRepo, "remote", "add", "origin", bareRepo)
+	firstSHA := commitFile(t, sourceRepo, "README.md", "# source v1\n", "init")
+	runGit(t, sourceRepo, "push", "-u", "origin", "main")
+
+	writeManifestFile(t, workspaceRoot, `
+version: 1
+repos:
+  - name: source-repo
+    git_url: `+bareRepo+`
+    ref: main
+`)
+
+	ws, err := Open(workspaceRoot)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+
+	resolved, diagnostics := ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != firstSHA {
+		t.Fatalf("expected first branch SHA %s, got %s", firstSHA, got)
+	}
+
+	secondSHA := commitFile(t, sourceRepo, "README.md", "# source v2\n", "update")
+	runGit(t, sourceRepo, "push", "origin", "main")
+
+	resolved, diagnostics = ws.ResolveRepoSources(context.Background(), ResolveOptions{FetchGit: true, VerifyRefs: true})
+	assertNoResolverErrors(t, diagnostics)
+	if len(resolved) != 1 {
+		t.Fatalf("expected one resolved repo, got %d", len(resolved))
+	}
+	if got := strings.TrimSpace(resolved[0].ResolvedSHA); got != secondSHA {
+		t.Fatalf("expected moving branch to resolve fresh SHA %s, got %s", secondSHA, got)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, resolved[0].Path, "rev-parse", "--verify", "HEAD^{commit}")); got != secondSHA {
+		t.Fatalf("expected cache HEAD %s after moving branch, got %s", secondSHA, got)
+	}
+	assertFileContent(t, filepath.Join(resolved[0].Path, "README.md"), "# source v2\n")
+}
+
 func TestResolveRepoSourcesPathRefFallbackToOriginAndHeadMismatchWarning(t *testing.T) {
 	t.Parallel()
 
