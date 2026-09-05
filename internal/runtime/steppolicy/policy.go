@@ -28,16 +28,6 @@ func PrimaryTaskRepoScope(explicit string, scopes []string) string {
 	return ""
 }
 
-func TopLevelSemanticOutputRule(stepID string) string {
-	if isCollectStep(stepID) {
-		return `Do NOT emit any top-level semantic payload on stdout; shard-pack-manifest.json is the only semantic result surface for collect steps.`
-	}
-	if runtimedrafts.IsDraftStep(stepID) {
-		return `Do NOT emit semantic payloads on stdout; runtime draft metadata belongs only inside constitution-draft.json / asis-draft-manifest.json / proposals-draft-manifest.json under write_root.`
-	}
-	return `Do NOT emit semantic payloads on stdout unless the step contract explicitly defines a runtime artifact for them under write_root.`
-}
-
 func ArchitectureHomeProcessNarrationPolicyLine() string {
 	markers := runtimedrafts.ArchitectureHomeForbiddenProcessNarrationMarkers()
 	quoted := make([]string, 0, len(markers))
@@ -1813,25 +1803,6 @@ func ConstitutionDraftManifestExample(task acpruntime.Task) string {
 		return `{"version":1,"run_id":"run-1","step_id":"init.step0.constitution","step_contract":"constitution","agent_role":"architect","outputs":[{"path":"charter-overview.md","canonical_path":"charter/overview.md","kind":"charter","title":"Constitution"},{"path":"baseline-subagents.yaml","canonical_path":"skills/subagents.yaml","kind":"bundle","title":"Baseline Subagents"}]}`
 	}
 	return string(raw)
-}
-
-func ParseRepairHints(stepID string, parseStage string, parseErr error) []string {
-	if parseErr == nil {
-		return nil
-	}
-	lines := []string{}
-	if detail := compactRetryHint(parseErr.Error()); detail != "" {
-		stage := strings.TrimSpace(parseStage)
-		if stage == "" {
-			stage = "unknown"
-		}
-		lines = append(lines, fmt.Sprintf(`- Previous %s validation failure: %s`, stage, detail))
-	}
-	return append(lines,
-		`- Do NOT return semantic payloads on stdout; write the required artifacts and exit.`,
-		`- Do NOT use stdout as a transport for JSON wrappers, tool transcripts, or operation logs.`,
-		`- Keep all semantic state inside the required step artifacts under write_root or draft_final_root.`,
-	)
 }
 
 func CollectArtifactRepairHints(initialProblem string) []string {

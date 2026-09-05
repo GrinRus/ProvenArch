@@ -187,18 +187,6 @@ func normalizeQuestionText(text string) string {
 	return normalizeSemanticKey(text)
 }
 
-func isOwnerMappingsMissing(coverage *contracts.Coverage) bool {
-	if coverage == nil {
-		return false
-	}
-	for _, missing := range coverage.Missing {
-		if canonicalizeCoverageMissingValue(missing) == "owner mappings" {
-			return true
-		}
-	}
-	return false
-}
-
 func guardRefreshCollectSemantic(stepID string, task acpruntime.Task, semantic contracts.SemanticSnapshot) (contracts.SemanticSnapshot, []string) {
 	if strings.TrimSpace(stepID) != "refresh.step1.collect" {
 		return semantic, nil

@@ -253,10 +253,6 @@ def run_probe_command(
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
-def run_artifact_smoke(provider: str, command: str, repo_root: str) -> tuple[bool, str, str]:
-    return run_artifact_smoke_with_env(provider, command, repo_root, None)
-
-
 def run_artifact_smoke_with_env(
     provider: str,
     command: str,
