@@ -59,6 +59,28 @@ func TestGitCommitRecordsExactTaskAttemptPublicationLinkage(t *testing.T) {
 	}
 }
 
+func TestValidatePublicationJournalPathRequiresGitMetadataFile(t *testing.T) {
+	gitDir := filepath.Join(t.TempDir(), ".git")
+	tests := []struct {
+		name      string
+		candidate string
+		wantError bool
+	}{
+		{name: "exact journal path", candidate: filepath.Join(gitDir, publicationJournalGitPath)},
+		{name: "parent traversal", candidate: filepath.Join(gitDir, "..", "acp-publication-journal.json"), wantError: true},
+		{name: "different metadata file", candidate: filepath.Join(gitDir, "config"), wantError: true},
+		{name: "outside metadata directory", candidate: filepath.Join(t.TempDir(), publicationJournalGitPath), wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := validatePublicationJournalPath(gitDir, test.candidate)
+			if (err != nil) != test.wantError {
+				t.Fatalf("validatePublicationJournalPath(%q): err=%v, wantError=%v", test.candidate, err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestGitCommitRejectsPartialPublicationContextWithoutMutation(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git binary is required for git mutation API tests")

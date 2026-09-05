@@ -180,18 +180,42 @@ func samePublicationIntent(left, right publicationIntent) bool {
 }
 
 func publicationJournalPath(ctx context.Context, ws workspace.Root) (string, error) {
+	gitDirValue, err := runGit(ctx, ws.Path, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("resolve Git metadata directory: %w", err)
+	}
+	gitDirValue = strings.TrimSpace(gitDirValue)
+	if gitDirValue == "" {
+		return "", errors.New("Git metadata directory is empty")
+	}
+	gitDir := filepath.FromSlash(gitDirValue)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(ws.Path, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+
 	pathValue, err := runGit(ctx, ws.Path, "rev-parse", "--git-path", publicationJournalGitPath)
 	if err != nil {
 		return "", fmt.Errorf("resolve publication journal: %w", err)
 	}
-	pathValue = strings.TrimSpace(pathValue)
+	pathValue = filepath.FromSlash(strings.TrimSpace(pathValue))
 	if pathValue == "" {
 		return "", errors.New("git publication journal path is empty")
 	}
 	if !filepath.IsAbs(pathValue) {
 		pathValue = filepath.Join(ws.Path, pathValue)
 	}
-	return filepath.Clean(pathValue), nil
+	return validatePublicationJournalPath(gitDir, pathValue)
+}
+
+func validatePublicationJournalPath(gitDir, pathValue string) (string, error) {
+	gitDir = filepath.Clean(gitDir)
+	pathValue = filepath.Clean(pathValue)
+	relative, err := filepath.Rel(gitDir, pathValue)
+	if err != nil || !filepath.IsLocal(relative) || filepath.Clean(relative) != filepath.FromSlash(publicationJournalGitPath) {
+		return "", errors.New("git publication journal path escapes Git metadata directory")
+	}
+	return pathValue, nil
 }
 
 func readPublicationJournal(pathValue string) ([]publicationIntent, error) {
