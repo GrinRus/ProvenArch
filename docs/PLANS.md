@@ -182,6 +182,8 @@ Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b4
 
 - 2026-09-05: Owner extended completion through PR merge into main for every iteration. Integrated independently merged retention fix #276, preserving both plan entries and runtime changes. The initial three audit passes remain evidenced by code/document/reference inventories, caller/contract checks, and a restarted challenge of test-only islands, historical documents and curated inputs; final post-merge revision remains pending.
 
+- 2026-09-05: Fresh integrated-tree pass after the original three audits found two additional orphans: `EditableArtifactOption` belonged to the removed baseline editor, and `contracts.DocArtifact` belonged to the removed `WriteDocArtifacts` writer. Neither has a remaining repository consumer or schema/spec declaration. Removed only these unused language types; no serialized runtime/schema contract changes. Scanned 243 Go files and 141 TypeScript files for isolated declarations and the complete tracked Python script set; the remaining single-reference `ContextBar` belongs to the intentionally retained accepted semantic library. All 423 Markdown links in 176 tracked files resolve locally where applicable. External URL probe returned 46 available destinations and one access-restricted ChatGPT settings URL; examples and loopback addresses were excluded from HTTP liveness claims. Full integrated DoD, sequential merges and post-merge verification are pending.
+
 ## EP-20260905-audit-remediation-program
 
 Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated.
