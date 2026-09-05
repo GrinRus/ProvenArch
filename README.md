@@ -101,11 +101,10 @@ modes; the existing Context/Container/Component explorer remains available as Mo
 service-scoped advanced Code view, structured findings/questions and evidence drill-down. `Tasks`
 uses a selected-task preview and outcome-first detail before exposing Attempt diagnostics. `Settings`
 exposes runner presets plus an advanced workspace, repository, runtime, scope, Git and diagnostics
-disclosure, while
-Runtime diagnostics at `/tasks/legacy` separate provider activity from durable step/shard progress and offer dependency-aware
-child-run retry/rerun after any terminal analysis. Failed runs preselect the failed scope; completed
-runs let the operator choose a step without restarting the full flow. Reused parent shards and aggregated indexes are
-revalidated and any source or staging drift makes the retry plan stale. Promoted snapshots retain
+disclosure. Attempt diagnostics and `/tasks/legacy` are read-only: they show durable progress,
+terminal outcomes and retained evidence. Dependency-aware child-run retry/rerun remains available
+through the compatible [pipeline recovery API](docs/spec/API_SPEC.md#4-pipeline-endpoints), with
+revalidation of reused inputs and stale-plan rejection. Promoted snapshots retain
 their validator-approved semantic payload, so Changes compares individual findings and gaps rather
 than Markdown files. Changes requires an explicit selected review package before publication, and
 Ask is a read-only workspace drawer rather than a blocking primary workflow modal. Mermaid diagrams
