@@ -313,11 +313,14 @@ func (s *Server) watchAdmittedAttempt(service *orchestrator.Service, registry *p
 	if service == nil || registry == nil || strings.TrimSpace(runID) == "" || strings.TrimSpace(attemptID) == "" {
 		return
 	}
-	watchCtx := s.attemptWatchCtx
-	if watchCtx == nil {
+	s.attemptWatchMu.Lock()
+	if s.attemptWatchClosed || s.attemptWatchCtx == nil {
+		s.attemptWatchMu.Unlock()
 		return
 	}
+	watchCtx := s.attemptWatchCtx
 	s.attemptWatchWG.Add(1)
+	s.attemptWatchMu.Unlock()
 	go func() {
 		defer s.attemptWatchWG.Done()
 		ticker := time.NewTicker(250 * time.Millisecond)

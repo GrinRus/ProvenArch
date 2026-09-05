@@ -595,10 +595,11 @@ tests, this ExecPlan and the lifecycle bullet in `docs/TESTING_STRATEGY.md` if w
 clarification. No schema/fixture output changes are expected.
 
 **Implementation boundary.** Give `Server` an owned watcher context, cancellation and WaitGroup;
-register every watcher before launching it; make the loop select on context and ticker; cancel and
-wait watchers from `Server.Shutdown` while holding the admission lease so no new watcher can race
-with Wait. Preserve retry-on-transient Task history write failures until terminal success or server
-cancellation.
+register every watcher before launching it; make the loop select on context and ticker; close watcher
+admission under a dedicated lifecycle lock before `Server.Shutdown` publishes terminal run state,
+then cancel and wait without holding the general admission lease. Serialize repeated shutdown calls
+separately so long context-bound API operations do not make shutdown ignore its deadline. Preserve
+retry-on-transient Task history write failures until terminal success or server cancellation.
 
 **Acceptance / regression.** A running Attempt is mirrored to terminal state; cancellation and
 server shutdown leave no active watcher; repeated Shutdown is safe; `go test ./internal/api` and
@@ -617,10 +618,15 @@ if watcher count is not quiescent after shutdown.
 - 2026-09-05: Baseline code review confirms watcher ownership is absent: `watchAdmittedAttempt`
   starts an untracked ticker goroutine and `Server.Shutdown` delegates only to orchestrator service
   shutdown. Focused lifecycle regression will establish the pre-fix leak/quiescence behavior.
-- 2026-09-05: Implemented server-owned watcher context/cancel/WaitGroup under the admission lease;
-  shutdown now lets orchestrator terminalization publish first, gives watchers a bounded 500ms grace
-  window, then cancels and waits. Cancellation and shutdown/repeated-shutdown tests pass, including
-  terminal Attempt mirroring and watcher quiescence.
+- 2026-09-05: Implemented server-owned watcher context/cancel/WaitGroup; shutdown now lets
+  orchestrator terminalization publish first, gives watchers a bounded 500ms grace window, then
+  cancels and waits. Cancellation and shutdown/repeated-shutdown tests pass, including terminal
+  Attempt mirroring and watcher quiescence.
+- 2026-09-05: Review found that holding the general admission lease across `service.Shutdown` could
+  delay shutdown behind long git/validation handlers. Replaced that coupling with a dedicated watcher
+  lifecycle lock plus serialized shutdown calls; watcher admission closes before terminalization while
+  cancellation remains deferred until the bounded grace window completes. API race and package tests
+  remain green.
 - 2026-09-05: Focused API and `-race` API suites pass. `make contracts`, `make lint` and `make build`
   pass. Full `make test` completed all Go packages except one unrelated load-sensitive
   `internal/runtime/providercommon/TestRunHeadlessProviderRespectsGlobalInvocationBudget` assertion;

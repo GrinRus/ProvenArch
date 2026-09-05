@@ -35,8 +35,11 @@ import (
 type Server struct {
 	mu                 sync.RWMutex
 	admissionMu        sync.Mutex
+	attemptWatchMu     sync.Mutex
+	shutdownMu         sync.Mutex
 	attemptWatchCtx    context.Context
 	attemptWatchCancel context.CancelFunc
+	attemptWatchClosed bool
 	attemptWatchWG     sync.WaitGroup
 	workspace          workspace.Root
 	workspacePath      string
@@ -231,16 +234,24 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	// Admission and shutdown share the same lease. This prevents a request from
-	// registering a new watcher while Shutdown is canceling and waiting for the
-	// existing watcher set.
-	s.admissionMu.Lock()
-	defer s.admissionMu.Unlock()
+	// Serialize repeated/concurrent shutdown calls without blocking admission
+	// handlers that may be finishing a long, context-bound operation.
+	s.shutdownMu.Lock()
+	defer s.shutdownMu.Unlock()
+
+	// Close watcher admission before asking the orchestrator to stop. The
+	// lifecycle lock protects the WaitGroup Add/Wait boundary; cancellation is
+	// deliberately delayed until after terminal run state has been published.
+	s.attemptWatchMu.Lock()
+	s.attemptWatchClosed = true
+	watchCancel := s.attemptWatchCancel
+	s.attemptWatchCancel = nil
+	s.attemptWatchMu.Unlock()
+
 	service := s.getService()
 	if service == nil {
-		if s.attemptWatchCancel != nil {
-			s.attemptWatchCancel()
-			s.attemptWatchCancel = nil
+		if watchCancel != nil {
+			watchCancel()
 		}
 		s.attemptWatchWG.Wait()
 		return nil
@@ -265,9 +276,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	case <-watchersDone:
 	case <-graceTimer.C:
 	}
-	if s.attemptWatchCancel != nil {
-		s.attemptWatchCancel()
-		s.attemptWatchCancel = nil
+	if watchCancel != nil {
+		watchCancel()
 	}
 	s.attemptWatchWG.Wait()
 	return serviceErr
