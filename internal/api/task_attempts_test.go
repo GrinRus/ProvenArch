@@ -85,6 +85,9 @@ func TestTaskAttemptRetryCreatesChildAttempt(t *testing.T) {
 	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == firstPayload.Attempt.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != firstPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
 		t.Fatalf("retry did not create child attempt: status=%d payload=%+v", retry.StatusCode, retryPayload)
 	}
+	// The Attempt watcher persists terminal history after the runtime finishes.
+	// Wait for that write before TempDir cleanup removes the workspace.
+	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
 }
 
 func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {
