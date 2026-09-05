@@ -271,44 +271,28 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 	}
 
 	resolvedSHA := ""
-	if options.VerifyRefs && strings.TrimSpace(repo.Ref) != "" {
-		if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", strings.TrimSpace(repo.Ref)+"^{commit}"); err != nil {
-			if _, checkoutErr := gitExec.Run(ctx, effectiveCacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); checkoutErr != nil {
-				return ResolvedRepo{}, []Diagnostic{{
-					Level:      DiagnosticError,
-					Code:       "workspace.repo.git_url.ref_invalid",
-					Repo:       repo.Name,
-					Path:       effectiveCacheDir,
-					Message:    fmt.Sprintf("cannot checkout ref %q: %v", repo.Ref, checkoutErr),
-					Suggestion: "Use an existing branch/tag/commit in workspace.yaml",
-				}}
-			}
-		}
-	}
-
 	if strings.TrimSpace(repo.Ref) != "" {
-		if _, err := gitExec.Run(ctx, effectiveCacheDir, "checkout", "--force", strings.TrimSpace(repo.Ref)); err != nil {
+		resolvedSHA, err = resolveGitURLRef(ctx, gitExec, effectiveCacheDir, strings.TrimSpace(repo.Ref))
+		if err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
-				Code:       "workspace.repo.git_url.checkout_failed",
+				Code:       "workspace.repo.git_url.ref_invalid",
 				Repo:       repo.Name,
 				Path:       effectiveCacheDir,
-				Message:    err.Error(),
-				Suggestion: "Ensure the requested ref exists and can be checked out",
+				Message:    fmt.Sprintf("cannot resolve ref %q: %v", repo.Ref, err),
+				Suggestion: "Ensure the requested remote branch/tag/commit exists and can be fetched",
 			}}
 		}
-		head, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}")
-		if err != nil {
+		if err := checkoutExactGitCommit(ctx, gitExec, effectiveCacheDir, resolvedSHA); err != nil {
 			return ResolvedRepo{}, []Diagnostic{{
 				Level:      DiagnosticError,
 				Code:       "workspace.repo.git_url.invalid_head",
 				Repo:       repo.Name,
 				Path:       effectiveCacheDir,
-				Message:    err.Error(),
+				Message:    fmt.Sprintf("cannot checkout resolved ref %q at %s: %v", repo.Ref, resolvedSHA, err),
 				Suggestion: "Ensure the requested ref resolves to a valid commit",
 			}}
 		}
-		resolvedSHA = strings.TrimSpace(head)
 	} else {
 		remoteRef, sha, err := resolveGitURLRemoteDefaultHead(ctx, gitExec, effectiveCacheDir)
 		if err != nil {
@@ -349,7 +333,8 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 		resolvedSHA = strings.TrimSpace(head)
 	}
 
-	if _, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
+	head, err := gitExec.Run(ctx, effectiveCacheDir, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
 		return ResolvedRepo{}, []Diagnostic{{
 			Level:      DiagnosticError,
 			Code:       "workspace.repo.git_url.invalid_head",
@@ -359,8 +344,80 @@ func (r Root) resolveGitURLRepo(ctx context.Context, gitExec GitExecutor, repo R
 			Suggestion: "Ensure repository is cloned and has a valid HEAD",
 		}}
 	}
+	if resolvedSHA != "" && strings.TrimSpace(head) != resolvedSHA {
+		return ResolvedRepo{}, []Diagnostic{{
+			Level:      DiagnosticError,
+			Code:       "workspace.repo.git_url.identity_mismatch",
+			Repo:       repo.Name,
+			Path:       effectiveCacheDir,
+			Message:    fmt.Sprintf("resolved ref %q is %s, but cache HEAD is %s", repo.Ref, resolvedSHA, strings.TrimSpace(head)),
+			Suggestion: "Retry source resolution so the ACP-owned cache is checked out at the resolved commit",
+		}}
+	}
 
 	return ResolvedRepo{Name: repo.Name, Source: "git_url", Path: effectiveCacheDir, Ref: repo.Ref, ResolvedSHA: resolvedSHA}, repoDiagnostics
+}
+
+func resolveGitURLRef(ctx context.Context, gitExec GitExecutor, repoPath string, requestedRef string) (string, error) {
+	ref := strings.TrimSpace(requestedRef)
+	if ref == "" {
+		return "", fmt.Errorf("requested ref is empty")
+	}
+
+	candidates := gitURLRefCandidates(ref)
+	tried := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || containsString(tried, candidate) {
+			continue
+		}
+		tried = append(tried, candidate)
+		resolved, err := gitExec.Run(ctx, repoPath, "rev-parse", "--verify", candidate+"^{commit}")
+		if err != nil {
+			continue
+		}
+		resolved = strings.TrimSpace(resolved)
+		if resolved != "" {
+			return resolved, nil
+		}
+	}
+
+	return "", fmt.Errorf("cannot resolve ref %q (tried: %s)", requestedRef, strings.Join(tried, ", "))
+}
+
+func gitURLRefCandidates(ref string) []string {
+	if strings.HasPrefix(ref, "refs/remotes/") {
+		return []string{ref}
+	}
+	if strings.HasPrefix(ref, "origin/") {
+		return []string{"refs/remotes/" + ref, ref}
+	}
+	if strings.HasPrefix(ref, "refs/heads/") {
+		return []string{"refs/remotes/origin/" + strings.TrimPrefix(ref, "refs/heads/")}
+	}
+	if strings.HasPrefix(ref, "refs/tags/") || strings.HasPrefix(ref, "refs/") {
+		return []string{ref}
+	}
+	if isFullCommitSHA(ref) {
+		return []string{ref}
+	}
+	// A plain ref in a remote source is a branch name first. Resolving the
+	// freshly fetched remote-tracking ref avoids reusing a stale local branch.
+	// The explicit tag candidate preserves the documented branch/tag behavior
+	// without allowing a deleted remote branch to fall back to cache state.
+	return []string{"refs/remotes/origin/" + ref, "refs/tags/" + ref}
+}
+
+func isFullCommitSHA(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= '0' && r <= '9') && !(r >= 'a' && r <= 'f') && !(r >= 'A' && r <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveGitURLRemoteDefaultHead(ctx context.Context, gitExec GitExecutor, repoPath string) (string, string, error) {

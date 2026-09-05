@@ -76,7 +76,7 @@ Remediation program и release gates остаются отдельными scope
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved PR merges to main, followed by final revision and closeout |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10 merged; REM-11 is the current independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -184,11 +184,12 @@ Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b4
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09 and REM-10 merged; REM-11 is the current independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Deliver REM-07 with its watcher lifecycle invariant, then repeat stabilization/dependency
-checks before selecting the next ready row; keep release status explicitly blocked until REM-03B is
-authorized and applied with before/after/rollback evidence. REM-25 remains blocked by REM-03..24.
+Next action: Reproduce and deliver REM-11 with a bounded Git change-inventory path,
+then repeat stabilization/dependency checks before selecting the next ready row; keep release status
+explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
+REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -276,11 +277,11 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
 | 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
-| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | blocked-by-dependency |
-| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | blocked-by-dependency |
-| 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
-| 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | blocked-by-dependency |
-| 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | blocked-by-dependency |
+| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | merged in PR #279 |
+| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | merged in PR #281 |
+| 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #283 |
+| 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | merged in PR #285 |
+| 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | ready; next independent slice |
 | 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | blocked-by-dependency |
 | 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | blocked-by-dependency |
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | blocked-by-dependency |
@@ -584,6 +585,260 @@ Task/Attempt linkage is absent. Do not touch stabilization-owned paths.
   hung in `git add -A` under concurrent worktree load.
 - 2026-09-05: PR #276 passed all required deterministic CI contexts and was squash-merged into `main`
   as `99c019fca9535cd0906648a2f02af0d57c2b1e61`; `origin/main` was fetched and verified clean.
+
+### REM-07 slice plan (in progress)
+
+**Goal.** Привязать Attempt registry watchers к жизненному циклу API server: watcher должен
+останавливаться на server shutdown, завершаться после terminal run/cancel и не оставлять
+неуправляемые goroutine или race при повторном запуске/закрытии.
+
+**Finding / baseline.** На свежем `origin/main` `watchAdmittedAttempt` запускает `go` без context,
+WaitGroup или cancellation ownership. Цикл выходит только при успешной terminal синхронизации или
+потере run; при shutdown он не получает сигнал и `Server.Shutdown` не ожидает его завершения. При
+неуспешной записи Task history terminal watcher может продолжать тикать после закрытия сервера.
+
+**Readiness.** REM-06 merged as `99c019f`; REM-07 depends only on that lifecycle invariant. Neighbor
+stabilization remains external/blocked at revision 30; no owned semantic/docflow/live paths overlap
+this slice. REM-03B remains explicitly authorization-gated and release-blocking.
+
+**Non-goals.** Не менять Attempt/Task schema или API shape, run retention semantics, provider
+runtime, stabilization-owned paths, GitHub settings, or release policy. Do not add a new watcher
+backend or polling interval redesign.
+
+**Affected paths.** `internal/api/server.go`, `internal/api/task_attempts.go`, focused API watcher
+tests, this ExecPlan and the lifecycle bullet in `docs/TESTING_STRATEGY.md` if wording needs
+clarification. No schema/fixture output changes are expected.
+
+**Implementation boundary.** Give `Server` an owned watcher context, cancellation and WaitGroup;
+register every watcher before launching it; make the loop select on context and ticker; close watcher
+admission under a dedicated lifecycle lock before `Server.Shutdown` publishes terminal run state,
+then cancel and wait without holding the general admission lease. Serialize repeated shutdown calls
+separately so long context-bound API operations do not make shutdown ignore its deadline. Preserve
+retry-on-transient Task history write failures until terminal success or server cancellation.
+
+**Acceptance / regression.** A running Attempt is mirrored to terminal state; cancellation and
+server shutdown leave no active watcher; repeated Shutdown is safe; `go test ./internal/api` and
+`go test -race ./internal/api` pass. Full DoD remains `make contracts`, `make test`, `make lint`,
+`make build`; no live provider/network execution is required.
+
+**Rollback / stop condition.** Stop if shutdown waits indefinitely on a provider or registry write,
+if a watcher updates a replaced workspace session, or if cancellation suppresses a terminal Attempt
+update that can still be durably published. Roll back if race detection shows Add/Wait overlap or
+if watcher count is not quiescent after shutdown.
+
+- 2026-09-05: Initial slice base was `origin/main=15c29fc2587402b8f235bfc82de93461ead31241`;
+  after cleanup PR #270 merged during implementation, branch was merged with fresh
+  `origin/main=dd686fd4bc6bed2d36618ec80e8c57a491e445e1` before PR checks. Neighbor status revision
+  30 remains blocked/idle with separate uncommitted stabilization changes. No path overlap.
+- 2026-09-05: Baseline code review confirms watcher ownership is absent: `watchAdmittedAttempt`
+  starts an untracked ticker goroutine and `Server.Shutdown` delegates only to orchestrator service
+  shutdown. Focused lifecycle regression will establish the pre-fix leak/quiescence behavior.
+- 2026-09-05: Implemented server-owned watcher context/cancel/WaitGroup; shutdown now lets
+  orchestrator terminalization publish first, gives watchers a bounded 500ms grace window, then
+  cancels and waits. Cancellation and shutdown/repeated-shutdown tests pass, including terminal
+  Attempt mirroring and watcher quiescence.
+- 2026-09-05: Review found that holding the general admission lease across `service.Shutdown` could
+  delay shutdown behind long git/validation handlers. Replaced that coupling with a dedicated watcher
+  lifecycle lock plus serialized shutdown calls; watcher admission closes before terminalization while
+  cancellation remains deferred until the bounded grace window completes. API race and package tests
+  remain green.
+- 2026-09-05: Focused API and `-race` API suites pass. `make contracts`, `make lint` and `make build`
+  pass. Full `make test` completed all Go packages except one unrelated load-sensitive
+  `internal/runtime/providercommon/TestRunHeadlessProviderRespectsGlobalInvocationBudget` assertion;
+  the failing test passes in an isolated rerun, so the failure is not in REM-07 paths.
+- 2026-09-05: PR #279 passed all required deterministic CI contexts and was squash-merged into
+  `main` as `079f9b51c95622abb6fc417234df52b0f1a36d0a`; fresh fetch confirms `origin/main` at the
+  merge commit. REM-07 is closed and REM-08 is the next ready independent P1 slice.
+
+### REM-08 slice plan (merged)
+
+**Goal.** Сохранить immutable admission context queued Attempt до фактического запуска и после
+перезапуска сервиса либо продолжить с тем же exact context, либо fail-closed с понятной диагностикой;
+исключить silent scope/runtime drift.
+
+**Finding / baseline.** На свежем `origin/main=91e52d0c` `CloneAdmittedRuntimeSnapshot` клонировал
+map-поля, но оставлял `RepositoryScopes` общим slice. `StartAsyncRun` также сохранял указатель на
+переданный snapshot в `pendingRun`, поэтому мутация caller-owned slice до запуска очереди могла
+изменить фактически выполненный scope. Restart rehearsal показал, что обычный queued run уже
+terminalizes fail-closed с `run_reconciled_after_restart`, но этот invariant не имел API regression
+coverage на exact Task/Attempt context.
+
+**Readiness.** REM-06 и REM-07 merged; REM-08 не пересекается с соседними semantic/docflow/live
+paths. Соседняя stabilization задача остаётся blocked/idle на revision 30 с незакоммиченными
+изменениями в отдельном checkout. REM-03B остаётся явно authorization-gated и release-blocking.
+
+**Non-goals.** Не менять Task/Attempt schema или API shape, queue capacity, provider defaults,
+restart policy, retention, watcher lifecycle, stabilization-owned paths, GitHub settings или live
+provider matrix.
+
+**Affected paths.** `internal/runtime/admission.go` и его clone regression test,
+`internal/orchestrator/service_runs.go` и queued snapshot test, API restart reconciliation test,
+этот ExecPlan. Schema/examples/fixtures не меняются.
+
+**Implementation boundary.** Глубоко клонировать все reference-поля `AdmittedRuntimeSnapshot` при
+admission до сохранения `RunRequest` в pending queue. Оставить существующую безопасную политику
+restart для queued runs (terminal `run_reconciled_after_restart`), а API reconcile должен сохранить
+неизменными IntentSnapshot и EffectiveRuntime и связать terminal state с теми же Task/Attempt/run
+IDs.
+
+**Acceptance / regression.** Caller mutation после queue admission не меняет persisted/executed
+`RepositoryScopes`; queued Attempt после service restart остаётся exact identity, сохраняет immutable
+intent/effective runtime и получает terminal failed state с `run_reconciled_after_restart`; focused
+runtime/orchestrator/API tests and `-race` pass. Full DoD remains `make contracts`, `make test`,
+`make lint`, `make build`; no live provider/network execution is required.
+
+**Rollback / stop condition.** Stop if a queued run reads caller-owned mutable data, restart
+reconciliation changes immutable Attempt fields, loses exact Task/Attempt/run linkage, or silently
+resumes a queued run without an explicit persisted snapshot. Roll back if schema validation or
+existing queue/restart semantics regress.
+
+- 2026-09-05: Fresh main `91e52d0ccea759894a3c70168b2947ac70cb924e` and neighbor revision 30 checked;
+  no stabilization overlap. Reproduced the shallow `RepositoryScopes` clone and confirmed queued
+  restart currently fails closed, establishing the bounded implementation slice.
+- 2026-09-05: Added deep snapshot cloning at async admission plus runtime and orchestrator regression
+  tests for caller mutation. Added API restart rehearsal proving queued Attempt terminal diagnostic,
+  exact identity and immutable intent/effective runtime are preserved.
+- 2026-09-05: PR #281 passed all 11 required checks and merged as `02086568a785284dbbecadd14c4ecb658961227a`;
+  fresh `origin/main` was fetched. REM-08 is closed and REM-09 is the next independent ready slice.
+
+### REM-09 slice plan (merged)
+
+**Goal.** Для remote `git_url` с moving branch/tag ref фактически использовать и сохранять exact
+commit identity, чтобы fetch не оставлял stale local branch и изменение удалённой ветки между
+validation и execution не превращалось в silent source drift.
+
+**Finding / baseline.** На свежем `origin/main=245f462b` resolver после `git fetch origin` проверяет
+и checkout-ит запрошенный `repo.Ref` напрямую. Для plain branch (например, `main`) это может
+разрешить локальную cache branch, которая осталась на старом commit, тогда как обновлённый
+`origin/main` уже указывает на новый commit. `ResolvedSHA` и `source-revisions.json` в таком случае
+честно описывают stale checkout, а не moving remote ref. Existing tests cover unpinned default
+freshness и pinned SHA stability, но не explicit moving branch ref.
+
+**Readiness.** REM-08 merged; REM-09 затрагивает только workspace source resolver и source-identity
+regressions, не пересекается с соседними semantic/docflow/live stabilization paths. Соседняя
+stabilization задача проверена на revision 30 и остаётся blocked/idle в отдельном checkout.
+REM-03B остаётся явно authorization-gated и release-blocking.
+
+**Non-goals.** Не менять `workspace.yaml` или public JSON schemas, path-source checkout safety,
+credential model, provider/runtime selection, refresh planner semantics, remote network policy или
+stabilization-owned files.
+
+**Affected paths.** `internal/workspace/resolver.go`, `internal/workspace/resolver_test.go`,
+`internal/orchestrator/source_resolution_test.go` only if execution-evidence coverage is needed,
+`docs/spec/WORKSPACE_SPEC.md` and this ExecPlan. Existing `ResolvedRepo.ResolvedSHA`/source-revisions
+contract remains the identity surface; no schema change is expected.
+
+**Implementation boundary.** После fetch разрешать explicit moving refs через свежий
+remote-tracking ref (`origin/<ref>`/`refs/remotes/origin/...`) before any stale local branch;
+resolve to a full commit SHA and detach/reset only the ACP-owned cache to that SHA. Preserve direct
+SHA and tag behavior, keep path sources non-mutating, and ensure persisted run evidence records the
+same cache `HEAD` identity used by execution. Add local bare-remote regression that advances a
+branch between two resolutions and asserts fresh content/SHA plus no stale local-branch checkout.
+
+**Acceptance / regression.** Explicit `git_url` branch ref follows the fetched remote-tracking
+commit after the branch advances; `ResolvedSHA == HEAD` and run/source evidence remain exact and
+reproducible. Pinned SHA and tag behavior remains stable, path verification remains read-only,
+focused resolver/orchestrator tests (including `-race` where applicable) pass, and full DoD remains
+`make contracts`, `make test`, `make lint`, `make build` with no live provider/network dependency.
+
+**Rollback / stop condition.** Stop if a moving remote ref resolves to a pre-fetch local branch,
+if a cache checkout remains attached to a mutable branch, if pinned refs change unexpectedly, or if
+path repositories are mutated. Roll back on source-revision/evidence mismatch, schema drift or any
+unrelated stabilization overlap.
+
+- 2026-09-05: Fresh `origin/main=245f462b` and neighbor stabilization revision 30 checked. Source
+  resolver review identified the stale-local-branch path; existing tests lack moving explicit branch
+  coverage. Implementation remains bounded to ACP-owned git_url caches and commit identity evidence.
+- 2026-09-05: Added remote-ref candidate resolution and detached exact-SHA checkout for fetched
+  `git_url` sources, plus cache `HEAD` identity mismatch diagnostics. Local bare-remote regression
+  now advances explicit `main` and confirms fresh content/SHA; pinned SHA, default-head and path
+  safety coverage remain green. Updated `docs/spec/WORKSPACE_SPEC.md` with the source identity and
+  diagnostic contract.
+- 2026-09-05: Focused and full workspace/orchestrator Go tests passed, including race checks for the
+  moving-ref path. `make contracts`, `make lint` and `make build` passed with local Node 22.22.3
+  override; the full `make test` Go phase passed and the Python suite passed without override. The
+  override run's four node-tool failures were expected fixture-version mismatches (22.22.3 vs
+  repository `.node-version` 22.21.1), not REM-09 regressions.
+- 2026-09-05: PR #283 passed all 11 required checks and merged as `1155f12afdc3c99a5a62cbeee4f21131d51a5e5c`;
+  fresh `origin/main` was fetched. REM-09 is closed and REM-10 is the next independent ready slice.
+
+### REM-10 slice plan (merged)
+
+**Goal.** Сделать публикацию Git и связь с точным Task/Attempt/run recoverable при частичном сбое:
+commit или branch mutation не должен теряться, а Task/Attempt не должен показывать ложный
+`Published`, если запись linkage не завершилась.
+
+**Finding / baseline.** На свежем `origin/main=9a235cda` оба Git mutation handler'а сначала выполняют
+необратимый `git commit`/`git checkout -b`, а затем вызывают `recordTaskPublication`. Если после
+Git side effect запись `task-history.json` падает (ошибка диска, transient write fault или crash
+между операциями), response возвращает `publication_linkage_failed`, но durable registry не содержит
+ни association, ни recovery marker. Повтор операции не может надёжно восстановить уже созданный
+commit, а UI/Task history не имеют доказуемой границы между `Published` и `unavailable`.
+
+**Readiness / parallel stabilization.** REM-09 и plan-sync PR #284 merged в `origin/main=9a235cda`.
+Соседний тред `Проверь UI и UX проекта` проверен непосредственно перед срезом: revision 30,
+`blocked/idle`; его незакоммиченные semantic/docflow/live изменения остаются в отдельном checkout.
+REM-10 не изменяет stabilization-owned paths (`docs/ARCHITECTURE.md`, semantic/docflow runtime и
+live diagnostics) и не зависит от их незавершённого gate. REM-03B остаётся authorization-gated и
+release-blocking.
+
+**Non-goals.** Не менять Task/Attempt JSON schema, Git publication scope, stale-confirmation policy,
+provider/runtime behavior, release settings, UI copy, remote network behavior или Git history.
+Не обещать cross-process rollback Git mutation: recovery должна либо доказать exact operation по
+сохранённой identity, либо оставить explicit pending/unavailable state.
+
+**Affected paths.** `internal/api/task_publication.go`, `internal/api/server.go`, Git mutation/API
+tests, `docs/spec/TASK_SPEC.md`/`docs/spec/API_SPEC.md` only where the recoverable boundary needs
+clarification, and this ExecPlan. No schema or fixture shape changes are expected.
+
+**Implementation boundary.** Перед Git side effect atomically persist a compact, structured
+publication-intent marker in the ACP Git metadata journal (`acp-publication-journal.json`), containing
+exact context, action, target branch and confirmed pre-mutation Git identity/fingerprint. On
+successful linkage, remove that marker after the registry transaction that writes Task and Attempt
+publication; either ordering remains recoverable on restart. On Git failure or no-op, clear the marker
+best-effort without changing a prior linked publication. On server/workspace attach, inspect pending
+markers and auto-link only when a strict proof exists: commit HEAD is exactly one commit over the
+recorded parent with the recorded message, or branch action has the exact target branch and recorded
+HEAD; otherwise keep the marker and leave publication unavailable for explicit recovery. The journal lives in
+`.git` metadata and never becomes a workspace publication artifact.
+The handlers remain fail-closed and never synthesize a publication from recency or a clean tree.
+
+**Acceptance / regression.** Context/journal persistence failure before Git prevents mutation; a
+simulated crash after Git and before linkage leaves a durable intent and a later server reconciliation restores the
+exact Task/Attempt publication for both commit and branch actions; ambiguous or failed Git state
+does not become `linked`; no-op/failure paths do not leave stale intents when cleanup succeeds. Existing
+exact-context, partial-context and stale-confirmation tests remain green. Focused API/tasks tests,
+`-race` checks and full deterministic DoD (`make contracts`, `make test`, `make lint`, `make build`)
+pass without live provider/network execution.
+
+**Rollback / stop condition.** Stop if intent persistence is not atomic, if a pending marker can be
+mistaken for a successful publication, if recovery links an unrelated commit/branch, if normal
+publication leaves permanent control-file drift, or if the slice touches stabilization-owned paths.
+Roll back on Task/Attempt schema drift, changed Git scope or any failure to preserve a previously
+linked publication during a failed subsequent mutation.
+
+- 2026-09-05: Reproduced the partial boundary on `origin/main=9a235cda`: Git mutation is durable
+  before `recordTaskPublication`, while linkage failure returns 500 without a durable recovery
+  record. Neighbor stabilization remains revision 30 `blocked/idle`; no path overlap.
+- 2026-09-05: Implemented an atomic-write Git metadata journal for contextual commit/branch
+  intents. Handlers prepare the journal before side effects, clear it on Git failure/no-op, and
+  remove it after successful Task/Attempt linkage; restart reconciliation requires exact branch/head
+  or one-parent commit plus message proof and leaves ambiguous state unavailable. Added API
+  regressions for commit recovery, branch recovery, ambiguous commit fail-closed behavior and clean
+  no-op cleanup. Full API/tasks tests, race recovery subset, docs guidance checks, contracts and
+  lint/build pass; full Go suite passes and the Python suite has only the known Node 22.22.3 override
+  mismatch in four toolchain fixture assertions (pinned 22.21.1 isolated tests pass).
+- 2026-09-05: Full `go test -race ./internal/api` was attempted after the slice; it remains blocked
+  by pre-existing parallel-runtime races in `internal/orchestrator/pipelineExecution.addArtifacts`
+  observed by unrelated API lifecycle tests. The REM-10 recovery race subset is green and no race
+  touches the journal paths.
+- 2026-09-05: Review hardening constrained the journal path to the exact fixed file inside Git's
+  common metadata directory and added traversal/escape regressions (`4f425cb6`). PR #285 passed all
+  required branch checks (backend, contracts, lint, UI, golden and smoke checks) and squash-merged as
+  `0842930a`; four CodeQL path-injection annotations were reviewed as false positives after the
+  containment guard and their bot review threads were resolved. Fresh `origin/main` was fetched;
+  the neighboring UI/UX stabilization thread remains revision 30 `blocked/idle`, with its owned paths
+  untouched. REM-10 is closed; REM-11 is the next independent P1 slice.
 
 ## EP-20260811-task-attempt-contracts
 
