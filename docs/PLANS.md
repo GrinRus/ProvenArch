@@ -76,7 +76,7 @@ Remediation program и release gates остаются отдельными scope
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved PR merges to main, followed by final revision and closeout |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02 merged; REM-06 is the current independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -184,11 +184,11 @@ Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b4
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01 and REM-02 merged; REM-06 is the current independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Deliver REM-06 with its retention invariant, then repeat stabilization/dependency checks
-before selecting the next ready row; keep release status explicitly blocked until REM-03B is authorized
-and applied with before/after/rollback evidence. REM-25 remains blocked by REM-03..24.
+Next action: Deliver REM-07 with its watcher lifecycle invariant, then repeat stabilization/dependency
+checks before selecting the next ready row; keep release status explicitly blocked until REM-03B is
+authorized and applied with before/after/rollback evidence. REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -529,7 +529,7 @@ valid list/pass проходит; renamed/removed test не проходит lis
   review fix и был squash-merged в `main` как `2c382a235073e9a364efbecc11b7fe0ed07ac225`; после
   merge выполнен `git fetch origin main --prune`, рабочее дерево чистое.
 
-### REM-06 slice plan (in progress)
+### REM-06 slice plan (merged)
 
 **Goal.** Сохранить каждый `queued`/`running` run и связанную с ним Task/Attempt identity/evidence
 при pressure retention; ограничивать retention только terminal run records и не допускать потери
@@ -582,6 +582,8 @@ Task/Attempt linkage is absent. Do not touch stabilization-owned paths.
   pass. `make contracts`, `make lint`, `make build` and doc-sync checks pass; full `make test` reached
   the complete Go suite but was interrupted after an unrelated `matrix_release_contract_test` setup
   hung in `git add -A` under concurrent worktree load.
+- 2026-09-05: PR #276 passed all required deterministic CI contexts and was squash-merged into `main`
+  as `99c019fca9535cd0906648a2f02af0d57c2b1e61`; `origin/main` was fetched and verified clean.
 
 ## EP-20260811-task-attempt-contracts
 
