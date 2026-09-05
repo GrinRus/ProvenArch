@@ -3,6 +3,14 @@
 set -Eeuo pipefail
 
 PROVENARCH_ROOT="${PROVENARCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+MATRIX_DRIVER_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+MATRIX_SOURCE_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse --verify HEAD 2>/dev/null || true)"
+MATRIX_SOURCE_TREE_CLEAN=1
+if [[ -n "$(git -C "$PROVENARCH_ROOT" status --porcelain --untracked-files=all 2>/dev/null || true)" ]]; then
+  MATRIX_SOURCE_TREE_CLEAN=0
+fi
+MATRIX_GENERATOR_ID="scripts/full-run-batch-matrix.sh"
+MATRIX_RELEASE_OVERRIDE=0
 # shellcheck source=scripts/legacy-env-guard.sh
 source "$PROVENARCH_ROOT/scripts/legacy-env-guard.sh"
 # shellcheck source=scripts/repos-meta-fields.sh
@@ -98,7 +106,8 @@ write_matrix_operational_blocker_report() {
   if ! command -v python3 >/dev/null 2>&1; then
     return 0
   fi
-  python3 - "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT" "$MATRIX_DRIVER_LOG" "$reason" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" "${RELEASE_MODE:-0}" <<'PY'
+  python3 - "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_ROOT" "$REPORTS_ROOT" "$MATRIX_STATUS_ROOT" "$MATRIX_DRIVER_LOG" "$reason" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" "${RELEASE_MODE:-0}" "$MATRIX_SOURCE_SHA" "$MATRIX_SOURCE_TREE_CLEAN" <<'PY'
+import hashlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -114,6 +123,8 @@ reason = sys.argv[7]
 selected_providers = [item for item in sys.argv[8].split(",") if item]
 selected_run_indexes = [item for item in sys.argv[9].split(",") if item]
 release_mode = str(sys.argv[10]).strip() == "1"
+source_sha = sys.argv[11].strip()
+source_tree_clean = str(sys.argv[12]).strip() == "1"
 
 now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 status_root.mkdir(parents=True, exist_ok=True)
@@ -266,6 +277,10 @@ if release_mode:
     verdict_payload = {
         "matrix_id": matrix_id,
         "generated_at_utc": now,
+        "evidence_schema_version": 2,
+        "source_sha": source_sha,
+        "source_tree_clean": source_tree_clean,
+        "generator": "scripts/full-run-batch-matrix.sh",
         "verdict": "FAIL",
         "release_state": "RELEASE BLOCKED",
         "profile_sweep_runs": 1,
@@ -279,6 +294,7 @@ if release_mode:
             "blocking_reasons": [reason],
         },
         "records": [record_payload],
+        "evidence_artifacts": {},
     }
 else:
     verdict_payload = {
@@ -292,7 +308,6 @@ else:
         "blocking_reasons": [reason],
         "records": [record_payload],
     }
-verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 title = "Release Verdict" if release_mode else "Matrix Result"
 status_key = "- verdict: FAIL" if release_mode else "- result: FAIL"
 extra_lines = ["- release_state: RELEASE BLOCKED", "- release_contract_status: failed"] if release_mode else ["- mode: non-release"]
@@ -314,6 +329,15 @@ verdict_md.write_text(
     + "\n",
     encoding="utf-8",
 )
+if release_mode:
+    def digest(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    verdict_payload["evidence_artifacts"] = {
+        "verdict_markdown": {"path": verdict_md.name, "sha256": digest(verdict_md)},
+        "profile_matrix_markdown": {"path": profile_matrix_md.name, "sha256": digest(profile_matrix_md)},
+        "profile_matrix_tsv": {"path": profile_matrix_tsv.name, "sha256": digest(profile_matrix_tsv)},
+    }
+verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 PY
 }
 
@@ -1000,6 +1024,20 @@ if [[ ! -f "$E2E_MATRIX_FILE" ]]; then
   die "E2E_MATRIX_FILE does not exist: $E2E_MATRIX_FILE"
 fi
 RELEASE_MODE="$(normalize_release_mode "$E2E_MATRIX_RELEASE_MODE")"
+if [[ "$RELEASE_MODE" == "1" ]]; then
+  CANONICAL_MATRIX_DRIVER_PATH="$(cd "$PROVENARCH_ROOT/scripts" 2>/dev/null && pwd -P)/full-run-batch-matrix.sh"
+  if [[ "$MATRIX_DRIVER_PATH" != "$CANONICAL_MATRIX_DRIVER_PATH" ]]; then
+    die "release-mode requires the canonical matrix driver: $CANONICAL_MATRIX_DRIVER_PATH"
+  fi
+  if [[ -n "$(git -C "$PROVENARCH_ROOT" status --porcelain --untracked-files=all 2>/dev/null)" ]]; then
+    if [[ "${ACP_TEST_ALLOW_DIRTY_SOURCE:-0}" == "1" ]]; then
+      MATRIX_RELEASE_OVERRIDE=1
+      log "release-mode source tree is dirty; accepting only explicit test override ACP_TEST_ALLOW_DIRTY_SOURCE=1"
+    else
+      die "release-mode requires a clean source tree (git status --porcelain is non-empty)"
+    fi
+  fi
+fi
 if [[ ! "$RUN_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   die "RUN_COUNT must be a positive integer, got '$RUN_COUNT'"
 fi
@@ -1012,6 +1050,13 @@ fi
 DEFAULT_BATCH_SCRIPT="$PROVENARCH_ROOT/scripts/full-run-batch.sh"
 if [[ "$RELEASE_MODE" == "1" && "$BATCH_SCRIPT" != "$DEFAULT_BATCH_SCRIPT" && "${ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE:-0}" != "1" ]]; then
   die "release-mode requires the canonical batch script: $DEFAULT_BATCH_SCRIPT"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$BATCH_SCRIPT" != "$DEFAULT_BATCH_SCRIPT" ]]; then
+  MATRIX_RELEASE_OVERRIDE=1
+  MATRIX_GENERATOR_ID="scripts/full-run-batch-matrix.sh (non-canonical batch script override)"
+fi
+if [[ "$RELEASE_MODE" == "1" && "$MATRIX_SOURCE_TREE_CLEAN" != "1" ]]; then
+  MATRIX_GENERATOR_ID="scripts/full-run-batch-matrix.sh (dirty source override)"
 fi
 if [[ ! -x "$BATCH_SCRIPT" ]]; then
   die "batch script is unavailable: $BATCH_SCRIPT"
@@ -1102,6 +1147,7 @@ trap 'on_matrix_exit $?' EXIT
 
 if ! python3 - "$E2E_MATRIX_FILE" "$COMBINATIONS_TSV" "$RELEASE_MODE" "$MATRIX_TIMEOUT_PROFILE_FILE" "$PROVENARCH_ROOT/scripts" <<'PY'
 import sys
+import re
 from pathlib import Path
 
 matrix_path = Path(sys.argv[1]).resolve()
@@ -1227,6 +1273,20 @@ allowed = {
     "shard_discovery_mode": {"heuristics", "semantic"},
 }
 required_release_sweeps = ("baseline", "parallel-default")
+required_release_execution = {
+    "baseline": {
+        "strategy": "sequential",
+        "max_parallel_tasks": 1,
+        "failure_policy": "best_effort",
+        "shard_discovery_mode": "heuristics",
+    },
+    "parallel-default": {
+        "strategy": "parallel",
+        "max_parallel_tasks": 4,
+        "failure_policy": "best_effort",
+        "shard_discovery_mode": "heuristics",
+    },
+}
 
 default_sweep = {
     "id": "baseline",
@@ -1263,7 +1323,14 @@ else:
 
         try:
             max_parallel_raw = item.get("max_parallel_tasks", default_sweep["max_parallel_tasks"])
-            max_parallel_tasks = int(max_parallel_raw)
+            if isinstance(max_parallel_raw, bool):
+                raise ValueError
+            if isinstance(max_parallel_raw, int):
+                max_parallel_tasks = max_parallel_raw
+            elif isinstance(max_parallel_raw, str) and re.fullmatch(r"[0-9]+", max_parallel_raw.strip()):
+                max_parallel_tasks = int(max_parallel_raw.strip())
+            else:
+                raise ValueError
         except Exception:
             raise SystemExit(f"sweeps[{idx}] max_parallel_tasks must be integer, got: {item.get('max_parallel_tasks')}")
         if max_parallel_tasks <= 0:
@@ -1296,6 +1363,18 @@ else:
         )
 
 if release_mode:
+    for sweep in sweep_rows:
+        sweep_id = str(sweep["id"]).strip()
+        expected_execution = required_release_execution.get(sweep_id)
+        if expected_execution is None:
+            continue
+        for key, expected in expected_execution.items():
+            observed = sweep.get(key)
+            if observed != expected:
+                raise SystemExit(
+                    "release-mode sweep execution mismatch: "
+                    f"{sweep_id}.{key} must be {expected!r}, got {observed!r}"
+                )
     observed_sweep_ids = {str(item["id"]).strip() for item in sweep_rows}
     required_sweep_ids = set(required_release_sweeps)
     missing_sweeps = sorted(required_sweep_ids - observed_sweep_ids)
@@ -1574,6 +1653,20 @@ CURRENT_PROFILE_STATUS_FILE=""
 
 reconcile_stale_profile_statuses
 
+# A release qualification can run for hours. Re-check the source identity and working tree
+# immediately before aggregating child evidence so a tracked mutation during the run cannot be
+# mislabeled as clean evidence for the original SHA.
+MATRIX_SOURCE_RECHECK_SHA="$(git -C "$PROVENARCH_ROOT" rev-parse --verify HEAD 2>/dev/null || true)"
+MATRIX_SOURCE_RECHECK_DIRTY="$(git -C "$PROVENARCH_ROOT" status --porcelain --untracked-files=all 2>/dev/null || true)"
+if [[ "$MATRIX_SOURCE_RECHECK_SHA" != "$MATRIX_SOURCE_SHA" || -n "$MATRIX_SOURCE_RECHECK_DIRTY" ]]; then
+  MATRIX_SOURCE_TREE_CLEAN=0
+  if [[ "$RELEASE_MODE" == "1" ]]; then
+    MATRIX_RELEASE_OVERRIDE=1
+    MATRIX_GENERATOR_ID="scripts/full-run-batch-matrix.sh (source changed during run)"
+  fi
+  log "source changed during matrix run; final evidence is release-blocked (start_sha=${MATRIX_SOURCE_SHA:-missing} end_sha=${MATRIX_SOURCE_RECHECK_SHA:-missing})"
+fi
+
 MATRIX_REPORT_MD="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.md"
 MATRIX_REPORT_TSV="$REPORTS_ROOT/profile_matrix_${MATRIX_ID}.tsv"
 if [[ "$RELEASE_MODE" == "1" ]]; then
@@ -1587,11 +1680,13 @@ if [[ "${MATRIX_TEST_TRUNCATE_RECORDS_JSONL:-0}" == "1" ]]; then
   : > "$RECORDS_JSONL"
 fi
 
-python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$RESULT_MD" "$RESULT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
-import json
+python3 - "$RECORDS_JSONL" "$MATRIX_STATUS_ROOT" "$MATRIX_REPORT_MD" "$MATRIX_REPORT_TSV" "$RESULT_MD" "$RESULT_JSON" "$MATRIX_ID" "$RELEASE_MODE" "$RUN_COUNT" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" "$MATRIX_SOURCE_SHA" "$MATRIX_SOURCE_TREE_CLEAN" "$MATRIX_GENERATOR_ID" "$MATRIX_RELEASE_OVERRIDE" <<'PY'
+import hashlib
 import os
 import re
+import shutil
 import sys
+import json
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1608,10 +1703,43 @@ release_mode = str(sys.argv[8]).strip() == "1"
 run_count = int(sys.argv[9])
 selected_providers = [item.strip() for item in str(sys.argv[10]).split(",") if item.strip()]
 selected_run_indexes = [item.strip() for item in str(sys.argv[11]).split(",") if item.strip()]
+source_sha = sys.argv[12].strip()
+source_tree_clean = str(sys.argv[13]).strip() == "1"
+generator_id = sys.argv[14].strip()
+release_override = str(sys.argv[15]).strip() == "1"
 
 
 def record_key(payload: dict[str, object]) -> tuple[str, str]:
     return (str(payload.get("profile_id", "")).strip(), str(payload.get("sweep_id", "")).strip())
+
+
+def artifact_reference(value: object, reports_root: Path) -> str:
+    path = Path(str(value)).resolve()
+    try:
+        return path.relative_to(reports_root.resolve()).as_posix()
+    except ValueError:
+        return str(value)
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def materialize_artifact(value: object, key: str, record: dict[str, object]) -> tuple[str, str]:
+    source = Path(str(value)).resolve()
+    profile = re.sub(r"[^A-Za-z0-9._-]+", "_", str(record.get("profile_id", "profile")))
+    sweep = re.sub(r"[^A-Za-z0-9._-]+", "_", str(record.get("sweep_id", "sweep")))
+    suffix = source.suffix or ".txt"
+    destination = verdict_json.parent / f"artifact_{matrix_id}_{profile}_{sweep}_{key}{suffix}"
+    if source.is_file() and source.stat().st_size > 0:
+        binding = (
+            f"\n# acp_record_profile_id: {record.get('profile_id', '')}\n"
+            f"# acp_record_sweep_id: {record.get('sweep_id', '')}\n"
+            f"# acp_record_batch_id: {record.get('batch_id', '')}\n"
+        ).encode("utf-8")
+        destination.write_bytes(source.read_bytes() + binding)
+        return destination.relative_to(verdict_json.parent).as_posix(), file_digest(destination)
+    return destination.relative_to(verdict_json.parent).as_posix(), ""
 
 
 records_by_key: dict[tuple[str, str], dict[str, object]] = {}
@@ -1677,6 +1805,20 @@ for record in records:
             record["failure_reason"] = "infra_incomplete_cycle"
 
 required_release_sweeps = ("baseline", "parallel-default")
+required_release_execution = {
+    "baseline": {
+        "strategy": "sequential",
+        "max_parallel_tasks": "1",
+        "failure_policy": "best_effort",
+        "shard_discovery_mode": "heuristics",
+    },
+    "parallel-default": {
+        "strategy": "parallel",
+        "max_parallel_tasks": "4",
+        "failure_policy": "best_effort",
+        "shard_discovery_mode": "heuristics",
+    },
+}
 release_profile_order = ("single-path", "single-git_url", "multi-path", "multi-git_url")
 required_release_providers = ("qwen-code", "claude-code", "codex-code")
 
@@ -2185,6 +2327,12 @@ observed_profile_sweep_runs = len(observed_pairs)
 missing_profile_sweep_pairs: list[str] = []
 extra_profile_sweep_pairs: list[str] = []
 if release_mode:
+    if not source_tree_clean:
+        release_contract_blockers.append("source_tree_clean=false")
+    if release_override:
+        release_contract_blockers.append("release_evidence_override_used=true")
+    if generator_id != "scripts/full-run-batch-matrix.sh":
+        release_contract_blockers.append(f"generator={generator_id}")
     required_sweeps = list(required_release_sweeps)
     required_sweep_set = set(required_sweeps)
     observed_sweep_set = set(observed_sweeps)
@@ -2266,6 +2414,22 @@ for rec in records:
     execution_max_parallel = str((execution or {}).get("max_parallel_tasks", "-"))
     execution_failure_policy = str((execution or {}).get("failure_policy", "-"))
     execution_shard_mode = str((execution or {}).get("shard_discovery_mode", "-"))
+    if release_mode:
+        expected_execution = required_release_execution.get(str(rec.get("sweep_id", "")).strip())
+        if expected_execution is not None:
+            observed_execution = {
+                "strategy": execution_strategy,
+                "max_parallel_tasks": execution_max_parallel,
+                "failure_policy": execution_failure_policy,
+                "shard_discovery_mode": execution_shard_mode,
+            }
+            for key, expected in expected_execution.items():
+                if observed_execution.get(key) != expected:
+                    release_contract_blockers.append(
+                        "execution_profile_mismatch="
+                        f"{rec.get('profile_id', '-')}/{rec.get('sweep_id', '-')}.{key}="
+                        f"{observed_execution.get(key)!r} (expected {expected!r})"
+                    )
     raw_output_refs = collect_raw_output_refs(rec)
     authority_sources = stats.get("authority_source_values")
     authority_audits = stats.get("promotion_audit_values")
@@ -2279,6 +2443,18 @@ for rec in records:
         public_authority_audit = next(iter(authority_audits)) if len(authority_audits) == 1 else "conflict"
     else:
         public_authority_audit = "missing_or_invalid"
+
+    artifact_refs: dict[str, str] = {}
+    artifact_digests: dict[str, str] = {}
+    for artifact_key in ("run_matrix_tsv", "run_matrix_md", "frontend_matrix_md", "execution_report_md"):
+        if release_mode:
+            artifact_ref, artifact_digest = materialize_artifact(rec.get(artifact_key, "-"), artifact_key, rec)
+        else:
+            artifact_ref, artifact_digest = str(rec.get(artifact_key, "-")), ""
+        artifact_refs[artifact_key] = artifact_ref
+        artifact_digests[artifact_key] = artifact_digest
+        if release_mode and not artifact_digest:
+            release_contract_blockers.append(f"missing_artifact={artifact_key}:{artifact_ref}")
 
     tsv_lines.append(
         "\t".join(
@@ -2400,17 +2576,16 @@ for rec in records:
                 "promotion_audit_result": public_authority_audit,
             },
             "artifacts": {
-                "run_matrix_tsv": rec["run_matrix_tsv"],
-                "run_matrix_md": rec["run_matrix_md"],
-                "frontend_matrix_md": rec["frontend_matrix_md"],
-                "execution_report_md": rec["execution_report_md"],
+                **artifact_refs,
+                "artifact_digests": artifact_digests,
                 "driver_log": rec["driver_log"],
-                "inventory_json": rec.get("inventory_json", "-"),
+                "inventory_json": artifact_reference(rec.get("inventory_json", "-"), verdict_json.parent),
                 "raw_output_ref_count": len(raw_output_refs),
             },
         }
     )
 
+release_contract_status = "passed" if not release_contract_blockers else "failed"
 release_contract_failed = release_mode and release_contract_status != "passed"
 verdict = "PASS" if strict_fail_count == 0 and not release_contract_failed else "FAIL"
 release_state = "RELEASE READY" if verdict == "PASS" else "RELEASE BLOCKED"
@@ -2541,6 +2716,10 @@ if release_mode:
     verdict_payload = {
         "matrix_id": matrix_id,
         "generated_at_utc": generated_at,
+        "evidence_schema_version": 2,
+        "source_sha": source_sha,
+        "source_tree_clean": source_tree_clean,
+        "generator": generator_id,
         "verdict": verdict,
         "release_state": release_state,
         "profile_sweep_runs": len(verdict_records),
@@ -2568,6 +2747,7 @@ if release_mode:
             "blocking_reasons": release_contract_blockers,
         },
         "records": verdict_records,
+        "evidence_artifacts": {},
     }
 else:
     matrix_blockers = [
@@ -2593,6 +2773,12 @@ else:
     }
 
 verdict_md.write_text("\n".join(verdict_lines) + "\n", encoding="utf-8")
+if release_mode:
+    verdict_payload["evidence_artifacts"] = {
+        "verdict_markdown": {"path": verdict_md.name, "sha256": file_digest(verdict_md)},
+        "profile_matrix_markdown": {"path": out_md.name, "sha256": file_digest(out_md)},
+        "profile_matrix_tsv": {"path": out_tsv.name, "sha256": file_digest(out_tsv)},
+    }
 verdict_json.write_text(json.dumps(verdict_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 PY
 

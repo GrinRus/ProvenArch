@@ -356,10 +356,70 @@ over the stabilization-owned set.
 
 ### Progress log
 
+### REM-01 slice plan (in progress)
+
+**Goal.** Закрыть P0 false-green boundary вокруг release evidence: verifier должен принимать только
+release verdict, сформированный текущим deterministic matrix generator, с полным profile/sweep/provider
+contract, свежим timestamp и source SHA квалификации, который является предком проверяемого tag commit. Companion verdict
+Markdown/profile matrix и оба accepted SWE assessment должны быть рядом с JSON и взаимно согласованы.
+
+**Non-goals.** Не запускать live providers, не менять canonical release matrices, не менять product
+API/schema/runtime semantics, не принимать diagnostic/non-release results и не ослаблять owner-waiver
+policy. Waiver остаётся отдельным `UNQUALIFIED PRERELEASE` escape hatch, но принимает только exact
+tag-scoped filename/payload и не может быть использован как `RELEASE READY` evidence.
+
+**Affected paths.** `scripts/full-run-batch-matrix.sh`, `scripts/verify-release-verdict.py`,
+`scripts/verify-release-owner-waiver.py`, `.github/workflows/release.yml`, matching release tests,
+`docs/RELEASE_LIVE_E2E_RUNBOOK.md`, `docs/TESTING_STRATEGY.md` и эта plan запись. Stabilization-owned
+paths не затрагиваются.
+
+**Implementation boundary.** Generator writes `evidence_schema_version`, `source_sha`, clean-tree
+provenance, generator identity and a complete artifact manifest for release verdicts (including
+operational-preflight failures). Release planning and verifier both enforce the canonical execution
+profiles (`baseline=sequential/1/best_effort/heuristics`, `parallel-default=parallel/4/best_effort/heuristics`),
+the exact record/profile/sweep/provider cardinality, zero runtime-flow issue counters, zero provider
+budget exhaustion, and canonical Provider Matrix/Run Details evidence. It rejects artifact-quality
+findings that producer would promote to a hard failure, release-blocking per-run issue tokens, and
+source-tree/SHA drift detected at final aggregation, while preserving the producer's
+`artifact_quality_status=needs_review` analysis signal when no hard artifact failure is present and
+leaving final acceptance to the required SWE assessment. Verifier validates required non-empty artifact files with SHA-256
+digests and cross-file identity, rejects stale/future evidence using a bounded age, and when invoked by
+tag workflow requires the payload source SHA to be an ancestor of the exact commit resolved by
+`GITHUB_SHA`/`refs/tags/<tag>`. Workflow passes tag/source context explicitly and rejects ambiguous
+evidence-mode configuration. Waiver verifier additionally enforces the exact tracked
+`reports/release_owner_waiver_<tag>.json` target and rejects unknown waiver fields/requirements.
+
+**Regression strategy.** Add provider-free fixtures for missing provenance, stale/future timestamps,
+source/tag mismatch, noncanonical sweep execution, non-zero runtime-flow issue counters, incomplete/
+duplicate records, missing or mismatched companion files, fabricated minimal payloads, contradictory
+Provider Matrix/Run Details tables, release-blocking per-run issues, mid-run source mutation,
+over-broad waiver filenames/fields and valid generated evidence.
+Keep matrix driver tests asserting generated release evidence carries provenance; run focused Python
+suites first, then `make contracts`, `make test`, `make lint`, `make build`.
+
+**Rollback / stop condition.** Revert the single PR if the verifier cannot distinguish a generated
+release fixture from any negative fixture without changing matrix execution behavior. Stop before PR
+delivery if the active stabilization task changes release-owned paths or if tag/source semantics remain
+ambiguous; record the exact blocker and do not substitute a weaker freshness check.
+
 - 2026-09-05: Создан follow-up remediation ExecPlan на baseline `c6d46ce`; соседняя задача
   `Проверь UI и UX проекта` подтверждена active во время Codex medium live matrix. Зафиксированы
-  owned paths, dynamic readiness и isolated-worktree protocol. Следующая задача — `REM-01`; ни один
-  product remediation slice и remediation goal этим planning change не запущен.
+  owned paths, dynamic readiness и isolated-worktree protocol. `REM-01` запущен в отдельной ветке;
+  stabilization-owned paths остаются нетронутыми.
+- 2026-09-05: `REM-01` реализован от свежего `origin/main` `91509c08f13c5461bf5ed6a0b209efb1a38243c4`;
+  release evidence теперь fail-closed по provenance, canonical execution map, runtime/provider
+  counters, artifact digests и Provider Matrix/Run Details. Полные focused suites зелёные
+  (`verify_release_verdict_test` 24/24, `matrix_release_contract_test` 41/41); contracts, lint и
+  build также прошли. Перед delivery повторно проверен active stabilization lane; его owned paths
+  не изменялись.
+- 2026-09-05: Соседний stabilization lane завершил текущую попытку в статусе blocked из-за
+  внешней нехватки диска/доступности Claude; его изменения остаются незакоммиченными в отдельном
+  checkout. Поэтому `REM-01` не включает semantic/docflow paths и не считает соседний результат
+  merge-ready доказательством закрытия stabilization findings.
+- 2026-09-05: Финальный review выявил и закрыл TOCTOU между началом matrix-run и итоговой агрегацией,
+  а также fail-open parsing per-run `issues`; verifier теперь использует явный allowlist допустимых
+  diagnostic analysis/recovery signals и блокирует неизвестные либо runtime/contract/artifact/
+  reliability issues. Добавлены mid-run mutation и allowlist/forbidden-token regression tests.
 
 ## EP-20260811-task-attempt-contracts
 

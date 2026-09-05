@@ -94,6 +94,8 @@ class ReleaseDistributionTest(unittest.TestCase):
         self.assertIn("--matrix-ids", verify_step["run"])
         self.assertIn("--matrix-id", verify_step["run"])
         self.assertIn("--verdict-path", verify_step["run"])
+        self.assertIn("--tag", verify_step["run"])
+        self.assertIn("--source-sha", verify_step["run"])
 
         self.assertEqual("ubuntu-latest", job["runs-on"])
         self.assertEqual("verify-release-evidence", job["needs"])

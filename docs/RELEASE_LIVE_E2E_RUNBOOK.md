@@ -664,7 +664,7 @@ Pre-tag/offline check:
   reports/release_verdict_<ftgo-sentry-matrix-id>.json
 ```
 
-Скрипт проверяет один или несколько уже созданных release-mode verdict JSON: `verdict=PASS`, `release_state=RELEASE READY`, `release_contract.mode=release`, `release_contract.contract_status=passed`, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. Для каждого constituent он проверяет два companion reports рядом с verdict JSON: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`, оба с matching `matrix_id` и `accepted` decision. Повторяющийся `matrix_id` блокирует composite check. Verifier не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
+Скрипт проверяет один или несколько уже созданных release-mode verdict JSON: `verdict=PASS`, `release_state=RELEASE READY`, `evidence_schema_version=2`, валидный `source_sha`, clean-tree/generator provenance, свежий UTC timestamp, канонические execution settings (`baseline=sequential/1/best_effort/heuristics`, `parallel-default=parallel/4/best_effort/heuristics`), нулевые runtime-flow issue counters, полный двух-sweep/two-profile/provider contract, exact release providers `qwen-code|claude-code|codex-code`, selected run indexes `["1"]`, и `strict_status=passed` во всех records. При передаче `--tag` и `--source-sha` verifier дополнительно требует, чтобы source SHA квалификации был предком точного commit тега в checkout, а `--source-sha` и tag указывали на один release commit; это обязательный режим GitHub tag workflow. Для каждого constituent он проверяет рядом с verdict JSON matching `release_verdict_<matrix-id>.md`, `profile_matrix_<matrix-id>.md/.tsv`, их SHA-256 manifest, реальные непустые per-record execution artifacts с согласованными Provider Matrix и Run Details таблицами и два companion reports: `swe_ux_assessment_<matrix-id>.md` и `swe_artifact_quality_assessment_<matrix-id>.md`. Оба assessment должны содержать matching `matrix_id`, `source_sha`, `assessed_by`, свежий `assessed_at_utc`, ссылку на точный verdict и `accepted` decision. Повторяющийся `matrix_id`, неполный/сфабрикованный payload или stale/future evidence блокируют composite check. Verifier не запускает live harness и не является wrapper-скриптом поверх `scripts/full-run-batch-matrix.sh`.
 
 GitHub tag release workflow применяет тот же verifier как отдельный read-only job до GoReleaser.
 По умолчанию этот evidence path остаётся обязательным. Исключение допускается только для явно
@@ -687,7 +687,9 @@ GitHub tag release workflow применяет тот же verifier как от�
 Одновременная настройка нескольких режимов, пустые или повторяющиеся IDs блокируют publication
 до запуска write-enabled job.
 
-Если verifier не находит `PASS` machine verdict или оба matching accepted SWE reports, publishing
+Если verifier не находит полный свежий `PASS` machine verdict, source qualification SHA, являющийся
+предком точного tag commit, обязательные
+profile-matrix/verdict artifacts или оба matching accepted SWE reports, publishing
 job с `contents/id-token/attestations: write` не стартует. Workflow не запускает live matrix и не
 создаёт release evidence; evidence должно быть создано заранее на trusted machine по этому runbook.
 
@@ -968,7 +970,13 @@ Machine execution `PASS` требует:
 6. Нет `analysis:evidence-scope` и `analysis:cross-repo-missing`.
 7. Нет runtime flow violations (`runtime:*`, `runtime_flow_failed`).
 8. Frontend live init-inspect smoke: `passed` для всех трёх release providers (`qwen`, `claude`, `codex`).
-9. Нет artifact-quality blockers (`artifact_quality.*` in `quality_signals[]`, `artifact_quality:` in run warnings, or `artifact_quality_failed_failures > 0` in matrix results).
+9. Нет artifact-quality blockers (`artifact_quality.*` in `quality_signals[]`, `artifact_quality:` in run warnings, `artifact_quality_failed_failures > 0` или `artifact_quality_findings > 0` в matrix results).
+10. Нет исчерпания provider invocation budget (`provider_budget_exhausted=1` в run rows или
+    `provider_budget_exhausted_runs > 0` в execution report).
+
+`artifact_quality_status=needs_review` при `artifact_quality_failed=0` не является machine hard-failure: это
+диагностический analysis signal, который должен быть разобран в обязательном accepted
+`swe_artifact_quality_assessment_<matrix-id>.md`.
 
 Final release readiness требует все три accepted evidence signals:
 1. `release_verdict_<matrix-id>.json = PASS`.

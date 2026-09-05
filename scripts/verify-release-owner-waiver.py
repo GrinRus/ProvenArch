@@ -18,6 +18,16 @@ REQUIRED_WAIVERS = [
     "claude-code live evidence",
     "composite release verdict",
 ]
+WAIVER_FIELDS = {
+    "schema_version",
+    "tag",
+    "decision",
+    "release_state",
+    "waived_requirements",
+    "approved_by",
+    "reason",
+    "base_qualification_sha",
+}
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -42,8 +52,21 @@ def is_ancestor(base: str, source: str, cwd: Path) -> bool:
     return completed.returncode == 0
 
 
+def tag_commit(tag: str, cwd: Path) -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
 def verify(payload: dict[str, Any], tag: str, source_sha: str, cwd: Path) -> list[str]:
     failures: list[str] = []
+    unknown = sorted(set(payload) - WAIVER_FIELDS)
+    if unknown:
+        failures.append(f"unknown waiver fields: {', '.join(unknown)}")
     if payload.get("schema_version") != 1:
         failures.append("schema_version must be 1")
     if payload.get("tag") != tag:
@@ -65,8 +88,14 @@ def verify(payload: dict[str, Any], tag: str, source_sha: str, cwd: Path) -> lis
         failures.append("base_qualification_sha must be a 40-character lowercase Git SHA")
     if not SHA_RE.fullmatch(source_sha):
         failures.append("source SHA must be a 40-character lowercase Git SHA")
-    elif SHA_RE.fullmatch(base) and not is_ancestor(base, source_sha, cwd):
-        failures.append(f"base qualification SHA {base} is not an ancestor of release SHA {source_sha}")
+    else:
+        resolved_tag_sha = tag_commit(tag, cwd)
+        if not resolved_tag_sha:
+            failures.append(f"release tag is not present in the checked-out repository: {tag}")
+        elif resolved_tag_sha != source_sha:
+            failures.append(f"release tag {tag} does not resolve to release SHA {source_sha}")
+        elif SHA_RE.fullmatch(base) and not is_ancestor(base, source_sha, cwd):
+            failures.append(f"base qualification SHA {base} is not an ancestor of release SHA {source_sha}")
     return failures
 
 
@@ -76,6 +105,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)
     args = parser.parse_args(argv)
+    expected_name = f"release_owner_waiver_{args.tag}.json"
+    if args.waiver.name != expected_name:
+        print(
+            f"release owner waiver rejected: waiver filename must be {expected_name}",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        args.waiver.resolve().relative_to((Path.cwd() / "reports").resolve())
+    except ValueError:
+        print("release owner waiver rejected: waiver must live under reports/", file=sys.stderr)
+        return 1
     failures = verify(load(args.waiver), args.tag, args.source_sha, Path.cwd())
     if failures:
         for failure in failures:

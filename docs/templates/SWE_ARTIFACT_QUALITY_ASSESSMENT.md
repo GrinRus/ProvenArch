@@ -9,6 +9,7 @@
 ## Decision
 - matrix_id:
 - decision: accepted|rejected|inconclusive|blocked
+- source_sha:
 - assessed_by:
 - assessed_at_utc:
 
@@ -23,7 +24,7 @@
 - Ask evidence:
 
 ## Diagnostic Execution Context (not artifact acceptance)
-- release verdict:
+- release verdict: release_verdict_<matrix-id>.json
 - execution reports and run matrices:
 - taskrun quality telemetry:
 - repair/stall/provider diagnostics:

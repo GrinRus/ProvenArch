@@ -1,8 +1,12 @@
 import json
+import io
 import os
 import signal
+import shutil
 import stat
 import subprocess
+import sys
+import tarfile
 import tempfile
 import textwrap
 import time
@@ -57,6 +61,7 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.timeout_sentinel_path = self.tmp_root / "batch-timeouts.jsonl"
         self.batch_script = self.tmp_root / "dummy-batch.sh"
         self._write_dummy_batch_script()
+        self.clean_repo_root = self._prepare_clean_driver_repo()
         self.profile_repos_files = self._prepare_repos_files()
 
     def tearDown(self) -> None:
@@ -218,24 +223,57 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 frontend_matrix_md="${REPORTS_ROOT}/frontend_e2e_matrix_${BATCH_ID}.md"
 
                 {
-                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\teffective_verdict_source\\tpromotion_audit_result\\n'
+                  printf 'provider\\trun\\thard_pass\\truntime_contract_failed\\trunner_unavailable\\truntime_timeout\\tinfra_signal_terminated\\tinfra_incomplete_cycle\\tsummary_missing\\tprecheck_failed\\tcancellation_like\\truntime_flow_failed\\tsemantic_hard_fail\\toff_topic_hits\\tartifact_source\\tissues\\teffective_verdict_source\\tpromotion_audit_result\\truntime_contract_status\\tartifact_quality_status\\tverdict\\tquality_gates_failed\\tartifact_quality_failed\\tpartial_failure_count\\tfailure_class\\tprovider_budget_exhausted\\tartifact_quality_findings\\n'
                   for provider in "${selected_providers[@]}"; do
                     for run_idx in $(seq 1 "${RUN_COUNT}"); do
                       if [[ "${MATRIX_TEST_RUNTIME_FLOW_FAILED:-0}" == "1" && "${PROFILE_ID}" == "single-path" && "${SWEEP_ID}" == "baseline" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t0\\t0\\tsnapshot\\treliability:runtime-flow-failed\\torchestrator\\tpass\\tpassed\\tpassed\\tGood\\t0\\t0\\t0\\tnone\\t0\\t0\\n' "${provider}" "${run_idx}"
                       elif [[ "${MATRIX_TEST_QWEN_BACKEND_FAILURE:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t0\\t0\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\treliability:runner-unavailable\\torchestrator\\tpass\\tpassed\\tpassed\\tGood\\t0\\t0\\t0\\tnone\\t0\\t0\\n' "${provider}" "${run_idx}"
                       elif [[ "${MATRIX_TEST_ARTIFACT_TELEMETRY:-0}" == "1" && "${provider}" == "qwen-code" && "$run_idx" -eq 1 ]]; then
-                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t2\\tsnapshot\\tanalysis:cross-repo-missing,artifact:quality-warning\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t1\\t2\\tsnapshot\\tanalysis:cross-repo-missing,artifact:quality-warning\\torchestrator\\tpass\\tpassed\\tpassed\\tGood\\t0\\t0\\t0\\tnone\\t0\\t0\\n' "${provider}" "${run_idx}"
                       else
-                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\torchestrator\\tpass\\n' "${provider}" "${run_idx}"
+                        printf '%s\\t%s\\t1\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\t0\\tsnapshot\\t-\\torchestrator\\tpass\\tpassed\\tpassed\\tGood\\t0\\t0\\t0\\tnone\\t0\\t0\\n' "${provider}" "${run_idx}"
                       fi
                     done
                   done
                 } > "${run_matrix_tsv}"
 
-                printf '# run matrix\\n' > "${run_matrix_md}"
-                printf '# execution\\n' > "${execution_report_md}"
+                {
+                  printf '# Run Matrix\\n\\n'
+                  printf '| provider | run | hard_pass | runtime_contract_status | artifact_quality_status | verdict | artifact_source | runtime_contract_failed | runner_unavailable | runtime_timeout | infra_signal_terminated | infra_incomplete_cycle | quality_gates_failed | artifact_quality_failed | summary_missing | precheck_failed | runtime_flow_failed | cancellation_like | semantic_hard_fail | off_topic_hits | artifact_quality_findings | provider_budget_exhausted | partial_failure_count | failure_class | issues | effective_verdict_source | promotion_audit_result |\\n'
+                  printf '|---|---:|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    for run_idx in $(seq 1 "${RUN_COUNT}"); do
+                      printf '| %s | %s | 1 | passed | passed | Good | snapshot | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | none | - | orchestrator | pass |\\n' "${provider}" "${run_idx}"
+                    done
+                  done
+                } > "${run_matrix_md}"
+                {
+                  printf '# Execution Report: %s\\n\\n' "${BATCH_ID}"
+                  printf '## Context\\n'
+                  printf -- '- provenarch_sha: %s\\n\\n' "$(git -C "${PROVENARCH_ROOT}" rev-parse HEAD)"
+                  printf '## Backend Execution Verdict\\n'
+                  printf -- '- hard_pass_runs: %s/%s\\n' "$((provider_count * RUN_COUNT))" "$((provider_count * RUN_COUNT))"
+                  printf -- '- artifact_quality_failed_runs: 0/%s\\n' "$((provider_count * RUN_COUNT))"
+                  printf -- '- artifact_quality_findings: 0\\n'
+                  printf -- '- runtime_flow_failed_runs: 0/%s\\n' "$((provider_count * RUN_COUNT))"
+                  printf -- '- primary_failure_classes: none\\n'
+                  printf -- '- semantic_hard_fail_runs: 0/%s\\n' "$((provider_count * RUN_COUNT))"
+                  printf -- '- artifact_source_snapshot_runs: %s/%s\\n' "$((provider_count * RUN_COUNT))" "$((provider_count * RUN_COUNT))"
+                  printf -- '- partial_failure_count: 0\\n'
+                  printf -- '- provider_budget_exhausted_runs: 0/%s\\n' "$((provider_count * RUN_COUNT))"
+                  printf '\\n## Public Promotion Authority\\n'
+                  printf -- '- effective_verdict_sources: orchestrator\\n'
+                  printf -- '- promotion_audit_failed_runs: 0/%s\\n' "$((provider_count * RUN_COUNT))"
+                  printf -- '- providers: qwen-code, claude-code, codex-code\\n'
+                  printf '\\n## Provider Matrix\\n\\n'
+                  printf '| provider | runs | pass_rate | off_topic_hits | artifact_quality_findings | semantic_hard_fail_runs | partial_failure_count | runtime_contract_failed_failures | runner_unavailable_failures | runtime_timeout_failures | infra_signal_terminated_failures | infra_incomplete_cycle_failures | quality_gates_failed_failures | artifact_quality_failed_failures | summary_missing_failures | precheck_failed_failures | runtime_flow_failed_failures | cancellation_like_failures | artifact_sources | frontend_live_pass_rate |\\n'
+                  printf '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    printf '| %s | %s | 1.00 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | snapshot=%s | 1.00 |\\n' "${provider}" "${RUN_COUNT}" "${RUN_COUNT}"
+                  done
+                } > "${execution_report_md}"
                 if [[ "${MATRIX_TEST_RAW_METADATA:-0}" == "1" ]]; then
                   raw_dir="${BATCH_ROOT}/qwen-code/run1/arch-workspace/reports/taskruns/raw"
                   mkdir -p "${raw_dir}"
@@ -276,6 +314,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 fi
 
                 {
+                  printf '# Frontend Live E2E Matrix\\n\\n'
+                  printf '## Summary\\n\\n'
                   printf '| provider | status | runs | reasons |\\n'
                   printf '|---|---|---|---|\\n'
                   for provider in "${selected_providers[@]}"; do
@@ -286,6 +326,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
                     else
                       printf '| %s | passed | 1 | ok=1 |\\n' "${provider}"
                     fi
+                  done
+                  printf '\\n## Run Details\\n\\n'
+                  printf '| provider | run | status |\\n'
+                  printf '|---|---:|---|\\n'
+                  for provider in "${selected_providers[@]}"; do
+                    printf '| %s | 1 | passed |\\n' "${provider}"
                   done
                 } > "${frontend_matrix_md}"
 
@@ -314,6 +360,23 @@ class MatrixReleaseContractTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.batch_script.chmod(self.batch_script.stat().st_mode | stat.S_IXUSR)
+
+    def _prepare_clean_driver_repo(self) -> Path:
+        clean_root = self.tmp_root / "clean-repo"
+        clean_root.mkdir(parents=True, exist_ok=True)
+        archive = subprocess.check_output(["git", "archive", "HEAD"], cwd=self.repo_root)
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(clean_root)
+        shutil.copy2(self.matrix_driver, clean_root / "scripts" / "full-run-batch-matrix.sh")
+        canonical_batch = clean_root / "scripts" / "full-run-batch.sh"
+        shutil.copy2(self.batch_script, canonical_batch)
+        canonical_batch.chmod(canonical_batch.stat().st_mode | stat.S_IXUSR)
+        subprocess.run(["git", "init", "-q"], cwd=clean_root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=clean_root, check=True)
+        subprocess.run(["git", "config", "user.name", "Matrix Test"], cwd=clean_root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=clean_root, check=True)
+        subprocess.run(["git", "commit", "-qm", "clean matrix fixture"], cwd=clean_root, check=True)
+        return clean_root
 
     def _write_matrix_file(
         self,
@@ -406,7 +469,8 @@ class MatrixReleaseContractTest(unittest.TestCase):
         env = self._build_subprocess_env(
             {
                 "E2E_MATRIX_FILE": str(matrix_file),
-                "BATCH_SCRIPT": str(self.batch_script),
+                "BATCH_SCRIPT": str(self.clean_repo_root / "scripts" / "full-run-batch.sh"),
+                "PROVENARCH_ROOT": str(self.clean_repo_root),
                 "MATRIX_ID": matrix_id,
                 "E2E_MATRIX_RELEASE_MODE": release_mode,
                 "ACP_CLAUDE_CMD_BIN": "true",
@@ -418,13 +482,12 @@ class MatrixReleaseContractTest(unittest.TestCase):
                 "E2E_MATRIX_MIN_FREE_KB": "0",
                 "MATRIX_TEST_SENTINEL": str(self.sentinel_path),
                 "MATRIX_TEST_TIMEOUT_SENTINEL": str(self.timeout_sentinel_path),
-                "ACP_TEST_ALLOW_BATCH_SCRIPT_OVERRIDE": "1",
                 **(extra_env or {}),
             }
         )
         return subprocess.run(
-            [str(self.matrix_driver)],
-            cwd=self.repo_root,
+            [str(self.clean_repo_root / "scripts" / "full-run-batch-matrix.sh")],
+            cwd=self.clean_repo_root,
             env=env,
             capture_output=True,
             text=True,
@@ -511,6 +574,26 @@ class MatrixReleaseContractTest(unittest.TestCase):
         self.assertIn("contains unsupported ids: extra-sweep", combined_output)
         self.assertFalse(self.sentinel_path.exists(), "batch script should not run when release sweeps contain extra ids")
 
+    def test_release_matrix_rejects_noncanonical_sweep_execution(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_text = matrix_file.read_text(encoding="utf-8")
+        parallel_start = matrix_text.index("- id: parallel-default")
+        parallel_end = matrix_text.find("- id:", parallel_start + 1)
+        if parallel_end < 0:
+            parallel_end = len(matrix_text)
+        parallel_block = matrix_text[parallel_start:parallel_end]
+        parallel_block = parallel_block.replace("strategy: parallel", "strategy: sequential", 1)
+        parallel_block = parallel_block.replace("max_parallel_tasks: 4", "max_parallel_tasks: 1", 1)
+        parallel_block = parallel_block.replace("failure_policy: best_effort", "failure_policy: fail_fast", 1)
+        parallel_block = parallel_block.replace("shard_discovery_mode: heuristics", "shard_discovery_mode: semantic", 1)
+        matrix_file.write_text(matrix_text[:parallel_start] + parallel_block + matrix_text[parallel_end:], encoding="utf-8")
+        matrix_id = "release-test-noncanonical-sweep"
+        result = self._run_matrix(matrix_file, matrix_id)
+        combined_output = result.stdout + "\n" + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sweep execution mismatch", combined_output)
+        self.assertFalse(self.sentinel_path.exists(), "batch script should not run when sweep semantics are invalid")
+
     def test_release_matrix_requires_single_and_multi_profile_families(self) -> None:
         matrix_file = self._write_matrix_file(
             ["baseline", "parallel-default"],
@@ -553,6 +636,21 @@ class MatrixReleaseContractTest(unittest.TestCase):
         verdict = self._load_verdict(matrix_id)
         self.assertEqual(verdict["verdict"], "PASS")
         self.assertEqual(verdict["release_state"], "RELEASE READY")
+        self.assertEqual(verdict["evidence_schema_version"], 2)
+        self.assertRegex(verdict["source_sha"], r"^[0-9a-f]{40}$")
+        self.assertTrue(verdict["source_tree_clean"])
+        self.assertEqual(verdict["generator"], "scripts/full-run-batch-matrix.sh")
+        self.assertEqual(
+            set(verdict["evidence_artifacts"]),
+            {"verdict_markdown", "profile_matrix_markdown", "profile_matrix_tsv"},
+        )
+        for artifact in verdict["evidence_artifacts"].values():
+            self.assertEqual(set(artifact), {"path", "sha256"})
+            self.assertRegex(artifact["sha256"], r"^[0-9a-f]{64}$")
+        for record in verdict["records"]:
+            self.assertEqual(record["backend"]["hard_pass"], 3)
+            self.assertEqual(record["backend"]["total_runs"], 3)
+            self.assertEqual(set(record["artifacts"]["artifact_digests"]), {"run_matrix_tsv", "run_matrix_md", "frontend_matrix_md", "execution_report_md"})
         for artifact_quality_key in (
             "semantic_hard_fail_runs",
             "off_topic_hits",
@@ -573,6 +671,126 @@ class MatrixReleaseContractTest(unittest.TestCase):
 
         calls = self.sentinel_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(calls), 4)
+
+    def test_release_matrix_rejects_dirty_source_without_test_override(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        dirty_marker = self.clean_repo_root / "dirty-source-marker"
+        dirty_marker.write_text("dirty\n", encoding="utf-8")
+        try:
+            result = self._run_matrix(
+                matrix_file,
+                "release-test-dirty-source",
+                extra_env={"ACP_TEST_ALLOW_DIRTY_SOURCE": "0"},
+            )
+        finally:
+            dirty_marker.unlink()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires a clean source tree", result.stderr)
+        self.assertFalse(self.sentinel_path.exists(), "dirty-source guard must run before child batch")
+
+    def test_release_test_override_cannot_emit_ready_evidence(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        dirty_marker = self.clean_repo_root / "dirty-source-marker"
+        dirty_marker.write_text("dirty\n", encoding="utf-8")
+        try:
+            result = self._run_matrix(
+                matrix_file,
+                "release-test-dirty-override",
+                extra_env={"ACP_TEST_ALLOW_DIRTY_SOURCE": "1"},
+            )
+            verdict = self._load_verdict("release-test-dirty-override")
+        finally:
+            dirty_marker.unlink()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(verdict["verdict"], "FAIL")
+        self.assertEqual(verdict["release_state"], "RELEASE BLOCKED")
+        self.assertFalse(verdict["source_tree_clean"])
+        self.assertNotEqual(verdict["generator"], "scripts/full-run-batch-matrix.sh")
+        self.assertIn("release_evidence_override_used=true", verdict["release_contract"]["blocking_reasons"])
+
+    def test_release_matrix_rechecks_source_after_child_run(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-source-toctou"
+        sleep_pid_file = self.tmp_root / "matrix-child.pid"
+        env = self._build_subprocess_env(
+            {
+                "E2E_MATRIX_FILE": str(matrix_file),
+                "PROVENARCH_ROOT": str(self.clean_repo_root),
+                "MATRIX_ID": matrix_id,
+                "E2E_MATRIX_RELEASE_MODE": "1",
+                "ACP_CLAUDE_CMD_BIN": "true",
+                "ACP_QWEN_CMD_BIN": "true",
+                "ACP_CODEX_CMD_BIN": "true",
+                "E2E_TMP_ROOT": str(self.e2e_tmp_root),
+                "REPORTS_ROOT": str(self.e2e_tmp_root / "reports"),
+                "MATRIX_ROOT": str(self.e2e_tmp_root / "matrix" / matrix_id),
+                "E2E_MATRIX_MIN_FREE_KB": "0",
+                "MATRIX_TEST_SLEEP_SEC": "2",
+                "MATRIX_TEST_SLEEP_PID_FILE": str(sleep_pid_file),
+            }
+        )
+        process = subprocess.Popen(
+            [str(self.clean_repo_root / "scripts" / "full-run-batch-matrix.sh")],
+            cwd=self.clean_repo_root,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not sleep_pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(sleep_pid_file.exists(), "matrix child did not start before mutation")
+            (self.clean_repo_root / "README.md").write_text("# changed during release qualification\n", encoding="utf-8")
+            process.wait(timeout=60)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertNotEqual(process.returncode, 0)
+        verdict = self._load_verdict(matrix_id)
+        self.assertEqual(verdict["verdict"], "FAIL")
+        self.assertEqual(verdict["release_state"], "RELEASE BLOCKED")
+        self.assertFalse(verdict["source_tree_clean"])
+        self.assertIn("source_tree_clean=false", verdict["release_contract"]["blocking_reasons"])
+        self.assertIn("release_evidence_override_used=true", verdict["release_contract"]["blocking_reasons"])
+
+    def test_generated_release_evidence_passes_fail_closed_verifier(self) -> None:
+        matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
+        matrix_id = "release-test-verifier-roundtrip"
+        result = self._run_matrix(matrix_file, matrix_id)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        verdict_path = self.e2e_tmp_root / "reports" / f"release_verdict_{matrix_id}.json"
+        verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+        reports_root = verdict_path.parent
+        source_sha = verdict["source_sha"]
+        generated_at = verdict["generated_at_utc"]
+        for label in ("ux", "artifact_quality"):
+            (reports_root / f"swe_{label}_assessment_{matrix_id}.md").write_text(
+                "\n".join(
+                    [
+                        f"- matrix_id: {matrix_id}",
+                        "- decision: accepted",
+                        f"- source_sha: {source_sha}",
+                        "- assessed_by: matrix-test",
+                        f"- assessed_at_utc: {generated_at}",
+                        "",
+                        "## Evidence Inspected",
+                        f"- release verdict: release_verdict_{matrix_id}.json",
+                        "- execution reports: profile matrix and per-record artifacts",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        verifier = self.repo_root / "scripts" / "verify-release-verdict.py"
+        verified = subprocess.run(
+            [sys.executable, str(verifier), str(verdict_path), "--source-sha", source_sha],
+            cwd=self.clean_repo_root,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(verified.returncode, 0, msg=verified.stderr)
 
     def test_artifact_quality_telemetry_does_not_enter_release_execution_verdict(self) -> None:
         matrix_file = self._write_matrix_file(["baseline", "parallel-default"])
