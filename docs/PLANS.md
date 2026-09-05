@@ -75,8 +75,8 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | review | implementation and deterministic verification complete; owner review of PRs #270–#273 |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02 merged; next row remains dependency/authorization/stabilization gated |
+| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved PR merges to main, followed by final revision and closeout |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02 merged; REM-06 is the current independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -139,9 +139,9 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-approved-trash-cleanup
 
-Status: review — approved cleanup implemented and validated; PRs #270–#273 await owner review.
+Status: active — cleanup implemented and validated; owner authorized PR merges to main and final revision.
 
-Next action: Review the stacked PRs [#270](https://github.com/GrinRus/ProvenArch/pull/270) → [#271](https://github.com/GrinRus/ProvenArch/pull/271) → [#272](https://github.com/GrinRus/ProvenArch/pull/272) → [#273](https://github.com/GrinRus/ProvenArch/pull/273). Merge remains an owner decision; REM-02 golden-selector repair is already merged in [#274](https://github.com/GrinRus/ProvenArch/pull/274).
+Next action: Merge the verified stacked PRs [#270](https://github.com/GrinRus/ProvenArch/pull/270) → [#271](https://github.com/GrinRus/ProvenArch/pull/271) → [#272](https://github.com/GrinRus/ProvenArch/pull/272) → [#273](https://github.com/GrinRus/ProvenArch/pull/273). The owner explicitly authorized push and merge for every cleanup iteration; REM-02 golden-selector repair is already merged in [#274](https://github.com/GrinRus/ProvenArch/pull/274).
 
 ### Context
 The owner approved removal of confirmed dead code and its isolated tests, migration of useful test-only checks, CSS cleanup, historical-document archival and broken-reference repairs. Supported compatibility is removed only when there is no remaining consumer or contract. Golden coverage must remain executable; an empty selector is not a useful gate.
@@ -152,6 +152,8 @@ The owner approved removal of confirmed dead code and its isolated tests, migrat
 - [x] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
 - [x] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
 - [x] Complete deterministic DoD, independent review and small PR delivery.
+- [ ] Merge each cleanup iteration through a checked PR into main.
+- [ ] Complete the final main revision and deliver the consolidated disposition report.
 
 ### Non-goals
 No runtime prompt/model defaults, schemas, supported public/legacy APIs, release matrices, readable fixture deduplication, waiver deletion, accepted semantic primitive/token removal, or live provider execution. The manually usable curated Bank manifest remains until manual-use ownership is known. This task does not start or close unrelated remediation rows.
@@ -160,7 +162,8 @@ No runtime prompt/model defaults, schemas, supported public/legacy APIs, release
 - Removed symbols have no live consumers, or their tests are migrated to the live surface.
 - Existing deterministic behavior and source fixture bytes are preserved.
 - `make contracts`, `make test`, `make lint`, `make build` pass; UI changes also pass mock/browser and embedded parity/determinism checks.
-- Each PR has bounded scope, validation evidence and reversible commits; no merge/release is implied by PR delivery.
+- Each iteration uses a bounded PR with validation evidence and reversible commits, successful required CI and merge into main. No direct main writes or release.
+- At least three complete audit passes are recorded; a final pass after the last merge finds no new confirmed in-scope garbage. Unproven candidates remain explicitly classified.
 
 ### Dependencies and ownership
 Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b45a4d41` after PRs #274–#275. The separate stabilization checkout has local changes in `docs/ARCHITECTURE.md`, semantic/docflow implementation/tests and `ui/src/App.test.tsx`; its worktree and changes are not touched. Cleanup uses isolated worktrees and avoids those runtime behavior changes. Documentation corrections affect separate stale descriptions only. The already merged guidance/archive work in PR #268 and release-verifier work in PR #269 are rechecked rather than repeated.
@@ -177,13 +180,15 @@ Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b4
 - 2026-09-05: Completion recheck confirmed all four reviewed PR heads had passed CI, but the newer main from #274–#275 conflicted with the cleanup plan-index insertion. Integrated `b45a4d41` through the stack and retained both independent plan entries/statuses. Removed two obsolete golden export/update commands that selected a deleted test; documented the boundary between stored readable digest checks and fresh pipeline generation. Corrected the REM-02 test-set count to six without changing its acceptance/status.
 - 2026-09-05: Independent recheck of the unchanged cleanup implementation found no live callers among 102 reviewed declaration names/22 removed or moved paths; 393 local Markdown references including 148 anchors passed. Rechecked the integrated result with docsync, all four golden runner contract tests, the actual workflow command (six tests) and readable fixture verification (90 artifacts): all passed. Runtime/UI source and embedded assets are unchanged from the completed cleanup DoD; updated PR heads receive fresh CI checks.
 
+- 2026-09-05: Owner extended completion through PR merge into main for every iteration. Integrated independently merged retention fix #276, preserving both plan entries and runtime changes. The initial three audit passes remain evidenced by code/document/reference inventories, caller/contract checks, and a restarted challenge of test-only islands, historical documents and curated inputs; final post-merge revision remains pending.
+
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01 and REM-02 merged; REM-03 is dependency/authorization gated.
+Status: active — REM-01 and REM-02 merged; REM-06 is the current independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Obtain explicit authority for REM-03B and repeat the stabilization/dependency checks
-after the next stabilization merge; select the first ready row only when its full acceptance boundary
-is unblocked. REM-25 remains blocked by REM-03..24.
+Next action: Deliver REM-06 with its retention invariant, then repeat stabilization/dependency checks
+before selecting the next ready row; keep release status explicitly blocked until REM-03B is authorized
+and applied with before/after/rollback evidence. REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -270,7 +275,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
-| 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
+| 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
 | 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | blocked-by-dependency |
 | 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | blocked-by-dependency |
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
@@ -523,6 +528,60 @@ valid list/pass проходит; renamed/removed test не проходит lis
 - 2026-09-05: PR #274 (`ci: fail closed on golden test selection`) прошёл повторный required CI после
   review fix и был squash-merged в `main` как `2c382a235073e9a364efbecc11b7fe0ed07ac225`; после
   merge выполнен `git fetch origin main --prune`, рабочее дерево чистое.
+
+### REM-06 slice plan (in progress)
+
+**Goal.** Сохранить каждый `queued`/`running` run и связанную с ним Task/Attempt identity/evidence
+при pressure retention; ограничивать retention только terminal run records и не допускать потери
+in-flight lifecycle state.
+
+**Finding / baseline.** На свежем `origin/main` `b45a4d41` `trimRunRegistry` сортирует все записи
+по `StartedAt` и удаляет самые старые независимо от статуса. `persistHistorySnapshotLocked` затем
+повторно берёт только хвост общего списка. При старом queued/running run и превышении retention это
+может удалить in-flight запись из памяти и `reports/taskruns/run-history.json`, хотя TASK_SPEC требует
+сохранять active/queued identity и terminal summary даже после удаления детальных run artifacts.
+
+**Readiness exception.** `REM-03B` остаётся внешней admin-only задачей без выданной авторизации;
+release status явно сохраняется `release-blocked`. Поэтому предусмотренная строкой REM-06
+альтернатива зависимости разрешает независимый lifecycle slice без изменения GitHub settings и
+без ослабления release gate.
+
+**Non-goals.** Не удалять Task автоматически, не менять public Task/Attempt или run-history schema,
+не менять run-log TTL/max-files cleanup, restart reconciliation semantics, stabilization-owned
+semantic/docflow paths, release rulesets или owner-waiver policy.
+
+**Affected paths.** `internal/orchestrator/service_runs.go`, новый focused
+`internal/orchestrator/retention_test.go`, этот ExecPlan и при необходимости узкий раздел
+`docs/spec/TASK_SPEC.md`/`docs/TESTING_STRATEGY.md` только если observed behavior wording требует
+уточнения. No schema or fixture output changes are expected.
+
+**Implementation boundary.** Introduce one retention selection helper used both by in-memory registry
+trim and persisted history serialization: keep all non-terminal statuses conservatively and retain at
+most configured `historyRetention` newest terminal records, ordered deterministically by
+`StartedAt`/`RunID`. Add tests for old queued/running records under terminal pressure, persisted
+TaskID/AttemptID linkage, all-in-flight retention, and deterministic terminal eviction.
+
+**Regression strategy.** Run focused orchestrator lifecycle/retention tests, then `-race` for the
+same package. Full implementation DoD remains `make contracts`, `make test`, `make lint`, `make build`;
+no live provider or network execution is required.
+
+**Rollback / stop condition.** Stop if preserving in-flight records changes admission capacity,
+terminal ordering, restart reconciliation, or creates unbounded retention beyond the one active plus
+one queued pipeline invariant. Roll back if persisted history diverges from in-memory retained IDs or
+Task/Attempt linkage is absent. Do not touch stabilization-owned paths.
+
+- 2026-09-05: Fresh base `origin/main=b45a4d41702b0f1bc57246907ed05f7eb3793158`; neighbor
+  stabilization remains idle/blocked at revision 29 with uncommitted semantic/docflow/live changes in
+  its separate checkout. Candidate REM-06 paths do not overlap that owned set.
+- 2026-09-05: Read-only GitHub evidence confirms branch protection currently requires six deterministic
+  contexts (`backend`, `contracts`, `ui`, `golden`, `smoke-cli`, `smoke-api`); `REM-03B` remains
+  authorization-gated and no setting mutation is in scope for this slice.
+- 2026-09-05: Baseline retention regressions reproduced on the fresh base: old queued/running records
+  were evicted from memory and persisted history when terminal records exceeded the budget. After the
+  helper-based fix, focused retention tests, orchestrator package tests and `-race` lifecycle subset
+  pass. `make contracts`, `make lint`, `make build` and doc-sync checks pass; full `make test` reached
+  the complete Go suite but was interrupted after an unrelated `matrix_release_contract_test` setup
+  hung in `git add -A` under concurrent worktree load.
 
 ## EP-20260811-task-attempt-contracts
 
