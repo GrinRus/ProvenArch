@@ -636,6 +636,55 @@ if watcher count is not quiescent after shutdown.
   `main` as `079f9b51c95622abb6fc417234df52b0f1a36d0a`; fresh fetch confirms `origin/main` at the
   merge commit. REM-07 is closed and REM-08 is the next ready independent P1 slice.
 
+### REM-08 slice plan (in progress)
+
+**Goal.** Сохранить immutable admission context queued Attempt до фактического запуска и после
+перезапуска сервиса либо продолжить с тем же exact context, либо fail-closed с понятной диагностикой;
+исключить silent scope/runtime drift.
+
+**Finding / baseline.** На свежем `origin/main=91e52d0c` `CloneAdmittedRuntimeSnapshot` клонировал
+map-поля, но оставлял `RepositoryScopes` общим slice. `StartAsyncRun` также сохранял указатель на
+переданный snapshot в `pendingRun`, поэтому мутация caller-owned slice до запуска очереди могла
+изменить фактически выполненный scope. Restart rehearsal показал, что обычный queued run уже
+terminalizes fail-closed с `run_reconciled_after_restart`, но этот invariant не имел API regression
+coverage на exact Task/Attempt context.
+
+**Readiness.** REM-06 и REM-07 merged; REM-08 не пересекается с соседними semantic/docflow/live
+paths. Соседняя stabilization задача остаётся blocked/idle на revision 30 с незакоммиченными
+изменениями в отдельном checkout. REM-03B остаётся явно authorization-gated и release-blocking.
+
+**Non-goals.** Не менять Task/Attempt schema или API shape, queue capacity, provider defaults,
+restart policy, retention, watcher lifecycle, stabilization-owned paths, GitHub settings или live
+provider matrix.
+
+**Affected paths.** `internal/runtime/admission.go` и его clone regression test,
+`internal/orchestrator/service_runs.go` и queued snapshot test, API restart reconciliation test,
+этот ExecPlan. Schema/examples/fixtures не меняются.
+
+**Implementation boundary.** Глубоко клонировать все reference-поля `AdmittedRuntimeSnapshot` при
+admission до сохранения `RunRequest` в pending queue. Оставить существующую безопасную политику
+restart для queued runs (terminal `run_reconciled_after_restart`), а API reconcile должен сохранить
+неизменными IntentSnapshot и EffectiveRuntime и связать terminal state с теми же Task/Attempt/run
+IDs.
+
+**Acceptance / regression.** Caller mutation после queue admission не меняет persisted/executed
+`RepositoryScopes`; queued Attempt после service restart остаётся exact identity, сохраняет immutable
+intent/effective runtime и получает terminal failed state с `run_reconciled_after_restart`; focused
+runtime/orchestrator/API tests and `-race` pass. Full DoD remains `make contracts`, `make test`,
+`make lint`, `make build`; no live provider/network execution is required.
+
+**Rollback / stop condition.** Stop if a queued run reads caller-owned mutable data, restart
+reconciliation changes immutable Attempt fields, loses exact Task/Attempt/run linkage, or silently
+resumes a queued run without an explicit persisted snapshot. Roll back if schema validation or
+existing queue/restart semantics regress.
+
+- 2026-09-05: Fresh main `91e52d0ccea759894a3c70168b2947ac70cb924e` and neighbor revision 30 checked;
+  no stabilization overlap. Reproduced the shallow `RepositoryScopes` clone and confirmed queued
+  restart currently fails closed, establishing the bounded implementation slice.
+- 2026-09-05: Added deep snapshot cloning at async admission plus runtime and orchestrator regression
+  tests for caller mutation. Added API restart rehearsal proving queued Attempt terminal diagnostic,
+  exact identity and immutable intent/effective runtime are preserved.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.
