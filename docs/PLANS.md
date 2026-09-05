@@ -75,7 +75,7 @@ Remediation program и release gates остаются отдельными scope
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved code cleanup, documentation archival and deterministic verification; PR delivery |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | blocked | separate owner start and per-row dependencies required |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02 merged; next row remains dependency/authorization/stabilization gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -170,9 +170,11 @@ Base is fresh `origin/main` `6dbbed79`. The separate stabilization checkout has 
 
 ## EP-20260905-audit-remediation-program
 
-Status: blocked — separate owner start and per-row dependencies required.
+Status: active — REM-01 and REM-02 merged; REM-03 is dependency/authorization gated.
 
-Next action: Start the separate remediation goal only on owner instruction, then select the first ready row after checking stabilization ownership; REM-25 remains blocked by REM-01..24.
+Next action: Obtain explicit authority for REM-03B and repeat the stabilization/dependency checks
+after the next stabilization merge; select the first ready row only when its full acceptance boundary
+is unblocked. REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -254,8 +256,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 
 | Order | ID | Priority | Result / acceptance boundary | Depends on | Initial readiness |
 | --- | --- | --- | --- | --- | --- |
-| 1 | REM-01 | P0 | Release verifier принимает только полное, свежее и связанное с release tag/source SHA evidence; stale, fabricated, incomplete, mismatched assessment и over-broad waiver fixtures fail closed. | none | ready; next slice |
-| 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | blocked-by-dependency |
+| 1 | REM-01 | P0 | Release verifier принимает только полное, свежее и связанное с release tag/source SHA evidence; stale, fabricated, incomplete, mismatched assessment и over-broad waiver fixtures fail closed. | none | merged in PR #269 |
+| 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | merged in PR #274 |
 | 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
@@ -389,7 +391,7 @@ over the stabilization-owned set.
 
 ### Progress log
 
-### REM-01 slice plan (in progress)
+### REM-01 slice plan (merged)
 
 **Goal.** Закрыть P0 false-green boundary вокруг release evidence: verifier должен принимать только
 release verdict, сформированный текущим deterministic matrix generator, с полным profile/sweep/provider
@@ -453,6 +455,65 @@ ambiguous; record the exact blocker and do not substitute a weaker freshness che
   а также fail-open parsing per-run `issues`; verifier теперь использует явный allowlist допустимых
   diagnostic analysis/recovery signals и блокирует неизвестные либо runtime/contract/artifact/
   reliability issues. Добавлены mid-run mutation и allowlist/forbidden-token regression tests.
+- 2026-09-05: PR #269 (`hardening: close release evidence false greens`) прошёл все required checks,
+  был squash-merged в `main` как `6dbbed79d95e1f3f1673c9a882a48611945aa242`; после merge выполнен
+  `git fetch origin main --prune`, рабочее дерево чистое.
+
+### REM-02 slice plan (merged)
+
+**Goal.** Закрыть P1 false-green boundary golden workflow: CI должен доказуемо обнаруживать каждый
+ожидаемый deterministic test case и завершаться ошибкой, если тест переименован, удалён, пропущен
+или фактический запуск вернул успешный пакетный результат без тестов (`[no tests to run]`).
+
+**Finding / baseline.** На свежем `origin/main` `6dbbed79` текущий workflow обращается к пяти старым
+`TestScenario*` именам, удалённым вместе с прежним runtime contract. Команда workflow проходит с
+нулевым покрытием:
+`./scripts/run-go.sh test ./internal/orchestrator -run 'TestScenarioFixturesDeterministicInitPipeline|...' -count=1`
+возвращает `ok ... [no tests to run]`. Это наблюдаемая false-green регрессия, а не предположение по
+тексту workflow.
+
+**Non-goals.** Не восстанавливать удалённый legacy contract, не менять product/runtime semantics,
+scenario fixture outputs, canonical release matrix или stabilization-owned semantic/docflow paths;
+не превращать live provider или network execution в required CI.
+
+**Affected paths.** `.github/workflows/golden.yml`, `scripts/run-golden-tests.sh`,
+`internal/orchestrator/golden_fixture_test.go`, `scripts/tests/golden_workflow_contract_test.py`,
+`docs/TESTING_STRATEGY.md` и эта plan-запись.
+Актуальный deterministic test set выбран из существующих orchestrator tests вне stabilization-owned
+файлов: snapshot promotion, run/refresh persistence, deterministic progress и materialization.
+
+**Implementation boundary.** Golden surface дополнительно проверяет, что три tracked scenario
+snapshots имеют валидные SHA-256 и все перечисленные readable outputs существуют; это возвращает
+проверяемую fixture-семантику без восстановления удалённого runtime contract. Новый runner сначала
+получает compiled test list через pinned repository
+Go wrapper и требует exact presence каждого переданного имени. Затем он выполняет anchored `-run`
+selection с `-json` и требует top-level `pass` event для каждого имени; `skip`, `fail`, zero-match,
+duplicate или malformed test name блокируют job. Golden workflow передаёт один явный список из шести
+актуальных deterministic tests, поэтому rename/removal не может тихо превратиться в зелёный check.
+
+**Regression strategy.** Contract tests проверяют workflow и runner с provider-free fake Go command:
+valid list/pass проходит; renamed/removed test не проходит list preflight; package-only/zero-test JSON
+не проходит pass-event gate. Реальный runner запускается на canonical five-test set. Узкие проверки
+дополняются `make verify-agent-guidance`, `make contracts`, `make test`, `make lint` и `make build`.
+
+**Rollback / stop condition.** Откатить PR, если runner не отличает valid execution от zero-match или
+если выбранный набор начинает пересекаться с актуальным stabilization diff. Не возвращать старые
+удалённые имена только ради зелёного workflow; при semantic overlap остановить slice и перепроверить
+очередь после stabilization merge.
+
+- 2026-09-05: Перед началом REM-02 зафиксирован свежий base `origin/main`
+  `6dbbed79d95e1f3f1673c9a882a48611945aa242`; соседний stabilization lane — idle/blocked, revision 29,
+  с незакоммиченными изменениями в отдельном checkout. Candidate scope с ним не пересекается.
+- 2026-09-05: Реализованы fail-closed list/JSON pass gates, шесть deterministic golden checks и
+  provider-free contract tests для valid, renamed/removed и zero-test случаев. Узкие checks, docs-sync,
+  contracts, lint и build прошли; полный Go rerun дал два pre-existing load-sensitive lifecycle
+  timeout-а, после чего оба targeted rerun прошли.
+- 2026-09-05: Полный Python discovery (308) и UI suite были запущены; один unrelated Claude probe
+  classification test и два UI timeout под общей нагрузкой дали flake, каждый изолированный rerun
+  прошёл. Эти внешние flakes не затрагивают REM-02 paths; required CI остаётся финальным gate.
+- 2026-09-05: PR #274 (`ci: fail closed on golden test selection`) прошёл повторный required CI после
+  review fix и был squash-merged в `main` как `2c382a235073e9a364efbecc11b7fe0ed07ac225`; после
+  merge выполнен `git fetch origin main --prune`, рабочее дерево чистое.
 
 ## EP-20260811-task-attempt-contracts
 

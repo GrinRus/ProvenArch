@@ -24,5 +24,12 @@ jobs:
         with:
           go-version-file: .go-version
 
-      - name: Run deterministic scenario golden tests
-        run: go test ./internal/orchestrator -run 'TestScenarioFixturesDeterministicInitPipeline|TestScenarioFixtureLayoutExists|TestScenarioRunnerFixturesContractAndSemantics|TestScenarioDomainTaskEnvelopesDeterministic|TestDeterministicSnapshotScopeExcludesRunSpecificArtifacts' -count=1
+      - name: Run deterministic golden tests
+        run: |
+          bash ./scripts/run-golden-tests.sh ./internal/orchestrator \
+            TestScenarioFixturesHaveTrackedGoldenSnapshots \
+            TestPersistPromotedArchitectureSnapshotCopiesOnlyArchitectureRoots \
+            TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts \
+            TestRefreshSelectivelyReplaysUnaffectedBaselineShards \
+            TestRunProgressUsesOnlyDeterministicPipelineSteps \
+            TestWriteRefreshMaterializationRecordsPreservedAndRemoved
