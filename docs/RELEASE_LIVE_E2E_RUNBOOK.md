@@ -76,11 +76,11 @@ Current shard classification:
 Для быстрых diagnostic/non-release комбинаций можно сгенерировать прямые команды harness:
 
 ```bash
-python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers codex --format shell
-python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
-python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
-python3 scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
-python3 scripts/live-e2e-plan.py --mode release --size full --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode smoke --size tiny --providers codex --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode release --size full --format shell
 ```
 
 `scripts/live-e2e-plan.py` только печатает команды `scripts/full-run-batch-matrix.sh`; он не запускает batch и не является release wrapper.
@@ -175,7 +175,7 @@ ACP_NODE_TOOL_CANDIDATES=/path/to/node-22.21.1/bin ./scripts/full-run-batch-matr
 Эту проверку выполнять до DoD/preflight и до старта canonical release slices:
 
 ```bash
-python3 - <<'PY'
+./scripts/run-python.sh - <<'PY'
 from pathlib import Path
 import os
 root = Path("/tmp/provenarch-live-e2e")
@@ -199,7 +199,7 @@ PY
 export PATH=/opt/homebrew/bin:$PATH
 qwen --version
 df -Pk /tmp/provenarch-test_arch_project
-python3 - <<'PY'
+./scripts/run-python.sh - <<'PY'
 from pathlib import Path
 for path in [
     Path("/tmp/provenarch-test_arch_project"),
@@ -417,7 +417,7 @@ profiles:
 0. Super-fast smoke через generated direct command (`1 repo × 1 run × 1 provider`):
 
 ```bash
-python3 scripts/live-e2e-plan.py --mode smoke --size tiny --providers qwen --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode smoke --size tiny --providers qwen --format shell
 ```
 
 Проверить напечатанную команду и запустить её напрямую. Этот smoke не является release readiness signal.
@@ -475,9 +475,9 @@ BATCH_PROVIDER_FILTER=claude-code
 Альтернативно для provider/size combinations использовать generator:
 
 ```bash
-python3 scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
-python3 scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
-python3 scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size fast --providers codex --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size full --providers claude --frontend-mode never --format shell
+./scripts/run-python.sh scripts/live-e2e-plan.py --mode regres --size complex --providers qwen --frontend-mode never --format shell
 ```
 
 `regres full` добавляет diagnostic Sentry baseline slice и покрывает все 6 canonical repo sets, но остаётся non-release.
@@ -495,7 +495,7 @@ make contracts test lint build
 5. Проверка path targets (exist + pinned SHA):
 
 ```bash
-python3 - <<'PY'
+./scripts/run-python.sh - <<'PY'
 import json, subprocess, sys
 from pathlib import Path
 
@@ -655,10 +655,10 @@ Non-release/diagnostic matrix пишет neutral result:
 
 Pre-tag/offline check:
 ```bash
-python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
+./scripts/run-python.sh scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 
 # release full: all three fresh constituent matrices in one fail-closed check
-python3 scripts/verify-release-verdict.py \
+./scripts/run-python.sh scripts/verify-release-verdict.py \
   reports/release_verdict_<fast-matrix-id>.json \
   reports/release_verdict_<long-matrix-id>.json \
   reports/release_verdict_<ftgo-sentry-matrix-id>.json
@@ -989,7 +989,7 @@ Composite release evidence:
 
 Перед tag/release выполнить offline verifier:
 ```bash
-python3 scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
+./scripts/run-python.sh scripts/verify-release-verdict.py reports/release_verdict_<matrix-id>.json
 ```
 
 SWE-agent assessments не заменяют verifier-backed execution verdict, но являются обязательными companion inputs для release readiness. Optional `reports/operator_blackbox_assessment_<matrix-id>.md` по шаблону `docs/templates/LIVE_E2E_OPERATOR_ASSESSMENT.md` можно использовать как дополнительный reasoning layer.

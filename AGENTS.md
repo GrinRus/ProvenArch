@@ -1,79 +1,72 @@
-# AGENTS.md (Codex)
+# AGENTS.md
 
-Короткие устойчивые правила для работы в репозитории. Детальные процедуры живут в specs, skills и
-runbooks, а не дублируются здесь.
+Устойчивые правила разработки ProvenArch. Процедуры и маршруты к коду живут в
+[agent development guide](docs/AGENT_DEVELOPMENT.md), specs и skills.
 
-## Mission (MVP)
+## Продукт
 
-Собрать ACP как local-first инструмент:
-- runtime анализа: headless multi-provider (`claude-code` default, `qwen-code` optional,
-  `codex-code` release peer) + deterministic `fake` baseline;
-- реализация: Go backend/orchestrator + embedded React UI;
-- результат: Git-версионируемые workspace-файлы с entity-per-file моделью.
+ACP — local-first инструмент: Go backend/orchestrator + embedded React UI и отдельный
+Git-версионируемый architecture workspace с entity-per-file моделью. `fake` — deterministic
+baseline; live runtime opt-in: `claude-code` default fallback, `qwen-code` optional,
+`codex-code` release peer. Hosted режим и security/compliance enforcement вне MVP.
 
-## Source routing
+## Где искать ответ
 
-- Начать с `README.md`, затем читать только относящиеся к текущему slice разделы
-  `docs/ARCHITECTURE.md` и `docs/spec/*`; для pipeline/runtime обязателен
-  `docs/spec/PIPELINE_SPEC.md`.
-- При конфликте источников правды использовать приоритет:
-  `schemas/*` -> `docs/spec/*` -> `README.md`/`docs/ARCHITECTURE.md` ->
-  `docs/STAKEHOLDER_DOC.md`.
-- Для нетривиальной задачи вести ExecPlan в `docs/PLANS.md` с целью, non-goals, acceptance и
-  progress log.
+- Начать с [README](README.md), затем выбрать затронутую строку
+  [карты кода, specs и проверок](docs/AGENT_DEVELOPMENT.md#карта-изменений).
+  Читать относящиеся к задаче разделы, а не весь корпус документации.
+- Контракты: `schemas/*` задают форму данных, `docs/spec/*` — семантику и инварианты.
+  Код и проверки показывают фактическое поведение; расхождение со spec фиксировать как drift,
+  а не разрешать молчаливым переписыванием контракта.
+- Статус реализации: canonical matrix в [STAKEHOLDER_DOC](docs/STAKEHOLDER_DOC.md).
+  Текущая работа и зависимости: [PLANS](docs/PLANS.md). [BACKLOG](docs/BACKLOG.md) — acceptance
+  reference; завершённый slice не переоткрывать по старому описанию. Несогласованные статусы
+  перепроверять по evidence; новая задача пользователя может не иметь backlog ID.
+- Для pipeline/runtime обязателен [PIPELINE_SPEC](docs/spec/PIPELINE_SPEC.md); для Task/Attempt
+  и UI — [TASK_SPEC](docs/spec/TASK_SPEC.md) и маршруты из guide.
 - Использовать релевантные `.agents/skills/*`: `acp-spec-first-slice` для новой фичи,
   `acp-schema-guardian` для контрактов, `acp-test-fixtures` для core/model logic,
-  `acp-docs-sync` для behavior docs и `acp-e2e-live-gate` для live/release gate.
+  `acp-docs-sync` для behavior docs, `acp-e2e-live-gate` для live/release gate.
+  Это навыки разработки; workspace runtime prompts — отдельная продуктовая поверхность.
 
-## Working contract
+## Рабочий контракт
 
-- В начале зафиксировать текущий слой работы: research, design, implementation, review или release;
-  не переходить между слоями молча.
-- Выбирать минимальный reviewable slice из `docs/BACKLOG.md` и релевантной spec. До правок
-  сформулировать проверяемый результат, ограничения и stop condition.
-- Для answer/review/diagnose: исследовать и сообщить результат, не менять код без запроса. Для
-  change/build/fix: самостоятельно внести локальные in-scope изменения и выполнить безопасную
-  проверку. Запрашивать подтверждение для release/push/external writes, destructive действий,
-  новых production dependencies и существенного расширения scope.
-- Сохранять пользовательские изменения, не трогать unrelated файлы и делать Git-friendly diff.
-- Не объявлять работу завершённой без фактической проверки; blocker описывать вместе с evidence и
-  минимальным следующим действием.
+- В начале назвать слой: research, design, implementation, review или release; смену слоя отмечать.
+- Для answer/review/diagnose исследовать и сообщить результат без правок кода. Для change/build/fix
+  самостоятельно выполнить локальный in-scope slice и его проверки.
+- До правок определить проверяемый результат, non-goals и stop condition. Для многошаговой работы
+  использовать существующий ExecPlan или добавить новый по [PLANS](docs/PLANS.md); держать
+  актуальными зависимости, evidence и следующее действие. Read-only audit не требует правки tracker.
+- Сохранять пользовательские изменения и делать reviewable diff. Параллельные задачи должны иметь
+  независимые границы файлов/ответственности и финальный синтез; не менять чужой active slice.
+- Release/push/external writes, destructive действия, новые production dependencies и существенное
+  расширение scope требуют явного разрешения. Уже данное разрешение не запрашивать повторно.
 
-## Guidance for current reasoning models
+## Инварианты реализации и review
 
-- Давать модели цель, доменный контекст, hard constraints, acceptance criteria и границы
-  автономности; не предписывать каждый промежуточный шаг без необходимости.
-- Каждое правило формулировать один раз. Удалять повторяющийся process/style scaffolding, но
-  сохранять продуктовые инварианты, форматы результата и review requirements.
-- Сохранять пользовательские значения и существующее поведение. Существенную неоднозначность в
-  контракте или необратимом результате выносить на уточнение; в локальном обратимом slice делать
-  явно отмеченное разумное допущение.
-- Для длинной работы держать актуальными текущий слой, зависимости, критерий остановки и краткий
-  handoff. Параллелить только независимые задачи с обязательным финальным синтезом.
-- Не закреплять модель или reasoning effort в `AGENTS.md`. Изменение `codex-code` model/reasoning
-  defaults — отдельный измеримый slice через runtime config, tests и live runbook. Не включать Pro,
-  multi-agent, persisted reasoning, explicit caching или programmatic tool calling только потому,
-  что новая модель это поддерживает.
+- Анализируемые репозитории — read-only inputs. Все outputs пишутся в разрешённые корни отдельного
+  workspace; проверять containment и identity до чтения, мутации и promotion.
+- Artifact-only runtime: успех подтверждают валидные step artifacts, stdout/stderr — diagnostics.
+  Сохранять staged validation → promotion и last-good knowledge при неуспешной попытке.
+- Task/Attempt/run identity и evidence authority задаёт backend. Не подменять explicit missing/stale
+  identity другим run, mutable current state или предположением frontend.
+- Сохранять пользовательские workspace values и editable baseline files. Изменение runtime prompts,
+  provider/model/reasoning defaults или списка providers — отдельный измеримый slice с тестами;
+  возможности новой модели сами по себе не основание добавлять orchestration или defaults.
+- При изменении контракта синхронизировать затронутые schemas/specs, validators, examples,
+  tests/fixtures, `docs/APPENDIX_SCHEMAS.md` и ADR rationale через schema-guardian. Core behavior и
+  testing baseline требуют соответствующих fixtures и behavior docs, а не механической правки всех docs.
 
-## Product invariants
+## Проверка и release
 
-- Нет hosted режима и security/compliance enforcement в MVP.
-- Не расширять список headless providers за `claude-code`, `qwen-code`, `codex-code` без отдельного
-  slice.
-- Не выдумывать форматы данных и не писать в анализируемые пользовательские репозитории.
-- При изменении схемы/контракта синхронизировать specs, validators, tests/fixtures, examples,
-  `docs/APPENDIX_SCHEMAS.md` и ADR rationale. Для `workspace.yaml` также синхронизировать
-  `docs/spec/WORKSPACE_SPEC.md` и `schemas/workspace.schema.json`.
-- При изменении core поведения обновлять tests/fixtures и behavior docs. При изменении testing
-  baseline синхронизировать `docs/TESTING_STRATEGY.md`, fixtures и golden outputs.
-- Required CI должен оставаться deterministic и без live network dependencies.
-
-## Validation and release
-
-- Во время работы запускать самый узкий релевантный check; для завершённого slice выполнить полный
-  DoD: `make contracts`, `make test`, `make lint`, `make build`.
-- Для pre-release live gate использовать только skill `acp-e2e-live-gate` и
-  `docs/RELEASE_LIVE_E2E_RUNBOOK.md`; canonical harness — `scripts/full-run-batch-matrix.sh` без
-  wrapper. Full live matrix остаётся manual trusted-machine gate, не required CI merge gate.
-- Не менять canonical release matrices или curated `repos_file` ради обхода ограничений машины;
-  переносить gate на подходящий trusted host.
+- Подготовка среды и точные toolchains: [CONTRIBUTING](CONTRIBUTING.md). Во время работы запускать
+  узкий релевантный check; для завершённого implementation slice выполнить полный DoD:
+  `make contracts`, `make test`, `make lint`, `make build`. Дополнительные UI/fixture checks — в guide.
+- Required CI остаётся deterministic, без live provider/network execution. Проверки структуры
+  agent guidance выполняет `make verify-agent-guidance`.
+- Live/release gate выполнять через `acp-e2e-live-gate` и
+  [RELEASE_LIVE_E2E_RUNBOOK](docs/RELEASE_LIVE_E2E_RUNBOOK.md): canonical harness
+  `scripts/full-run-batch-matrix.sh` без wrapper, manual trusted-machine gate вне required CI.
+  Не менять canonical matrices или curated `repos_file` для обхода ограничений хоста.
+- Завершение подтверждать фактическими проверками; blocker сообщать с evidence и минимальным
+  следующим действием. Implementation complete и release accepted — разные результаты.

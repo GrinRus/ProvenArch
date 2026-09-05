@@ -1,7 +1,9 @@
 # Task and Attempt contract (W23A1–W23A4 foundation)
 
 Status: **W23A1–W23A4 schemas, durable registry, public Task APIs, Attempt admission and W23
-Task-first surfaces are implemented. W24 authority and W25 trusted live evidence remain gated.**
+Task-first surfaces are implemented. W24 effective-verdict authority is implemented; W25 trusted
+live qualification remains open.** See the [canonical stakeholder matrix](../STAKEHOLDER_DOC.md#0-canonical-stakeholder-matrix-source-of-truth)
+for implementation and release-evidence status.
 
 This document fixes the product identity and persistence boundary for the Task-first shell. Current
 `/api/pipeline/runs*` behavior remains readable for runtime lifecycle and legacy evidence, while
@@ -37,7 +39,7 @@ unknown/stale identity fails visibly and never falls back to another Task, Attem
 
 ## 4) Persistence
 
-The planned authoritative registry paths are:
+The authoritative registry paths are:
 
 ```text
 reports/taskruns/task-history.json
@@ -57,7 +59,7 @@ There is no automatic Task deletion in the MVP.
 
 ## 5) Task v1 public shape
 
-The 23A schema slice must define at least:
+The Task v1 schema defines:
 
 - `version`;
 - opaque server-generated `task_id`;
@@ -112,7 +114,7 @@ retention. A retry/rerun always creates a new child Attempt.
   Task/Attempt/run identity; a token cannot represent a different request.
 - Queue/readiness/conflict responses expose exact Task, Attempt and run identities.
 
-## 8) Planned API surface
+## 8) Public API surface
 
 The implemented 23A surface exposes versioned JSON contracts for:
 

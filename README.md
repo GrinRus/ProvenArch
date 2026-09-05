@@ -296,11 +296,11 @@ make build
 ./bin/acp version
 ```
 
-The complete Python test suite also requires its pinned YAML dependency:
-
-```bash
-./scripts/run-python.sh -m pip install PyYAML==6.0.3
-```
+`make bootstrap` installs the locked UI and contract dependencies and the pinned Python test
+dependencies in a worktree-local `.venv`, without rewriting Go module declarations. The repository
+Python wrapper discovers this environment automatically. Run `make preflight` to check local
+readiness without installing anything; see [Contributing](CONTRIBUTING.md) for toolchain overrides
+and checks for uncommitted UI changes.
 
 Before submitting a change, run the project definition of done:
 

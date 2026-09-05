@@ -269,18 +269,21 @@ Implemented required jobs:
   - `go test ./...`
   - `./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
+  - agent guidance checks validate skill metadata/unique names, local file/fragment and script
+    references, and active plan index/status/body structure; these checks do not infer semantic
+    completion or release readiness from checkboxes
   - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
   - `make test-stress` (coordinator explicit-queue and pending-supersession regression loop)
   - `go build ./cmd/acp`
 - `ui`
   - `./scripts/run-npm.sh ci --prefix ui`
-  - `./scripts/run-npm.sh run typecheck --prefix ui`
   - `./scripts/run-npm.sh run test --prefix ui -- --run`
   - `./scripts/run-npm.sh run build --prefix ui`
-  - `make verify-ui-determinism` builds the exact checked-out commit in two independent
-    temp roots and compares sorted `ui/dist` path/digest manifests
-  - `make verify-ui-dist` rebuilds and re-embeds `internal/api/ui_dist`, then fails if the
-    tracked embedded bundle is stale
+  - `make verify-ui-determinism` builds the current worktree in two independent temp roots and
+    compares sorted `ui/dist` path/digest manifests; set `UI_SOURCE=HEAD` or an exact Git ref to
+    verify committed sources explicitly
+  - `make verify-ui-dist` builds into temporary output and compares `internal/api/ui_dist`
+    without rewriting the embedded bundle or requiring staging
 
 Implemented additional jobs:
 - `lint`
@@ -310,6 +313,8 @@ Implemented additional jobs:
   - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes eight local
     provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
     horizontal overflow
+  - mock E2E allocates a private results directory and loopback server per invocation; it never
+    silently reuses a server from another worktree or deletes another run's evidence
   - optional local coverage is available through `npm run coverage --prefix ui`; it uses locked
     `@vitest/coverage-v8`, includes all `ui/src` implementation files and writes ignored
     `ui/coverage/coverage-summary.json` / `coverage-final.json`
@@ -538,7 +543,7 @@ Release workflow hardening:
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
-- live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`
+- live headless provider smoke не блокирует merge; deterministic CI policy включает `contracts`, `backend`, `ui`, `lint`, `golden`, `smoke-cli`, `smoke-api`; фактические branch-protection settings проверяются отдельно
 - release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - pre-tag release check использует `scripts/verify-release-verdict.py` поверх уже созданного `reports/release_verdict_<matrix-id>.json`; это не required CI и не live runner
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
@@ -549,7 +554,7 @@ Release workflow hardening:
   - `make verify-readable-fixtures` checks every readable export path/digest against its adjacent
     machine `snapshot.sha256`; machine-only snapshot entries remain valid
   - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
-    the embedded bundle and `make verify-ui-dist` to prove the committed bundle matches the
+    the embedded bundle and `make verify-ui-dist` to prove the working-tree bundle matches the
     current Vite output.
   - controlled snapshot refresh:
   - `ACP_UPDATE_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
