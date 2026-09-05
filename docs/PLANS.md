@@ -170,11 +170,12 @@ Base is fresh `origin/main` `6dbbed79`. The separate stabilization checkout has 
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02 and REM-06 merged; REM-07 is the current independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06 and REM-07 merged; REM-08 is the current independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Deliver REM-07 with its watcher lifecycle invariant, then repeat stabilization/dependency
-checks before selecting the next ready row; keep release status explicitly blocked until REM-03B is
-authorized and applied with before/after/rollback evidence. REM-25 remains blocked by REM-03..24.
+Next action: Reproduce and deliver REM-08 with its immutable queued-Attempt admission invariant,
+then repeat stabilization/dependency checks before selecting the next ready row; keep release status
+explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
+REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -262,8 +263,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
 | 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
-| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | ready; current slice |
-| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | blocked-by-dependency |
+| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | merged in PR #279 |
+| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | ready; current slice |
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | blocked-by-dependency |
 | 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | blocked-by-dependency |
@@ -631,6 +632,9 @@ if watcher count is not quiescent after shutdown.
   pass. Full `make test` completed all Go packages except one unrelated load-sensitive
   `internal/runtime/providercommon/TestRunHeadlessProviderRespectsGlobalInvocationBudget` assertion;
   the failing test passes in an isolated rerun, so the failure is not in REM-07 paths.
+- 2026-09-05: PR #279 passed all required deterministic CI contexts and was squash-merged into
+  `main` as `079f9b51c95622abb6fc417234df52b0f1a36d0a`; fresh fetch confirms `origin/main` at the
+  merge commit. REM-07 is closed and REM-08 is the next ready independent P1 slice.
 
 ## EP-20260811-task-attempt-contracts
 
