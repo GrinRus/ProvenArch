@@ -75,7 +75,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved code cleanup, documentation archival and deterministic verification; PR delivery |
+| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | review | implementation and deterministic verification complete; owner review of PRs #270–#273 |
 | [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | blocked | separate owner start and per-row dependencies required |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
@@ -139,19 +139,19 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-approved-trash-cleanup
 
-Status: active — implementation of the owner's approved three-pass audit cleanup.
+Status: review — approved cleanup implemented and validated; PRs #270–#273 await owner review.
 
-Next action: Deliver small backend, UI, CSS and documentation PRs with deterministic checks, coordinated with the separate REM-02 golden repair.
+Next action: Review the stacked PRs [#270](https://github.com/GrinRus/ProvenArch/pull/270) → [#271](https://github.com/GrinRus/ProvenArch/pull/271) → [#272](https://github.com/GrinRus/ProvenArch/pull/272) → [#273](https://github.com/GrinRus/ProvenArch/pull/273). Merge remains an owner decision; the separate REM-02 owner retains golden-selector repair.
 
 ### Context
 The owner approved removal of confirmed dead code and its isolated tests, migration of useful test-only checks, CSS cleanup, historical-document archival and broken-reference repairs. Supported compatibility is removed only when there is no remaining consumer or contract. Golden coverage must remain executable; an empty selector is not a useful gate.
 
 ### Goals (must have)
 - [x] Preserve the useful golden gate and leave its selector repair to the active REM-02 owner; avoid a duplicate runner.
-- [ ] Remove confirmed backend and frontend dead groups; preserve useful regression coverage on live paths.
-- [ ] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
-- [ ] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
-- [ ] Complete deterministic DoD, independent review and small PR delivery.
+- [x] Remove confirmed backend and frontend dead groups; preserve useful regression coverage on live paths.
+- [x] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
+- [x] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
+- [x] Complete deterministic DoD, independent review and small PR delivery.
 
 ### Non-goals
 No runtime prompt/model defaults, schemas, supported public/legacy APIs, release matrices, readable fixture deduplication, waiver deletion, accepted semantic primitive/token removal, or live provider execution. The manually usable curated Bank manifest remains until manual-use ownership is known. This task does not start or close unrelated remediation rows.
@@ -168,6 +168,11 @@ Base is fresh `origin/main` `6dbbed79`. The separate stabilization checkout has 
 ### Progress log
 - 2026-09-05: Owner approved the audit cleanup and small PR delivery. Fresh-main comparison found several documentation/archival findings already fixed by PR #268. Created isolated cleanup branches; source audit registers retained outside the repository for revalidation.
 - 2026-09-05: Detected concurrent REM-02 implementation on `codex/rem-02-golden-selection`; excluded the overlapping golden experiment from this series. Existing readable fixture history remains unchanged. Backend removal and UI source/CSS changes passed focused tests and independent backend review.
+
+- 2026-09-05: Completed 46 Go declaration removals and one Python wrapper removal; migrated effective-verdict, Service history and incomplete-report regressions to live paths. Independent backend and UI reviews found no regression. Removed retired frontend modules/mutation branches while preserving workspace identity, Task admission and read-only diagnostics. Removed 84 CSS classes; all 1,952 retained selector branches preserve declarations/context/order. Code, styles and tests have 3,152 fewer net lines.
+- 2026-09-05: Archived 11 historical documents with provenance and repaired references. Current UI and effective-verdict prose now match implementation; stale architect-summary determinism claims were replaced with bounded existing regression evidence. Documentation checks covered 358 local links and 146 fragments; independent changed-document review found no broken moved targets. Open plans, release waivers, curated inputs, readable golden history and accepted semantic primitives/tokens remain intact.
+- 2026-09-05: Full integration check found one obsolete Go docsync assertion that read the removed BaselineEditorsPanel. Removed only that copy test in the UI PR; the actual runtime prompt-pack boundary test remains. Final deterministic DoD passed: `make contracts`, `make test` (all Go packages, 304 Python tests, 245 UI tests), `make lint`, `make build`. UI determinism and embedded freshness checks passed; the final rebuild produced no diff. No live provider run was used.
+- 2026-09-05: Browser QA passed all 10 source/CSS mock configurations across desktop/tablet/mobile after an ENOSPC retry. Fourteen of 18 screenshot pairs were exact; a button state, dynamic elapsed times and one unstable full-page capture bound the remaining comparisons. No universal pixel-parity claim is made. All 11 CI checks passed for the implementation PR heads; this final plan-only evidence update receives a fresh CI run. Temporary cleanup worktrees were removed after retaining commits, PRs and local audit evidence. Stop condition reached at PR delivery; no merge or release performed.
 
 ## EP-20260905-audit-remediation-program
 
