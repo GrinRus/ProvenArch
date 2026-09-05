@@ -61,6 +61,229 @@ EP-YYYYMMDD-<slug>
 Tracker reconciliation from 2026-07-02 archived implementation-complete plans into `docs/archive/PLANS_ARCHIVE_2026-07.md`. Historical reconciliation evidence remains in `docs/archive/TRACKER_RECONCILIATION_2026-05-07.md`, with older closed plans in the monthly archives listed above.
 
 ### Plan ID
+EP-20260905-audit-remediation-program
+
+### Context
+
+Follow-up аудит от 2026-09-05 оценил не только локальные дефекты, но и соответствие реализации
+local-first mission, Task-first product flow и release claims. Базовая точка аудита — `main` на
+`c6d46ce13775349fb9b038ba4fcbf39c039efce3`. Программа продолжает, но не переоткрывает завершённый
+Epic 19: каждая проблема должна быть повторно доказана на актуальном `origin/main`, закрыта отдельным
+reviewable slice и защищена regression evidence.
+
+Параллельно в соседней задаче `Проверь UI и UX проекта` идёт stabilization lane: semantic
+alias/collision handling, document-flow assembly и trusted Codex live qualification. На момент
+создания плана соседняя задача активна и имеет незавершённые изменения в отдельном checkout. Поэтому
+очередь ниже является ordered-ready queue: на каждой итерации берётся первая незакрытая задача, для
+которой сняты зависимости и отсутствует пересечение с актуальным stabilization scope.
+
+Этот planning slice не исправляет продуктовый код и не объявляет release readiness. Реализация
+начинается только после отдельного запуска remediation goal владельцем проекта.
+
+### Goals (must have)
+
+- [ ] Закрыть все подтверждённые P0/P1 findings и явно принять, перенести или закрыть evidence для
+      каждого P2 finding.
+- [ ] Проводить каждую code/config доработку отдельным минимальным PR с regression test,
+      независимым review и зелёными required checks; внешние admin operations подтверждать
+      отдельным audit trail и rollback evidence.
+- [ ] Не дублировать и не перетирать работу соседнего stabilization lane; после его merge повторно
+      проверить затронутые findings на свежем `origin/main`.
+- [ ] Восстановить достоверность release/golden gates до низкорисковых refactoring и UX polish.
+- [ ] Довести Task-first journey `Setup -> Task -> Attempt -> Review -> Publish` до согласованного
+      поведения API, UI, persistence и документации.
+- [ ] Завершить программу полным deterministic DoD и отдельной trusted-machine qualification по
+      canonical runbook без превращения live providers в required CI.
+
+### Non-goals
+
+- [ ] Не добавлять hosted mode, security/compliance enforcement или новых headless providers.
+- [ ] Не менять public contracts, schemas или canonical release matrices без отдельного
+      schema/spec-first решения и соответствующих guardians.
+- [ ] Не переписывать большие подсистемы до появления regression coverage для исправляемого
+      поведения.
+- [ ] Не использовать текущий main checkout соседней задачи для remediation commits, reset, pull
+      или cleanup её незавершённых файлов.
+- [ ] Не обновлять canonical stakeholder status до фактического merge соответствующих slices.
+- [ ] Не считать diagnostic/non-release live run доказательством `RELEASE READY`.
+
+### Dependencies / parallel stabilization boundary
+
+Текущий stabilization-owned set фиксируется как стартовый snapshot, а не вечный список:
+
+- `docs/ARCHITECTURE.md`
+- `internal/artifactquality/semantic.go`
+- `internal/artifactquality/semantic_test.go`
+- `internal/orchestrator/docflow.go`
+- `internal/orchestrator/docflow_test.go`
+- active Codex medium live matrix и связанные с ней runtime diagnostics
+
+До merge соседней задачи эти файлы не изменяются remediation slices. Для близких путей
+`internal/artifactquality/**`, `internal/orchestrator/docflow*`, architecture behavior docs и live
+harness сначала проверяется semantic overlap, даже если имя файла не совпадает. Если overlap есть,
+slice остаётся `blocked-by-stabilization`: реализация не начинается, а следующей выбирается первая
+ready задача.
+
+Перед выбором и перед merge каждого slice исполнитель обязан:
+
+1. Получить статус и последние material changes соседней задачи, а не ориентироваться только на этот
+   стартовый snapshot.
+2. Выполнить `git fetch origin main --prune`, зафиксировать base SHA и сравнить изменённые пути с
+   candidate scope.
+3. После merge stabilization lane обновиться от `origin/main`, повторно воспроизвести finding и
+   удалить из очереди уже закрытые либо переформулировать изменившиеся acceptance criteria.
+4. Не запускать конкурирующую full/live matrix на том же trusted host. Узкие deterministic checks
+   допустимы; полный DoD планируется так, чтобы не искажать live evidence соседней задачи.
+
+### Ordered remediation queue
+
+Статусы `ready` и `blocked-by-stabilization` перепроверяются на каждой итерации. Если
+stabilization-sensitive P1 становится ready, он возвращается выше оставшихся P1/P2 задач независимо
+от того, какая ready задача была временно пропущена.
+
+| Order | ID | Priority | Result / acceptance boundary | Depends on | Initial readiness |
+| --- | --- | --- | --- | --- | --- |
+| 1 | REM-01 | P0 | Release verifier принимает только полное, свежее и связанное с release tag/source SHA evidence; stale, fabricated, incomplete, mismatched assessment и over-broad waiver fixtures fail closed. | none | ready; next slice |
+| 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | blocked-by-dependency |
+| 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
+| 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
+| 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
+| 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
+| 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | blocked-by-dependency |
+| 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | blocked-by-dependency |
+| 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | blocked-by-dependency |
+| 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | blocked-by-dependency |
+| 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | blocked-by-dependency |
+| 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | blocked-by-dependency |
+| 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | blocked-by-dependency |
+| 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | blocked-by-dependency |
+| 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | blocked-by-dependency |
+| 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
+| 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | blocked-by-dependency |
+| 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
+| 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | blocked-by-dependency |
+| 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
+| 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | blocked-by-dependency |
+| 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | blocked-by-stabilization-and-dependency |
+| 23 | REM-23 | P2 | UI hotspots разделены по data/state/view seams, общие states унифицированы, а route-level regression suite остаётся зелёной. | REM-17..21 | blocked-by-dependency |
+| 24 | REM-24 | P2 | Wall-clock sleeps/flaky waits заменены deterministic clocks/events; повторные focused runs не дают flakes. | stabilization merge, REM-06..08, REM-22 | blocked-by-stabilization-and-dependency |
+| 25 | REM-25 | P2 | Specs, architecture, testing strategy, stakeholder mirror, examples и active/archive plans синхронизированы с фактом; дублированные stale claims удалены. | REM-01..24 resolved | blocked-by-program |
+
+### Slice definition of ready
+
+Задача готова к реализации, только если одновременно выполнено следующее:
+
+- finding воспроизводится на актуальном `origin/main` и записан как observable failure/invariant;
+- прочитаны релевантные `schemas/*`, `docs/spec/*`, architecture и tests согласно source priority;
+- candidate paths не принадлежат активному stabilization lane и не имеют semantic overlap;
+- определены goal, non-goals, acceptance, regression test, rollback и stop condition;
+- code/config slice помещается в один reviewable PR без unrelated cleanup и новых production
+  dependencies. Для admin-only `REM-03B` вместо PR заранее фиксируются exact setting delta,
+  authorization, before/after evidence и rollback command.
+
+Если finding больше не воспроизводится после соседнего merge, задача закрывается evidence-комментарием
+в progress log, а не повторной реализацией того же исправления.
+
+### Iteration protocol
+
+Для каждого следующего пункта очереди выполняется один и тот же цикл:
+
+Admin-only `REM-03B` использует те же research, plan, review, evidence и record gates, но не создаёт
+фиктивную branch/commit/PR: GitHub setting применяется только после явной авторизации и проверки
+rollback.
+
+1. **Select.** Обновить статус соседней задачи и `origin/main`; просканировать ordered queue сверху и
+   взять первую ready задачу.
+2. **Research.** Детально прочитать относящиеся specs, code paths, tests, history и актуальный соседний
+   diff; воспроизвести дефект либо измерить baseline.
+3. **Plan.** Добавить/уточнить отдельный ExecPlan slice: goal, non-goals, acceptance, affected paths,
+   regression strategy, risks, rollback и stop condition.
+4. **Isolate.** До изменений создать свежую `codex/<slice>` branch в отдельном worktree от точного
+   `origin/main` SHA. Это намеренно выполняется до первого commit, чтобы не переносить незакоммиченные
+   изменения между ветками и не задеть соседний main checkout.
+5. **Implement and verify.** Реализовать минимальный slice, сначала запустить узкие checks, затем
+   требуемый deterministic DoD. Не расширять scope найденными попутно P2/P3 проблемами.
+6. **Commit and review.** Сделать содержательный implementation commit, провести независимое review
+   correctness/contracts/tests/maintainability; внести fixes отдельным commit только если fixes
+   действительно нужны. Empty review commit не создаётся.
+7. **Refresh and deliver.** Ещё раз получить соседний статус и `origin/main`, разрешить drift/overlap,
+   push branch, открыть PR, дождаться required checks, исправить замечания и merge только зелёный PR.
+8. **Rebase the loop.** После merge выполнить fetch `origin/main` и проверить merge SHA. Если main
+   checkout занят/dirty в соседней задаче, не делать pull в нём: следующий worktree создаётся прямо
+   от обновлённого `origin/main`.
+9. **Record and repeat.** Записать исходный `origin/main` SHA, stabilization status/revision и owned
+   paths snapshot, branch, PR URL, merge SHA, review verdict и выполненные checks; затем вернуться к
+   шагу 1. Программа останавливается на blocker только после фиксации evidence и минимального
+   действия для разблокировки.
+
+### Approach
+
+1. Сначала восстановить truthfulness автоматических gates (`REM-01..03`), чтобы последующие PR и
+   release claims опирались на исполняемые проверки.
+2. По мере готовности немедленно поднять stabilization-sensitive runtime safety (`REM-04..05`) выше
+   оставшихся P1; до этого продолжать независимый lifecycle/state slice (`REM-06..08`).
+3. Закрыть Git/publication correctness/performance (`REM-09..11`) и Task-first contract gaps
+   (`REM-12..15`) до UI polish.
+4. Свести publish/product-flow state machine (`REM-16..21`) и лишь затем выполнять структурные
+   backend/UI refactors (`REM-22..24`).
+5. Синхронизировать documentation/tracker surfaces (`REM-25`), выполнить полный deterministic DoD и
+   только после этого провести canonical trusted qualification через `acp-e2e-live-gate` и
+   `docs/RELEASE_LIVE_E2E_RUNBOOK.md`.
+
+### Files expected to change
+
+- Release/golden evidence: `.github/workflows/{golden,release}.yml`, `scripts/verify-release-*.py`,
+  `scripts/tests/*release*`, repository ruleset evidence.
+- Runtime/filesystem/lifecycle: `internal/fs`, `internal/runtime`, `internal/orchestrator`,
+  `internal/api`, Task/run registries and focused tests.
+- Git/publication: Git resolver/inventory/publish services, recovery metadata and API tests.
+- Task-first/UI: Task/Attempt contracts and routes, `ui/src/**`, component and Playwright tests.
+- Closure docs: relevant `docs/spec/*`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`,
+  `docs/STAKEHOLDER_DOC.md`, this plan/archive and examples.
+
+Exact files are re-derived per slice. Listing a path here does not grant a parallel slice ownership
+over the stabilization-owned set.
+
+### Acceptance criteria
+
+- [ ] Каждая P0/P1 REM-задача имеет final state `merged` или `closed by current-main evidence`;
+      иначе программа и release status остаются явно blocked. Для P2 дополнительно допустимо
+      `explicitly accepted/deferred` с owner/rationale; молча пропущенных findings нет.
+- [ ] Для исправленных P0/P1 существует negative regression test, который падал бы на audit
+      baseline.
+- [ ] Каждый merged slice основан на свежем `origin/main`, не содержит чужих stabilization changes и
+      прошёл independent diff review.
+- [ ] На каждом завершённом behavior slice проходят `make contracts`, `make test`, `make lint` и
+      `make build` с pinned toolchain; scope-specific checks сохранены в PR evidence.
+- [ ] Required CI не имеет zero-test success и не зависит от live network/provider binaries.
+- [ ] Финальный Task-first smoke подтверждает Setup, create/admit, progress/recovery, review и
+      publish boundaries для desktop/mobile и offline/error states.
+- [ ] Trusted live gate запускается только canonical harness/profile taxonomy; fresh verifier-backed
+      evidence связано с точным qualified SHA, а diagnostic runs не повышают release status.
+- [ ] После финального merge `origin/main` повторно проверен, stakeholder/docs синхронизированы, а
+      незакрытые residual risks перечислены явно.
+
+### Risks
+
+- Соседний stabilization merge может закрыть или изменить finding. Mitigation: reproduce-after-merge
+  gate и запрет механического применения старого patch.
+- Два worktree могут конкурировать за CPU/provider/session resources. Mitigation: не запускать
+  параллельные full/live gates; deterministic checks ограничивать выбранным slice до финального DoD.
+- Большие cross-cutting fixes легко превратить в unreviewable PR. Mitigation: один invariant и один
+  rollback boundary на slice; refactor следует после behavior lock.
+- GitHub settings и trusted qualification зависят от внешнего состояния. Mitigation: отделять code
+  merge от admin/live evidence и не помечать задачу закрытой без фактической проверки.
+- Existing docs содержат исторические claims. Mitigation: не переписывать backlog/history в каждом
+  PR; выполнить единую fact-based reconciliation в `REM-25`.
+
+### Progress log
+
+- 2026-09-05: Создан follow-up remediation ExecPlan на baseline `c6d46ce`; соседняя задача
+  `Проверь UI и UX проекта` подтверждена active во время Codex medium live matrix. Зафиксированы
+  owned paths, dynamic readiness и isolated-worktree protocol. Следующая задача — `REM-01`; ни один
+  product remediation slice и remediation goal этим planning change не запущен.
+
+### Plan ID
 EP-20260811-task-attempt-contracts
 
 ### Context
