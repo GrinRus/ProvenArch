@@ -74,6 +74,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
+| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved code cleanup, documentation archival and deterministic verification; PR delivery |
 | [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | blocked | separate owner start and per-row dependencies required |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
@@ -134,6 +135,38 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## Active Plans
 
+
+## EP-20260905-approved-trash-cleanup
+
+Status: active — implementation of the owner's approved three-pass audit cleanup.
+
+Next action: Deliver small backend, UI, CSS and documentation PRs with deterministic checks, coordinated with the separate REM-02 golden repair.
+
+### Context
+The owner approved removal of confirmed dead code and its isolated tests, migration of useful test-only checks, CSS cleanup, historical-document archival and broken-reference repairs. Supported compatibility is removed only when there is no remaining consumer or contract. Golden coverage must remain executable; an empty selector is not a useful gate.
+
+### Goals (must have)
+- [x] Preserve the useful golden gate and leave its selector repair to the active REM-02 owner; avoid a duplicate runner.
+- [ ] Remove confirmed backend and frontend dead groups; preserve useful regression coverage on live paths.
+- [ ] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
+- [ ] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
+- [ ] Complete deterministic DoD, independent review and small PR delivery.
+
+### Non-goals
+No runtime prompt/model defaults, schemas, supported public/legacy APIs, release matrices, readable fixture deduplication, waiver deletion, accepted semantic primitive/token removal, or live provider execution. The manually usable curated Bank manifest remains until manual-use ownership is known. This task does not start or close unrelated remediation rows.
+
+### Acceptance criteria
+- Removed symbols have no live consumers, or their tests are migrated to the live surface.
+- Existing deterministic behavior and source fixture bytes are preserved.
+- `make contracts`, `make test`, `make lint`, `make build` pass; UI changes also pass mock/browser and embedded parity/determinism checks.
+- Each PR has bounded scope, validation evidence and reversible commits; no merge/release is implied by PR delivery.
+
+### Dependencies and ownership
+Base is fresh `origin/main` `6dbbed79`. The separate stabilization checkout has local changes in `docs/ARCHITECTURE.md`, semantic/docflow implementation/tests and `ui/src/App.test.tsx`; its worktree and changes are not touched. Cleanup uses isolated worktrees and avoids those runtime behavior changes. Documentation corrections affect separate stale descriptions only. The already merged guidance/archive work in PR #268 and release-verifier work in PR #269 are rechecked rather than repeated.
+
+### Progress log
+- 2026-09-05: Owner approved the audit cleanup and small PR delivery. Fresh-main comparison found several documentation/archival findings already fixed by PR #268. Created isolated cleanup branches; source audit registers retained outside the repository for revalidation.
+- 2026-09-05: Detected concurrent REM-02 implementation on `codex/rem-02-golden-selection`; excluded the overlapping golden experiment from this series. Existing readable fixture history remains unchanged. Backend removal and UI source/CSS changes passed focused tests and independent backend review.
 
 ## EP-20260905-audit-remediation-program
 
