@@ -687,6 +687,65 @@ existing queue/restart semantics regress.
 - 2026-09-05: PR #281 passed all 11 required checks and merged as `02086568a785284dbbecadd14c4ecb658961227a`;
   fresh `origin/main` was fetched. REM-08 is closed and REM-09 is the next independent ready slice.
 
+### REM-09 slice plan (in progress)
+
+**Goal.** Для remote `git_url` с moving branch/tag ref фактически использовать и сохранять exact
+commit identity, чтобы fetch не оставлял stale local branch и изменение удалённой ветки между
+validation и execution не превращалось в silent source drift.
+
+**Finding / baseline.** На свежем `origin/main=245f462b` resolver после `git fetch origin` проверяет
+и checkout-ит запрошенный `repo.Ref` напрямую. Для plain branch (например, `main`) это может
+разрешить локальную cache branch, которая осталась на старом commit, тогда как обновлённый
+`origin/main` уже указывает на новый commit. `ResolvedSHA` и `source-revisions.json` в таком случае
+честно описывают stale checkout, а не moving remote ref. Existing tests cover unpinned default
+freshness и pinned SHA stability, но не explicit moving branch ref.
+
+**Readiness.** REM-08 merged; REM-09 затрагивает только workspace source resolver и source-identity
+regressions, не пересекается с соседними semantic/docflow/live stabilization paths. Соседняя
+stabilization задача проверена на revision 30 и остаётся blocked/idle в отдельном checkout.
+REM-03B остаётся явно authorization-gated и release-blocking.
+
+**Non-goals.** Не менять `workspace.yaml` или public JSON schemas, path-source checkout safety,
+credential model, provider/runtime selection, refresh planner semantics, remote network policy или
+stabilization-owned files.
+
+**Affected paths.** `internal/workspace/resolver.go`, `internal/workspace/resolver_test.go`,
+`internal/orchestrator/source_resolution_test.go` only if execution-evidence coverage is needed,
+`docs/spec/WORKSPACE_SPEC.md` and this ExecPlan. Existing `ResolvedRepo.ResolvedSHA`/source-revisions
+contract remains the identity surface; no schema change is expected.
+
+**Implementation boundary.** После fetch разрешать explicit moving refs через свежий
+remote-tracking ref (`origin/<ref>`/`refs/remotes/origin/...`) before any stale local branch;
+resolve to a full commit SHA and detach/reset only the ACP-owned cache to that SHA. Preserve direct
+SHA and tag behavior, keep path sources non-mutating, and ensure persisted run evidence records the
+same cache `HEAD` identity used by execution. Add local bare-remote regression that advances a
+branch between two resolutions and asserts fresh content/SHA plus no stale local-branch checkout.
+
+**Acceptance / regression.** Explicit `git_url` branch ref follows the fetched remote-tracking
+commit after the branch advances; `ResolvedSHA == HEAD` and run/source evidence remain exact and
+reproducible. Pinned SHA and tag behavior remains stable, path verification remains read-only,
+focused resolver/orchestrator tests (including `-race` where applicable) pass, and full DoD remains
+`make contracts`, `make test`, `make lint`, `make build` with no live provider/network dependency.
+
+**Rollback / stop condition.** Stop if a moving remote ref resolves to a pre-fetch local branch,
+if a cache checkout remains attached to a mutable branch, if pinned refs change unexpectedly, or if
+path repositories are mutated. Roll back on source-revision/evidence mismatch, schema drift or any
+unrelated stabilization overlap.
+
+- 2026-09-05: Fresh `origin/main=245f462b` and neighbor stabilization revision 30 checked. Source
+  resolver review identified the stale-local-branch path; existing tests lack moving explicit branch
+  coverage. Implementation remains bounded to ACP-owned git_url caches and commit identity evidence.
+- 2026-09-05: Added remote-ref candidate resolution and detached exact-SHA checkout for fetched
+  `git_url` sources, plus cache `HEAD` identity mismatch diagnostics. Local bare-remote regression
+  now advances explicit `main` and confirms fresh content/SHA; pinned SHA, default-head and path
+  safety coverage remain green. Updated `docs/spec/WORKSPACE_SPEC.md` with the source identity and
+  diagnostic contract.
+- 2026-09-05: Focused and full workspace/orchestrator Go tests passed, including race checks for the
+  moving-ref path. `make contracts`, `make lint` and `make build` passed with local Node 22.22.3
+  override; the full `make test` Go phase passed and the Python suite passed without override. The
+  override run's four node-tool failures were expected fixture-version mismatches (22.22.3 vs
+  repository `.node-version` 22.21.1), not REM-09 regressions.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.
