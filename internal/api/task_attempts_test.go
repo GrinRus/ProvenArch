@@ -234,6 +234,9 @@ func TestQueuedAttemptFailsClosedAfterServiceRestart(t *testing.T) {
 	if after.Status != producttasks.AttemptFailed || after.TerminalSummary == nil || after.TerminalSummary.ErrorCode != "run_reconciled_after_restart" {
 		t.Fatalf("queued Attempt did not fail closed with restart diagnostic: %+v", after)
 	}
+	if after.TaskID != queuedPayload.Attempt.TaskID || after.AttemptID != queuedPayload.Attempt.AttemptID || after.RunID != queuedPayload.Attempt.RunID {
+		t.Fatalf("restart reconciliation changed exact Task/Attempt/run identity: before=%+v after=%+v", queuedPayload.Attempt, after)
+	}
 	if !reflect.DeepEqual(beforeIntent, after.IntentSnapshot) || !reflect.DeepEqual(beforeRuntime, after.EffectiveRuntime) {
 		t.Fatalf("restart reconciliation changed immutable admission context: before=(%+v,%+v) after=(%+v,%+v)", beforeIntent, beforeRuntime, after.IntentSnapshot, after.EffectiveRuntime)
 	}
