@@ -19,6 +19,10 @@ func (s *Service) ReconcileStaleRunsAfterRestart() {
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
 	_ = s.cleanupRunLogs()
+	// Queue admission owns the request after this call returns. Detach the
+	// mutable snapshot graph so callers cannot change a queued Attempt's
+	// execution scope before the pending run starts.
+	request.RuntimeSnapshot = acpruntime.CloneAdmittedRuntimeSnapshot(request.RuntimeSnapshot)
 	if request.Pipeline == PipelineQA && strings.TrimSpace(request.Question) == "" {
 		return "", fmt.Errorf("question is required for qa runs")
 	}

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/orchestrator"
 	producttasks "github.com/GrinRus/ProvenArch/internal/tasks"
 )
 
@@ -172,6 +174,71 @@ func TestAttemptWatcherStopsWithServerShutdown(t *testing.T) {
 	}
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatalf("repeated shutdown: %v", err)
+	}
+}
+
+func TestQueuedAttemptFailsClosedAfterServiceRestart(t *testing.T) {
+	server := newTestServerWithRunner(t, cancellableDelayedRunner{delay: 5 * time.Second})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	activeTask := createTaskForAttemptTest(t, httpServer.URL, "restart-active")
+	activeResponse := postJSON(t, httpServer.URL+"/api/tasks/"+activeTask.TaskID+"/attempts", `{"idempotency_key":"restart-active-key"}`)
+	var activePayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(activeResponse.Body).Decode(&activePayload); err != nil {
+		activeResponse.Body.Close()
+		t.Fatalf("decode active admission: %v", err)
+	}
+	activeResponse.Body.Close()
+	if activeResponse.StatusCode != http.StatusAccepted {
+		t.Fatalf("active admission failed: %d", activeResponse.StatusCode)
+	}
+	waitForAttemptStatus(t, server, activePayload.Attempt.AttemptID, producttasks.AttemptRunning)
+
+	queuedTask := createTaskForAttemptTest(t, httpServer.URL, "restart-queued")
+	queuedResponse := postJSON(t, httpServer.URL+"/api/tasks/"+queuedTask.TaskID+"/attempts", `{"idempotency_key":"restart-queued-key","pipeline":"refresh","intent":"queue"}`)
+	var queuedPayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(queuedResponse.Body).Decode(&queuedPayload); err != nil {
+		queuedResponse.Body.Close()
+		t.Fatalf("decode queued admission: %v", err)
+	}
+	queuedResponse.Body.Close()
+	if queuedResponse.StatusCode != http.StatusAccepted || queuedPayload.Attempt.Status != producttasks.AttemptQueued {
+		t.Fatalf("queued admission failed: status=%d attempt=%+v", queuedResponse.StatusCode, queuedPayload.Attempt)
+	}
+	beforeIntent := queuedPayload.Attempt.IntentSnapshot
+	beforeRuntime := queuedPayload.Attempt.EffectiveRuntime
+
+	restartedService := orchestrator.NewService(
+		orchestrator.WithHistoryWorkspace(server.getWorkspace()),
+		orchestrator.WithRunner(cancellableDelayedRunner{delay: time.Second}),
+	)
+	restartedService.ReconcileStaleRunsAfterRestart()
+	restartedServer := NewServer(server.getWorkspace(), restartedService)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := restartedServer.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown restarted server: %v", err)
+		}
+	}()
+
+	after, ok := findAttempt(restartedServer.taskRegistry.Snapshot(), queuedTask.TaskID, queuedPayload.Attempt.AttemptID)
+	if !ok {
+		t.Fatal("queued Attempt disappeared after restart reconciliation")
+	}
+	if after.Status != producttasks.AttemptFailed || after.TerminalSummary == nil || after.TerminalSummary.ErrorCode != "run_reconciled_after_restart" {
+		t.Fatalf("queued Attempt did not fail closed with restart diagnostic: %+v", after)
+	}
+	if after.TaskID != queuedPayload.Attempt.TaskID || after.AttemptID != queuedPayload.Attempt.AttemptID || after.RunID != queuedPayload.Attempt.RunID {
+		t.Fatalf("restart reconciliation changed exact Task/Attempt/run identity: before=%+v after=%+v", queuedPayload.Attempt, after)
+	}
+	if !reflect.DeepEqual(beforeIntent, after.IntentSnapshot) || !reflect.DeepEqual(beforeRuntime, after.EffectiveRuntime) {
+		t.Fatalf("restart reconciliation changed immutable admission context: before=(%+v,%+v) after=(%+v,%+v)", beforeIntent, beforeRuntime, after.IntentSnapshot, after.EffectiveRuntime)
 	}
 }
 
