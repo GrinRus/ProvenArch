@@ -77,7 +77,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11 merged; REM-12 is the next independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12 merged; REM-13 is the next independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -140,12 +140,12 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10 and REM-11 merged; REM-12 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11 and REM-12 merged; REM-13 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-12's
-runner/provider identity finding and create its isolated slice plan; keep release status explicitly
-blocked until REM-03B is authorized and applied with before/after/rollback evidence. REM-25 remains
-blocked by REM-03..24.
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-13's
+Task composer/admission contract finding and create its isolated slice plan; keep release status
+explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
+REM-25 remains blocked by REM-03..24.
 
 ### Context
 
@@ -238,8 +238,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #283 |
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | merged in PR #285 |
 | 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | merged in PR #288 |
-| 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | ready; next independent slice |
-| 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | blocked-by-dependency |
+| 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | merged in PR #290 |
+| 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | ready; next independent slice |
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | blocked-by-dependency |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | blocked-by-dependency |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
@@ -860,7 +860,7 @@ neighbor stabilization. Бюджет CI не должен быть flaky: determ
   stabilization remains blocked externally and no stabilization-owned paths were touched. REM-11 is
   closed; REM-12 is the next ready independent P1 slice.
 
-### REM-12 slice plan
+### REM-12 slice plan (merged)
 
 **Goal.** Сохранить в immutable Task/Attempt admission snapshot полный фактически принятый
 runner/provider/model contract: каждый pipeline step должен исполняться выбранным adapter/provider,
@@ -918,6 +918,11 @@ paths or the exact origin base drifts without a rebase and renewed focused evide
   orchestrator and runtime tests, race coverage, contracts, guidance, lint and build pass; the
   first unconstrained full Go suite was stopped after unrelated long-running test timeouts under
   concurrent local load, while the affected tests pass individually.
+- 2026-09-06: Post-merge evidence: implementation commit `2b3fb9b5` passed every required PR #290
+  check (backend, contracts, lint, UI, golden, smoke-api, smoke-cli, CodeQL, dependency review and
+  Go/JS analysis) and squash-merged to `origin/main=fe511986`. The neighboring stabilization lane
+  remains externally blocked (disk/provider/live gate); its owned paths were rechecked and remain
+  untouched. REM-13 is now the next ready independent P1 slice.
 
 ## EP-20260811-task-attempt-contracts
 
