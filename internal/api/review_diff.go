@@ -896,13 +896,15 @@ func normalizeOptionalWorkspacePath(rawPath string) (string, error) {
 }
 
 func collectWorkspaceGitState(ctx context.Context, ws workspace.Root) (gitWorkspaceState, error) {
-	statusOutput, err := runGitRaw(ctx, ws.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	return collectWorkspaceGitStateWithRunner(ctx, ws, runGitRaw)
+}
+
+type gitCommandRunner func(context.Context, string, ...string) (string, error)
+
+func collectWorkspaceGitStateWithRunner(ctx context.Context, ws workspace.Root, run gitCommandRunner) (gitWorkspaceState, error) {
+	files, err := collectWorkspaceGitInventoryWithRunner(ctx, ws, run)
 	if err != nil {
 		return gitWorkspaceState{}, err
-	}
-	files := parseGitStatusFiles(statusOutput)
-	for index := range files {
-		files[index] = enrichGitDiffFile(ctx, ws, files[index])
 	}
 	sort.Slice(files, func(i, j int) bool {
 		if files[i].Path == files[j].Path {
@@ -910,7 +912,7 @@ func collectWorkspaceGitState(ctx context.Context, ws workspace.Root) (gitWorksp
 		}
 		return files[i].Path < files[j].Path
 	})
-	identity, err := collectGitWorkspaceIdentity(ctx, ws.Path)
+	identity, err := collectGitWorkspaceIdentityWithRunner(ctx, ws.Path, run)
 	if err != nil {
 		return gitWorkspaceState{}, err
 	}
@@ -919,6 +921,26 @@ func collectWorkspaceGitState(ctx context.Context, ws workspace.Root) (gitWorksp
 		return gitWorkspaceState{}, err
 	}
 	return gitWorkspaceState{Identity: identity, Files: files, Fingerprint: fingerprint}, nil
+}
+
+type gitNumstat struct {
+	Additions int
+	Deletions int
+	Binary    bool
+}
+
+func collectWorkspaceGitInventoryWithRunner(ctx context.Context, ws workspace.Root, run gitCommandRunner) ([]gitDiffFile, error) {
+	statusOutput, err := run(ctx, ws.Path, "status", "--porcelain=v2", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	files := parseGitStatusV2Files(statusOutput)
+	numstatOutput, _ := run(ctx, ws.Path, "diff", "HEAD", "--numstat", "-z", "--no-renames", "--")
+	numstats := parseGitNumstat(numstatOutput)
+	for index := range files {
+		files[index] = enrichGitDiffFileFromInventory(ws, files[index], numstats)
+	}
+	return files, nil
 }
 
 func artifactPathFilterForRun(runID string, stepID string, service *orchestrator.Service) map[string]struct{} {
@@ -949,37 +971,102 @@ func artifactPathFilterForRun(runID string, stepID string, service *orchestrator
 	return allowed
 }
 
-func parseGitStatusFiles(output string) []gitDiffFile {
+func parseGitStatusV2Files(output string) []gitDiffFile {
 	parts := strings.Split(output, "\x00")
-	files := []gitDiffFile{}
-	for index := 0; index < len(parts); index += 1 {
+	files := make([]gitDiffFile, 0, len(parts))
+	for index := 0; index < len(parts); index++ {
 		item := parts[index]
-		if len(item) < 4 {
+		if item == "" {
 			continue
 		}
-		code := item[:2]
-		rel := strings.TrimSpace(item[3:])
-		var originalPath *string
-		if strings.Contains(code, "R") || strings.Contains(code, "C") {
-			if index+1 < len(parts) && strings.TrimSpace(parts[index+1]) != "" {
-				original := filepath.ToSlash(strings.TrimSpace(parts[index+1]))
-				originalPath = &original
-				index += 1
+		var file gitDiffFile
+		var consumed int
+		switch item[0] {
+		case '1':
+			fields := strings.SplitN(item, " ", 9)
+			if len(fields) != 9 {
+				continue
 			}
-		}
-		if rel == "" {
+			file = gitDiffFileFromStatusV2(fields[1], fields[3], fields[4], fields[6], fields[7], fields[8])
+		case '2':
+			fields := strings.SplitN(item, " ", 10)
+			if len(fields) != 10 || index+1 >= len(parts) {
+				continue
+			}
+			file = gitDiffFileFromStatusV2(fields[1], fields[3], fields[4], fields[6], fields[7], fields[9])
+			if original := filepath.ToSlash(parts[index+1]); original != "" {
+				file.OriginalPath = &original
+			}
+			consumed = 1
+		case 'u':
+			fields := strings.SplitN(item, " ", 11)
+			if len(fields) != 11 {
+				continue
+			}
+			// Unmerged entries have three index stages. Preserve the stage-1 HEAD
+			// identity and the worktree mode; the index has no singular OID.
+			file = gitDiffFileFromStatusV2(fields[1], fields[3], fields[6], fields[7], "", fields[10])
+		case '?':
+			rel := strings.TrimPrefix(item, "? ")
+			if rel == "" {
+				continue
+			}
+			file = gitDiffFile{Path: filepath.ToSlash(rel), Folder: gitDiffFolder(filepath.ToSlash(rel)), Status: "untracked", IndexStatus: "untracked", WorktreeStatus: "untracked"}
+		default:
 			continue
 		}
-		files = append(files, gitDiffFile{
-			Path:           filepath.ToSlash(rel),
-			OriginalPath:   originalPath,
-			Folder:         gitDiffFolder(filepath.ToSlash(rel)),
-			Status:         gitDiffStatusLabel(code),
-			IndexStatus:    gitStatusColumn(code, 0),
-			WorktreeStatus: gitStatusColumn(code, 1),
-		})
+		if file.Path == "" {
+			continue
+		}
+		files = append(files, file)
+		index += consumed
 	}
 	return files
+}
+
+func gitDiffFileFromStatusV2(code, oldMode, newMode, headOID, indexOID, rel string) gitDiffFile {
+	pathValue := filepath.ToSlash(rel)
+	return gitDiffFile{
+		Path:           pathValue,
+		Folder:         gitDiffFolder(pathValue),
+		Status:         gitDiffStatusLabel(code),
+		IndexStatus:    gitStatusColumn(code, 0),
+		WorktreeStatus: gitStatusColumn(code, 1),
+		OldMode:        gitStatusValue(oldMode),
+		NewMode:        gitStatusValue(newMode),
+		HeadOID:        gitStatusValue(headOID),
+		IndexOID:       gitStatusValue(indexOID),
+	}
+}
+
+func gitStatusValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.Trim(value, "0") == "" {
+		return ""
+	}
+	return value
+}
+
+func parseGitNumstat(output string) map[string]gitNumstat {
+	result := map[string]gitNumstat{}
+	for _, item := range strings.Split(output, "\x00") {
+		if item == "" {
+			continue
+		}
+		fields := strings.SplitN(item, "\t", 3)
+		if len(fields) != 3 || fields[2] == "" {
+			continue
+		}
+		stat := gitNumstat{}
+		if fields[0] == "-" || fields[1] == "-" {
+			stat.Binary = true
+		} else {
+			stat.Additions, _ = strconv.Atoi(fields[0])
+			stat.Deletions, _ = strconv.Atoi(fields[1])
+		}
+		result[filepath.ToSlash(fields[2])] = stat
+	}
+	return result
 }
 
 func gitDiffStatusLabel(code string) string {
@@ -1003,7 +1090,7 @@ func gitDiffStatusLabel(code string) string {
 }
 
 func gitStatusColumn(code string, index int) string {
-	if index < 0 || index >= len(code) || code[index] == ' ' {
+	if index < 0 || index >= len(code) || code[index] == ' ' || code[index] == '.' {
 		return "clean"
 	}
 	if code[index] == '?' {
@@ -1020,69 +1107,44 @@ func gitDiffFolder(rel string) string {
 	return parts[0]
 }
 
-func enrichGitDiffFile(ctx context.Context, ws workspace.Root, file gitDiffFile) gitDiffFile {
-	file.Binary = workspaceFileIsBinary(ws, file.Path)
-	file.OldMode, file.HeadOID = gitHeadEntry(ctx, ws.Path, file.Path)
-	file.NewMode, file.IndexOID = gitIndexEntry(ctx, ws.Path, file.Path)
-	if content, err := ws.ReadFile(file.Path); err == nil {
+func enrichGitDiffFileFromInventory(ws workspace.Root, file gitDiffFile, numstats map[string]gitNumstat) gitDiffFile {
+	content, err := ws.ReadFile(file.Path)
+	if err == nil {
+		file.Binary = bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content)
 		sum := sha256.Sum256(content)
 		file.WorktreeSHA256 = hex.EncodeToString(sum[:])
 	} else if file.Status != "deleted" {
 		file.Unavailable = true
 	}
-	switch file.Status {
-	case "untracked", "new":
+	if file.Status == "untracked" || file.Status == "new" {
 		if !file.Binary {
-			file.Additions = countWorkspaceTextLines(ws, file.Path)
+			file.Additions = countTextLines(string(content))
 		}
-	case "deleted":
-		file.Deletions = countGitHeadTextLines(ctx, ws, file.Path)
-	default:
-		additions, deletions, binary := gitNumstatForPath(ctx, ws, file.Path)
-		file.Additions = additions
-		file.Deletions = deletions
-		file.Binary = file.Binary || binary
+		return file
 	}
+	// The legacy per-file path query reported the destination side of a rename.
+	// Keep that API behavior while the batched no-renames query supplies the same
+	// destination entry without starting another Git process.
+	stat := numstats[file.Path]
+	file.Additions = stat.Additions
+	file.Deletions = stat.Deletions
+	file.Binary = file.Binary || stat.Binary
 	return file
 }
 
-func gitHeadEntry(ctx context.Context, repoPath string, rel string) (string, string) {
-	output, err := runGit(ctx, repoPath, "ls-tree", "HEAD", "--", rel)
-	if err != nil || strings.TrimSpace(output) == "" {
-		return "", ""
-	}
-	fields := strings.Fields(output)
-	if len(fields) < 3 {
-		return "", ""
-	}
-	return fields[0], fields[2]
-}
-
-func gitIndexEntry(ctx context.Context, repoPath string, rel string) (string, string) {
-	output, err := runGit(ctx, repoPath, "ls-files", "--stage", "--", rel)
-	if err != nil || strings.TrimSpace(output) == "" {
-		return "", ""
-	}
-	fields := strings.Fields(output)
-	if len(fields) < 2 {
-		return "", ""
-	}
-	return fields[0], fields[1]
-}
-
-func collectGitWorkspaceIdentity(ctx context.Context, repoPath string) (gitWorkspaceIdentity, error) {
+func collectGitWorkspaceIdentityWithRunner(ctx context.Context, repoPath string, run gitCommandRunner) (gitWorkspaceIdentity, error) {
 	identity := gitWorkspaceIdentity{Branch: "DETACHED"}
-	if branch, err := runGit(ctx, repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
+	if branch, err := run(ctx, repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil && strings.TrimSpace(branch) != "" {
 		identity.Branch = strings.TrimSpace(branch)
 	}
-	if head, err := runGit(ctx, repoPath, "rev-parse", "--verify", "HEAD"); err == nil {
+	if head, err := run(ctx, repoPath, "rev-parse", "--verify", "HEAD"); err == nil {
 		identity.HeadOID = strings.TrimSpace(head)
 	}
 	identity.BaseRef = identity.Branch
 	identity.BaseOID = identity.HeadOID
-	if upstream, err := runGit(ctx, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil && strings.TrimSpace(upstream) != "" {
+	if upstream, err := run(ctx, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil && strings.TrimSpace(upstream) != "" {
 		identity.BaseRef = strings.TrimSpace(upstream)
-		if base, baseErr := runGit(ctx, repoPath, "merge-base", "HEAD", identity.BaseRef); baseErr == nil {
+		if base, baseErr := run(ctx, repoPath, "merge-base", "HEAD", identity.BaseRef); baseErr == nil {
 			identity.BaseOID = strings.TrimSpace(base)
 		}
 	}
@@ -1107,47 +1169,6 @@ func optionalStringValue(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func gitNumstatForPath(ctx context.Context, ws workspace.Root, rel string) (int, int, bool) {
-	output, err := runGit(ctx, ws.Path, "diff", "HEAD", "--numstat", "--", rel)
-	if err != nil {
-		return 0, 0, false
-	}
-	fields := strings.Fields(output)
-	if len(fields) < 2 {
-		return 0, 0, false
-	}
-	if fields[0] == "-" || fields[1] == "-" {
-		return 0, 0, true
-	}
-	additions, _ := strconv.Atoi(fields[0])
-	deletions, _ := strconv.Atoi(fields[1])
-	return additions, deletions, false
-}
-
-func workspaceFileIsBinary(ws workspace.Root, rel string) bool {
-	content, err := ws.ReadFile(rel)
-	if err != nil {
-		return false
-	}
-	return bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content)
-}
-
-func countWorkspaceTextLines(ws workspace.Root, rel string) int {
-	content, err := ws.ReadFile(rel)
-	if err != nil || bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content) {
-		return 0
-	}
-	return countTextLines(string(content))
-}
-
-func countGitHeadTextLines(ctx context.Context, ws workspace.Root, rel string) int {
-	output, err := runGitRaw(ctx, ws.Path, "show", "HEAD:"+rel)
-	if err != nil {
-		return 0
-	}
-	return countTextLines(output)
 }
 
 func countTextLines(content string) int {

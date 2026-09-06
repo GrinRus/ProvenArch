@@ -1333,6 +1333,11 @@ normalized `status`, `index_status`, `worktree_status`, `path`, nullable `origin
 old/new mode, HEAD/index object identity, worktree SHA-256, additions/deletions и flags
 `binary|unavailable`. Rename/copy не теряют source path.
 
+Inventory собирается пакетно: status/mode/OID identity читаются из одного
+`porcelain=v2 -z` снимка, а line stats — из одного общего `diff --numstat -z` прохода. Число Git
+процессов не зависит от количества изменённых файлов; selected preview hunks остаются отдельным
+запросом и не меняют полный `files[]` scope.
+
 `fingerprint` — SHA-256 канонического отсортированного manifest identity + полного inventory;
 он меняется при смене branch/HEAD/base, status/path/mode/index blob или рабочего содержимого.
 `state` — server-authored `clean | dirty | stale | blocked | unknown`. Optional query

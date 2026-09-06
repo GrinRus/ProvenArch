@@ -842,6 +842,61 @@ linked publication during a failed subsequent mutation.
   the neighboring UI/UX stabilization thread remains revision 30 `blocked/idle`, with its owned paths
   untouched. REM-10 is closed; REM-11 is the next independent P1 slice.
 
+### REM-11 slice plan (in progress)
+
+**Goal.** Сохранить полный и семантически идентичный Git inventory для `/api/git/diff`, убрав
+subprocess-per-file путь: получение status, modes/OIDs и numstat должно быть ограничено фиксированным
+числом пакетных Git-вызовов и иметь измеримый budget на representative наборе из 275 изменённых
+файлов.
+
+**Finding / baseline.** На свежем `origin/main=19fbc9335ca2af58398c83ec9fe88d95d1c6b61a` статус
+собирается одним `git status`, после чего каждый файл запускает `git ls-tree`, `git ls-files` и
+`git diff --numstat` (для deleted ещё `git show`), то есть 2–3+ Git-процесса на файл. При 275
+изменённых файлов это даёт порядка 550–825 дочерних процессов до выбранного preview diff и создаёт
+лишнюю latency/нагрузку. Обязательная семантика из `API_SPEC` остаётся полной workspace inventory,
+отдельной preview scope и стабильным fingerprint.
+
+**Readiness / parallel stabilization.** Перед началом проверены соседний тред `Проверь UI и UX
+проекта` (completed, blocked by external disk/provider conditions; последний diagnostic дошёл до
+9/16 shard) и свежий `origin/main`. REM-11 ограничен `internal/api/review_diff.go`, его regression/
+benchmark tests, релевантными API/testing docs и этим планом; stabilization-owned semantic/docflow
+пути не затрагиваются. Перед PR/merge статус соседа и base SHA будут проверены повторно.
+
+**Non-goals.** Не менять public JSON shape, Git scope (`git add -A`), stale/fingerprint policy,
+selected hunk preview, publication semantics, schemas, provider/runtime behavior, release settings
+или canonical live matrix. Не добавлять production dependencies и не маскировать Git errors как
+успешный inventory.
+
+**Implementation boundary.** Перейти на `git status --porcelain=v2 -z` как источник XY,
+rename/copy paths, modes и HEAD/index OIDs; одним `git diff HEAD --numstat -z --no-renames --`
+получать additions/deletions и binary markers для всего дерева. Worktree SHA/binary/line counts
+считать из уже прочитанного файла; для rename/copy сохранять destination-side numstat, совместимый
+с прежним per-file path query, без потери `original_path`.
+Ввести внутренний injectable command runner для deterministic command-budget evidence; identity
+вызовы остаются фиксированными и не зависят от количества файлов.
+
+**Acceptance / regression.** Existing Git diff, stale confirmation and publication tests остаются
+green; добавлены v2 parser cases для spaces, rename/copy, deleted, untracked, staged/unstaged и
+binary состояния, а также representative 275-file command-budget test/benchmark (не более 8 Git
+процессов для inventory+identity, без subprocess-per-file). Fingerprint и API fields для baseline
+сценариев byte/semantic-compatible; full deterministic DoD (`make contracts`, `make test`,
+`make lint`, `make build`) проходит без live provider/network.
+
+**Rollback / stop condition.** Остановиться и вернуть старый код, если v2 parser теряет path/OID/mode,
+rename source, unmerged state или binary/line stats; если fingerprint/API semantics меняются вне
+явно покрытого regression; если command budget зависит от числа файлов; либо появляется overlap с
+neighbor stabilization. Бюджет CI не должен быть flaky: deterministic command-count assertion
+является gate, timing benchmark — diagnostic metric.
+
+- 2026-09-05: Fresh base and neighbor status rechecked; focused pre-change Git diff tests passed on
+  `19fbc933`. Baseline code audit confirmed 2–3+ Git subprocesses per changed path (and an extra
+  `git show` for deleted files); implementation branch `codex/rem-11-git-inventory` created from
+  the exact origin SHA.
+- 2026-09-05: Implemented porcelain-v2 status plus one batched numstat pass, preserving destination
+  rename stats, modes/OIDs, binary/unavailable flags, worktree hashes and fingerprint inputs. Added
+  path/rename/copy/unmerged parser coverage, rename integration coverage and a 275-file command-budget
+  regression/benchmark. Focused API and `-race` suites pass; benchmark reports 5 Git processes.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.
