@@ -76,7 +76,7 @@ Remediation program и release gates остаются отдельными scope
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved PR merges to main, followed by final revision and closeout |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10 merged; REM-11 is the current independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11 merged; REM-12 is the next independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -186,12 +186,12 @@ Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b4
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09 and REM-10 merged; REM-11 is the current independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10 and REM-11 merged; REM-12 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Reproduce and deliver REM-11 with a bounded Git change-inventory path,
-then repeat stabilization/dependency checks before selecting the next ready row; keep release status
-explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
-REM-25 remains blocked by REM-03..24.
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-12's
+runner/provider identity finding and create its isolated slice plan; keep release status explicitly
+blocked until REM-03B is authorized and applied with before/after/rollback evidence. REM-25 remains
+blocked by REM-03..24.
 
 ### Context
 
@@ -283,8 +283,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | merged in PR #281 |
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #283 |
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | merged in PR #285 |
-| 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | ready; next independent slice |
-| 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | blocked-by-dependency |
+| 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | merged in PR #288 |
+| 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | ready; next independent slice |
 | 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | blocked-by-dependency |
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | blocked-by-dependency |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | blocked-by-dependency |
@@ -842,7 +842,7 @@ linked publication during a failed subsequent mutation.
   the neighboring UI/UX stabilization thread remains revision 30 `blocked/idle`, with its owned paths
   untouched. REM-10 is closed; REM-11 is the next independent P1 slice.
 
-### REM-11 slice plan (in progress)
+### REM-11 slice plan (merged)
 
 **Goal.** Сохранить полный и семантически идентичный Git inventory для `/api/git/diff`, убрав
 subprocess-per-file путь: получение status, modes/OIDs и numstat должно быть ограничено фиксированным
@@ -896,6 +896,15 @@ neighbor stabilization. Бюджет CI не должен быть flaky: determ
   rename stats, modes/OIDs, binary/unavailable flags, worktree hashes and fingerprint inputs. Added
   path/rename/copy/unmerged parser coverage, rename integration coverage and a 275-file command-budget
   regression/benchmark. Focused API and `-race` suites pass; benchmark reports 5 Git processes.
+- 2026-09-06: Rebased the implementation from the exact `origin/main=d58158f0` after concurrent
+  cleanup/docs merges. Final checks: guidance, contracts and focused API/race tests passed; `make
+  lint` and `make build` passed; full Go suite passed. The 308-test Python run had four known
+  `resolve-node-tool` fixture mismatches only because the local run explicitly used Node 22.22.3
+  while `.node-version` is 22.21.1; the isolated resolver suite without that override passed 4/4.
+  Required CI (backend, contracts, lint, UI, golden, smoke-api, smoke-cli, CodeQL, dependency review
+  and both language analyses) passed on PR #288. Squash merge completed as `48ee6515`; neighboring
+  stabilization remains blocked externally and no stabilization-owned paths were touched. REM-11 is
+  closed; REM-12 is the next ready independent P1 slice.
 
 ## EP-20260811-task-attempt-contracts
 
