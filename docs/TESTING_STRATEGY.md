@@ -71,6 +71,10 @@
   workspace containment and byte-identical read-only scans; response version remains `1`
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 - `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
+- Git diff inventory tests use `status --porcelain=v2 -z` and batched `numstat` fixtures to preserve
+  spaces, rename/copy source paths, staged/unstaged modes/OIDs, binary/deleted/untracked stats and
+  full-workspace fingerprint semantics; a synthetic 275-file regression asserts a fixed Git-command
+  budget and the accompanying benchmark reports `git-procs` as a diagnostic metric.
 - collect contract fixtures must include at least one authored document and one repo-backed
   citation; sparse `documents: []`, `citations: []`, empty document/citation binding arrays,
   unknown citation document IDs, and one-way document/citation bindings are negative fixtures,
