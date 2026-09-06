@@ -37,6 +37,7 @@ import { formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type Chang
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { deriveAppWorkflowState, derivePublicationState, selectedRunIssueCopy } from "./lib/appDerived";
+import { buildPublishContextGateItems } from "./features/publish/publishUtils";
 import { type WorkflowDestination } from "./lib/workflowState";
 import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useTaskReviewCandidates } from "./hooks/useTaskReviewCandidates";
@@ -785,6 +786,21 @@ export default function App() {
 
   const publishExternalGateItems = useMemo(
     () => [
+      ...(route.taskId || route.attemptId
+        ? buildPublishContextGateItems({
+            sourceMode: route.source ?? "snapshot",
+            routeRunId: route.runId,
+            selectedRunId: runId,
+            taskId: route.taskId,
+            attemptId: route.attemptId,
+            selectedRunStatus: runStatus?.status,
+            selectedRunAuthoritative: runList.find((item) => item.run_id === runId)?.authoritative_index,
+            evidenceStatus: evidenceSnapshot.runId === runId ? evidenceSnapshot.status : "idle",
+            reviewRunId: runReviewSummary?.run_id,
+            reviewSourceRunId: runReviewSummary?.review?.source_run_id,
+            reviewStatus: runReviewStatus,
+          })
+        : []),
       ...validationErrors.map((diagnostic) => ({
         label: diagnostic.code,
         detail: diagnostic.suggestion ? `${diagnostic.message} Suggested fix available.` : diagnostic.message,
@@ -813,7 +829,7 @@ export default function App() {
           })()
         : []),
     ],
-    [doctorFailures, runStatus, validationErrors],
+    [doctorFailures, evidenceSnapshot.runId, evidenceSnapshot.status, route.attemptId, route.runId, route.source, route.taskId, runId, runList, runReviewStatus, runReviewSummary, runStatus, validationErrors],
   );
 
   const publication = useMemo(() => derivePublicationState({ gitError, gitDiffStatus, gitDiff }), [gitDiff, gitDiffStatus, gitError]);

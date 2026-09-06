@@ -140,16 +140,18 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14 and REM-15 merged; REM-16 is the next P1 slice but remains blocked by stabilization while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14 and REM-15 merged; REM-17 is the next independent P1 slice while REM-16 remains blocked by stabilization and REM-03B remains authorization-gated.
 
-Next action: Recheck stabilization/dependencies on fresh `origin/main`, then prepare the isolated
-REM-16 copy/route/docs slice when stabilization is merged; keep release status explicitly
-blocked until REM-03B is authorized and applied with before/after/rollback evidence.
+Next action: Implement the isolated REM-17 publication-context/review-evidence gate from fresh
+`origin/main`, keeping stabilization-owned paths untouched; prepare REM-16 only after the neighbor
+stabilization merge. Keep release status explicitly blocked until REM-03B is authorized and applied
+with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: all independent REM slices through REM-15 are merged; no unmerged P1 is
-currently ready. REM-03B remains authorization-gated, REM-04/REM-05/REM-16 are stabilization-
-dependent, and REM-17 is dependency-blocked.
+Current queue truth: all independent REM slices through REM-15 are merged; REM-17 is now the first
+ready unmerged P1 after its exact-context/review baseline was reproduced on current `origin/main`.
+REM-03B remains authorization-gated, REM-04/REM-05/REM-16 are stabilization-dependent, and later
+REM-18+ remain dependency-blocked.
 
 ### Context
 
@@ -247,7 +249,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | merged in PR #294 |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | merged in PR #296 |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
-| 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | blocked-by-dependency |
+| 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | ready on current `origin/main` |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
 | 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | blocked-by-dependency |
 | 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
@@ -271,6 +273,65 @@ stabilization-sensitive P1 становится ready, он возвращает
 
 Если finding больше не воспроизводится после соседнего merge, задача закрывается evidence-комментарием
 в progress log, а не повторной реализацией того же исправления.
+
+### REM-17 slice plan
+
+**Goal.** Закрыть публикационный обход в Task-first UI: commit и proposal-branch controls должны
+быть недоступны без exact `task_id`/`attempt_id`/`run_id`, успешного authoritative Attempt, свежего
+run-pinned review evidence и authoritative full-workspace Git inventory. Backend уже fail-closed на
+неполном/несовпадающем контексте и stale fingerprint; этот slice доводит тот же invariant до route,
+page и mutation affordances, чтобы stale UI state не обещал публикацию.
+
+**Finding / baseline.** На свежем `origin/main=a7f5b52d` Task-first route с неполным context не
+получает external blocker и позволяет начать Git confirmation после загрузки diff.
+`useGitActions` отправляет mutation без Task/Attempt/run triple; API закономерно отвечает
+`publication unavailable`, но Git side effect уже происходит. При выбранном Task route также не
+проверяется matching run-pinned review contract до показа publish action. Исторический run-only route
+остаётся legacy/unbound compatibility surface и не должен получать fabricated Task identity; REM-17
+закрывает именно Task-first mutation boundary поверх уже merged REM-10/13/14/15 safeguards.
+
+**Readiness / parallel stabilization.** Fresh `origin/main` и соседний stabilization checkout
+проверены непосредственно перед slice. Neighbor остаётся dirty/blocked в
+`docs/ARCHITECTURE.md`, `internal/artifactquality/{semantic.go,semantic_test.go}`,
+`internal/orchestrator/docflow{,.test}.go` и `ui/src/App.test.tsx`; REM-17 scope ограничен
+`ui/src/App.tsx`, `ui/src/components/ChangesPage.tsx`/tests и publish utility/panel tests, поэтому
+не пересекается с этими owned paths. No live matrix is started.
+
+**Acceptance.**
+
+- [x] Changes page may expose the read-only publication gate for inspection, but no enabled Git
+      mutation action is presented without exact Task/Attempt/run route context and a successful
+      authoritative selected run.
+- [x] Publish commit and proposal-branch controls expose a hard blocker until review evidence is
+      loaded for the same run (`review.source_run_id === run_id`) and the full-workspace Git inventory
+      is non-stale; no latest-run or unbound fallback is used.
+- [x] A stale, partial, mismatched or missing review context is covered by negative UI tests; the
+      existing API stale-fingerprint and exact-context tests remain green.
+- [x] `make contracts`, focused/full UI tests, backend and Python regression suites, `make lint`, `make build` and
+      `make verify-agent-guidance` pass with no stabilization-path edits.
+
+**Progress (2026-09-06).** Implemented on `codex/rem-17-publish-gate`: Task-first routes now fail
+closed before Git confirmation unless Task/Attempt/run identity, authoritative successful Attempt,
+run-pinned review and complete evidence are all current. Legacy run-only compatibility remains
+unbound. Focused and full UI suites pass (249 tests), Go and Python suites pass (308 Python tests),
+contracts/lint/build/docs guidance checks pass, and no neighbor-owned stabilization path was edited.
+
+**Non-goals.** Do not change the optional public Git API contract, publication journal/recovery
+semantics, provider/runtime behavior, stabilization-owned files, or docs claims outside this plan
+entry. Do not add a new production dependency or silently infer Task identity from run recency.
+
+**Affected paths.** `ui/src/App.tsx`, focused publish tests and
+`ui/src/features/publish/publishUtils.{ts,test.ts}`. The Changes route remains a navigational entry
+to inspect the gate; Task-first Git mutation controls are disabled until the exact context is ready,
+while explicit legacy run-only compatibility remains unbound. No schema change is expected.
+
+**Regression / rollback.** Add deterministic tests for no-context, mismatched run/review and stale
+evidence states, plus the ready exact-context path. Roll back the slice if a valid Task review can no
+longer reach confirmation, if controls can mutate without an authoritative full-workspace diff, or if
+any stabilization-owned path becomes necessary.
+
+**Stop condition.** Stop before implementation if the neighbor merges changes touching the candidate
+paths, if current main changes the publication contract, or if the finding no longer reproduces.
 
 ### Iteration protocol
 
