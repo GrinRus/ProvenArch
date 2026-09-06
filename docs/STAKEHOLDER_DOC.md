@@ -1,8 +1,8 @@
-# Документ для стейкхолдеров и лидов (v1.2 implementation-aligned)
+# Документ для стейкхолдеров и лидов (v1.3 implementation-aligned)
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
-> **Версия:** v1.2 (implementation-aligned)
-> **Дата:** 5 September 2026 (narrow status/reference reconciliation; no new release evidence)
+> **Версия:** v1.3 (implementation-aligned)
+> **Дата:** 5 September 2026 (documentation cleanup, current UI and regression evidence alignment; no new release evidence)
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
@@ -22,20 +22,20 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Baseline flow `validate -> init|refresh -> inspect` (CLI/API/UI) | done | `scripts/smoke-cli.sh`, `scripts/smoke-api.sh`, `ui/src/App.test.tsx` |
 | Schema-driven workspace/runtime artifact validation + actionable diagnostics | done | `internal/workspace/validation.go`, `internal/contracts/runtimeexecution.go`, `internal/api/server_test.go` |
 | Domain-first per-domain execution with persisted runtime execution metadata + domain outputs | done | `internal/orchestrator/orchestrator.go`, `internal/orchestrator/sharding_test.go`, `internal/orchestrator/runtime_execution_test.go` |
-| Architect aggregation deterministic output | done | `reports/agent-outputs/architect/summary.md`, `internal/reports/compiler_test.go`, `internal/orchestrator/docflow_pipeline_test.go`, scenario golden snapshots |
+| Promoted snapshot and refresh artifact regression baseline | done | `TestPersistPromotedArchitectureSnapshotCopiesOnlyArchitectureRoots` checks snapshot containment and retained semantics; `TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts`, `TestRefreshSelectivelyReplaysUnaffectedBaselineShards` and `TestWriteRefreshMaterializationRecordsPreservedAndRemoved` check refresh execution/materialization evidence. These deterministic regressions do not establish live semantic-extraction quality or architect-summary determinism. |
 | Q&A capability with UI + CLI + public API surface | target upgraded | UI uses async `/api/qa/runs`; deterministic `internal/qa` + `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (trust shell cutover) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go`, `ui/src/components/ProductShell.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
 | Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts Guided Setup with Workspace, Sources, Analysis brief, Runner/readiness and Review/start; direct `acp serve --workspace` remains compatibility path. |
-| Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
-| Console evidence trust and IA reset | in progress (truth + shell slices) | The native History shell provides `Tasks / Architecture / Changes` plus first-class `/settings`; Architecture exposes Map/Documents/Diagrams/Model/Findings, Tasks keeps a selected-task preview and outcome-first detail, and Changes requires an explicit review package before publication. The explicit `/tasks/legacy` read-only migration surface, contextual evidence, deep URL context, run-pinned review, server-authored coordination/runtime identity, safe Git publication, responsive navigation/context drawer, current-workspace authority and global read-only Ask remain preserved. |
+| Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/archive/audits/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
+| Console evidence trust and IA reset | done (Epic 20 implementation; later remediation remains separate) | The native History shell provides `Tasks / Architecture / Changes` plus first-class `/settings`; Architecture exposes Map/Documents/Diagrams/Model/Findings, Tasks keeps a selected-task preview and outcome-first detail, and Changes requires an explicit review package before publication. The explicit `/tasks/legacy` read-only migration surface, contextual evidence, deep URL context, run-pinned review, server-authored coordination/runtime identity, safe Git publication, responsive navigation/context drawer, current-workspace authority and global read-only Ask remain preserved. |
 | Task-first UI, runner presets and content-aware artifact workbenches | **done (W23B1–W23N + deterministic Q10 closure, 2026-08-23)** | [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md), [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md), [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md) and 2026-08-11 Task/Attempt ADRs fix the target identity/persistence/admission/publication boundary; typed Task/Attempt routes, a scope/runner-aware New Task composer with Attempt admission, selected-task Inbox preview, exact-run semantic outcome, Attempt-bound Pipeline Studio, explicit Task-scoped current Architecture, Map/Documents/Diagrams/Model/Findings workbenches, evidence-chain drill-down, exact Task-scoped Changes context, explicit Ask/Runner authority boundaries, Task state/accessibility coverage and a primary nav limited to Tasks/Architecture/Changes now exist without legacy-run fallback. Q10 additionally verifies one Changes workbench, Architecture Home default selection, truthful unavailable outcomes, route heading focus/scroll reset, collapsed Inbox/Settings disclosures, responsive overflow/touch-target and critical axe checks. Pre-Task runs remain only under explicit read-only `/tasks/legacy` migration routes. |
 | Weak-model validation and promotion hardening | in progress; W24A–W24F, W24H and W24I implemented; W24G metric recorded/deferred | [`ADR-20260811-validation-audit-effective-verdict-authority.md`](adr/ADR-20260811-validation-audit-effective-verdict-authority.md), [`ADR-20260812-w24g-entry-metric.md`](adr/ADR-20260812-w24g-entry-metric.md) fix provider draft → technical candidate → provider-free pre-promotion audit → effective verdict; W24H bounds each runtime unit to three provider starts with persisted diagnostics; W24I adds provider-free incident corpus, adapter parity, closure counters and deterministic p95 evidence; the recorded W24G entry condition is false. |
 | Task-first live E2E and hardened runtime evidence alignment | 25A/25B + public backend admission implemented; 25C trusted gate operationally blocked | Cross-epic release-gate task after `23O`/`24I`: backend cycles admit fresh Task/Attempt records through `/api/tasks*`, `init-inspect` resolves exact public Task/Attempt/run identity, and batch reports consume public audit/verdict/budget fields only. Snapshot mode fails closed when identity is missing or ambiguous; no synthetic legacy identity or second analysis is allowed. The 2026-08-13 readiness recheck confirmed Codex `0.144.1` ready, while Claude `2.1.85` and Qwen `0.19.11` still returned `quota_or_permission` from the configured Kimi billing-cycle account; exact Node `22.21.1` was available through the pinned local toolchain. No canonical matrix was launched; rerun on a trusted account is required. |
-| Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Runs and Changes. |
+| Evidence-backed architecture home + impact-aware refresh | done (Epic 21) | `reports/as-is/overview.md` is the validated Architecture Home; refresh records source revisions, impact, actual execution and materialization evidence, supports provider-free no-op and fail-closed affected-only collect, and explains preserved/updated output in Task Attempt diagnostics and Changes. |
 | Post-implementation correctness and trust-boundary audit remediation | done; R3 pending | Epic 22 slices `22A`–`22O` and provider-free closure are complete. The latest diagnostic R3 attempt used clean SHA `aa69d16191f93311560190fc467edd534ed5e567` and stopped at fresh smoke when a provider incorrectly treated source-repository security observations as blocking validator issues. A provider-free technical-only validator-boundary fix is in qualification; no stopped live evidence is accepted. |
 | Advisory Workspace Health completion | done (K2b implementation) | Read-only v1 now reports broken/escaping links, model endpoint/alias/owner defects, orphan domain/team outputs, malformed canonical text, unlinked findings and missing proposal evidence; current Knowledge shows the summary without turning health into historical Changes evidence or a publication gate. |
-| Outcome-first Architecture and recovery UX | implemented | Home/Architecture expose the promoted result and interactive C4 projection through the Architecture API with a legacy Knowledge fallback; Changes compares individual entities, relations, findings and evidence gaps from immutable promoted semantics; Runs exposes structured useful progress, outcome/recovery and audited child-run retry/rerun for every terminal analysis with revalidated shard/aggregate inputs and validator-gated promotion. |
+| Outcome-first Architecture and diagnostic UX | implemented | Architecture exposes the promoted result and interactive C4 projection through the Architecture API with a legacy Knowledge read-model fallback; Changes compares individual entities, relations, findings and evidence gaps from immutable promoted semantics. Task Attempt diagnostics and `/tasks/legacy` are read-only and show structured progress, outcome, blockers and retained evidence. Compatible backend recovery APIs retain audited child-run retry/rerun with revalidated inputs and validator-gated promotion; the diagnostics UI does not expose those mutations. |
 | Explicit Ask-to-Proposal handoff | done (K3A/K3B implementation) | A succeeded immutable Ask answer exposes a digest; operator confirmation atomically creates a traceable proposal/evidence/source package, refreshes Git truth and opens current Changes→Proposals with Return to Ask. |
 
 Epic matrix:
@@ -108,14 +108,13 @@ Epic matrix:
 - в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
 - pipeline/QA start, смена workspace/runner и Git publication сериализованы одной admission lease; пока есть active или queued run, session/runtime/profile/Git mutations возвращают явный conflict, а UI/API продолжают показывать effective runtime текущей service generation до terminal state.
 
-2) **Шаг 0: Конституция проекта**
-- открывает UI → мастер (wizard) по “Конституции”:
-  - цель/границы, глоссарий, NFR/FT, правила/анти‑паттерны;
-- (опционально) агент предлагает черновик, пользователь подтверждает/редактирует;
-- UI сохраняет изменения в workspace и предлагает/выполняет git commit.
+2) **Analysis brief и Конституция проекта**
+- в Guided Setup пользователь сохраняет brief с целью и границами анализа;
+- pipeline step0 использует brief и baseline workspace inputs для Конституции проекта;
+- отдельного Charter/baseline bundle editor в текущем UI нет; Git publication выполняется явно через Changes.
 
 3) **Запуск Init pipeline**
-- пользователь нажимает “Run Init (1–4)”.
+- пользователь запускает первый анализ после readiness checks в Guided Setup или создаёт Task с выбранными scope и runner через `New Task`.
 
 4) **Результат**
 - в `model/` появляется каноническая as‑is модель (entity-per-file);
@@ -123,9 +122,9 @@ Epic matrix:
 - в `reports/coverage/` появляется coverage report и список открытых вопросов по недостающей информации;
 - в `reports/findings/` — список провалов/анти‑паттернов с evidence;
 - в `proposals/` — 1–3 “proposal пакета” улучшений (to‑be) + черновики ADR/RFC.
-- в UI dashboard видны все run'ы анализа (queued/running/succeeded/failed), включая уже завершённые; terminal `run_canceled` и restart-reconciled failed states показываются пользователю как `canceled`/`recovered`;
-- при повторном открытии UI выбирает newest active run и ведёт в `Analysis`, иначе newest completed artifact run и ведёт в `Review`;
-- для выбранного run UI показывает полный warnings/error контекст, live logs (в т.ч. structured fields) и поддерживает cancel active run с пояснением cooperative stop, terminal canceled/restart-reconciled status/history/activity labels, retained-evidence recovery actions/copy и сохранения taskrun evidence/history.
+- Task Inbox показывает durable Tasks и selected-task preview; Task detail сохраняет точную историю Attempt и outcome;
+- при повторном открытии `/` UI открывает Task Inbox; deep links сохраняют exact Task/Attempt identity, а pre-Task run history доступна только в `/tasks/legacy`;
+- Attempt detail и Pipeline Studio показывают read-only status, structured progress, warnings/error и retained evidence. Legacy detail сохраняет logs и технический контекст; cancel/retry/rerun controls в этих diagnostics views отсутствуют.
 
 5) **Git‑ветка proposal**
 - пользователь создаёт `proposal/<topic>` из UI (MVP) или вручную;
@@ -328,17 +327,13 @@ arch-workspace/
    хранит: “Конституцию”, rules, skills, model, отчёты, findings, предложения
 
 2) **UI (локальный web-интерфейс)**  
-   - Proven Arch console с top status bar, product-flow rail `Source / Readiness / Charter / Analysis / Review / Proposals / Ask / Publish`, центральной рабочей областью, правым inspector и bottom activity drawer  
-   - wizard summary, domain/team card overview, baseline prompt bundle status и charter baseline recovery для “Конституции” в `Charter`
-   - настройка источников репозиториев (`path` или `git_url`) в `Source` с repo table для source/ref/validation state и source validation recovery для blocking repo/source diagnostics
-   - readiness validation, summary cards, provider readiness recovery, doctor checklist, read-only workspace health snapshot и runtime profile (`timeouts` + `execution` + `permissions`) в `Readiness`
-   - редактор baseline skills/prompts (с версионированием через git)  
-   - запуск пайплайнов (init / refresh) в `Analysis` с run mission control, canonical step timeline, failed-run recovery path, terminal canceled/recovered status/history labels, retained-evidence recovery actions, provider-unavailable Readiness recovery, live diagnostics для shard/repair/stall/raw-output сигналов, shard/log table, warning/error drilldown и pending permission triage
-   - logs activity drawer с dual-view (`event timeline` + `raw agent stream`) и terminal canceled/recovered empty-log copy
-   - `Review` для evidence tabs, grouped artifact explorer, markdown/Mermaid preview, coverage/open-question/trust summary и artifact-derived Domain Map по `model/entities/*`, `model/edges/*`, `reports/agent-outputs/domains/*` с explicit partial states
-   - `Proposals` для review room по proposal/changelog packages: proposal package recovery для incomplete proposal/changelog packages, preview/evidence/changelog/diff tabs, quality blockers и publication path перед `Publish`
-   - `Ask` для async agent-backed Q&A через `POST /api/qa/runs`, с history/citations/safety/audit links, failed-run recovery и deterministic `POST /api/qa/ask` compatibility API
-   - `Publish` для Git Review Room: publication readiness summary, mobile section jumps, folder-level artifact summary, selected artifact preview, explicit diff partial state, publish gate/checklist, commit plan, prepared commit-message copy action, failed Git action recovery и proposal branch
+   - primary navigation `Tasks / Architecture / Changes`; Settings, Guided Setup, Ask и runtime diagnostics доступны как utilities
+   - Guided Setup сохраняет workspace, sources, analysis brief и runner/readiness; Settings предоставляет runner presets и advanced workspace/source/runtime controls
+   - Task Inbox, New Task и Task detail показывают intent, scope, runner, outcome и immutable Attempt history
+   - Attempt detail и Pipeline Studio показывают read-only progress, blockers, warnings/error и retained evidence; `/tasks/legacy` хранит pre-Task run logs/artifacts и техническую диагностику без start/cancel/retry/rerun controls
+   - Architecture предоставляет Map/Documents/Diagrams/Model/Findings, Markdown/Mermaid preview и contextual evidence с explicit partial states
+   - Changes объединяет selected review package, findings, proposal/changelog и diff; Git Review Room сохраняет explicit publication confirmation, inventory, commit plan и proposal branch
+   - global read-only Ask drawer использует async `POST /api/qa/runs` с history/citations/safety/audit links и отдельным explicit Ask-to-Proposal handoff; deterministic `POST /api/qa/ask` остаётся compatibility API
 
 3) **Orchestrator (локальный сервис, Go)**  
    - управляет шагами pipeline  

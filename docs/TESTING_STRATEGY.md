@@ -566,8 +566,9 @@ Release workflow hardening:
 - release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - pre-tag release check использует `scripts/verify-release-verdict.py` поверх уже созданного `reports/release_verdict_<matrix-id>.json`; это не required CI и не live runner
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
-- optional readable golden export доступен для review-diff:
-  - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
+- readable golden exports уже находятся в `fixtures/scenarios/*/golden/readable/` и доступны для review-diff.
+  Текущий golden job проверяет сохранённые snapshots и отдельные deterministic snapshot/refresh
+  regression paths; сравнение свежего pipeline output с этими историческими exports не выполняется.
 - tracked generated artifacts policy:
   - `internal/api/ui_dist/*` и `fixtures/scenarios/*/golden/readable/*` остаются versioned в git как часть baseline/release surface
   - `make verify-readable-fixtures` checks every readable export path/digest against its adjacent
@@ -575,8 +576,9 @@ Release workflow hardening:
   - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
     the embedded bundle and `make verify-ui-dist` to prove the working-tree bundle matches the
     current Vite output.
-  - controlled snapshot refresh:
-  - `ACP_UPDATE_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
+  - автоматической команды export/update этих исторических snapshots сейчас нет. Изменение
+    generation baseline требует отдельного fixture slice с проверяемым способом генерации и review
+    согласованного diff readable outputs и `snapshot.sha256`; static digest check не заменяет генерацию.
 
 ## 9) Технологические defaults
 

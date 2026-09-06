@@ -1,5 +1,7 @@
 # ProvenArch Code Quality Audit
 
+> Archived 2026-09-05 from `docs/CODE_AUDIT_2026-07-10.md`. Findings and line references describe the recorded July baseline, not the current tree. Epic 19 remediation status belongs to the [canonical matrix](../../STAKEHOLDER_DOC.md); the original audit evidence is preserved below.
+
 Дата: 2026-07-10
 
 Baseline: 122e4c9b5a91b29e243677c0dac0fe2ebfca226b

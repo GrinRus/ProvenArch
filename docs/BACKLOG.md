@@ -229,7 +229,7 @@ Suggested PR slices:
 ## Epic 16 — ACP Console V2 UX + Live E2E Coverage
 
 Acceptance:
-- исторический UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`; его PNG references
+- исторический UI baseline зафиксирован в `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`; его PNG references
   удалены после supersession и не являются текущим target
 - implementation baseline после rebase на `origin/main` `3aa458a`: текущий UI уже имеет
   stage shell, компактный activity drawer/artifact links, optional `UI_E2E_QA_SMOKE=1`,
@@ -495,7 +495,7 @@ Suggested PR slices:
 ## Epic 19 — Code Quality Audit Remediation (Local-first MVP)
 
 Status: implementation-complete and merged into `main` at `02716bb`.
-Source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at baseline
+Source-of-truth findings — `docs/archive/audits/CODE_AUDIT_2026-07-10.md` at baseline
 `122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
 
 ### Goal
@@ -899,14 +899,14 @@ Context:
   однако недостаточно надёжно отвечает на вопросы «какой run я смотрю», «какие данные
   проверены», «что именно будет закоммичено» и «что считается завершённым».
 - Это corrective successor для UI/IA частей Epics 16–17. Его historical target описан в
-  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) и
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) и
   superseded task-first Epic 23. После
   реализации Epic 20 primary IA `Home / Runs / Knowledge / Changes`, contextual Setup и global
   Ask заменяют требование о восьми обязательных numbered stages; backend/runtime contracts,
   local-first boundary, deterministic required CI и release live-E2E guardrails сохраняются.
 - Historical delivery order, обязательные contract-first PR, code/test map, cutover/rollback и
   reference matrix были зафиксированы в
-  [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
   План отображает эти же `20A–20N` и не является вторым roadmap.
 - Исходный trust audit подтвердил несколько defects: selected historical run терял обязательный
   `staged_path`, UI обещает `Commit selected artifacts`, хотя backend выполняет `git add -A`,

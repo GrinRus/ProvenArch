@@ -853,17 +853,18 @@ field; they must not infer a comparison when `review` is absent or unavailable.
 
 ### POST `/api/pipeline/runs/{run_id}/retry-plan`
 Для любого terminal analysis run (`succeeded|failed|canceled`) рассчитывает безопасную dependency
-closure. Для failed/canceled UI по умолчанию передаёт failed step/scopes; для succeeded оператор
-явно выбирает завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
+closure. Это compatible backend API; текущие Attempt и legacy diagnostics в UI read-only.
+Для failed/canceled client может передать failed step/scopes; для succeeded caller явно выбирает
+завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
 Response содержит reused inputs, effective start step, downstream
 invalidations, estimated units, widening reason и `plan_hash`. Если parent staging отсутствует или
 любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
 validation, либо агрегированные final/citation indexes и их staged documents не проходят strict
 parse, parent identity и containment validation, planner явно расширяет retry до первого pipeline step.
 `estimated_units` — execution units: для scoped Collect он включает выбранные shard scopes и
-downstream steps, поэтому UI не должен подписывать это поле как количество pipeline steps. UI
-обязан отдельно показать reuse, execute closure, `invalidated_steps`, effective scope и причину
-dependency closure до запуска child run.
+downstream steps. Если client предоставляет interactive retry flow, он должен отличать units от
+pipeline steps и до запуска child run показать reuse, execute closure, `invalidated_steps`,
+effective scope и причину dependency closure.
 
 ### POST `/api/pipeline/runs/{run_id}/retry`
 Принимает исходные `step_id`, `scope_ids[]` и обязательный `plan_hash`. Backend повторно вычисляет

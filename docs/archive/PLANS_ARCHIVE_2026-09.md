@@ -9,7 +9,7 @@ The merged Epic 19 program and its child scopes are closed by the final `19Z` re
 recording merge `02716bb`; old “continue the next slice” or archive-only checkboxes below describe
 that earlier sequence. Other moved scopes have explicit completed acceptance, supersession or
 archive-only follow-up. Original bodies/checklists/logs are retained, including historical failures.
-One relative `design-qa.md` link is rebased for the new directory. Archiving implementation evidence
+One relative `docs/archive/audits/DESIGN_QA_2026-08-21.md` link is rebased for the new directory. Archiving implementation evidence
 does not turn failed/stopped diagnostics into qualification or close any parent R3/W25 gate.
 Owner-review/admin decisions and incomplete release/DoD criteria remain in the active file.
 The 2026-09-05 remediation program, its dependencies and REM-25 remain unchanged and unexecuted.
@@ -251,9 +251,9 @@ internal/external references used during review.
 6) Synchronize discovery surfaces and execute docs plus repository DoD checks.
 
 ### Files expected to change
-- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`
-- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
-- `docs/UI_CONSOLE_V2_DESIGN.md`
+- `docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`
+- `docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
+- `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`
 - `docs/BACKLOG.md`
 - `docs/PLANS.md`
 - `docs/STAKEHOLDER_DOC.md`
@@ -290,7 +290,7 @@ internal/external references used during review.
   full Git inventory, historical runtime mode and pending/supersession readback require
   contract-first PR before their target UI.
 - 2026-07-15: Added
-  `docs/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md` with authority rules, all internal and
+  `docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md` with authority rules, all internal and
   official external references, six delivery phases, existing `20A–20N` slice cards, module/route
   maps, fixtures, QA gates, one-shell cutover/rollback and first-slice handoff; synchronized product
   discovery and stakeholder surfaces.
@@ -349,9 +349,9 @@ the current baseline, architecture overview and Epic 20 backlog.
 6) Cross-link the target design from current docs/backlog and run docs/full repository checks.
 
 ### Files expected to change
-- `docs/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
+- `docs/archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`
 - `docs/assets/ui-architecture-change-review/*.png`
-- `docs/UI_CONSOLE_V2_DESIGN.md`
+- `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`
 - `docs/BACKLOG.md`
 - `README.md`
 - `docs/ARCHITECTURE.md`
@@ -377,7 +377,7 @@ the current baseline, architecture overview and Epic 20 backlog.
   explicitly planned until implementation and E2E migration are complete.
 
 ### Progress log
-- 2026-07-15: Located the historical V2 design/current-shell baseline at `docs/UI_CONSOLE_V2_DESIGN.md`, historical
+- 2026-07-15: Located the historical V2 design/current-shell baseline at `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`, historical
   visuals under `docs/assets/ui-console-v2/`, target trust decisions in Epic 20, current UX evidence
   under `reports/`, and implementation sources in `ui/src/components` plus `ui/src/styles.css`.
 - 2026-07-15: Added the user-selected Architecture Change Review target spec with explicit
@@ -3294,7 +3294,7 @@ interfaces change.
 EP-20260714-epic-19-19w5c-orchestrator-quality-residual-cleanup
 
 ### Context
-`19W5c` follows committed `19W5b`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+`19W5c` follows committed `19W5b`. `docs/archive/audits/CODE_AUDIT_2026-07-10.md` identifies the
 package-local residual at `internal/orchestrator/quality.go:241`. In the current tree this is the
 unused `assessLiveReportSurfaceWarnings` wrapper; active code and tests call
 `assessLiveReportSurfaceSignals` directly.
@@ -3356,7 +3356,7 @@ interfaces change.
 EP-20260714-epic-19-19w5d-reports-compiler-residual-cleanup
 
 ### Context
-`19W5d` follows committed `19W5c`. `docs/CODE_AUDIT_2026-07-10.md` identifies the
+`19W5d` follows committed `19W5c`. `docs/archive/audits/CODE_AUDIT_2026-07-10.md` identifies the
 package-local residual at `internal/reports/compiler.go:266`. In the current tree this is the
 unused `writeStringList` helper; active coverage rendering uses `writeStringListWithFallback`.
 
@@ -3418,7 +3418,7 @@ EP-20260714-epic-19-19w5e-prompt-contract-residual-cleanup
 
 ### Context
 `19W5e` follows committed `19W5d` and closes the `DEAD-007` package-local residual track.
-`docs/CODE_AUDIT_2026-07-10.md` identifies the residual at
+`docs/archive/audits/CODE_AUDIT_2026-07-10.md` identifies the residual at
 `internal/runtime/promptcontract/collect_repair.go:213`. In the current tree this is the unused
 `firstNonEmpty` helper; collect repair prompt composition uses explicit path/evidence selection
 logic instead.
@@ -3819,7 +3819,7 @@ release interface changes.
 | 16 Console V2 UX | done (beta baseline) | Mission-control shell, Source/Readiness/Review/Publish surfaces, live E2E selector migration and fake/direct-mode coverage |
 | 17 Onboarding-first setup | done (beta baseline) | `acp serve` launcher/onboarding, workspace create/open, multi-repo sources, mandatory runner choice and direct `--workspace` compatibility path |
 | 18 Live E2E black-box boundary | open (paused behind Epic 22) | PR #171/#172 are merged; fresh R3 qualification and composite evidence restart only after the provider-free Epic 22 closure gate |
-| 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/CODE_AUDIT_2026-07-10.md` |
+| 19 Code quality remediation | done | Merged into `main` at `02716bb`; deterministic DoD and cleanup evidence are recorded in the active/archive plans and `docs/archive/audits/CODE_AUDIT_2026-07-10.md` |
 | 20 Console UX trust and IA reset | done | 20A–20N deliver trustworthy contracts, four-destination shell, feature seams, semantic primitives and responsive task gates; Epic 18 trusted-machine release evidence remains separate |
 | 21 Evidence-backed Architecture Home + impact-aware refresh | done (Wave 1) | Architecture Home, source revision/impact evidence, provider-free no-op, affected-only collect, surgical materialization and operator explanation are implemented |
 | 22 Post-implementation correctness/trust audit | open (release blocker) | Ordered provider-free remediation `22A..22O`: runtime/path/snapshot/refresh correctness, typed recovery, live/product isolation and ProductShell offline closure before R3 |
@@ -3840,7 +3840,7 @@ release interface changes.
 - [x] Run four isolated review streams: Static, Backend, UI and Tooling.
 - [x] Execute allowed deterministic checks and classify environment limitations separately from code findings.
 - [x] Deduplicate sanitized fragments without returning to source during synthesis.
-- [x] Publish `docs/CODE_AUDIT_2026-07-10.md` with prioritized remediation roadmap and confirmed dead-code register.
+- [x] Publish `docs/archive/audits/CODE_AUDIT_2026-07-10.md` with prioritized remediation roadmap and confirmed dead-code register.
 - [x] Verify the final worktree changes only this plan and the audit report.
 
 ### Non-goals
@@ -3859,7 +3859,7 @@ release interface changes.
 - Deterministic baseline passed: contracts, Go tests, race/shuffle, Python 230 tests, Vitest 93 tests, UI mock Playwright 7/7 and lint.
 - Confirmed quality gaps include generated UI drift, ShellCheck coverage, missing V8 coverage dependency and missing failure-injection/request-order tests.
 - No production code, API, schema or contract changes were made.
-- Final worktree verification found only `docs/PLANS.md` and `docs/CODE_AUDIT_2026-07-10.md`.
+- Final worktree verification found only `docs/PLANS.md` and `docs/archive/audits/CODE_AUDIT_2026-07-10.md`.
 
 ---
 
@@ -4218,7 +4218,7 @@ Completed Epic 20 exit plans `20M`, `20K`, `20L` and `20N` are archived in
 ## EP-20260710-code-audit-remediation-backlog
 
 ### Context
-- The completed audit at `docs/CODE_AUDIT_2026-07-10.md` identified 29 reportable findings and 13 confirmed dead-code groups.
+- The completed audit at `docs/archive/audits/CODE_AUDIT_2026-07-10.md` identified 29 reportable findings and 13 confirmed dead-code groups.
 - The project remains a local-first MVP with a loopback/trusted-operator React UI embedded into the Go binary.
 - Security/compliance enforcement and hosted/multi-user frontend hardening remain Wave 1+.
 
@@ -4622,7 +4622,7 @@ embedded-asset parity, responsive/accessibility smoke and final live UI comparis
 ### Context
 
 - Epic 23 contracts, routes and additive surfaces are implemented, but the fresh comparison in
-  [`design-qa.md`](../../design-qa.md) found six P1 and five P2 gaps against the authoritative
+  [`docs/archive/audits/DESIGN_QA_2026-08-21.md`](audits/DESIGN_QA_2026-08-21.md) found six P1 and five P2 gaps against the authoritative
   task-first UX and target composition references.
 - The current UI is operational and deterministic tests pass, but it still reads as a dense
   operator console. The highest-risk gaps are contradictory Task/Attempt state, diagnostic-first
@@ -4657,7 +4657,7 @@ workspace and use Ask/Settings without needing runtime vocabulary or hidden lega
 2. `docs/UI_TASK_FIRST_PRODUCT_DESIGN.md`.
 3. Epic 23 acceptance in `docs/BACKLOG.md`.
 4. `docs/UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`.
-5. `design-qa.md` and the normalized comparison evidence.
+5. `docs/archive/audits/DESIGN_QA_2026-08-21.md` and the normalized comparison evidence.
 6. PNGs under `docs/assets/ui-task-first-product/` for composition, density and visual character.
 
 ### Product brief
@@ -4886,7 +4886,7 @@ preset invalid/save/conflict/readiness states fail inline and cannot rewrite an 
 - Run the full state/viewport matrix with overflow, console-error, critical axe, keyboard-only,
   focus-return, 200% zoom, reduced-motion, long-path and touch-target checks.
 - Compare matched implementation captures against every target reference using full-view and focused
-  side-by-side evidence; append iteration history to `design-qa.md`.
+  side-by-side evidence; append iteration history to `docs/archive/audits/DESIGN_QA_2026-08-21.md`.
 - Remove obsolete/duplicated components, CSS, routes, test IDs and compatibility DOM exposed by the
   corrective slices.
 - Run `acp-docs-sync` only after behavior is implemented; synchronize README, ARCHITECTURE,
@@ -4898,7 +4898,7 @@ preset invalid/save/conflict/readiness states fail inline and cannot rewrite an 
 
 **Acceptance:** critical axe violations are zero; no global overflow or clipped primary action at
 all supported viewports; every primary job is keyboard-complete; no actionable P0/P1/P2 design QA
-finding remains; `design-qa.md` ends with exact `final result: passed`; full DoD and embedded parity
+finding remains; `docs/archive/audits/DESIGN_QA_2026-08-21.md` ends with exact `final result: passed`; full DoD and embedded parity
 pass from a clean tree.
 
 ### State matrix required for closure
@@ -4945,7 +4945,7 @@ schema/contract decision instead of inventing frontend state.
 
 ### Progress log
 
-- 2026-08-21: Baseline plan created from `design-qa.md`, Epic 23, the target UX and migration plan.
+- 2026-08-21: Baseline plan created from `docs/archive/audits/DESIGN_QA_2026-08-21.md`, Epic 23, the target UX and migration plan.
   No implementation started. Current QA remains `blocked` with six P1 and five P2 findings.
 - 2026-08-21: Q1 implementation started. New Task admission now lands on exact Task detail;
   terminal Pipeline Studio states suppress stale blockers/active language; Architecture refreshes

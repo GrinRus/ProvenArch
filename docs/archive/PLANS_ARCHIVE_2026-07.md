@@ -207,7 +207,7 @@ Follow-up medium-depth rendered UX/UI audit found two operator issues after the 
 EP-20260708-ux-ui-quality-loop
 
 ### Context
-The user requested an iterative UX/UI quality loop for the ACP operator console: understand the product and user journey, inspect every screen, run live E2E on a medium task when host prerequisites allow it, write a UX/UI quality report, plan improvements, commit, and repeat until a first-time operator can complete the happy path and recovery paths clearly. Existing diagnostic evidence in `reports/ux_current_state_20260707.md` shows the fake-runtime UI flow passes, but the rendered console is still too dense around shared shell chrome: Activity drawer, right inspector, and active run summary compete with the stage workbench.
+The user requested an iterative UX/UI quality loop for the ACP operator console: understand the product and user journey, inspect every screen, run live E2E on a medium task when host prerequisites allow it, write a UX/UI quality report, plan improvements, commit, and repeat until a first-time operator can complete the happy path and recovery paths clearly. Existing diagnostic evidence in `docs/archive/audits/ux_current_state_20260707.md` shows the fake-runtime UI flow passes, but the rendered console is still too dense around shared shell chrome: Activity drawer, right inspector, and active run summary compete with the stage workbench.
 
 ### Goals (must have)
 - [x] Map the current user journey across onboarding, Source, Readiness, Charter, Analysis, Review, Proposals, Ask and Publish.
@@ -312,10 +312,10 @@ The user requested an iterative UX/UI quality loop for the ACP operator console:
 - `ui/e2e/source-recovery-mock.spec.ts`
 - `ui/src/hooks/useGitActions.ts`
 - `ui/src/styles.css`
-- `reports/ux_ui_assessment_20260708.md`
+- `docs/archive/audits/ux_ui_assessment_20260708.md`
 - `README.md`
 - `docs/ARCHITECTURE.md`
-- `docs/UI_CONSOLE_V2_DESIGN.md`
+- `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`
 - `docs/STAKEHOLDER_DOC.md`
 - `docs/PLANS.md`
 
@@ -525,7 +525,7 @@ The current task is a diagnostic UX review pass over Console V2: capture present
 
 ### Files changed
 - `docs/PLANS.md`
-- `reports/ux_current_state_20260707.md`
+- `docs/archive/audits/ux_current_state_20260707.md`
 
 ### Acceptance criteria
 - [x] Host/tool readiness and smoke result are recorded with evidence paths.
@@ -539,7 +539,7 @@ The current task is a diagnostic UX review pass over Console V2: capture present
 ### Progress log
 - 2026-07-07: Started diagnostic UX live smoke review. Initial preflight found current PATH Node.js `25.9.0`, while `.node-version` requires `22.21.1`.
 - 2026-07-07: Downloaded exact diagnostic Node.js `22.21.1` to `/tmp/provenarch-node-v22.21.1`, ran `make build`, started fake-runtime `acp serve`, and passed `ui/e2e/live-flow.spec.ts` with `UI_E2E_QA_SMOKE=1`.
-- 2026-07-07: Captured current state in `reports/ux_current_state_20260707.md` with screenshot paths, API evidence, findings and proposed UX fixes.
+- 2026-07-07: Captured current state in `docs/archive/audits/ux_current_state_20260707.md` with screenshot paths, API evidence, findings and proposed UX fixes.
 - 2026-07-07: Archived the completed diagnostic plan during the Console V2 UX hardening slice so `docs/PLANS.md` keeps only active workstreams.
 
 ### Plan ID

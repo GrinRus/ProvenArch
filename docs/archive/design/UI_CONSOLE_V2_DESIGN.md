@@ -1,10 +1,12 @@
 # UI Console V2 Design Baseline
 
+> Archived 2026-09-05 from `docs/UI_CONSOLE_V2_DESIGN.md`. This superseded design record is retained for decision traceability; use the [current task-first UX](../../UI_TASK_FIRST_PRODUCT_DESIGN.md) for implementation acceptance. Original historical claims below are preserved.
+
 Статус: **superseded historical V2 design record; not a target baseline**, 2026-05-27.
 
 Единственное актуальное planned-направление зафиксировано в
-[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md), а порядок cutover — в
-[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md). Старые PNG
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](../../UI_TASK_FIRST_PRODUCT_DESIGN.md), а порядок cutover — в
+[`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](../../UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md). Старые PNG
 удалены намеренно: этот текст остаётся только как traceability реализованного lineage.
 
 Этот документ фиксирует историческую V2 design specification и решения, на которых построена
@@ -15,7 +17,7 @@
 ## Retired visual references
 
 The former V2 PNG set was removed on 2026-08-11. Use the task-first reference inventory in
-[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md); behavior claims for the
+[`UI_TASK_FIRST_PRODUCT_DESIGN.md`](../../UI_TASK_FIRST_PRODUCT_DESIGN.md); behavior claims for the
 current binary remain in README and `ARCHITECTURE.md`.
 
 ## Product framing
