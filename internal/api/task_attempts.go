@@ -159,9 +159,13 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 	}
 	runtimeSnapshot, err := attemptRuntimeSnapshot(attempt)
 	if err != nil {
-		_ = registry.Update(func(candidate *producttasks.History) error {
-			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID, task.LastActivityAt)
 		})
+		if cleanupErr != nil {
+			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("runtime snapshot failed: %v; cleanup failed: %v", err, cleanupErr))
+			return
+		}
 		writeError(writer, http.StatusBadRequest, "attempt_start_failed", err.Error())
 		return
 	}
@@ -172,7 +176,7 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 	})
 	if err != nil || runID != attempt.RunID {
 		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
-			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID, task.LastActivityAt)
 		})
 		if cleanupErr != nil {
 			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("run admission failed: %v; cleanup failed: %v", err, cleanupErr))
@@ -313,9 +317,13 @@ func (s *Server) handleTaskAttemptChild(writer http.ResponseWriter, request *htt
 	}
 	runtimeSnapshot, err := attemptRuntimeSnapshot(attempt)
 	if err != nil {
-		_ = registry.Update(func(candidate *producttasks.History) error {
-			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID, task.LastActivityAt)
 		})
+		if cleanupErr != nil {
+			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("runtime snapshot failed: %v; cleanup failed: %v", err, cleanupErr))
+			return
+		}
 		writeError(writer, http.StatusBadRequest, "attempt_start_failed", err.Error())
 		return
 	}
@@ -327,7 +335,7 @@ func (s *Server) handleTaskAttemptChild(writer http.ResponseWriter, request *htt
 	})
 	if err != nil || runID != attempt.RunID {
 		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
-			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID, task.LastActivityAt)
 		})
 		if cleanupErr != nil {
 			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("%s admission failed: %v; cleanup failed: %v", action, err, cleanupErr))
@@ -852,7 +860,7 @@ func appendAttemptToHistory(history *producttasks.History, taskID string, attemp
 	return nil
 }
 
-func removeAttemptFromHistory(history *producttasks.History, taskID, attemptID string) error {
+func removeAttemptFromHistory(history *producttasks.History, taskID, attemptID, previousLastActivityAt string) error {
 	index := -1
 	for i, attempt := range history.Attempts {
 		if attempt.TaskID == taskID && attempt.AttemptID == attemptID {
@@ -873,6 +881,7 @@ func removeAttemptFromHistory(history *producttasks.History, taskID, attemptID s
 			}
 		}
 		history.Tasks[taskIndex].Attempts = filtered
+		history.Tasks[taskIndex].LastActivityAt = previousLastActivityAt
 	}
 	return nil
 }

@@ -1066,6 +1066,61 @@ Rebase from exact fresh `origin/main` and repeat focused evidence if remote main
   parallel tests and Claude availability; its owned files still do not overlap REM-15.
   REM-14 is closed and REM-15 is next.
 
+### REM-15 slice plan (current)
+
+**Goal.** Сделать create/admit/queue flow атомарным на наблюдаемом уровне: если после записи
+Attempt runtime admission не состоялся, durable Task возвращается к состоянию до попытки, не
+остаётся phantom active/queued Attempt и UI продолжает показывать только восстановимый Task,
+а не ложный запуск.
+
+**Finding / baseline.** На свежем `origin/main=26c68908` API намеренно сохраняет Task после
+ошибки admission (у Task Composer есть recovery path), но compensating cleanup удаляет Attempt
+и его summary, не восстанавливая `Task.last_activity_at`. Поэтому отказ после registry write
+(например, `ErrServiceClosed` из `StartAsyncRun`) меняет ordering/projection Task несмотря на
+отсутствие активного Attempt. Backend registry и orchestrator service остаются двумя отдельными
+durable transactions; REM-15 ограничивает исправление границей этого admission rollback и не
+изобретает новую cross-file transaction.
+
+**Readiness / parallel stabilization.** Ветка создаётся от свежего `origin/main=26c68908`.
+Соседний тред `Проверь UI и UX проекта` повторно проверен после REM-14: его material changes
+ограничены `docs/ARCHITECTURE.md`, `internal/artifactquality/{semantic.go,semantic_test.go}`
+и `internal/orchestrator/docflow{,_test.go}`; live gate остаётся externally blocked диском,
+параллельными тестами и доступностью Claude. REM-15 меняет только admission rollback и его
+регрессионные тесты, поэтому этих stabilization-owned путей не касается.
+
+**Non-goals.** Не менять JSON/schema shape, Task-first UI navigation contract, provider/model
+resolution, capacity policy, queue replacement semantics, runtime history, live harness или
+публичные API routes. Не удалять созданный пользователем Task при ошибке admission и не
+пытаться сделать registry и orchestrator одной filesystem-транзакцией.
+
+**Implementation boundary.** Передавать в compensating cleanup точный pre-admission projection
+Task (как минимум `last_activity_at`) и восстанавливать только поля, изменённые append helper,
+одновременно удаляя Attempt и summary. Добавить API regression coverage для synchronous
+post-persist admission failure с закрытым service: error остаётся typed, Task identity и
+pre-admission projection сохраняются, Attempt list и service coordination не содержат active или
+queued phantom. Проверить существующий UI recovery test и не менять его user-visible контракт.
+
+**Acceptance / regression.**
+
+- [ ] Admission failure after registry append leaves zero Attempt/summary for the failed identity
+      and preserves the Task projection/order fields from before admission.
+- [ ] No active or queued service ownership remains after failed start; typed error response is
+      unchanged and idempotency can be retried with the same Task.
+- [ ] Successful init/start, refresh/queue and child retry/rerun paths retain current behavior;
+      existing UI recovery behavior remains covered.
+- [ ] Focused Go tests (including `-race` where relevant), UI suite/typecheck and deterministic
+      `make contracts`, `make test`, `make lint`, `make build` pass; no stabilization-owned files
+      change.
+
+**Rollback / stop condition.** Stop before merge if a failed admission still changes Task
+projection or leaves an active/queued identity, if successful queue/retry/rerun behavior changes,
+or if the fix requires a public contract/schema change not covered by a separate schema-first
+slice. Rebase from exact fresh `origin/main` and repeat focused evidence if remote main advances.
+
+- 2026-09-06: Research identified the post-persist projection drift and selected a compensating
+  rollback fix with a closed-service regression seam. Branch `codex/rem-15-atomic-admission` is
+  isolated from the neighbor stabilization paths; implementation follows after this plan sync.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.
