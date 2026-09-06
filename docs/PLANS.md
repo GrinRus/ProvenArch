@@ -77,7 +77,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12 merged; REM-13 is the next independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12/REM-13 merged; REM-14 is the next independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -140,11 +140,11 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11 and REM-12 merged; REM-13 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12 and REM-13 merged; REM-14 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Finish REM-13 review and full deterministic DoD on the isolated branch, then open the
-required PR; keep release status explicitly blocked until REM-03B is authorized and applied with
-before/after/rollback evidence.
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-14's
+edit/retry/rerun boundary finding and create its isolated slice plan; keep release status explicitly
+blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
 ### Context
@@ -924,7 +924,7 @@ paths or the exact origin base drifts without a rebase and renewed focused evide
   remains externally blocked (disk/provider/live gate); its owned paths were rechecked and remain
   untouched. REM-13 is now the next ready independent P1 slice.
 
-### REM-13 slice plan (in progress)
+### REM-13 slice plan (merged)
 
 **Goal.** Сделать Task-first scope и runner contract единым от composer до фактического runtime:
 явно выбранные repository/path scopes и provider должны попасть в immutable Attempt snapshot,
@@ -962,13 +962,13 @@ provider-equality gate (mode mismatch и отсутствие workspace/scope о
 
 **Acceptance / regression.**
 
-- [ ] Composer permits an explicit supported provider and submits it; only incompatible mode,
+- [x] Composer permits an explicit supported provider and submits it; only incompatible mode,
       missing workspace or empty scope blocks admission.
-- [ ] Admitted repository names and path patterns survive Task → Attempt → runtime snapshot →
+- [x] Admitted repository names and path patterns survive Task → Attempt → runtime snapshot →
       queued RunInfo/history → restart and are exactly the inputs visible in shard/task metadata.
-- [ ] Legacy runs without path map retain current workspace discovery behavior; invalid repo/path
+- [x] Legacy runs without path map retain current workspace discovery behavior; invalid repo/path
       identity fails before provider execution and never falls back to `.`.
-- [ ] Focused Go/TypeScript tests, race coverage where relevant, `make contracts`, `make test`,
+- [x] Focused Go/TypeScript tests, race coverage where relevant, `make contracts`, `make test`,
       `make lint` and `make build` pass; no stabilization-owned file changes.
 
 **Rollback / stop condition.** Stop before merge if a Task path can be broadened by mutable
@@ -988,6 +988,11 @@ advances.
   blockers. Focused Go and UI tests pass; contracts, typecheck, lint and build pass. Full package
   tests remain environment-limited by concurrent `no space left on device` failures in unrelated
   async/docflow tests.
+- 2026-09-06: PR #292 (implementation commits `f13eaba6` and `044570f1`) passed all required CI
+  checks, including full backend, UI bundle freshness, contracts, lint, golden, smoke-api,
+  smoke-cli, CodeQL, dependency review and Go/JS analysis; squash-merged to
+  `origin/main=5cab70c0`. The local full-suite resource/flaky failures were unrelated to the
+  changed paths; affected tests passed focused and race runs. REM-13 is closed and REM-14 is next.
 
 ## EP-20260811-task-attempt-contracts
 
