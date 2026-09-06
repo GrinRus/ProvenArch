@@ -1064,7 +1064,8 @@ Rebase from exact fresh `origin/main` and repeat focused evidence if remote main
   CodeQL, dependency review and Go/JS analysis) and squash-merged to `origin/main=e06c3733`.
   Neighbor stabilization was rechecked after merge and remains externally blocked by disk,
   parallel tests and Claude availability; its owned files still do not overlap REM-15.
-  REM-14 is closed and REM-15 is next.
+  REM-14 is closed; REM-15 was the next isolated slice and is now merged, while REM-16 remains
+  blocked by stabilization.
 
 ### REM-15 slice plan (merged)
 
