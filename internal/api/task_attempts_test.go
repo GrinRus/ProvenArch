@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,7 +203,7 @@ func TestTaskAttemptAdmissionIsIdempotentAndLinksExactRun(t *testing.T) {
 	}
 }
 
-func TestTaskAttemptRetryCreatesChildAttempt(t *testing.T) {
+func TestTaskAttemptRerunCreatesChildAttempt(t *testing.T) {
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
@@ -217,21 +219,227 @@ func TestTaskAttemptRetryCreatesChildAttempt(t *testing.T) {
 	first.Body.Close()
 	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
 
-	retry := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+firstPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"child-key","reason":"repair"}`)
+	run := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+firstPayload.Attempt.AttemptID+"/rerun", `{"idempotency_key":"child-key","reason":"repair"}`)
+	var retryPayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(run.Body).Decode(&retryPayload); err != nil {
+		run.Body.Close()
+		t.Fatalf("decode retry: %v", err)
+	}
+	run.Body.Close()
+	if run.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == firstPayload.Attempt.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != firstPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
+		t.Fatalf("rerun did not create child attempt: status=%d payload=%+v", run.StatusCode, retryPayload)
+	}
+	// The Attempt watcher persists terminal history after the runtime finishes.
+	// Wait for that write before TempDir cleanup removes the workspace.
+	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
+}
+
+func TestTaskAttemptActionsDistinguishRetryAndRerun(t *testing.T) {
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "action-gates")
+	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"action-parent"}`)
+	var parentPayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&parentPayload); err != nil {
+		first.Body.Close()
+		t.Fatalf("decode parent: %v", err)
+	}
+	first.Body.Close()
+	waitForTerminalAttempt(t, server, parentPayload.Attempt.AttemptID)
+
+	wrongAction := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+parentPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"wrong-action"}`)
+	body, _ := io.ReadAll(wrongAction.Body)
+	wrongAction.Body.Close()
+	if wrongAction.StatusCode != http.StatusConflict || !strings.Contains(string(body), "retry_parent_not_retryable") {
+		t.Fatalf("successful parent was accepted by retry: status=%d body=%s", wrongAction.StatusCode, body)
+	}
+
+	failureServer := newTestServerWithRunner(t, unavailableRunner{})
+	failureHTTP := httptest.NewServer(failureServer.Handler())
+	defer failureHTTP.Close()
+	failureTask := createTaskForAttemptTest(t, failureHTTP.URL, "retry-gate")
+	failed := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts", `{"idempotency_key":"failed-parent"}`)
+	var failedPayload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(failed.Body).Decode(&failedPayload); err != nil {
+		failed.Body.Close()
+		t.Fatalf("decode failed parent: %v", err)
+	}
+	failed.Body.Close()
+	waitForTerminalAttempt(t, failureServer, failedPayload.Attempt.AttemptID)
+
+	wrongRerun := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedPayload.Attempt.AttemptID+"/rerun", `{"idempotency_key":"wrong-rerun"}`)
+	body, _ = io.ReadAll(wrongRerun.Body)
+	wrongRerun.Body.Close()
+	if wrongRerun.StatusCode != http.StatusConflict || !strings.Contains(string(body), "rerun_parent_not_succeeded") {
+		t.Fatalf("failed parent was accepted by rerun: status=%d body=%s", wrongRerun.StatusCode, body)
+	}
+
+	retry := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"valid-retry"}`)
 	var retryPayload struct {
 		Attempt producttasks.Attempt `json:"attempt"`
 	}
 	if err := json.NewDecoder(retry.Body).Decode(&retryPayload); err != nil {
 		retry.Body.Close()
-		t.Fatalf("decode retry: %v", err)
+		t.Fatalf("decode child retry: %v", err)
 	}
 	retry.Body.Close()
-	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == firstPayload.Attempt.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != firstPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
-		t.Fatalf("retry did not create child attempt: status=%d payload=%+v", retry.StatusCode, retryPayload)
+	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != failedPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "operator_retry" {
+		t.Fatalf("failed parent did not create retry child: status=%d payload=%+v", retry.StatusCode, retryPayload.Attempt)
 	}
-	// The Attempt watcher persists terminal history after the runtime finishes.
-	// Wait for that write before TempDir cleanup removes the workspace.
-	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
+	waitForTerminalAttempt(t, failureServer, retryPayload.Attempt.AttemptID)
+}
+
+func TestTaskAttemptEditDoesNotMutateAdmittedSnapshot(t *testing.T) {
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "immutable-edit")
+	admission := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"immutable-parent"}`)
+	var admitted struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(admission.Body).Decode(&admitted); err != nil {
+		admission.Body.Close()
+		t.Fatalf("decode admitted attempt: %v", err)
+	}
+	admission.Body.Close()
+
+	patchRequest, err := http.NewRequest(http.MethodPatch, httpServer.URL+"/api/tasks/"+created.TaskID, strings.NewReader(`{"expected_revision":1,"title":"edited title","goal":"edited goal","context":"edited context"}`))
+	if err != nil {
+		t.Fatalf("create task edit request: %v", err)
+	}
+	patchRequest.Header.Set("Content-Type", "application/json")
+	patchResponse, err := http.DefaultClient.Do(patchRequest)
+	if err != nil {
+		t.Fatalf("edit task: %v", err)
+	}
+	var patched struct {
+		Task producttasks.Task `json:"task"`
+	}
+	if err := json.NewDecoder(patchResponse.Body).Decode(&patched); err != nil {
+		patchResponse.Body.Close()
+		t.Fatalf("decode edited task: %v", err)
+	}
+	patchResponse.Body.Close()
+	if patchResponse.StatusCode != http.StatusOK || patched.Task.Revision != 2 || patched.Task.Title != "edited title" {
+		t.Fatalf("task edit failed: status=%d task=%+v", patchResponse.StatusCode, patched.Task)
+	}
+
+	attemptResponse, err := http.Get(httpServer.URL + "/api/tasks/" + created.TaskID + "/attempts/" + admitted.Attempt.AttemptID)
+	if err != nil {
+		t.Fatalf("read immutable attempt: %v", err)
+	}
+	var after struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(attemptResponse.Body).Decode(&after); err != nil {
+		attemptResponse.Body.Close()
+		t.Fatalf("decode immutable attempt: %v", err)
+	}
+	attemptResponse.Body.Close()
+	if attemptResponse.StatusCode != http.StatusOK {
+		t.Fatalf("read immutable attempt status=%d", attemptResponse.StatusCode)
+	}
+	if !reflect.DeepEqual(admitted.Attempt.IntentSnapshot, after.Attempt.IntentSnapshot) || !reflect.DeepEqual(admitted.Attempt.EffectiveRuntime, after.Attempt.EffectiveRuntime) {
+		t.Fatalf("Task edit mutated admitted Attempt: before=(%+v,%+v) after=(%+v,%+v)", admitted.Attempt.IntentSnapshot, admitted.Attempt.EffectiveRuntime, after.Attempt.IntentSnapshot, after.Attempt.EffectiveRuntime)
+	}
+	waitForTerminalAttempt(t, server, admitted.Attempt.AttemptID)
+	rerun := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+admitted.Attempt.AttemptID+"/rerun", `{"idempotency_key":"edited-child"}`)
+	var child struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(rerun.Body).Decode(&child); err != nil {
+		rerun.Body.Close()
+		t.Fatalf("decode edited child: %v", err)
+	}
+	rerun.Body.Close()
+	if rerun.StatusCode != http.StatusAccepted || child.Attempt.TaskRevision != 2 || child.Attempt.IntentSnapshot.Title != "edited title" || child.Attempt.IntentSnapshot.Goal != "edited goal" || child.Attempt.ParentAttemptID == nil || *child.Attempt.ParentAttemptID != admitted.Attempt.AttemptID {
+		t.Fatalf("edited Task values were not explicitly inherited by child: status=%d child=%+v", rerun.StatusCode, child.Attempt)
+	}
+	waitForTerminalAttempt(t, server, child.Attempt.AttemptID)
+}
+
+func TestTaskAttemptSecondRootRequiresExplicitChildAction(t *testing.T) {
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "root-once")
+	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"root-once-parent"}`)
+	var payload struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&payload); err != nil {
+		first.Body.Close()
+		t.Fatalf("decode first root: %v", err)
+	}
+	first.Body.Close()
+	waitForTerminalAttempt(t, server, payload.Attempt.AttemptID)
+
+	second := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"root-once-second"}`)
+	body, _ := io.ReadAll(second.Body)
+	second.Body.Close()
+	if second.StatusCode != http.StatusConflict || !strings.Contains(string(body), "attempt_action_required") {
+		t.Fatalf("second root admission was not rejected: status=%d body=%s", second.StatusCode, body)
+	}
+}
+
+func TestTaskAttemptChildRejectsEditedForeignScopeBeforePersistence(t *testing.T) {
+	server := newTestServerWithRunner(t, unavailableRunner{})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "foreign-child-scope")
+	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"foreign-parent"}`)
+	var parent struct {
+		Attempt producttasks.Attempt `json:"attempt"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&parent); err != nil {
+		first.Body.Close()
+		t.Fatalf("decode foreign-scope parent: %v", err)
+	}
+	first.Body.Close()
+	waitForTerminalAttempt(t, server, parent.Attempt.AttemptID)
+
+	patchRequest, err := http.NewRequest(http.MethodPatch, httpServer.URL+"/api/tasks/"+created.TaskID, strings.NewReader(`{"expected_revision":1,"scope":{"repositories":[{"name":"not-in-manifest","paths":["."]}]}}`))
+	if err != nil {
+		t.Fatalf("create foreign scope patch: %v", err)
+	}
+	patchRequest.Header.Set("Content-Type", "application/json")
+	patchResponse, err := http.DefaultClient.Do(patchRequest)
+	if err != nil {
+		t.Fatalf("patch foreign scope: %v", err)
+	}
+	patchResponse.Body.Close()
+	if patchResponse.StatusCode != http.StatusOK {
+		t.Fatalf("patch foreign scope status=%d", patchResponse.StatusCode)
+	}
+
+	retry := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+parent.Attempt.AttemptID+"/retry", `{"idempotency_key":"foreign-child"}`)
+	body, _ := io.ReadAll(retry.Body)
+	retry.Body.Close()
+	if retry.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "task_scope_invalid") {
+		t.Fatalf("foreign child scope was not rejected before persistence: status=%d body=%s", retry.StatusCode, body)
+	}
+	attempts, err := http.Get(httpServer.URL + "/api/tasks/" + created.TaskID + "/attempts")
+	if err != nil {
+		t.Fatalf("list child attempts: %v", err)
+	}
+	defer attempts.Body.Close()
+	var listed struct {
+		Items []producttasks.Attempt `json:"items"`
+	}
+	if err := json.NewDecoder(attempts.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode child attempt list: %v", err)
+	}
+	if len(listed.Items) != 1 {
+		t.Fatalf("foreign child was persisted despite scope rejection: %+v", listed.Items)
+	}
 }
 
 func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {

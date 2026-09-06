@@ -1719,11 +1719,17 @@ The implemented W23A3 boundary currently exposes:
   fall back to another Task or latest run.
 
 `POST /api/tasks/<task_id>/attempts` requires `idempotency_key` and optionally accepts `pipeline`
-(`init|refresh`) and `intent` (`start|queue`). It returns an immutable effective runtime snapshot,
-server-generated Attempt identity and an exact requested `run_id`. Repeating the same key and
-fingerprint returns the same identity; reusing it for different options returns
-`409 idempotency_conflict`. `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` requires a
-terminal parent and creates a child Attempt with `parent_attempt_id` and `retry_reason`.
+(`init|refresh`) and `intent` (`start|queue`). It is the root admission for a Task with no prior
+Attempts; after the first Attempt it returns typed `409 attempt_action_required`. It returns an
+immutable effective runtime snapshot, server-generated Attempt identity and an exact requested
+`run_id`. Repeating the same key and fingerprint returns the same identity; reusing it for different
+options returns `409 idempotency_conflict`. Capacity errors are typed (`run_active` or
+`attempt_queue_full`) and never supersede another Task's queued Attempt.
+`POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` accepts only a `failed`, `canceled` or
+`timeout` parent; `/rerun` accepts only a `succeeded` parent. Both create a child Attempt with
+`parent_attempt_id` and a distinct `retry_reason` default (`operator_retry` or `operator_rerun`),
+while the parent snapshot remains immutable. Both validate the current Task repository scope before
+persisting the child.
 Admission validates repository scope and runner before provider start, uses the shared admission
 lease, and returns `run_active`/`attempt_queue_full` instead of replacing another Task's queued
 Attempt. The Attempt registry watcher mirrors queued/running/terminal run state and retains the

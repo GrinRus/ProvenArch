@@ -21,8 +21,9 @@ Introduce a separate product `Task` aggregate and immutable child `Attempt` reco
   repository/scope selection and desired runner preset), monotonic `revision`, timestamps and
   explicit archive metadata.
 - One Attempt maps to exactly one pipeline `run_id`. Admission snapshots the exact Task intent,
-  scope and effective runner configuration. Retry/rerun creates a new Attempt with explicit parent
-  lineage and never mutates the parent.
+  scope and effective runner configuration. Retry of an unsuccessful terminal Attempt and rerun of
+  a successful terminal Attempt create a new child Attempt with explicit parent lineage and never
+  mutate the parent; a Task cannot create a second root Attempt.
 - Task grouping such as `Needs attention`, `Running`, `Ready` and `Completed` is a read model derived
   from Task archive state plus linked Attempt/run state; it is not an independently persisted
   lifecycle authority.

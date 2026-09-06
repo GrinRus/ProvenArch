@@ -138,6 +138,10 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 		writeJSON(writer, http.StatusOK, map[string]any{"attempt": producttasks.CloneAttempt(existing), "idempotent": true})
 		return
 	}
+	if taskHasAttempts(history, task.TaskID) {
+		writeError(writer, http.StatusConflict, "attempt_action_required", "the Task already has an Attempt; use retry or rerun on a terminal Attempt")
+		return
+	}
 	if conflict := validateTaskCapacity(history, snapshot.Service, intent); conflict != nil {
 		writeError(writer, http.StatusConflict, conflict.Code, conflict.Message)
 		return
@@ -200,14 +204,18 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 	writeJSON(writer, http.StatusAccepted, map[string]any{"attempt": result, "idempotent": false})
 }
 
-func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *http.Request, taskID, attemptID string) {
+func (s *Server) handleTaskAttemptChild(writer http.ResponseWriter, request *http.Request, taskID, attemptID, action string) {
 	if request.Method != http.MethodPost {
 		writeMethodNotAllowed(writer, http.MethodPost)
 		return
 	}
+	if action != "retry" && action != "rerun" {
+		writeError(writer, http.StatusNotFound, "task_route_not_found", "task attempt action not found")
+		return
+	}
 	var payload taskAttemptRetryRequest
 	if err := decodeStrictJSON(request, &payload); err != nil {
-		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid attempt retry request")
+		writeError(writer, http.StatusBadRequest, "invalid_request_body", "invalid child attempt request")
 		return
 	}
 	key := strings.TrimSpace(payload.IdempotencyKey)
@@ -224,7 +232,7 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 	defer s.admissionMu.Unlock()
 	snapshot := s.sessionSnapshot()
 	if !snapshot.RuntimeSelected || snapshot.Service == nil {
-		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select a workspace and runner before retrying an attempt")
+		writeError(writer, http.StatusPreconditionRequired, "workspace_not_selected", "select a workspace and runner before admitting a child attempt")
 		return
 	}
 	registry, err := s.taskRegistrySnapshot()
@@ -239,7 +247,7 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 		return
 	}
 	if task.Lifecycle == producttasks.LifecycleArchived {
-		writeError(writer, http.StatusConflict, "task_archived", "archived tasks cannot admit retry attempts")
+		writeError(writer, http.StatusConflict, "task_archived", "archived tasks cannot admit child attempts")
 		return
 	}
 	parent, ok := findAttempt(history, taskID, attemptID)
@@ -247,8 +255,17 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusNotFound, "attempt_not_found", "attempt not found for task")
 		return
 	}
-	if !isTerminalAttempt(parent.Status) {
-		writeError(writer, http.StatusConflict, "retry_parent_not_terminal", "retry is available only after the parent attempt reaches a terminal state")
+	if action == "retry" {
+		if !isRetryableAttempt(parent.Status) {
+			if !isTerminalAttempt(parent.Status) {
+				writeError(writer, http.StatusConflict, "retry_parent_not_terminal", "retry is available only after the parent Attempt reaches a terminal state")
+			} else {
+				writeError(writer, http.StatusConflict, "retry_parent_not_retryable", "retry is available only after a failed, canceled or timed-out Attempt")
+			}
+			return
+		}
+	} else if parent.Status != producttasks.AttemptSucceeded {
+		writeError(writer, http.StatusConflict, "rerun_parent_not_succeeded", "rerun is available only after a successful Attempt")
 		return
 	}
 	if strings.TrimSpace(payload.Pipeline) == "" && parent.Pipeline != "" {
@@ -258,14 +275,22 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 			return
 		}
 	}
+	if err := validateTaskRepositoryScope(task, snapshot.Workspace); err != nil {
+		writeError(writer, http.StatusBadRequest, "task_scope_invalid", err.Error())
+		return
+	}
 	reason := strings.TrimSpace(payload.Reason)
 	if reason == "" {
-		reason = "operator_retry"
+		if action == "rerun" {
+			reason = "operator_rerun"
+		} else {
+			reason = "operator_retry"
+		}
 	}
 	fingerprint := attemptFingerprint(attemptAdmissionFingerprint{TaskID: task.TaskID, TaskRevision: task.Revision, Pipeline: string(pipeline), Intent: string(intent), ParentAttemptID: parent.AttemptID, RetryReason: reason})
 	if existing, found := findIdempotentAttempt(history, task.TaskID, key); found {
 		if existing.RequestFingerprint != fingerprint {
-			writeError(writer, http.StatusConflict, "idempotency_conflict", "idempotency_key was already used for a different retry request")
+			writeError(writer, http.StatusConflict, "idempotency_conflict", "idempotency_key was already used for a different child attempt request")
 			return
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"attempt": producttasks.CloneAttempt(existing), "idempotent": true})
@@ -305,7 +330,7 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
 		})
 		if cleanupErr != nil {
-			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("retry admission failed: %v; cleanup failed: %v", err, cleanupErr))
+			writeError(writer, http.StatusInternalServerError, "attempt_admission_inconsistent", fmt.Sprintf("%s admission failed: %v; cleanup failed: %v", action, err, cleanupErr))
 			return
 		}
 		if err == nil {
@@ -324,6 +349,19 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 	s.watchAdmittedAttempt(snapshot.Service, registry, runID, attempt.AttemptID)
 	result, _ := findAttempt(registry.Snapshot(), task.TaskID, attempt.AttemptID)
 	writeJSON(writer, http.StatusAccepted, map[string]any{"attempt": result, "idempotent": false})
+}
+
+func isRetryableAttempt(status producttasks.AttemptStatus) bool {
+	return status == producttasks.AttemptFailed || status == producttasks.AttemptCanceled || status == producttasks.AttemptTimeout
+}
+
+func taskHasAttempts(history producttasks.History, taskID string) bool {
+	for _, attempt := range history.Attempts {
+		if attempt.TaskID == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) watchAdmittedAttempt(service *orchestrator.Service, registry *producttasks.Registry, runID, attemptID string) {
@@ -607,13 +645,35 @@ func (s *Server) buildAdmittedAttempt(snapshot serverSessionSnapshot, task produ
 	return producttasks.Attempt{
 		Version: producttasks.CurrentVersion, AttemptID: attemptID, TaskID: task.TaskID, RunID: runID,
 		ParentAttemptID: parentID, RetryReason: reason, Pipeline: string(pipeline), IdempotencyKey: key, RequestFingerprint: fingerprint,
-		TaskRevision: task.Revision, IntentSnapshot: producttasks.IntentSnapshot{Title: task.Title, Goal: task.Goal, Context: task.Context, Scope: task.Scope, DesiredRunner: task.DesiredRunner},
+		TaskRevision: task.Revision, IntentSnapshot: taskIntentSnapshot(task),
 		EffectiveRuntime: producttasks.EffectiveRuntime{Mode: mode, Provider: string(parsedProvider), Model: models.Effective[parsedProvider].Model, Effort: models.Effective[parsedProvider].Effort, Permissions: permissionMode, Timeouts: map[string]int{
 			"step_timeout_sec": timeouts.Effective.StepTimeoutSec, "heartbeat_sec": timeouts.Effective.HeartbeatSec, "pipeline_timeout_sec": timeouts.Effective.PipelineTimeoutSec, "pipeline_kill_grace_sec": timeouts.Effective.PipelineKillGraceSec, "api_ready_timeout_sec": timeouts.Effective.APIReadyTimeoutSec, "api_init_timeout_sec": timeouts.Effective.APIInitTimeoutSec, "ui_init_poll_timeout_sec": timeouts.Effective.UIInitPollTimeoutSec, "ui_cancel_poll_timeout_sec": timeouts.Effective.UICancelPollTimeoutSec,
-		}, Scope: task.Scope, Execution: producttasks.ExecutionSettings{Strategy: execution.Effective.Strategy, MaxParallel: execution.Effective.MaxParallel, FailurePolicy: execution.Effective.FailurePolicy, ShardMode: execution.Effective.ShardMode}, StepOverrides: stepOverrides, ResolutionSources: sources},
+		}, Scope: cloneTaskScope(task.Scope), Execution: producttasks.ExecutionSettings{Strategy: execution.Effective.Strategy, MaxParallel: execution.Effective.MaxParallel, FailurePolicy: execution.Effective.FailurePolicy, ShardMode: execution.Effective.ShardMode}, StepOverrides: stepOverrides, ResolutionSources: sources},
 		Status: producttasks.AttemptQueued, AdmittedAt: now, QueuedAt: &now, RetainedEvidence: producttasks.EvidenceUnavailable,
 		Outcome: producttasks.Outcome{State: producttasks.Unavailable, UnavailableReason: "attempt has not completed"}, Publication: producttasks.Publication{State: producttasks.PublicationUnavailable, UnavailableReason: "attempt has not been published"},
 	}, nil
+}
+
+// taskIntentSnapshot is the explicit inheritance allowlist for a future
+// Attempt. Task lifecycle, revision, timestamps, prior attempts, outcomes and
+// publication state are aggregate metadata and must never leak into a child
+// Attempt snapshot.
+func taskIntentSnapshot(task producttasks.Task) producttasks.IntentSnapshot {
+	return producttasks.IntentSnapshot{
+		Title:         task.Title,
+		Goal:          task.Goal,
+		Context:       task.Context,
+		Scope:         cloneTaskScope(task.Scope),
+		DesiredRunner: task.DesiredRunner,
+	}
+}
+
+func cloneTaskScope(scope producttasks.Scope) producttasks.Scope {
+	repositories := make([]producttasks.RepositoryScope, len(scope.Repositories))
+	for index, repository := range scope.Repositories {
+		repositories[index] = producttasks.RepositoryScope{Name: repository.Name, Paths: append([]string(nil), repository.Paths...)}
+	}
+	return producttasks.Scope{Repositories: repositories}
 }
 
 func normalizeResolutionSource(source string) string {

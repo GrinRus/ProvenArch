@@ -88,6 +88,7 @@ export type TaskAttemptListResponse = {
 
 export type CreateTaskRequest = Pick<ProductTask, "title" | "goal" | "scope" | "desired_runner"> & { context?: string };
 export type AdmitTaskAttemptRequest = { pipeline?: string; intent?: "start" | "queue" };
+export type TaskAttemptActionRequest = { pipeline?: string; intent?: "start" | "queue"; reason?: string; idempotencyKey?: string };
 
 export async function createTask(request: CreateTaskRequest): Promise<ProductTask> {
   const response = await fetchJSON<{ task: ProductTask }>("/api/tasks", {
@@ -130,6 +131,29 @@ export async function getTask(taskId: string, signal?: AbortSignal): Promise<Pro
 
 export async function listTaskAttempts(taskId: string, signal?: AbortSignal): Promise<TaskAttemptListResponse> {
   return fetchJSON<TaskAttemptListResponse>(`/api/tasks/${encodeURIComponent(taskId)}/attempts`, { signal });
+}
+
+async function admitChildAttempt(taskId: string, attemptId: string, action: "retry" | "rerun", request: TaskAttemptActionRequest = {}): Promise<TaskAttempt> {
+  const response = await fetchJSON<{ attempt: TaskAttempt }>(`/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idempotency_key: request.idempotencyKey ?? newIdempotencyKey(),
+      pipeline: request.pipeline,
+      intent: request.intent,
+      reason: request.reason,
+    }),
+  });
+  if (!response.attempt?.attempt_id) throw new Error(`${action} API returned no Attempt identity`);
+  return response.attempt;
+}
+
+export function retryTaskAttempt(taskId: string, attemptId: string, request: TaskAttemptActionRequest = {}): Promise<TaskAttempt> {
+  return admitChildAttempt(taskId, attemptId, "retry", request);
+}
+
+export function rerunTaskAttempt(taskId: string, attemptId: string, request: TaskAttemptActionRequest = {}): Promise<TaskAttempt> {
+  return admitChildAttempt(taskId, attemptId, "rerun", request);
 }
 
 export async function getTaskAttempt(taskId: string, attemptId: string, signal?: AbortSignal): Promise<TaskAttempt> {

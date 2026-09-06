@@ -100,7 +100,9 @@ payload remains self-describing.
 
 Attempt status follows the linked run lifecycle while that run is retained. Terminalization copies
 a bounded immutable summary into Task history so archive/history remains useful after detailed run
-retention. A retry/rerun always creates a new child Attempt.
+retention. A retry after `failed|canceled|timeout` and a rerun after `succeeded` always create a
+new child Attempt; the parent snapshot is never edited. A second root admission is rejected after
+the first Attempt and must use one of these explicit child actions.
 
 The effective runtime snapshot is authoritative for every step. It preserves the admitted
 per-step provider and the provider-scoped model/effort values that the selected steps will use;
@@ -138,12 +140,16 @@ The implemented 23A surface exposes versioned JSON contracts for:
 - `POST /api/tasks/<task_id>/archive` and `/unarchive`;
 - `POST /api/tasks/<task_id>/attempts` — admit/start an Attempt idempotently;
 - `GET /api/tasks/<task_id>/attempts/<attempt_id>` — exact Attempt detail;
-- `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` — create an explicit child Attempt.
+- `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` — create a child after a failed,
+  canceled or timed-out Attempt;
+- `POST /api/tasks/<task_id>/attempts/<attempt_id>/rerun` — create a child after a succeeded
+  Attempt.
 
 Attempt admission accepts `{idempotency_key, pipeline?: init|refresh, intent?: start|queue}`. Retry
-accepts the same fields plus an optional `reason`; a retry requires a terminal parent and always
-creates a new child identity. Duplicate keys with the same canonical request fingerprint return the
-existing Attempt, while a reused key for a different Task revision/options returns
+and rerun accept the same fields plus an optional `reason`; each requires the matching terminal
+parent status and always creates a new child identity. The initial admission endpoint is valid only
+for a Task without prior Attempts. Duplicate keys with the same canonical request fingerprint return
+the existing Attempt, while a reused key for a different Task revision/options returns
 `409 idempotency_conflict`. Capacity errors are typed (`run_active` or `attempt_queue_full`) and
 never supersede another Task's queued Attempt.
 
