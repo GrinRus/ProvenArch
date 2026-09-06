@@ -142,8 +142,7 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12 and REM-13 merged; REM-14 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-14's
-edit/retry/rerun boundary finding and create its isolated slice plan; keep release status explicitly
+Next action: Implement the isolated REM-14 edit/retry/rerun slice; keep release status explicitly
 blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
@@ -240,7 +239,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | merged in PR #288 |
 | 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | merged in PR #290 |
 | 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | ready; next independent slice |
-| 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | blocked-by-dependency |
+| 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | ready; current slice |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | blocked-by-dependency |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | blocked-by-dependency |
@@ -993,6 +992,72 @@ advances.
   smoke-cli, CodeQL, dependency review and Go/JS analysis; squash-merged to
   `origin/main=5cab70c0`. The local full-suite resource/flaky failures were unrelated to the
   changed paths; affected tests passed focused and race runs. REM-13 is closed and REM-14 is next.
+
+### REM-14 slice plan (current)
+
+**Goal.** Развести три действия Task-first flow: edit меняет только текущий desired Task intent,
+retry создаёт child Attempt после неуспешного terminal Attempt, rerun создаёт child Attempt после
+успешного terminal Attempt. Любой существующий Attempt остаётся immutable, а новый snapshot
+получает только явно разрешённые intent-поля Task и новый effective runtime на момент admission.
+
+**Finding / baseline.** На свежем `origin/main=32cc4a4f` PATCH уже повышает Task revision, а
+Attempt хранит snapshot, но API не различает retry и rerun: `/retry` принимает любой terminal
+status (включая `succeeded`), отдельного `/rerun` маршрута нет, и повторный `POST /attempts`
+создаёт новый root Attempt без parent lineage. Retry также не повторяет до-provider validation
+scope, поэтому изменённый Task scope может попасть в persisted child перед поздним runtime
+отказом. Existing `buildAdmittedAttempt` вручную выбирает intent-поля, поэтому сохраняем этот
+allowlist и закрепляем его тестами вместо копирования mutable Task aggregate.
+
+**Readiness / parallel stabilization.** После merge REM-13 и plan-sync `origin/main=32cc4a4f`
+подтянут. Соседний тред `Проверь UI и UX проекта` повторно проверен: status idle/completed,
+live gate externally blocked by disk/parallel tests/Claude availability; его material changes
+ограничены `docs/ARCHITECTURE.md`, `internal/artifactquality/{semantic.go,semantic_test.go}` и
+`internal/orchestrator/docflow{,_test.go}` плюс disposable live diagnostics. REM-14 меняет только
+Task API/registry semantics, API consumer/spec/tests и не трогает stabilization-owned paths или
+live harness.
+
+**Non-goals.** Не менять JSON shape существующих Task/Attempt, provider precedence, runtime
+snapshot fields, legacy `/api/pipeline/runs*` retry planner, capacity limits, publication,
+retention, live matrices или добавлять новые providers. Не добавлять silent fallback, не мутировать
+parent Attempt и не разрешать rerun активного/неуспешного parent через другой маршрут.
+
+**Implementation boundary.** Добавить typed `rerun` Task route/request, ограничить `/retry` статусами
+`failed|canceled|timeout`, ограничить `/rerun` статусом `succeeded`, и для обоих использовать
+общий child-admission helper с явным intent allowlist (`title`, `goal`, `context`, `scope`,
+`desired_runner`) и immutable current Task revision. Повторный root admission после уже созданного
+Attempt должен fail closed с typed `attempt_action_required`; первый admission остаётся прежним.
+Переиспользовать idempotency fingerprint и parent lineage, но default reason различать как
+`operator_retry`/`operator_rerun`. Retry и rerun должны валидировать repository scope до registry
+write. Добавить API/Go regression tests на edit-after-admission, retry/rerun status gates,
+parent immutability, child inheritance and idempotency; синхронизировать TASK/API specs and typed
+UI client methods without changing schema files.
+
+**Acceptance / regression.**
+
+- [ ] PATCH Task after a queued/running/terminal Attempt increments Task revision and changes only
+      desired Task fields; every existing Attempt intent/effective runtime remains byte-equivalent.
+- [ ] `/retry` rejects succeeded or non-terminal parents; `/rerun` accepts only succeeded parents;
+      both create a new child Attempt with exact parent ID, distinct run/attempt IDs and distinct
+      default lineage reason.
+- [ ] A second root `POST /attempts` is rejected with a typed action-required response; first
+      admission and idempotent replay keep current behavior.
+- [ ] Retry/rerun validates current Task repository scope before persistence, and child snapshots
+      contain only the explicit Task intent allowlist plus newly admitted runtime values.
+- [ ] Focused Go/UI type checks, race coverage where relevant, `make contracts`, `make test`,
+      `make lint` and `make build` pass; no stabilization-owned file changes.
+
+**Rollback / stop condition.** Stop before merge if an old Attempt changes after Task PATCH, a
+retry/rerun can bypass parent status or scope validation, a second root Attempt remains possible,
+or public Task/Attempt JSON, provider arguments, fake identity or legacy retry semantics change.
+Rebase from exact fresh `origin/main` and repeat focused evidence if remote main advances.
+
+- 2026-09-06: Research reproduced the status/lineage gaps above on `origin/main=32cc4a4f`.
+  Neighbor stabilization was rechecked immediately before branch creation and has no overlapping
+  files. Branch `codex/rem-14-edit-retry-rerun` is isolated for implementation.
+- 2026-09-06: Implemented the isolated API/spec/UI slice and regression coverage. Focused Go,
+  related package, UI (246 tests), typecheck, contracts, lint, build, UI-dist freshness and agent
+  guidance checks pass. Full Go/Python suites reached unrelated packages but were limited by the
+  host temp volume exhausting space; the affected providercommon package passes independently.
 
 ## EP-20260811-task-attempt-contracts
 

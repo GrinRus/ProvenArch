@@ -76,14 +76,14 @@ func (s *Server) handleTasks(writer http.ResponseWriter, request *http.Request) 
 	}
 	if len(parts) == 3 {
 		if strings.TrimSpace(parts[2]) == "retry" {
-			s.handleTaskAttemptRetry(writer, request, taskID, "")
+			s.handleTaskAttemptChild(writer, request, taskID, "", "retry")
 			return
 		}
 		s.handleTaskAttempts(writer, request, taskID, strings.TrimSpace(parts[2]))
 		return
 	}
-	if len(parts) == 4 && strings.TrimSpace(parts[3]) == "retry" {
-		s.handleTaskAttemptRetry(writer, request, taskID, strings.TrimSpace(parts[2]))
+	if len(parts) == 4 && (strings.TrimSpace(parts[3]) == "retry" || strings.TrimSpace(parts[3]) == "rerun") {
+		s.handleTaskAttemptChild(writer, request, taskID, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
 		return
 	}
 	writeError(writer, http.StatusNotFound, "task_route_not_found", "task route not found")
