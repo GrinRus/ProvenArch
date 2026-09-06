@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
+	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	producttasks "github.com/GrinRus/ProvenArch/internal/tasks"
 	"github.com/GrinRus/ProvenArch/internal/workspace"
@@ -674,9 +675,20 @@ func attemptRuntimeSnapshot(attempt producttasks.Attempt) (*acpruntime.AdmittedR
 		}
 	}
 	repositoryScopes := make([]string, 0, len(attempt.EffectiveRuntime.Scope.Repositories))
+	repositoryPathScopes := make(map[string][]string, len(attempt.EffectiveRuntime.Scope.Repositories))
 	for _, repository := range attempt.EffectiveRuntime.Scope.Repositories {
-		if strings.TrimSpace(repository.Name) != "" {
-			repositoryScopes = append(repositoryScopes, strings.TrimSpace(repository.Name))
+		name := strings.TrimSpace(repository.Name)
+		if name != "" {
+			repositoryScopes = append(repositoryScopes, name)
+			paths := append([]string(nil), repository.Paths...)
+			for index, rawPath := range paths {
+				pathValue := strings.TrimSpace(rawPath)
+				if _, compileErr := pathscope.Compile(pathValue); compileErr != nil {
+					return nil, fmt.Errorf("admitted attempt repository %q path %d is invalid: %w", name, index, compileErr)
+				}
+				paths[index] = pathValue
+			}
+			repositoryPathScopes[name] = paths
 		}
 	}
 	models := acpruntime.ProviderModelValues{provider: {Model: attempt.EffectiveRuntime.Model, Effort: attempt.EffectiveRuntime.Effort}}
@@ -707,6 +719,7 @@ func attemptRuntimeSnapshot(attempt producttasks.Attempt) (*acpruntime.AdmittedR
 		Permissions:          acpruntime.PermissionValues{Mode: attempt.EffectiveRuntime.Permissions, ApprovalChannel: acpruntime.PermissionApprovalFailFast},
 		Timeouts:             acpruntime.TimeoutValues{StepTimeoutSec: attempt.EffectiveRuntime.Timeouts["step_timeout_sec"], HeartbeatSec: attempt.EffectiveRuntime.Timeouts["heartbeat_sec"], PipelineTimeoutSec: attempt.EffectiveRuntime.Timeouts["pipeline_timeout_sec"], PipelineKillGraceSec: attempt.EffectiveRuntime.Timeouts["pipeline_kill_grace_sec"], APIReadyTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_ready_timeout_sec"], APIInitTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_init_timeout_sec"], UIInitPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_init_poll_timeout_sec"], UICancelPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_cancel_poll_timeout_sec"]},
 		RepositoryScopes:     repositoryScopes,
+		RepositoryPathScopes: repositoryPathScopes,
 	}, nil
 }
 
@@ -750,8 +763,15 @@ func validateTaskRepositoryScope(task producttasks.Task, ws workspace.Root) erro
 		known[repo.Name] = true
 	}
 	for _, repo := range task.Scope.Repositories {
-		if !known[repo.Name] {
-			return fmt.Errorf("task scope repository %q is not present in workspace manifest", repo.Name)
+		name := strings.TrimSpace(repo.Name)
+		if !known[name] {
+			return fmt.Errorf("task scope repository %q is not present in workspace manifest", name)
+		}
+		for index, rawPath := range repo.Paths {
+			pathValue := strings.TrimSpace(rawPath)
+			if _, err := pathscope.Compile(pathValue); err != nil {
+				return fmt.Errorf("task scope repository %q path %d is invalid: %w", name, index, err)
+			}
 		}
 	}
 	return nil

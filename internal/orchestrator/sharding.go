@@ -18,10 +18,11 @@ type runtimeShardPlan struct {
 }
 
 type ShardPlanInput struct {
-	Workspace         workspace.Root
-	ResolvedRepoPaths map[string]string
-	ExecutionProfile  acpruntime.ExecutionValues
-	RepoScopes        []string
+	Workspace            workspace.Root
+	ResolvedRepoPaths    map[string]string
+	ExecutionProfile     acpruntime.ExecutionValues
+	RepoScopes           []string
+	RepositoryPathScopes map[string][]string
 }
 
 type ShardPlanResult struct {

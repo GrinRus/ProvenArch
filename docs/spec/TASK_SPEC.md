@@ -110,6 +110,11 @@ without consulting current workspace settings or environment variables. A fake-m
 the configured provider as its selection surface, while the execution artifact reports the neutral
 `fake` provider as defined by the pipeline contract.
 
+Each admitted `scope.repositories[].paths` value is repository-relative and may be a normalized
+path pattern. An empty `paths` array means the repository root. These patterns are copied into the
+runtime admission snapshot and shard plan; workspace analysis include/exclude settings are only a
+legacy fallback for runs that predate the Task-authoritative path snapshot.
+
 ## 7) Admission and coordination
 
 - Runner and scope validation completes before provider execution.

@@ -13,6 +13,7 @@ type AdmittedRuntimeSnapshot struct {
 	Permissions          PermissionValues     `json:"permissions"`
 	Timeouts             TimeoutValues        `json:"timeouts"`
 	RepositoryScopes     []string             `json:"repository_scopes"`
+	RepositoryPathScopes map[string][]string  `json:"repository_path_scopes,omitempty"`
 }
 
 func CloneAdmittedRuntimeSnapshot(value *AdmittedRuntimeSnapshot) *AdmittedRuntimeSnapshot {
@@ -25,7 +26,19 @@ func CloneAdmittedRuntimeSnapshot(value *AdmittedRuntimeSnapshot) *AdmittedRunti
 	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
 	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
 	clone.RepositoryScopes = append([]string(nil), value.RepositoryScopes...)
+	clone.RepositoryPathScopes = cloneRepositoryPathScopes(value.RepositoryPathScopes)
 	return &clone
+}
+
+func cloneRepositoryPathScopes(value map[string][]string) map[string][]string {
+	if value == nil {
+		return nil
+	}
+	clone := make(map[string][]string, len(value))
+	for repository, paths := range value {
+		clone[repository] = append([]string(nil), paths...)
+	}
+	return clone
 }
 
 func cloneStepProviderValues(value StepProviderValues) StepProviderValues {

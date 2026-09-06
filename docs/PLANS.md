@@ -142,9 +142,9 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11 and REM-12 merged; REM-13 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Recheck stabilization/dependencies on fresh `origin/main`, reproduce REM-13's
-Task composer/admission contract finding and create its isolated slice plan; keep release status
-explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
+Next action: Finish REM-13 review and full deterministic DoD on the isolated branch, then open the
+required PR; keep release status explicitly blocked until REM-03B is authorized and applied with
+before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
 ### Context
@@ -923,6 +923,71 @@ paths or the exact origin base drifts without a rebase and renewed focused evide
   Go/JS analysis) and squash-merged to `origin/main=fe511986`. The neighboring stabilization lane
   remains externally blocked (disk/provider/live gate); its owned paths were rechecked and remain
   untouched. REM-13 is now the next ready independent P1 slice.
+
+### REM-13 slice plan (in progress)
+
+**Goal.** Сделать Task-first scope и runner contract единым от composer до фактического runtime:
+явно выбранные repository/path scopes и provider должны попасть в immutable Attempt snapshot,
+queued/restarted RunInfo и shard plan без возврата к mutable workspace-фильтрам; UI должен
+показывать и разрешать только тот выбор, который backend действительно принимает.
+
+**Finding / baseline.** На свежем `origin/main=dc2a66b0` Task/Attempt JSON уже сохраняют
+`scope.repositories[].paths`, а `buildAdmittedAttempt` принимает explicit provider. Однако
+`attemptRuntimeSnapshot` переносит только имена репозиториев в `AdmittedRuntimeSnapshot`; RunInfo,
+history и planner тоже теряют paths, после чего sharding снова вычисляет scope из текущего
+`workspace.yaml` analysis include/exclude. Поэтому UI/API summary может описывать `src,docs`, а
+runtime фактически выполнит workspace scope. `TaskComposer` дополнительно блокирует provider,
+отличный от provider текущей сессии, хотя admission contract позволяет явный Task provider.
+
+**Readiness / parallel stabilization.** REM-12 и plan-sync PR #291 уже merged в
+`origin/main=dc2a66b0`. Соседний тред `Проверь UI и UX проекта` перед началом slice повторно
+проверен: он completed/externally blocked (disk/provider/live gate), его owned paths остаются
+`docs/ARCHITECTURE.md`, `internal/artifactquality/{semantic.go,semantic_test.go}` и
+`internal/orchestrator/docflow{,_test.go}`. REM-13 не меняет эти файлы и не запускает live
+provider/E2E gate; при каждом rebase/merge проверять этот boundary заново.
+
+**Non-goals.** Не менять Task/Attempt repository shape, provider precedence, fake-vs-headless
+metadata, model IDs, permissions semantics, workspace analysis filtering для legacy runs,
+retry/edit/publication behavior или stabilization/live matrices. Не добавлять fallback, который
+может расширить явно принятый Task scope.
+
+**Implementation boundary.** Добавить immutable per-repository path-scope map в runtime admission
+snapshot и RunInfo history/restart conversions, глубоко клонировать его и передать в
+`ShardPlanInput`. Для admitted Task использовать его normalized path patterns как authoritative
+shard inputs; при отсутствии map сохранить legacy workspace discovery/filter behavior. Усилить
+admission validation для repository/path identity и fail closed при невалидном scope. Убрать UI
+provider-equality gate (mode mismatch и отсутствие workspace/scope остаются блокерами), сохранив
+явно выбранный provider в Task payload и readiness summary. Добавить backend/UI regression tests и
+актуализировать API/appendix/task-spec wording о Task-authoritative scope.
+
+**Acceptance / regression.**
+
+- [ ] Composer permits an explicit supported provider and submits it; only incompatible mode,
+      missing workspace or empty scope blocks admission.
+- [ ] Admitted repository names and path patterns survive Task → Attempt → runtime snapshot →
+      queued RunInfo/history → restart and are exactly the inputs visible in shard/task metadata.
+- [ ] Legacy runs without path map retain current workspace discovery behavior; invalid repo/path
+      identity fails before provider execution and never falls back to `.`.
+- [ ] Focused Go/TypeScript tests, race coverage where relevant, `make contracts`, `make test`,
+      `make lint` and `make build` pass; no stabilization-owned file changes.
+
+**Rollback / stop condition.** Stop before merge if a Task path can be broadened by mutable
+workspace settings, if a restart reconstructs a different scope/provider, if fake execution
+identity or public Task shape changes, or if neighbor stabilization starts touching this slice's
+files. Rebase from exact fresh `origin/main` and re-run focused evidence whenever remote main
+advances.
+
+- 2026-09-06: Research on fresh `origin/main=dc2a66b0` reproduced the path loss in
+  `attemptRuntimeSnapshot`/`AdmittedRuntimeSnapshot`/`ShardPlanInput` and the UI provider mismatch
+  gate. Neighbor stabilization was rechecked immediately before branch creation and remains
+  externally blocked with no overlapping edits. Branch `codex/rem-13-scope-runner-contract` is
+  isolated for implementation.
+- 2026-09-06: Implemented immutable repository path-scope propagation through admission,
+  RunInfo/history/restart and shard planning; added path-pattern validation and schema/spec notes.
+  Task composer now permits an explicit supported provider while retaining mode/workspace/scope
+  blockers. Focused Go and UI tests pass; contracts, typecheck, lint and build pass. Full package
+  tests remain environment-limited by concurrent `no space left on device` failures in unrelated
+  async/docflow tests.
 
 ## EP-20260811-task-attempt-contracts
 
