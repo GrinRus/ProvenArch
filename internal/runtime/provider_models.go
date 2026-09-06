@@ -24,6 +24,9 @@ const (
 	ProviderModelSourceDefault   ProviderModelSource = ProviderDefaultModelSource
 	ProviderModelSourceWorkspace ProviderModelSource = "workspace"
 	ProviderModelSourceEnv       ProviderModelSource = "env"
+	// ProviderModelSourceTaskPreset is used only by an immutable Task/Attempt
+	// snapshot when the Task explicitly overrides the resolved profile.
+	ProviderModelSourceTaskPreset ProviderModelSource = "task_preset"
 )
 
 type ProviderModelConfig struct {

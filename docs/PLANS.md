@@ -860,6 +860,65 @@ neighbor stabilization. Бюджет CI не должен быть flaky: determ
   stabilization remains blocked externally and no stabilization-owned paths were touched. REM-11 is
   closed; REM-12 is the next ready independent P1 slice.
 
+### REM-12 slice plan
+
+**Goal.** Сохранить в immutable Task/Attempt admission snapshot полный фактически принятый
+runner/provider/model contract: каждый pipeline step должен исполняться выбранным adapter/provider,
+а API/run review и restart path должны показывать те же значения и resolution sources без silent
+fallback или переименования native-default в `workspace`.
+
+**Finding / baseline.** На свежем `origin/main=b62d66c0` `buildAdmittedAttempt` резолвит
+`runtime.profile.steps` и `runtime.profile.providers`, но записывает в каждый `StepOverrides` один
+`task.DesiredRunner`/global provider, не сохраняя per-step effective provider. `attemptRuntimeSnapshot`
+затем маркирует все step sources как `override`, восстанавливает только одну provider model и
+жёстко маркирует её model/effort sources как `workspace`; env/provider-default sources и модели
+других фактически выбранных providers теряются. После queued/restart execution это может изменить
+adapter selection либо показать provenance, не соответствующий принятому run state. Execution
+metadata уже корректно использует neutral provider `fake` в fake mode и concrete headless adapter
+name; этот established contract не переопределяется.
+
+**Readiness / parallel stabilization.** Перед slice проверены свежие `origin/main` и соседняя
+задача `Проверь UI и UX проекта`: она completed/externally blocked (диск/provider/live gate), её
+owned paths остаются `docs/ARCHITECTURE.md`, `internal/artifactquality/{semantic.go,semantic_test.go}`
+и `internal/orchestrator/docflow{,_test.go}`. REM-12 ограничен Task admission/runtime snapshot,
+orchestrator runtime identity tests, relevant API/spec/testing docs и не пересекает эти пути.
+
+**Non-goals.** Не менять public Task/Attempt JSON shape, provider precedence, fake-vs-headless
+execution metadata, adapter command contracts, live matrices, schemas или UI composer (REM-13), не
+добавлять provider fallback и не угадывать native model IDs.
+
+**Implementation boundary.** Derive admitted step overrides from the resolved immutable step/provider
+and provider-model maps, preserving task-level explicit overrides only where they are actually the
+admission source. Encode source values through the existing `EffectiveRuntime.ResolutionSources`
+allow-list, reconstruct the same complete `AdmittedRuntimeSnapshot` for every attempt, and add
+provider-free regression tests for mixed step providers, env/workspace/provider-default model sources,
+queued/restart snapshots and no-fallback identity. Update TASK/WORKSPACE/API or testing docs only for
+the corrected observed contract.
+
+**Acceptance / regression.** A test fails on the baseline when a manifest mixes providers or model
+sources and `attemptRuntimeSnapshot` is compared with the admitted resolution. After the fix,
+effective step providers, per-provider model/effort values, source maps, permissions, execution,
+timeouts and repository scope survive the Task→Run boundary byte-for-byte; a selected unavailable
+provider fails closed and is never replaced by another provider. Focused API/orchestrator/runtime
+tests (including `-race`) and deterministic DoD pass; no stabilization-owned path is changed.
+
+**Rollback / stop condition.** Stop and revert if the patch changes the documented provider
+precedence, fake execution identity, public wire/schema shape, provider CLI args, or makes a queued
+attempt depend on mutable workspace/env state. Stop before merge if neighbor scope expands into these
+paths or the exact origin base drifts without a rebase and renewed focused evidence.
+
+- 2026-09-06: Fresh neighbor/base check passed (`origin/main=b62d66c0`); baseline audit reproduced
+  incomplete step/provider and model-source provenance in `internal/api/task_attempts.go`. Branch
+  `codex/rem-12-runner-provenance` created from that exact SHA; implementation and regression slice
+  are in progress.
+- 2026-09-06: Concurrent cleanup/docs merge advanced `origin/main` to `a097dd1e`; the slice was
+  rebased before validation. The implementation now persists resolved per-step providers and
+  provider-scoped model/effort sources, reconstructs immutable snapshots fail-closed, and covers
+  workspace/env/default/task-preset provenance plus incomplete persisted step identity. Focused API,
+  orchestrator and runtime tests, race coverage, contracts, guidance, lint and build pass; the
+  first unconstrained full Go suite was stopped after unrelated long-running test timeouts under
+  concurrent local load, while the affected tests pass individually.
+
 ## EP-20260811-task-attempt-contracts
 
 Status: blocked — recorded validation or trusted qualification remains open.

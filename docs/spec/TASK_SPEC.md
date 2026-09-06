@@ -102,6 +102,14 @@ Attempt status follows the linked run lifecycle while that run is retained. Term
 a bounded immutable summary into Task history so archive/history remains useful after detailed run
 retention. A retry/rerun always creates a new child Attempt.
 
+The effective runtime snapshot is authoritative for every step. It preserves the admitted
+per-step provider and the provider-scoped model/effort values that the selected steps will use;
+`resolution_sources` may therefore include `task_preset` alongside `env`, `workspace`,
+`provider_default` and `request`. A restart or queued-run handoff must reconstruct this snapshot
+without consulting current workspace settings or environment variables. A fake-mode Attempt keeps
+the configured provider as its selection surface, while the execution artifact reports the neutral
+`fake` provider as defined by the pipeline contract.
+
 ## 7) Admission and coordination
 
 - Runner and scope validation completes before provider execution.

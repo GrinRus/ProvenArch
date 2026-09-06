@@ -152,10 +152,18 @@ func (s *Server) handleTaskAttemptAdmission(writer http.ResponseWriter, request 
 		writeError(writer, http.StatusInternalServerError, "attempt_persist_failed", err.Error())
 		return
 	}
+	runtimeSnapshot, err := attemptRuntimeSnapshot(attempt)
+	if err != nil {
+		_ = registry.Update(func(candidate *producttasks.History) error {
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+		})
+		writeError(writer, http.StatusBadRequest, "attempt_start_failed", err.Error())
+		return
+	}
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace: snapshot.Workspace, Pipeline: pipeline, Intent: intent,
 		TaskID: task.TaskID, AttemptID: attempt.AttemptID, RequestedRunID: attempt.RunID,
-		RuntimeSnapshot: attemptRuntimeSnapshot(attempt), NonInteractive: true,
+		RuntimeSnapshot: runtimeSnapshot, NonInteractive: true,
 	})
 	if err != nil || runID != attempt.RunID {
 		cleanupErr := registry.Update(func(candidate *producttasks.History) error {
@@ -277,10 +285,18 @@ func (s *Server) handleTaskAttemptRetry(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusInternalServerError, "attempt_persist_failed", err.Error())
 		return
 	}
+	runtimeSnapshot, err := attemptRuntimeSnapshot(attempt)
+	if err != nil {
+		_ = registry.Update(func(candidate *producttasks.History) error {
+			return removeAttemptFromHistory(candidate, task.TaskID, attempt.AttemptID)
+		})
+		writeError(writer, http.StatusBadRequest, "attempt_start_failed", err.Error())
+		return
+	}
 	runID, err := snapshot.Service.StartAsyncRun(context.Background(), orchestrator.RunRequest{
 		Workspace: snapshot.Workspace, Pipeline: pipeline, Intent: intent,
 		TaskID: task.TaskID, AttemptID: attempt.AttemptID, RequestedRunID: attempt.RunID,
-		RuntimeSnapshot: attemptRuntimeSnapshot(attempt), NonInteractive: true,
+		RuntimeSnapshot: runtimeSnapshot, NonInteractive: true,
 		RetryParentRunID: parent.RunID, RetryReason: reason,
 	})
 	if err != nil || runID != attempt.RunID {
@@ -546,10 +562,6 @@ func (s *Server) buildAdmittedAttempt(snapshot serverSessionSnapshot, task produ
 		runID = newOpaqueID("run")
 	}
 	attemptID := newOpaqueID("attempt")
-	stepOverrides := map[string]producttasks.RunnerPreset{}
-	for key := range steps.Effective {
-		stepOverrides[key] = producttasks.RunnerPreset{Preset: key, Mode: mode, Provider: string(parsedProvider)}
-	}
 	sources := map[string]string{
 		"mode": "request", "provider": "request", "permissions": normalizeResolutionSource(string(permissions.Source.Mode)),
 		"execution.strategy": normalizeResolutionSource(string(execution.Source.Strategy)), "execution.max_parallel": normalizeResolutionSource(string(execution.Source.MaxParallel)),
@@ -562,6 +574,33 @@ func (s *Server) buildAdmittedAttempt(snapshot serverSessionSnapshot, task produ
 				sources[field] = "task_preset"
 			}
 		}
+	}
+	for provider, source := range models.Source {
+		modelSource := normalizeResolutionSource(string(source.Model))
+		effortSource := normalizeResolutionSource(string(source.Effort))
+		if provider == parsedProvider {
+			if task.DesiredRunner.Model != "" {
+				modelSource = "task_preset"
+			}
+			if task.DesiredRunner.Effort != "" {
+				effortSource = "task_preset"
+			}
+		}
+		sources["provider."+string(provider)+".model"] = modelSource
+		sources["provider."+string(provider)+".effort"] = effortSource
+	}
+	taskProviderOverride := strings.TrimSpace(task.DesiredRunner.Provider) != ""
+	stepOverrides := map[string]producttasks.RunnerPreset{}
+	for key, resolvedProvider := range steps.Effective {
+		providerForStep := resolvedProvider
+		providerSource := normalizeResolutionSource(string(steps.Source[key]))
+		if taskProviderOverride {
+			providerForStep = parsedProvider
+			providerSource = "task_preset"
+		}
+		config := models.Effective[providerForStep]
+		stepOverrides[key] = producttasks.RunnerPreset{Preset: key, Mode: mode, Provider: string(providerForStep), Model: config.Model, Effort: config.Effort}
+		sources["step."+key+".provider"] = providerSource
 	}
 	timeouts := acpruntime.ResolveTimeouts(snapshot.Workspace.Manifest)
 	return producttasks.Attempt{
@@ -586,20 +625,53 @@ func normalizeResolutionSource(source string) string {
 	return source
 }
 
-func attemptRuntimeSnapshot(attempt producttasks.Attempt) *acpruntime.AdmittedRuntimeSnapshot {
+func attemptRuntimeSnapshot(attempt producttasks.Attempt) (*acpruntime.AdmittedRuntimeSnapshot, error) {
+	provider, err := acpruntime.ParseProvider(attempt.EffectiveRuntime.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("admitted attempt provider is invalid: %w", err)
+	}
 	stepProviders := acpruntime.StepProviderValues{}
 	stepSources := acpruntime.StepProviderSources{}
 	for stepID, preset := range attempt.EffectiveRuntime.StepOverrides {
-		provider, err := acpruntime.ParseProvider(preset.Provider)
-		if err != nil {
-			continue
+		stepID = strings.TrimSpace(stepID)
+		if stepID == "" {
+			return nil, errors.New("admitted attempt contains an empty step provider identity")
 		}
-		stepProviders[stepID] = provider
-		stepSources[stepID] = acpruntime.ProviderSourceOverride
+		stepProvider, parseErr := acpruntime.ParseProvider(preset.Provider)
+		if parseErr != nil {
+			return nil, fmt.Errorf("admitted attempt step %q provider is invalid: %w", stepID, parseErr)
+		}
+		stepProviders[stepID] = stepProvider
+		stepSources[stepID] = admittedStepProviderSource(attempt.EffectiveRuntime.ResolutionSources["step."+stepID+".provider"], attempt.EffectiveRuntime.ResolutionSources["provider"])
 	}
-	provider, err := acpruntime.ParseProvider(attempt.EffectiveRuntime.Provider)
-	if err != nil {
-		return nil
+	if len(stepProviders) > 0 {
+		for _, stepID := range []string{
+			acpruntime.StepProviderStep0Constitution,
+			acpruntime.StepProviderStep1Collect,
+			acpruntime.StepProviderStep2AsIs,
+			acpruntime.StepProviderStep3Findings,
+			acpruntime.StepProviderStep4Proposals,
+			acpruntime.StepProviderQA,
+		} {
+			if _, exists := stepProviders[stepID]; !exists {
+				return nil, fmt.Errorf("admitted attempt is missing provider identity for step %q", stepID)
+			}
+		}
+	}
+	// Attempts written before per-step provenance was introduced still have a
+	// durable global provider. Reconstruct those steps from that immutable value
+	// rather than falling back to mutable workspace/env resolution.
+	if len(stepProviders) == 0 {
+		for _, stepID := range []string{
+			acpruntime.StepProviderStep0Constitution,
+			acpruntime.StepProviderStep1Collect,
+			acpruntime.StepProviderStep2AsIs,
+			acpruntime.StepProviderStep3Findings,
+			acpruntime.StepProviderStep4Proposals,
+		} {
+			stepProviders[stepID] = provider
+			stepSources[stepID] = admittedStepProviderSource(attempt.EffectiveRuntime.ResolutionSources["provider"], "")
+		}
 	}
 	repositoryScopes := make([]string, 0, len(attempt.EffectiveRuntime.Scope.Repositories))
 	for _, repository := range attempt.EffectiveRuntime.Scope.Repositories {
@@ -608,7 +680,23 @@ func attemptRuntimeSnapshot(attempt producttasks.Attempt) *acpruntime.AdmittedRu
 		}
 	}
 	models := acpruntime.ProviderModelValues{provider: {Model: attempt.EffectiveRuntime.Model, Effort: attempt.EffectiveRuntime.Effort}}
-	modelSources := acpruntime.ProviderModelSources{provider: {Model: acpruntime.ProviderModelSourceWorkspace, Effort: acpruntime.ProviderModelSourceWorkspace}}
+	modelSources := acpruntime.ProviderModelSources{provider: {
+		Model:  admittedProviderModelSource(attempt.EffectiveRuntime.ResolutionSources["provider."+string(provider)+".model"], attempt.EffectiveRuntime.ResolutionSources["model"]),
+		Effort: admittedProviderModelSource(attempt.EffectiveRuntime.ResolutionSources["provider."+string(provider)+".effort"], attempt.EffectiveRuntime.ResolutionSources["effort"]),
+	}}
+	for _, stepPreset := range attempt.EffectiveRuntime.StepOverrides {
+		stepProvider, parseErr := acpruntime.ParseProvider(stepPreset.Provider)
+		if parseErr != nil {
+			return nil, fmt.Errorf("admitted attempt step provider is invalid: %w", parseErr)
+		}
+		if _, exists := models[stepProvider]; !exists {
+			models[stepProvider] = acpruntime.ProviderModelConfig{Model: stepPreset.Model, Effort: stepPreset.Effort}
+			modelSources[stepProvider] = acpruntime.ProviderModelFieldSources{
+				Model:  admittedProviderModelSource(attempt.EffectiveRuntime.ResolutionSources["provider."+string(stepProvider)+".model"], ""),
+				Effort: admittedProviderModelSource(attempt.EffectiveRuntime.ResolutionSources["provider."+string(stepProvider)+".effort"], ""),
+			}
+		}
+	}
 	return &acpruntime.AdmittedRuntimeSnapshot{
 		Mode:                 attempt.EffectiveRuntime.Mode,
 		StepProviders:        stepProviders,
@@ -619,6 +707,40 @@ func attemptRuntimeSnapshot(attempt producttasks.Attempt) *acpruntime.AdmittedRu
 		Permissions:          acpruntime.PermissionValues{Mode: attempt.EffectiveRuntime.Permissions, ApprovalChannel: acpruntime.PermissionApprovalFailFast},
 		Timeouts:             acpruntime.TimeoutValues{StepTimeoutSec: attempt.EffectiveRuntime.Timeouts["step_timeout_sec"], HeartbeatSec: attempt.EffectiveRuntime.Timeouts["heartbeat_sec"], PipelineTimeoutSec: attempt.EffectiveRuntime.Timeouts["pipeline_timeout_sec"], PipelineKillGraceSec: attempt.EffectiveRuntime.Timeouts["pipeline_kill_grace_sec"], APIReadyTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_ready_timeout_sec"], APIInitTimeoutSec: attempt.EffectiveRuntime.Timeouts["api_init_timeout_sec"], UIInitPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_init_poll_timeout_sec"], UICancelPollTimeoutSec: attempt.EffectiveRuntime.Timeouts["ui_cancel_poll_timeout_sec"]},
 		RepositoryScopes:     repositoryScopes,
+	}, nil
+}
+
+func admittedStepProviderSource(source, fallback string) acpruntime.ProviderSource {
+	if source == "" {
+		source = fallback
+	}
+	switch source {
+	case "workspace":
+		return acpruntime.ProviderSourceWorkspace
+	case "env":
+		return acpruntime.ProviderSourceEnv
+	case "task_preset":
+		return acpruntime.ProviderSourceTaskPreset
+	case "request", "override":
+		return acpruntime.ProviderSourceOverride
+	default:
+		return acpruntime.ProviderSourceDefault
+	}
+}
+
+func admittedProviderModelSource(source, fallback string) acpruntime.ProviderModelSource {
+	if source == "" {
+		source = fallback
+	}
+	switch source {
+	case "env":
+		return acpruntime.ProviderModelSourceEnv
+	case "workspace":
+		return acpruntime.ProviderModelSourceWorkspace
+	case "task_preset", "request":
+		return acpruntime.ProviderModelSourceTaskPreset
+	default:
+		return acpruntime.ProviderModelSourceDefault
 	}
 }
 

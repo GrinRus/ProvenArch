@@ -587,6 +587,13 @@ Partial update persisted execution-полей в `workspace.yaml`.
 В run envelope дополнительно сохраняются resolved `provider_models` и `provider_model_sources`,
 зафиксированные при принятии запуска.
 
+Для Task/Attempt запуска `provider_models`, `provider_model_sources`, `step_providers` и
+`step_provider_sources` являются копией immutable admission snapshot. Если модель/effort были
+заданы самим Task runner preset, source равен `task_preset`; ACP не заменяет его на `workspace`.
+После queue/restart эти поля восстанавливаются из Attempt без повторного resolve по текущему
+`workspace.yaml` или environment. В fake mode execution artifact по-прежнему сообщает neutral
+provider `fake`, тогда как selection surface сохраняет выбранный configured provider.
+
 ### GET `/api/runtime/permissions`
 Возвращает permission-профиль для текущего workspace:
 - `persisted` — значения из `workspace.yaml` (`runtime.profile.permissions`);

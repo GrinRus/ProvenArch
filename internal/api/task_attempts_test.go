@@ -10,8 +10,136 @@ import (
 	"time"
 
 	"github.com/GrinRus/ProvenArch/internal/orchestrator"
+	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	producttasks "github.com/GrinRus/ProvenArch/internal/tasks"
 )
+
+func TestAdmittedAttemptPreservesResolvedProviderAndModelProvenance(t *testing.T) {
+	t.Setenv(acpruntime.ClaudeModelEnv, "")
+	t.Setenv(acpruntime.ClaudeEffortEnv, "")
+	t.Setenv(acpruntime.QwenModelEnv, "")
+	t.Setenv(acpruntime.CodexModelEnv, "")
+	t.Setenv(acpruntime.CodexReasoningEffortEnv, "")
+	server := newTestServerFromManifest(t, `version: 1
+repos:
+  - name: payments-service
+    path: /tmp
+runtime:
+  profile:
+    steps:
+      step1_collect:
+        provider: qwen-code
+      step3_findings:
+        provider: codex-code
+    providers:
+      qwen-code:
+        model: qwen-workspace
+      codex-code:
+        model: codex-workspace
+        effort: high
+`)
+	snapshot := server.sessionSnapshot()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	task := producttasks.Task{
+		Version: 1, TaskID: "task-rem12-provenance", Title: "provenance", Goal: "preserve provenance",
+		Scope:         producttasks.Scope{Repositories: []producttasks.RepositoryScope{{Name: "payments-service", Paths: []string{"."}}}},
+		DesiredRunner: producttasks.RunnerPreset{Preset: "default"}, Lifecycle: producttasks.LifecycleOpen, Revision: 1,
+		CreatedAt: now, UpdatedAt: now, LastActivityAt: now, Attempts: []producttasks.AttemptSummary{},
+		Outcome:     producttasks.Outcome{State: producttasks.Unavailable, UnavailableReason: "no attempt has completed"},
+		Publication: producttasks.Publication{State: producttasks.PublicationUnavailable, UnavailableReason: "no publication has been recorded"},
+	}
+	attempt, err := server.buildAdmittedAttempt(snapshot, task, orchestrator.PipelineInit, orchestrator.RunIntentStart, "key", "", nil, "")
+	if err != nil {
+		t.Fatalf("build admitted attempt: %v", err)
+	}
+	if got := attempt.EffectiveRuntime.StepOverrides[acpruntime.StepProviderStep1Collect].Provider; got != string(acpruntime.ProviderQwenCode) {
+		t.Fatalf("step1 provider drifted to global fallback: %q", got)
+	}
+	if got := attempt.EffectiveRuntime.StepOverrides[acpruntime.StepProviderStep3Findings].Provider; got != string(acpruntime.ProviderCodexCode) {
+		t.Fatalf("step3 provider drifted to global fallback: %q", got)
+	}
+	if got := attempt.EffectiveRuntime.ResolutionSources["step."+acpruntime.StepProviderStep1Collect+".provider"]; got != "workspace" {
+		t.Fatalf("step1 provider source was not retained: %q", got)
+	}
+	if got := attempt.EffectiveRuntime.ResolutionSources["provider.claude-code.model"]; got != "provider_default" {
+		t.Fatalf("default model source was not retained: %q", got)
+	}
+	if got := attempt.EffectiveRuntime.StepOverrides[acpruntime.StepProviderStep3Findings].Effort; got != "high" {
+		t.Fatalf("step3 effort was not retained: %q", got)
+	}
+
+	runtimeSnapshot, err := attemptRuntimeSnapshot(attempt)
+	if err != nil {
+		t.Fatalf("rebuild runtime snapshot: %v", err)
+	}
+	if got := runtimeSnapshot.StepProviders[acpruntime.StepProviderStep1Collect]; got != acpruntime.ProviderQwenCode {
+		t.Fatalf("snapshot changed step1 provider: %q", got)
+	}
+	if got := runtimeSnapshot.StepProviderSources[acpruntime.StepProviderStep1Collect]; got != acpruntime.ProviderSourceWorkspace {
+		t.Fatalf("snapshot changed step1 provider source: %q", got)
+	}
+	if got := runtimeSnapshot.ProviderModels[acpruntime.ProviderQwenCode].Model; got != "qwen-workspace" {
+		t.Fatalf("snapshot lost qwen model: %q", got)
+	}
+	if got := runtimeSnapshot.ProviderModelSources[acpruntime.ProviderCodexCode].Effort; got != acpruntime.ProviderModelSourceWorkspace {
+		t.Fatalf("snapshot changed codex effort source: %q", got)
+	}
+	if got := runtimeSnapshot.ProviderModelSources[acpruntime.ProviderClaudeCode].Model; got != acpruntime.ProviderModelSourceDefault {
+		t.Fatalf("snapshot changed default model source: %q", got)
+	}
+
+	t.Setenv(acpruntime.QwenModelEnv, "qwen-env")
+	envAttempt, err := server.buildAdmittedAttempt(snapshot, task, orchestrator.PipelineInit, orchestrator.RunIntentStart, "env-key", "", nil, "")
+	if err != nil {
+		t.Fatalf("build env-model attempt: %v", err)
+	}
+	if got := envAttempt.EffectiveRuntime.StepOverrides[acpruntime.StepProviderStep1Collect].Model; got != "qwen-env" {
+		t.Fatalf("env model was not admitted: %q", got)
+	}
+	if got := envAttempt.EffectiveRuntime.ResolutionSources["provider.qwen-code.model"]; got != "env" {
+		t.Fatalf("env model source was not retained: %q", got)
+	}
+	envSnapshot, err := attemptRuntimeSnapshot(envAttempt)
+	if err != nil {
+		t.Fatalf("rebuild env-model runtime snapshot: %v", err)
+	}
+	if got := envSnapshot.ProviderModelSources[acpruntime.ProviderQwenCode].Model; got != acpruntime.ProviderModelSourceEnv {
+		t.Fatalf("snapshot changed env model source: %q", got)
+	}
+
+	task.DesiredRunner = producttasks.RunnerPreset{Preset: "default", Provider: string(acpruntime.ProviderCodexCode), Model: "codex-task", Effort: "high"}
+	taskAttempt, err := server.buildAdmittedAttempt(snapshot, task, orchestrator.PipelineInit, orchestrator.RunIntentStart, "task-key", "", nil, "")
+	if err != nil {
+		t.Fatalf("build task-preset attempt: %v", err)
+	}
+	if got := taskAttempt.EffectiveRuntime.ResolutionSources["provider.codex-code.model"]; got != "task_preset" {
+		t.Fatalf("task model source was not retained: %q", got)
+	}
+	taskSnapshot, err := attemptRuntimeSnapshot(taskAttempt)
+	if err != nil {
+		t.Fatalf("rebuild task-preset runtime snapshot: %v", err)
+	}
+	if got := taskSnapshot.ProviderModels[acpruntime.ProviderCodexCode].Model; got != "codex-task" {
+		t.Fatalf("task model was not admitted: %q", got)
+	}
+	if got := taskSnapshot.ProviderModelSources[acpruntime.ProviderCodexCode].Model; got != acpruntime.ProviderModelSourceTaskPreset {
+		t.Fatalf("task model source was relabeled: %q", got)
+	}
+}
+
+func TestAttemptRuntimeSnapshotFailsClosedOnInvalidPersistedProvider(t *testing.T) {
+	attempt := producttasks.Attempt{EffectiveRuntime: producttasks.EffectiveRuntime{Provider: "unknown-provider"}}
+	if _, err := attemptRuntimeSnapshot(attempt); err == nil {
+		t.Fatal("expected invalid persisted provider to fail closed")
+	}
+	attempt.EffectiveRuntime.Provider = string(acpruntime.ProviderClaudeCode)
+	attempt.EffectiveRuntime.StepOverrides = map[string]producttasks.RunnerPreset{
+		acpruntime.StepProviderStep0Constitution: {Provider: string(acpruntime.ProviderClaudeCode)},
+	}
+	if _, err := attemptRuntimeSnapshot(attempt); err == nil {
+		t.Fatal("expected incomplete persisted step identity to fail closed")
+	}
+}
 
 func TestTaskAttemptAdmissionIsIdempotentAndLinksExactRun(t *testing.T) {
 	server := newTestServer(t)
