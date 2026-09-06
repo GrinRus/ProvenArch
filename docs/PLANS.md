@@ -77,7 +77,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12/REM-13 merged; REM-14 is the next independent P1 slice while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12/REM-13/REM-14/REM-15 merged; REM-16 is blocked by stabilization while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -140,10 +140,10 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13 and REM-14 merged; REM-15 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14 and REM-15 merged; REM-16 is the next P1 slice but remains blocked by stabilization while REM-03B remains authorization-gated.
 
-Next action: Recheck stabilization/dependencies on fresh `origin/main`, then implement the isolated
-REM-15 create/admit/queue slice; keep release status explicitly
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, then prepare the isolated
+REM-16 copy/route/docs slice when stabilization is merged; keep release status explicitly
 blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
@@ -241,7 +241,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | merged in PR #290 |
 | 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | merged in PR #292 |
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | merged in PR #294 |
-| 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | ready; next independent slice |
+| 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | merged in PR #296 |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | blocked-by-dependency |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
@@ -1066,7 +1066,7 @@ Rebase from exact fresh `origin/main` and repeat focused evidence if remote main
   parallel tests and Claude availability; its owned files still do not overlap REM-15.
   REM-14 is closed and REM-15 is next.
 
-### REM-15 slice plan (current)
+### REM-15 slice plan (merged)
 
 **Goal.** Сделать create/admit/queue flow атомарным на наблюдаемом уровне: если после записи
 Attempt runtime admission не состоялся, durable Task возвращается к состоянию до попытки, не
@@ -1102,13 +1102,13 @@ queued phantom. Проверить существующий UI recovery test и 
 
 **Acceptance / regression.**
 
-- [ ] Admission failure after registry append leaves zero Attempt/summary for the failed identity
+- [x] Admission failure after registry append leaves zero Attempt/summary for the failed identity
       and preserves the Task projection/order fields from before admission.
-- [ ] No active or queued service ownership remains after failed start; typed error response is
+- [x] No active or queued service ownership remains after failed start; typed error response is
       unchanged and idempotency can be retried with the same Task.
-- [ ] Successful init/start, refresh/queue and child retry/rerun paths retain current behavior;
+- [x] Successful init/start, refresh/queue and child retry/rerun paths retain current behavior;
       existing UI recovery behavior remains covered.
-- [ ] Focused Go tests (including `-race` where relevant), UI suite/typecheck and deterministic
+- [x] Focused Go tests (including `-race` where relevant), UI suite/typecheck and deterministic
       `make contracts`, `make test`, `make lint`, `make build` pass; no stabilization-owned files
       change.
 
@@ -1120,6 +1120,12 @@ slice. Rebase from exact fresh `origin/main` and repeat focused evidence if remo
 - 2026-09-06: Research identified the post-persist projection drift and selected a compensating
   rollback fix with a closed-service regression seam. Branch `codex/rem-15-atomic-admission` is
   isolated from the neighbor stabilization paths; implementation follows after this plan sync.
+- 2026-09-06: Implemented and self-reviewed the rollback fix in `internal/api/task_attempts.go`
+  with `TestTaskAttemptAdmissionRollbackPreservesTaskProjection`; focused API and race tests,
+  UI (44 files/246 tests), typecheck, contracts, lint, build, UI-dist freshness, agent guidance
+  and the full deterministic `make test` (Go, 308 Python tests, UI) passed. PR #296 passed all
+  required CI checks and squash-merged as `origin/main=8185d898`; no stabilization-owned files
+  changed. Neighbor thread remains externally blocked on disk/parallel tests/Claude availability.
 
 ## EP-20260811-task-attempt-contracts
 
