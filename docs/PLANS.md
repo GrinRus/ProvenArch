@@ -147,6 +147,10 @@ REM-16 copy/route/docs slice when stabilization is merged; keep release status e
 blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
+Current queue truth: all independent REM slices through REM-15 are merged; no unmerged P1 is
+currently ready. REM-03B remains authorization-gated, REM-04/REM-05/REM-16 are stabilization-
+dependent, and REM-17 is dependency-blocked.
+
 ### Context
 
 Follow-up аудит от 2026-09-05 оценил не только локальные дефекты, но и соответствие реализации
@@ -232,7 +236,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
 | 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
 | 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
-| 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | ready under explicit REM-03B release blocker; current slice |
+| 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #276 |
 | 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | merged in PR #279 |
 | 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | merged in PR #281 |
 | 9 | REM-09 | P1 | Remote/moving Git ref резолвится в immutable commit identity; изменение branch между validate/run обнаруживается, а evidence остаётся воспроизводимым. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #283 |
@@ -542,7 +546,7 @@ Task/Attempt linkage is absent. Do not touch stabilization-owned paths.
 - 2026-09-05: PR #276 passed all required deterministic CI contexts and was squash-merged into `main`
   as `99c019fca9535cd0906648a2f02af0d57c2b1e61`; `origin/main` was fetched and verified clean.
 
-### REM-07 slice plan (in progress)
+### REM-07 slice plan (merged)
 
 **Goal.** Привязать Attempt registry watchers к жизненному циклу API server: watcher должен
 останавливаться на server shutdown, завершаться после terminal run/cancel и не оставлять
