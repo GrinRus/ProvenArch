@@ -75,6 +75,10 @@
   spaces, rename/copy source paths, staged/unstaged modes/OIDs, binary/deleted/untracked stats and
   full-workspace fingerprint semantics; a synthetic 275-file regression asserts a fixed Git-command
   budget and the accompanying benchmark reports `git-procs` as a diagnostic metric.
+- Task/Attempt runtime snapshot tests use mixed per-step providers and independent env/workspace/
+  provider-default model sources, then compare the admitted snapshot with its queued/restart
+  reconstruction. Invalid persisted provider identity must fail closed rather than re-resolving
+  mutable workspace settings or silently selecting a fallback adapter.
 - collect contract fixtures must include at least one authored document and one repo-backed
   citation; sparse `documents: []`, `citations: []`, empty document/citation binding arrays,
   unknown citation document IDs, and one-way document/citation bindings are negative fixtures,
