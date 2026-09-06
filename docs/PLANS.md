@@ -140,9 +140,10 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12 and REM-13 merged; REM-14 is the next independent P1 slice while REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13 and REM-14 merged; REM-15 is the next independent P1 slice while REM-03B remains authorization-gated.
 
-Next action: Implement the isolated REM-14 edit/retry/rerun slice; keep release status explicitly
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, then implement the isolated
+REM-15 create/admit/queue slice; keep release status explicitly
 blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
@@ -238,9 +239,9 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 10 | REM-10 | P1 | Publication и Task/Attempt linkage имеют recoverable atomic boundary; частичный сбой не оставляет ложный `Published` или потерянный commit. | REM-09 | merged in PR #285 |
 | 11 | REM-11 | P1 | Git change inventory убирает subprocess-per-file path; benchmark на representative 275-file change set имеет заданный budget и не меняет semantics. | REM-09 | merged in PR #288 |
 | 12 | REM-12 | P1 | Runner/provider identity и provenance отражают фактически выполненный adapter/model, без fallback mislabeling. | REM-08 | merged in PR #290 |
-| 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | ready; next independent slice |
-| 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | ready; current slice |
-| 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | blocked-by-dependency |
+| 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | merged in PR #292 |
+| 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | merged in PR #294 |
+| 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | ready; next independent slice |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | blocked-by-dependency |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
@@ -991,9 +992,10 @@ advances.
   checks, including full backend, UI bundle freshness, contracts, lint, golden, smoke-api,
   smoke-cli, CodeQL, dependency review and Go/JS analysis; squash-merged to
   `origin/main=5cab70c0`. The local full-suite resource/flaky failures were unrelated to the
-  changed paths; affected tests passed focused and race runs. REM-13 is closed and REM-14 is next.
+  changed paths; affected tests passed focused and race runs. REM-13 is closed; REM-14 follows
+  in the next remediation section.
 
-### REM-14 slice plan (current)
+### REM-14 slice plan (merged)
 
 **Goal.** Развести три действия Task-first flow: edit меняет только текущий desired Task intent,
 retry создаёт child Attempt после неуспешного terminal Attempt, rerun создаёт child Attempt после
@@ -1034,16 +1036,16 @@ UI client methods without changing schema files.
 
 **Acceptance / regression.**
 
-- [ ] PATCH Task after a queued/running/terminal Attempt increments Task revision and changes only
+- [x] PATCH Task after a queued/running/terminal Attempt increments Task revision and changes only
       desired Task fields; every existing Attempt intent/effective runtime remains byte-equivalent.
-- [ ] `/retry` rejects succeeded or non-terminal parents; `/rerun` accepts only succeeded parents;
+- [x] `/retry` rejects succeeded or non-terminal parents; `/rerun` accepts only succeeded parents;
       both create a new child Attempt with exact parent ID, distinct run/attempt IDs and distinct
       default lineage reason.
-- [ ] A second root `POST /attempts` is rejected with a typed action-required response; first
+- [x] A second root `POST /attempts` is rejected with a typed action-required response; first
       admission and idempotent replay keep current behavior.
-- [ ] Retry/rerun validates current Task repository scope before persistence, and child snapshots
+- [x] Retry/rerun validates current Task repository scope before persistence, and child snapshots
       contain only the explicit Task intent allowlist plus newly admitted runtime values.
-- [ ] Focused Go/UI type checks, race coverage where relevant, `make contracts`, `make test`,
+- [x] Focused Go/UI type checks, race coverage where relevant, `make contracts`, `make test`,
       `make lint` and `make build` pass; no stabilization-owned file changes.
 
 **Rollback / stop condition.** Stop before merge if an old Attempt changes after Task PATCH, a
@@ -1058,6 +1060,11 @@ Rebase from exact fresh `origin/main` and repeat focused evidence if remote main
   related package, UI (246 tests), typecheck, contracts, lint, build, UI-dist freshness and agent
   guidance checks pass. Full Go/Python suites reached unrelated packages but were limited by the
   host temp volume exhausting space; the affected providercommon package passes independently.
+- 2026-09-06: PR #294 passed all required CI checks (backend, UI, contracts, lint, golden, smoke,
+  CodeQL, dependency review and Go/JS analysis) and squash-merged to `origin/main=e06c3733`.
+  Neighbor stabilization was rechecked after merge and remains externally blocked by disk,
+  parallel tests and Claude availability; its owned files still do not overlap REM-15.
+  REM-14 is closed and REM-15 is next.
 
 ## EP-20260811-task-attempt-contracts
 
