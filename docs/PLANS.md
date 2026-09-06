@@ -73,9 +73,10 @@ runbook или разрешение на новый запуск. Локальн
 [результаты и проверки](archive/PLANS_ARCHIVE_2026-09.md#ep-20260905-agent-development-revision).
 Remediation program и release gates остаются отдельными scope и этой ревизией не запускаются.
 
+Согласованная очистка завершена; [проходы ревизии, disposition и проверки](archive/PLANS_ARCHIVE_2026-09.md#ep-20260905-approved-trash-cleanup) сохранены в архиве.
+
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | active | approved PR merges to main, followed by final revision and closeout |
 | [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10 merged; REM-11 is the current independent P1 slice while REM-03B remains authorization-gated |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
@@ -136,53 +137,6 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## Active Plans
 
-
-## EP-20260905-approved-trash-cleanup
-
-Status: active — cleanup implemented and validated; owner authorized PR merges to main and final revision.
-
-Next action: Merge the verified stacked PRs [#270](https://github.com/GrinRus/ProvenArch/pull/270) → [#271](https://github.com/GrinRus/ProvenArch/pull/271) → [#272](https://github.com/GrinRus/ProvenArch/pull/272) → [#273](https://github.com/GrinRus/ProvenArch/pull/273). The owner explicitly authorized push and merge for every cleanup iteration; REM-02 golden-selector repair is already merged in [#274](https://github.com/GrinRus/ProvenArch/pull/274).
-
-### Context
-The owner approved removal of confirmed dead code and its isolated tests, migration of useful test-only checks, CSS cleanup, historical-document archival and broken-reference repairs. Supported compatibility is removed only when there is no remaining consumer or contract. Golden coverage must remain executable; an empty selector is not a useful gate.
-
-### Goals (must have)
-- [x] Preserve the useful golden gate from the separately merged REM-02 repair; avoid a duplicate runner.
-- [x] Remove confirmed backend and frontend dead groups; preserve useful regression coverage on live paths.
-- [x] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
-- [x] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
-- [x] Complete deterministic DoD, independent review and small PR delivery.
-- [ ] Merge each cleanup iteration through a checked PR into main.
-- [ ] Complete the final main revision and deliver the consolidated disposition report.
-
-### Non-goals
-No runtime prompt/model defaults, schemas, supported public/legacy APIs, release matrices, readable fixture deduplication, waiver deletion, accepted semantic primitive/token removal, or live provider execution. The manually usable curated Bank manifest remains until manual-use ownership is known. This task does not start or close unrelated remediation rows.
-
-### Acceptance criteria
-- Removed symbols have no live consumers, or their tests are migrated to the live surface.
-- Existing deterministic behavior and source fixture bytes are preserved.
-- `make contracts`, `make test`, `make lint`, `make build` pass; UI changes also pass mock/browser and embedded parity/determinism checks.
-- Each iteration uses a bounded PR with validation evidence and reversible commits, successful required CI and merge into main. No direct main writes or release.
-- At least three complete audit passes are recorded; a final pass after the last merge finds no new confirmed in-scope garbage. Unproven candidates remain explicitly classified.
-
-### Dependencies and ownership
-Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b45a4d41` after PRs #274–#275. The separate stabilization checkout has local changes in `docs/ARCHITECTURE.md`, semantic/docflow implementation/tests and `ui/src/App.test.tsx`; its worktree and changes are not touched. Cleanup uses isolated worktrees and avoids those runtime behavior changes. Documentation corrections affect separate stale descriptions only. The already merged guidance/archive work in PR #268 and release-verifier work in PR #269 are rechecked rather than repeated.
-
-### Progress log
-- 2026-09-05: Owner approved the audit cleanup and small PR delivery. Fresh-main comparison found several documentation/archival findings already fixed by PR #268. Created isolated cleanup branches; source audit registers retained outside the repository for revalidation.
-- 2026-09-05: Detected concurrent REM-02 implementation on `codex/rem-02-golden-selection`; excluded the overlapping golden experiment from this series. Existing readable fixture history remains unchanged. Backend removal and UI source/CSS changes passed focused tests and independent backend review.
-
-- 2026-09-05: Completed 46 Go declaration removals and one Python wrapper removal; migrated effective-verdict, Service history and incomplete-report regressions to live paths. Independent backend and UI reviews found no regression. Removed retired frontend modules/mutation branches while preserving workspace identity, Task admission and read-only diagnostics. Removed 84 CSS classes; all 1,952 retained selector branches preserve declarations/context/order. Code, styles and tests have 3,152 fewer net lines.
-- 2026-09-05: Archived 11 historical documents with provenance and repaired references. Current UI and effective-verdict prose now match implementation; stale architect-summary determinism claims were replaced with bounded existing regression evidence. Documentation checks covered 358 local links and 146 fragments; independent changed-document review found no broken moved targets. Open plans, release waivers, curated inputs, readable golden history and accepted semantic primitives/tokens remain intact.
-- 2026-09-05: Full integration check found one obsolete Go docsync assertion that read the removed BaselineEditorsPanel. Removed only that copy test in the UI PR; the actual runtime prompt-pack boundary test remains. Final deterministic DoD passed: `make contracts`, `make test` (all Go packages, 304 Python tests, 245 UI tests), `make lint`, `make build`. UI determinism and embedded freshness checks passed; the final rebuild produced no diff. No live provider run was used.
-- 2026-09-05: Browser QA passed all 10 source/CSS mock configurations across desktop/tablet/mobile after an ENOSPC retry. Fourteen of 18 screenshot pairs were exact; a button state, dynamic elapsed times and one unstable full-page capture bound the remaining comparisons. No universal pixel-parity claim is made. All 11 CI checks passed for the implementation PR heads; this final plan-only evidence update receives a fresh CI run. Temporary cleanup worktrees were removed after retaining commits, PRs and local audit evidence. Stop condition reached at PR delivery; no merge or release performed.
-
-- 2026-09-05: Completion recheck confirmed all four reviewed PR heads had passed CI, but the newer main from #274–#275 conflicted with the cleanup plan-index insertion. Integrated `b45a4d41` through the stack and retained both independent plan entries/statuses. Removed two obsolete golden export/update commands that selected a deleted test; documented the boundary between stored readable digest checks and fresh pipeline generation. Corrected the REM-02 test-set count to six without changing its acceptance/status.
-- 2026-09-05: Independent recheck of the unchanged cleanup implementation found no live callers among 102 reviewed declaration names/22 removed or moved paths; 393 local Markdown references including 148 anchors passed. Rechecked the integrated result with docsync, all four golden runner contract tests, the actual workflow command (six tests) and readable fixture verification (90 artifacts): all passed. Runtime/UI source and embedded assets are unchanged from the completed cleanup DoD; updated PR heads receive fresh CI checks.
-
-- 2026-09-05: Owner extended completion through PR merge into main for every iteration. Integrated independently merged retention fix #276, preserving both plan entries and runtime changes. The initial three audit passes remain evidenced by code/document/reference inventories, caller/contract checks, and a restarted challenge of test-only islands, historical documents and curated inputs; final post-merge revision remains pending.
-
-- 2026-09-05: Fresh integrated-tree pass after the original three audits found two additional orphans: `EditableArtifactOption` belonged to the removed baseline editor, and `contracts.DocArtifact` belonged to the removed `WriteDocArtifacts` writer. Neither has a remaining repository consumer or schema/spec declaration. Removed only these unused language types; no serialized runtime/schema contract changes. Scanned 243 Go files and 141 TypeScript files for isolated declarations and the complete tracked Python script set; the remaining single-reference `ContextBar` belongs to the intentionally retained accepted semantic library. All 423 Markdown links in 176 tracked files resolve locally where applicable. External URL probe returned 46 available destinations and one access-restricted ChatGPT settings URL; examples and loopback addresses were excluded from HTTP liveness claims. Full integrated DoD, sequential merges and post-merge verification are pending.
 
 ## EP-20260905-audit-remediation-program
 
