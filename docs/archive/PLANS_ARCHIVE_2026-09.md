@@ -18,6 +18,7 @@ The 2026-09-05 remediation program, its dependencies and REM-25 remain unchanged
 
 | Original plan or note | Reason for relocation |
 | --- | --- |
+| [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | Approved cleanup merged through five checked PRs; final main audit and deterministic DoD passed. |
 | [EP-20260905-agent-development-revision](#ep-20260905-agent-development-revision) | Completed owner-approved local revision; full DoD and eight rendered mock scenarios passed. |
 | [EP-20260804-agents-gpt-5-6](#ep-20260804-agents-gpt-5-6) | Superseded by the owner-approved agent-development revision; implementation had passed its DoD and only archive/review bookkeeping remained. |
 | [EP-20260801-api-test-server-shutdown](#ep-20260801-api-test-server-shutdown) | Explicit completed/superseded scope; only archive bookkeeping remained. |
@@ -5148,3 +5149,114 @@ it does not execute or close the independent `EP-20260905-audit-remediation-prog
 - 2026-09-05: Preserved source fixtures, production dependency declarations and embedded UI assets
   without diff. Archived this completed plan and the superseded August instruction-revision plan;
   existing remediation dependencies and trusted release/owner gates remain open in their own scopes.
+
+---
+
+## EP-20260905-approved-trash-cleanup
+
+Status: completed — approved cleanup merged into main and final code/document/reference review passed.
+
+Completion evidence: PRs #270, #271, #272, #273 and #278 are merged into main. Final reviewed implementation commit: `d58158f0124be22dab2ad2b59999d5029b638015`. This archive records completed engineering work; current unrelated work remains in the [active plan index](../PLANS.md#active-plan-index).
+
+### Context
+The owner approved removal of confirmed dead code and its isolated tests, migration of useful test-only checks, CSS cleanup, historical-document archival and broken-reference repairs. Supported compatibility is removed only when there is no remaining consumer or contract. Golden coverage must remain executable; an empty selector is not a useful gate.
+
+### Goals (must have)
+- [x] Preserve the useful golden gate from the separately merged REM-02 repair; avoid a duplicate runner.
+- [x] Remove confirmed backend and frontend dead groups; preserve useful regression coverage on live paths.
+- [x] Remove orphan CSS selectors and verify desktop, tablet and phone rendering.
+- [x] Archive remaining completed/historical documents with repaired links and explicit expired evidence; preserve open release/owner obligations.
+- [x] Complete deterministic DoD, independent review and small PR delivery.
+- [x] Merge each cleanup implementation iteration through a checked PR into main.
+- [x] Complete the final main revision and record the consolidated disposition below.
+
+### Non-goals
+No runtime prompt/model defaults, schemas, supported public/legacy APIs, release matrices, readable fixture deduplication, waiver deletion, accepted semantic primitive/token removal, or live provider execution. The manually usable curated Bank manifest remains until manual-use ownership is known. This task does not start or close unrelated remediation rows.
+
+### Acceptance criteria
+- Removed symbols have no live consumers, or their tests are migrated to the live surface.
+- Existing deterministic behavior and source fixture bytes are preserved.
+- `make contracts`, `make test`, `make lint`, `make build` pass; UI changes also pass mock/browser and embedded parity/determinism checks.
+- Each iteration uses a bounded PR with validation evidence and reversible commits, successful required CI and merge into main. No direct main writes or release.
+- At least three complete audit passes are recorded; a final pass after the last merge finds no new confirmed in-scope garbage. Unproven candidates remain explicitly classified.
+
+### Dependencies and ownership
+Initial base was `origin/main` `6dbbed79`; the completion recheck integrates `b45a4d41` after PRs #274–#275. The separate stabilization checkout has local changes in `docs/ARCHITECTURE.md`, semantic/docflow implementation/tests and `ui/src/App.test.tsx`; its worktree and changes are not touched. Cleanup uses isolated worktrees and avoids those runtime behavior changes. Documentation corrections affect separate stale descriptions only. The already merged guidance/archive work in PR #268 and release-verifier work in PR #269 are rechecked rather than repeated.
+
+### Progress log
+- 2026-09-05: Owner approved the audit cleanup and small PR delivery. Fresh-main comparison found several documentation/archival findings already fixed by PR #268. Created isolated cleanup branches; source audit registers retained outside the repository for revalidation.
+- 2026-09-05: Detected concurrent REM-02 implementation on `codex/rem-02-golden-selection`; excluded the overlapping golden experiment from this series. Existing readable fixture history remains unchanged. Backend removal and UI source/CSS changes passed focused tests and independent backend review.
+
+- 2026-09-05: Completed 46 Go declaration removals and one Python wrapper removal; migrated effective-verdict, Service history and incomplete-report regressions to live paths. Independent backend and UI reviews found no regression. Removed retired frontend modules/mutation branches while preserving workspace identity, Task admission and read-only diagnostics. Removed 84 CSS classes; all 1,952 retained selector branches preserve declarations/context/order. Code, styles and tests have 3,152 fewer net lines.
+- 2026-09-05: Archived 11 historical documents with provenance and repaired references. Current UI and effective-verdict prose now match implementation; stale architect-summary determinism claims were replaced with bounded existing regression evidence. Documentation checks covered 358 local links and 146 fragments; independent changed-document review found no broken moved targets. Open plans, release waivers, curated inputs, readable golden history and accepted semantic primitives/tokens remain intact.
+- 2026-09-05: Full integration check found one obsolete Go docsync assertion that read the removed BaselineEditorsPanel. Removed only that copy test in the UI PR; the actual runtime prompt-pack boundary test remains. Final deterministic DoD passed: `make contracts`, `make test` (all Go packages, 304 Python tests, 245 UI tests), `make lint`, `make build`. UI determinism and embedded freshness checks passed; the final rebuild produced no diff. No live provider run was used.
+- 2026-09-05: Browser QA passed all 10 source/CSS mock configurations across desktop/tablet/mobile after an ENOSPC retry. Fourteen of 18 screenshot pairs were exact; a button state, dynamic elapsed times and one unstable full-page capture bound the remaining comparisons. No universal pixel-parity claim is made. All 11 CI checks passed for the implementation PR heads; this final plan-only evidence update receives a fresh CI run. Temporary cleanup worktrees were removed after retaining commits, PRs and local audit evidence. Stop condition reached at PR delivery; no merge or release performed.
+
+- 2026-09-05: Completion recheck confirmed all four reviewed PR heads had passed CI, but the newer main from #274–#275 conflicted with the cleanup plan-index insertion. Integrated `b45a4d41` through the stack and retained both independent plan entries/statuses. Removed two obsolete golden export/update commands that selected a deleted test; documented the boundary between stored readable digest checks and fresh pipeline generation. Corrected the REM-02 test-set count to six without changing its acceptance/status.
+- 2026-09-05: Independent recheck of the unchanged cleanup implementation found no live callers among 102 reviewed declaration names/22 removed or moved paths; 393 local Markdown references including 148 anchors passed. Rechecked the integrated result with docsync, all four golden runner contract tests, the actual workflow command (six tests) and readable fixture verification (90 artifacts): all passed. Runtime/UI source and embedded assets are unchanged from the completed cleanup DoD; updated PR heads receive fresh CI checks.
+
+- 2026-09-05: Owner extended completion through PR merge into main for every iteration. Integrated independently merged retention fix #276, preserving both plan entries and runtime changes. The initial three audit passes remain evidenced by code/document/reference inventories, caller/contract checks, and a restarted challenge of test-only islands, historical documents and curated inputs; final post-merge revision remains pending.
+
+- 2026-09-05: Fresh integrated-tree pass after the original three audits found two additional orphans: `EditableArtifactOption` belonged to the removed baseline editor, and `contracts.DocArtifact` belonged to the removed `WriteDocArtifacts` writer. Neither has a remaining repository consumer or schema/spec declaration. Removed only these unused language types; no serialized runtime/schema contract changes. Scanned 243 Go files and 141 TypeScript files for isolated declarations and the complete tracked Python script set; the remaining single-reference `ContextBar` belongs to the intentionally retained accepted semantic library. All 423 Markdown links in 176 tracked files resolve locally where applicable. External URL probe returned 46 available destinations and one access-restricted ChatGPT settings URL; examples and loopback addresses were excluded from HTTP liveness claims. Full integrated DoD, sequential merges and post-merge verification are pending.
+
+### Closure evidence — 2026-09-06
+
+The original three audit passes were followed by implementation rechecks and a final review of main.
+An absent textual reference alone was never sufficient to remove a contract, manual input, historical
+record or accepted future UI primitive.
+
+| Pass | Scope and method | Result |
+| --- | --- | --- |
+| 1 | Repository inventory, README/spec routing, Go declarations, UI ownership and documentation status. | Separated unreachable helpers/retired editors from live contracts, generated baselines and unique history. |
+| 2 | Restarted with transitive references, test-only islands, concrete UI render paths, CSS construction and canonical document claims. | Identified coordinated removals requiring test migration, stale UI/evidence descriptions and archive candidates. |
+| 3 | Restarted against complete code/test compilation, document consumers, historical evidence and curated inputs; challenged earlier candidates. | Confirmed the safe/caution register and retained contract enums, accepted semantic primitives, readable fixtures, waivers and manually usable inputs. |
+| Integration rechecks | Removed approved groups, exercised live regression entrypoints, checked all retained CSS branches and rendered mock views; rechecked after concurrent main updates. | Removed two additional orphan language types in #278 and repaired retry-test teardown in #271; preserved independent REM changes. |
+| Final main review | Reviewed `d58158f0`: 244 Go files, 141 TypeScript files, 42 Python scripts, 176 Markdown files, local links/anchors and all archive moves. | No further confirmed in-scope garbage. Go transitive pruning returned no candidates; the remaining isolated declarations have explicit contract/library or test roles. |
+
+Delivery used protected PRs and squash merges, with all 11 CI checks successful on each merged head:
+[#270](https://github.com/GrinRus/ProvenArch/pull/270) (`dd686fd4`),
+[#271](https://github.com/GrinRus/ProvenArch/pull/271) (`08babcd8`),
+[#272](https://github.com/GrinRus/ProvenArch/pull/272) (`b4a1db29`),
+[#273](https://github.com/GrinRus/ProvenArch/pull/273) (`f87a85ea`),
+[#278](https://github.com/GrinRus/ProvenArch/pull/278) (`d58158f0`).
+No direct main writes, protection overrides or release acceptance were involved.
+
+The integrated `make contracts test lint build` passed: all Go packages, 308 Python tests,
+245 UI tests in 44 files, lint and build. The successful local run bounded contention with
+`GOMAXPROCS=2` and `GOFLAGS=-p=1`; no tests or assertions were disabled. Earlier resource/timing
+failures were investigated: the retry test now awaits terminal Attempt persistence (ten repeats
+passed), and an isolated CI `text file busy` stub launch passed five local repeats and a full CI
+rerun. The fully validated Git tree `f98bcf2d3723715e9aa3095a942bbe2128a6902a` exactly matches
+final implementation main `d58158f0` despite the delivery merges.
+
+The final link scan checked 423 Markdown links, including 393 local references, with no broken
+local targets/anchors. The earlier external probe found 46 available destinations and one
+access-restricted ChatGPT settings URL; loopback addresses and illustrative repository URLs were
+excluded from liveness claims. All 11 historical document moves resolve, and the 90 readable
+fixture artifacts pass drift verification. The retained 1,952 CSS selector branches preserve
+order, declarations and at-rule context; earlier browser QA covered ten viewport/source/CSS
+configurations, with its dynamic screenshot limitations retained in the progress log.
+
+### Consolidated disposition
+
+- Removed: 47 Go declarations, one unused Python forwarding wrapper, retired frontend editors,
+  unreachable legacy frontend mutation paths and orphan exports/types, plus 84 CSS classes.
+  Useful regression cases were migrated to live effective-verdict, history-recovery and report
+  paths. The cleanup removes a net 3,165 code/style/test lines, excluding docs and generated UI.
+- Archived: 11 historical design/research/audit documents with provenance, repaired links and
+  expired/nonportable evidence labels. Unique historical content remains available.
+- Repaired: broken current document links, stale current UI and implementation references, and
+  two no-op golden export/update commands selecting a removed test. Static readable-digest
+  verification is explicitly distinguished from fresh pipeline output generation.
+- Retained with caution: accepted semantic UI primitives/tokens, contract enums, test helpers,
+  full per-scenario readable golden snapshots and intentional example/fixture duplicates.
+  Their consumers or review/contract roles prevent treating them as automatic garbage.
+- Separate owner decision before further deletion/reorganization: unique archives/snapshots,
+  release waivers, readable golden deduplication/review workflow, the manually usable curated
+  `examples/repos/curated/single-path.bank-of-anthos.repos.yaml`, and existing test-package/backlog
+  ownership decisions. No new confirmed removal is waiting on these decisions in this cleanup.
+
+This is a bounded repository audit, not a mathematical proof that every possible unused path or
+external/manual consumer has been discovered. Unrelated remediation plans and open live/release
+gates remain separate. The closeout only archives this completed cleanup record and repairs its
+active-index route; post-closeout main verification and the consolidated chat report complete delivery.
