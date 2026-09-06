@@ -133,6 +133,7 @@ type RunInfo struct {
 	PermissionProfile    acpruntime.PermissionValues     `json:"permission_profile,omitempty"`
 	Timeouts             acpruntime.TimeoutValues        `json:"timeouts,omitempty"`
 	RepositoryScopes     []string                        `json:"repository_scopes,omitempty"`
+	RepositoryPathScopes map[string][]string             `json:"repository_path_scopes,omitempty"`
 	Warnings             []string                        `json:"warnings,omitempty"`
 	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
 	ErrorCode            string                          `json:"error_code,omitempty"`
@@ -247,6 +248,7 @@ type runHistoryItem struct {
 	PermissionProfile    acpruntime.PermissionValues     `json:"permission_profile,omitempty"`
 	Timeouts             acpruntime.TimeoutValues        `json:"timeouts,omitempty"`
 	RepositoryScopes     []string                        `json:"repository_scopes,omitempty"`
+	RepositoryPathScopes map[string][]string             `json:"repository_path_scopes,omitempty"`
 	Warnings             []string                        `json:"warnings,omitempty"`
 	PendingPermissions   []acpruntime.PermissionRequest  `json:"pending_permissions,omitempty"`
 	ErrorCode            string                          `json:"error_code,omitempty"`
@@ -482,6 +484,7 @@ func runtimeSnapshotFromRunInfo(info RunInfo) *acpruntime.AdmittedRuntimeSnapsho
 		Permissions:          info.PermissionProfile,
 		Timeouts:             info.Timeouts,
 		RepositoryScopes:     append([]string(nil), info.RepositoryScopes...),
+		RepositoryPathScopes: cloneRepositoryPathScopes(info.RepositoryPathScopes),
 	}
 }
 
@@ -490,6 +493,24 @@ func runtimeSnapshotRepositoryScopes(snapshot *acpruntime.AdmittedRuntimeSnapsho
 		return nil
 	}
 	return normalizeOrderedUniqueStrings(snapshot.RepositoryScopes)
+}
+
+func cloneRepositoryPathScopes(values map[string][]string) map[string][]string {
+	if values == nil {
+		return nil
+	}
+	clone := make(map[string][]string, len(values))
+	for repository, paths := range values {
+		clone[repository] = append([]string(nil), paths...)
+	}
+	return clone
+}
+
+func runtimeSnapshotRepositoryPathScopes(snapshot *acpruntime.AdmittedRuntimeSnapshot) map[string][]string {
+	if snapshot == nil {
+		return nil
+	}
+	return cloneRepositoryPathScopes(snapshot.RepositoryPathScopes)
 }
 
 func (s *Service) Run(ctx context.Context, request RunRequest) (RunInfo, []Artifact, error) {
@@ -581,6 +602,7 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 	initialInfo.PermissionProfile = resolvedPermissions.Effective
 	initialInfo.Timeouts = resolvedTimeouts.Effective
 	initialInfo.RepositoryScopes = runtimeSnapshotRepositoryScopes(runtimeSnapshot)
+	initialInfo.RepositoryPathScopes = runtimeSnapshotRepositoryPathScopes(runtimeSnapshot)
 	if err := s.storeRun(runRecord{
 		info:      initialInfo,
 		artifacts: append([]Artifact(nil), initialArtifacts...),
@@ -793,14 +815,15 @@ func (s *Service) runWithID(ctx context.Context, request RunRequest, runID strin
 			artifactIndex: artifactIndexFor(initialArtifacts),
 		},
 		pipelineRuntimeState: pipelineRuntimeState{
-			runnerResolver:    stepRunnerResolver,
-			runtimeVersions:   map[string]struct{}{},
-			resolvedRepoPaths: map[string]string{},
-			stepProviders:     resolvedStepProviders.Effective,
-			providerModels:    resolvedProviderModels.Effective,
-			permissionProfile: resolvedPermissions.Effective,
-			repositoryScopes:  runtimeSnapshotRepositoryScopes(runtimeSnapshot),
-			retryScopes:       append([]string(nil), request.RetryScopes...),
+			runnerResolver:       stepRunnerResolver,
+			runtimeVersions:      map[string]struct{}{},
+			resolvedRepoPaths:    map[string]string{},
+			stepProviders:        resolvedStepProviders.Effective,
+			providerModels:       resolvedProviderModels.Effective,
+			permissionProfile:    resolvedPermissions.Effective,
+			repositoryScopes:     runtimeSnapshotRepositoryScopes(runtimeSnapshot),
+			repositoryPathScopes: runtimeSnapshotRepositoryPathScopes(runtimeSnapshot),
+			retryScopes:          append([]string(nil), request.RetryScopes...),
 		},
 		pipelineQualityState: pipelineQualityState{
 			runtimeStepMetrics:      []runtimeStepQuality{},
@@ -1070,6 +1093,7 @@ type pipelineRuntimeState struct {
 	executionProfile         acpruntime.ExecutionValues
 	permissionProfile        acpruntime.PermissionValues
 	repositoryScopes         []string
+	repositoryPathScopes     map[string][]string
 	refreshIntentContext     string
 	partialFailures          []runtimeShardFailure
 	resolvedRepoPaths        map[string]string

@@ -87,6 +87,9 @@ runtime:
 	if got := runtimeSnapshot.ProviderModelSources[acpruntime.ProviderClaudeCode].Model; got != acpruntime.ProviderModelSourceDefault {
 		t.Fatalf("snapshot changed default model source: %q", got)
 	}
+	if got := runtimeSnapshot.RepositoryPathScopes["payments-service"]; !reflect.DeepEqual(got, []string{"."}) {
+		t.Fatalf("snapshot changed admitted repository path scope: %v", got)
+	}
 
 	t.Setenv(acpruntime.QwenModelEnv, "qwen-env")
 	envAttempt, err := server.buildAdmittedAttempt(snapshot, task, orchestrator.PipelineInit, orchestrator.RunIntentStart, "env-key", "", nil, "")
@@ -124,6 +127,16 @@ runtime:
 	}
 	if got := taskSnapshot.ProviderModelSources[acpruntime.ProviderCodexCode].Model; got != acpruntime.ProviderModelSourceTaskPreset {
 		t.Fatalf("task model source was relabeled: %q", got)
+	}
+}
+
+func TestAttemptRuntimeSnapshotRejectsInvalidRepositoryPathScope(t *testing.T) {
+	attempt := producttasks.Attempt{EffectiveRuntime: producttasks.EffectiveRuntime{
+		Provider: string(acpruntime.ProviderClaudeCode),
+		Scope:    producttasks.Scope{Repositories: []producttasks.RepositoryScope{{Name: "repo", Paths: []string{"../escape"}}}},
+	}}
+	if _, err := attemptRuntimeSnapshot(attempt); err == nil {
+		t.Fatal("expected invalid repository path scope to fail closed")
 	}
 }
 

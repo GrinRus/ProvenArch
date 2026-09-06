@@ -840,6 +840,7 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		PermissionProfile:    record.info.PermissionProfile,
 		Timeouts:             record.info.Timeouts,
 		RepositoryScopes:     append([]string(nil), record.info.RepositoryScopes...),
+		RepositoryPathScopes: cloneRepositoryPathScopes(record.info.RepositoryPathScopes),
 		Warnings:             append([]string(nil), record.info.Warnings...),
 		PendingPermissions:   clonePermissionRequests(record.info.PendingPermissions),
 		ErrorCode:            record.info.ErrorCode,
@@ -890,6 +891,7 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			PermissionProfile:    item.PermissionProfile,
 			Timeouts:             item.Timeouts,
 			RepositoryScopes:     append([]string(nil), item.RepositoryScopes...),
+			RepositoryPathScopes: cloneRepositoryPathScopes(item.RepositoryPathScopes),
 			Warnings:             append([]string(nil), item.Warnings...),
 			PendingPermissions:   clonePermissionRequests(item.PendingPermissions),
 			ErrorCode:            item.ErrorCode,
@@ -940,6 +942,7 @@ func cloneRunInfo(value RunInfo) RunInfo {
 	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
 	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
 	clone.RepositoryScopes = append([]string(nil), value.RepositoryScopes...)
+	clone.RepositoryPathScopes = cloneRepositoryPathScopes(value.RepositoryPathScopes)
 	clone.Warnings = append([]string(nil), value.Warnings...)
 	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
 	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)

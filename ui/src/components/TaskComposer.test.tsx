@@ -36,13 +36,32 @@ describe("TaskComposer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("blocks create when the selected runner differs from the admitted session", () => {
+  it("blocks create when the selected mode differs from the admitted session", () => {
     render(<TaskComposer workspaceReady repos={repos} runtimeMode="fake" runtimeProvider="claude-code" onCreated={vi.fn()} />);
     fireEvent.change(screen.getByTestId("task-title"), { target: { value: "Task" } });
     fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
     fireEvent.change(screen.getByLabelText("Runtime mode"), { target: { value: "headless" } });
     expect(screen.getByTestId("task-runner-readiness")).toHaveTextContent("Current session is fake");
     expect(screen.getByTestId("task-create-submit")).toBeDisabled();
+  });
+
+  it("allows an explicit provider different from the current session", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/tasks") {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ desired_runner: { provider: "qwen-code", mode: "fake" } });
+        return new Response(JSON.stringify({ task: { task_id: "task-qwen" } }), { status: 201, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ attempt: { attempt_id: "attempt-qwen" } }), { status: 202, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onCreated = vi.fn();
+    render(<TaskComposer workspaceReady repos={repos} runtimeMode="fake" runtimeProvider="claude-code" onCreated={onCreated} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Use Qwen" } });
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "qwen-code" } });
+    expect(screen.getByTestId("task-runner-readiness")).toHaveTextContent("will snapshot fake / qwen-code");
+    expect(screen.getByTestId("task-create-submit")).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId("task-create-submit"));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith("task-qwen"));
   });
 
   it("keeps a created Task recoverable when Attempt admission fails", async () => {

@@ -19,10 +19,11 @@ import (
 
 func (e *pipelineExecution) planRuntimeShards(repoScopes []string) ([]runtimeShardPlan, []string, []runtimeShardPlanGraphEdge) {
 	result := (defaultShardPlanner{}).PlanRuntimeShards(ShardPlanInput{
-		Workspace:         e.workspace,
-		ResolvedRepoPaths: cloneStringMap(e.resolvedRepoPaths),
-		ExecutionProfile:  e.executionProfile,
-		RepoScopes:        append([]string(nil), repoScopes...),
+		Workspace:            e.workspace,
+		ResolvedRepoPaths:    cloneStringMap(e.resolvedRepoPaths),
+		ExecutionProfile:     e.executionProfile,
+		RepoScopes:           append([]string(nil), repoScopes...),
+		RepositoryPathScopes: cloneRepositoryPathScopes(e.repositoryPathScopes),
 	})
 	return result.Plans, result.Warnings, result.SemanticGraph
 }
@@ -48,6 +49,11 @@ func (defaultShardPlanner) PlanRuntimeShards(input ShardPlanInput) ShardPlanResu
 		paths, pathWarnings := planScopePathsForInput(input, scope)
 		warnings = append(warnings, pathWarnings...)
 		if len(paths) == 0 {
+			if _, explicit := input.RepositoryPathScopes[scope]; explicit {
+				// An admitted scope is authoritative. Do not silently broaden an
+				// invalid/empty explicit value to the workspace root.
+				continue
+			}
 			paths = []string{"."}
 		}
 
@@ -195,6 +201,21 @@ func planScopePathsForInput(input ShardPlanInput, scope string) ([]string, []str
 	repo, ok := lookupManifestRepo(input.Workspace.Manifest.Repos, scope)
 	if !ok {
 		return []string{"."}, []string{fmt.Sprintf("repo scope %q is not present in workspace manifest; fallback shard='.'", scope)}
+	}
+	if explicit, exists := input.RepositoryPathScopes[scope]; exists {
+		if len(explicit) == 0 {
+			return []string{"."}, nil
+		}
+		for index, rawPath := range explicit {
+			if _, err := pathscope.Compile(strings.TrimSpace(rawPath)); err != nil {
+				return nil, []string{fmt.Sprintf("repo scope %q has invalid admitted path scope %d: %v", scope, index, err)}
+			}
+		}
+		paths := normalizeAndSortShardPaths(explicit)
+		if len(paths) == 0 {
+			return nil, []string{fmt.Sprintf("repo scope %q has an invalid admitted path scope", scope)}
+		}
+		return paths, nil
 	}
 
 	repoPath := resolveRepoPathForInput(input, scope)

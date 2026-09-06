@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -614,6 +615,41 @@ func TestShardPlanItemsInvariantAcrossBaselineAndParallelDefault(t *testing.T) {
 
 	if !reflect.DeepEqual(baseline, parallelDefault) {
 		t.Fatalf("baseline and parallel-default shard plans differ:\nbaseline=%#v\nparallel=%#v", baseline, parallelDefault)
+	}
+}
+
+func TestShardPlannerUsesAdmittedRepositoryPathScopes(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	repoPath := filepath.Join(workspaceRoot, "repo")
+	for _, rel := range []string{"go.mod", "src/main.go", "docs/README.md", "ignored/other.go"} {
+		writeShardFixturePath(t, repoPath, rel)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "workspace.yaml"), []byte("version: 1\nrepos:\n  - name: repo\n    path: "+repoPath+"\n"), 0o644); err != nil {
+		t.Fatalf("write workspace manifest: %v", err)
+	}
+	ws, err := workspace.Open(workspaceRoot)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	result := (defaultShardPlanner{}).PlanRuntimeShards(ShardPlanInput{
+		Workspace:            ws,
+		ResolvedRepoPaths:    map[string]string{"repo": repoPath},
+		RepoScopes:           []string{"repo"},
+		RepositoryPathScopes: map[string][]string{"repo": {"src", "docs/**/*.md"}},
+		ExecutionProfile:     acpruntime.ExecutionValues{ShardMode: "heuristics"},
+	})
+	if len(result.Plans) != 2 {
+		t.Fatalf("expected one plan per admitted path pattern, got plans=%#v warnings=%#v", result.Plans, result.Warnings)
+	}
+	paths := make([]string, 0, len(result.Plans))
+	for _, plan := range result.Plans {
+		paths = append(paths, plan.PathScopes...)
+	}
+	sort.Strings(paths)
+	if !reflect.DeepEqual(paths, []string{"docs/**/*.md", "src"}) {
+		t.Fatalf("planner broadened admitted path scopes: %v", paths)
 	}
 }
 

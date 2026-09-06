@@ -1729,6 +1729,11 @@ lease, and returns `run_active`/`attempt_queue_full` instead of replacing anothe
 Attempt. The Attempt registry watcher mirrors queued/running/terminal run state and retains the
 exact Task/Attempt/run join.
 
+The admitted repository path patterns are authoritative for Task-first execution. They are copied
+into the immutable runtime snapshot and persisted RunInfo/history so shard planning after queue or
+restart cannot broaden a Task by re-reading mutable workspace analysis filters. Legacy runs without
+this path snapshot retain the workspace discovery/filter behavior.
+
 Current `/api/pipeline/runs*` remains authoritative for implemented execution lifecycle and legacy
 run history during migration. Pre-contract runs remain readable but are not synthesized into Tasks.
 The Task/Attempt JSON schemas, typed errors, pagination cursors, fixtures and API tests are now
