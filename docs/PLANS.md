@@ -140,18 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14 and REM-15 merged; REM-17 is the next independent P1 slice while REM-16 remains blocked by stabilization and REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15 and REM-17 merged; REM-16 remains blocked by stabilization and REM-03B remains authorization-gated.
 
-Next action: Implement the isolated REM-17 publication-context/review-evidence gate from fresh
-`origin/main`, keeping stabilization-owned paths untouched; prepare REM-16 only after the neighbor
-stabilization merge. Keep release status explicitly blocked until REM-03B is authorized and applied
-with before/after/rollback evidence.
+Next action: Recheck stabilization/dependencies on fresh `origin/main`, then prepare the isolated
+REM-16 copy/route/docs slice only after the neighbor stabilization merge. Keep release status
+explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: all independent REM slices through REM-15 are merged; REM-17 is now the first
-ready unmerged P1 after its exact-context/review baseline was reproduced on current `origin/main`.
-REM-03B remains authorization-gated, REM-04/REM-05/REM-16 are stabilization-dependent, and later
-REM-18+ remain dependency-blocked.
+Current queue truth: all independent REM slices through REM-15 and REM-17 are merged; REM-16 is the
+next P1 but remains stabilization-dependent. REM-03B remains authorization-gated, REM-04/REM-05
+remain stabilization-dependent, and later REM-18+ remain dependency-blocked.
 
 ### Context
 
@@ -249,7 +247,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | merged in PR #294 |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | merged in PR #296 |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization merge, REM-12..15 | blocked-by-stabilization-and-dependency |
-| 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | ready on current `origin/main` |
+| 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | merged in PR #300 |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
 | 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | blocked-by-dependency |
 | 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
