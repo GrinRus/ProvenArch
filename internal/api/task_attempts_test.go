@@ -203,6 +203,48 @@ func TestTaskAttemptAdmissionIsIdempotentAndLinksExactRun(t *testing.T) {
 	}
 }
 
+func TestTaskAttemptAdmissionRollbackPreservesTaskProjection(t *testing.T) {
+	server := newTestServer(t)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	created := createTaskForAttemptTest(t, httpServer.URL, "admission-rollback")
+	beforeHistory := server.taskRegistry.Snapshot()
+	beforeTask, ok := findTask(beforeHistory, created.TaskID)
+	if !ok {
+		t.Fatalf("created Task %q is missing before admission", created.TaskID)
+	}
+
+	if err := server.getService().Shutdown(context.Background()); err != nil {
+		t.Fatalf("close service for admission failure: %v", err)
+	}
+	response := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"rollback-key"}`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected typed admission failure after service close, got %d", response.StatusCode)
+	}
+	if code := decodeErrorCode(t, response); code != "attempt_start_failed" {
+		t.Fatalf("expected attempt_start_failed, got %q", code)
+	}
+
+	afterHistory := server.taskRegistry.Snapshot()
+	afterTask, ok := findTask(afterHistory, created.TaskID)
+	if !ok {
+		t.Fatalf("Task %q disappeared after admission rollback", created.TaskID)
+	}
+	if !reflect.DeepEqual(afterTask, beforeTask) {
+		t.Fatalf("admission rollback changed Task projection: before=%+v after=%+v", beforeTask, afterTask)
+	}
+	for _, attempt := range afterHistory.Attempts {
+		if attempt.TaskID == created.TaskID {
+			t.Fatalf("failed admission left phantom Attempt: %+v", attempt)
+		}
+	}
+	coordination := server.getService().Coordination()
+	if coordination.ActiveRunID != "" || coordination.Pending != nil {
+		t.Fatalf("failed admission left service ownership: %+v", coordination)
+	}
+}
+
 func TestTaskAttemptRerunCreatesChildAttempt(t *testing.T) {
 	server := newTestServer(t)
 	httpServer := httptest.NewServer(server.Handler())
