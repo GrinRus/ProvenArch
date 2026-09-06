@@ -652,13 +652,6 @@ export type RuntimeProfileResponse = {
 
 export const runtimeModelProviderOrder = ["claude-code", "qwen-code", "codex-code"] as const;
 
-export type EditableArtifactOption = {
-  path: string;
-  label: string;
-  category?: string;
-  prompt_usage?: string;
-};
-
 export const runtimeTimeoutKeys: RuntimeTimeoutKey[] = [
   "step_timeout_sec",
   "heartbeat_sec",
