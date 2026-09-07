@@ -140,16 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, REM-19 and REM-20 merged; REM-21 is in progress; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, REM-19, REM-20 and REM-21 merged in PR #308; REM-03B remains authorization-gated.
 
-Next action: Implement and verify the isolated REM-21 accessibility slice
-from fresh `origin/main=3c782f7d`, then review/push/merge it. Keep release status
+Next action: Refresh from the merged PR #308 and re-evaluate the ordered queue for REM-22.
+REM-22 remains blocked by stabilization and earlier dependency completion. Keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: independent REM slices through REM-20 are merged; REM-21 is the first ready
-task after REM-20 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05 remain
-stabilization-dependent, and REM-22+ remain dependency-blocked until this slice is merged.
+Current queue truth: independent REM slices through REM-21 are merged; REM-03B remains
+authorization-gated, REM-04/REM-05 and REM-22 remain stabilization/dependency-blocked, and REM-23+
+remain dependency-blocked until the next ready slice is reproduced on fresh `origin/main`.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -256,15 +256,15 @@ expected.
 
 **Acceptance.**
 
-- [ ] All eight deterministic UI mock journeys pass axe with both `critical` and `serious` impact;
+- [x] All eight deterministic UI mock journeys pass axe with both `critical` and `serious` impact;
       contrast, landmark and label regressions are no longer silently ignored.
-- [ ] The warning palette passes AA contrast on paper and warning surfaces without changing the
+- [x] The warning palette passes AA contrast on paper and warning surfaces without changing the
       meaning of warning states.
-- [ ] The Task-first journey exercises keyboard activation, dialog initial focus, and reduced-motion
+- [x] The Task-first journey exercises keyboard activation, dialog initial focus, and reduced-motion
       preferences; reduced motion leaves no active transition/animation duration above 0.01 ms.
-- [ ] Persistent desktop Details moves focus to Close and returns focus to the opener; the existing
+- [x] Persistent desktop Details moves focus to Close and returns focus to the opener; the existing
       modal drawer retains Escape/trap/return-focus behavior.
-- [ ] Focused/full UI tests, mock E2E, `make contracts`, `make test`, `make lint`, `make build` and
+- [x] Focused/full UI tests, mock E2E, `make contracts`, `make test`, `make lint`, `make build` and
       `make verify-agent-guidance` pass without stabilization-path edits.
 
 **Regression / rollback.** Keep the shared axe assertion descriptive so a failed rule and help text
@@ -277,6 +277,19 @@ token or ContextDrawer paths.
 clean but active at `codex/stabilization-live-e2e-20260907` revision `68c41e99`, ahead of its remote
 and with owned changes in `docs/ARCHITECTURE.md`, semantic/docflow runtime, live diagnostics and
 `ui/src/App.test.tsx`. REM-21 avoids those paths and does not start a live matrix.
+
+**Progress.**
+
+- 2026-09-07: Fresh base `origin/main=3c782f7d` and neighbor revision `68c41e99` were rechecked;
+  the serious contrast baseline was reproduced before implementation and the candidate scope stayed
+  outside stabilization-owned paths.
+- 2026-09-07: Implementation commit `7ea4b4fc` added the fail-closed axe gate, AA warning palette,
+  reduced-motion/keyboard smoke, and persistent drawer focus continuity. Clean-toolchain bundle
+  freshness required review fix `d0018a29` after the first CI attempt used a locally different
+  dependency tree; exact `ui/package-lock.json` install now makes `make verify-ui-dist` pass.
+- 2026-09-07: PR #308 passed required CI on `d0018a29` (backend, UI, contracts, golden, lint,
+  smoke-api, smoke-cli, CodeQL, dependency review and Go/JS analysis); squash merge is the delivery
+  action for this slice. No stabilization-owned path was changed.
 
 ### Context
 
