@@ -1321,9 +1321,13 @@ func normalizeSemanticEntityType(id, value string) string {
 	}
 	id = strings.ToLower(strings.TrimSpace(id))
 	switch {
+	case strings.HasPrefix(id, "runtime.") && containsSemanticType([]string{"runtime", "deployment-topology"}, typeName):
+		return "runtime"
+	case strings.HasPrefix(id, "component.") && containsSemanticType([]string{"component", "service"}, typeName):
+		return "component"
 	case strings.HasPrefix(id, "tech.") && containsSemanticType([]string{"technology", "framework"}, typeName):
 		return "technology"
-	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service", "platform", "service-platform", "application-service", "application-surface", "domain", "component", "application-component", "service-group", "repository", "api-gateway", "service-suite", "service-landscape", "service-system", "service-domain", "data-service"}, typeName):
+	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service", "platform", "service-platform", "application-service", "application-surface", "domain", "component", "application-component", "service-group", "repository", "api-gateway", "service-suite", "service-landscape", "service-system", "service-domain", "data-service", "infrastructure"}, typeName):
 		return "service"
 	case strings.HasPrefix(id, "svc.") && strings.HasSuffix(id, ".clickhouse") && typeName == "datastore":
 		return "service"

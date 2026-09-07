@@ -1516,6 +1516,63 @@ func TestNormalizeSemanticSnapshotMergesSvcClickhouseDatastoreServiceAlias(t *te
 	}
 }
 
+func TestNormalizeSemanticSnapshotMergesRuntimeDeploymentTopologyAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "runtime.posthog.compose", Type: "runtime", Name: "PostHog Docker Compose local/hobby runtime", Provenance: evidence("docker-compose.base.yml")},
+		{ID: "runtime.posthog.compose", Type: "deployment-topology", Name: "PostHog base Compose runtime", Provenance: evidence("docker-compose.dev.yml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected runtime/deployment-topology aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "runtime"; got != want {
+		t.Fatalf("expected runtime alias to normalize to runtime, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesSvcInfrastructureServiceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.posthog.temporal", Type: "infrastructure", Name: "Temporal workflow runtime", Provenance: evidence("docker-compose.dev.yml")},
+		{ID: "svc.posthog.temporal", Type: "service", Name: "Temporal dynamic configuration surface", Provenance: evidence("docker/temporal/dynamicconfig/README.md")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected svc infrastructure/service aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "service"; got != want {
+		t.Fatalf("expected svc alias to normalize to service, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesComponentServiceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "component.posthog.web", Type: "component", Name: "Web application", Provenance: evidence("docker-compose.dev-full.yml")},
+		{ID: "component.posthog.web", Type: "service", Name: "PostHog web application", Provenance: evidence("docker-compose.dev-full.yml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected component/service aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "component"; got != want {
+		t.Fatalf("expected component alias to normalize to component, got=%q", got)
+	}
+}
+
 func TestNormalizeSemanticSnapshotMergesTechTechnologyFrameworkAlias(t *testing.T) {
 	t.Parallel()
 
