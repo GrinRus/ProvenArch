@@ -348,6 +348,41 @@ func TestPromoteValidatedArtifactsRollsBackMixedGenerationFailures(t *testing.T)
 	}
 }
 
+func TestPromoteValidatedArtifactsFailsClosedOnSymlinkSwap(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	execution := prepareTransactionalPromotionExecution(t, workspaceRoot)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "sentinel.txt"), []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make the extra changelog target eligible for the backup hook. The hook
+	// then swaps its parent directory for an outside symlink before rename.
+	writeWorkspaceText(t, workspaceRoot, "reports/changelog/runtime-proposals.md", "# Old Runtime Changelog\n")
+
+	restore := setPromotionFaultHookForTest(func(point promotionFaultPoint, relPath string) error {
+		if point == promotionFaultBackupCanonical && relPath == "reports/changelog/runtime-proposals.md" {
+			if err := os.RemoveAll(filepath.Join(workspaceRoot, "reports", "changelog")); err != nil {
+				return err
+			}
+			if err := os.Symlink(outside, filepath.Join(workspaceRoot, "reports", "changelog")); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	err := execution.promoteValidatedArtifacts()
+	restore()
+	if err == nil {
+		t.Fatal("expected promotion to fail closed after symlink swap")
+	}
+	if content, readErr := os.ReadFile(filepath.Join(outside, "sentinel.txt")); readErr != nil || string(content) != "outside\n" {
+		t.Fatalf("outside target changed after promotion symlink swap: content=%q err=%v", content, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "runtime-proposals.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("promotion created an outside canonical file, stat err=%v", statErr)
+	}
+}
+
 func TestPromoteValidatedArtifactsActivatesCompleteGeneration(t *testing.T) {
 	t.Parallel()
 

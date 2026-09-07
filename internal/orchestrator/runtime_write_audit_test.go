@@ -199,6 +199,48 @@ func TestRuntimeWriteAuditDoesNotOverwritePostRunConflict(t *testing.T) {
 	}
 }
 
+func TestRuntimeWriteAuditRestoreFailsClosedOnSymlinkSwap(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(ws.Path, "schemas"), 0o755); err != nil {
+		t.Fatalf("create protected schema root: %v", err)
+	}
+	protectedPath := filepath.Join(ws.Path, "schemas", "policy.yaml")
+	if err := os.WriteFile(protectedPath, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write protected schema: %v", err)
+	}
+	task := writeAuditTask(ws, nil)
+	execution, _ := newWriteAuditExecution(ws)
+
+	before := snapshotProtectedWorkspaceFiles(ws.Path)
+	if err := os.WriteFile(protectedPath, []byte("provider mutation\n"), 0o644); err != nil {
+		t.Fatalf("mutate protected schema: %v", err)
+	}
+	after := snapshotProtectedWorkspaceFiles(ws.Path)
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "sentinel.txt"), []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(ws.Path, "schemas")); err != nil {
+		t.Fatalf("replace protected schema root: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(ws.Path, "schemas")); err != nil {
+		t.Fatalf("install protected schema symlink: %v", err)
+	}
+
+	execution.restoreRuntimeWriteAuditMutations("init.step1.collect", "", task, before, after, []string{"schemas/policy.yaml"})
+	if content, err := os.ReadFile(filepath.Join(outside, "sentinel.txt")); err != nil || string(content) != "outside\n" {
+		t.Fatalf("outside target changed during restore: content=%q err=%v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "policy.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("restore created an outside protected file, stat err=%v", err)
+	}
+	if !hasWarningContaining(execution.warnings, runtimeWriteAuditRestoreConflict) {
+		t.Fatalf("expected symlink-swap restore conflict, got %#v", execution.warnings)
+	}
+}
+
 func TestRuntimeWriteAuditRestoresProtectedFileMode(t *testing.T) {
 	t.Parallel()
 

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,7 +16,12 @@ import (
 )
 
 type Store struct {
-	workspace workspace.Root
+	workspace workspaceAccess
+}
+
+type workspaceAccess interface {
+	ReadRegularTree(relRoot string) ([]workspace.TreeFile, error)
+	WriteFile(relPath string, content []byte) error
 }
 
 type ApplyReport struct {
@@ -153,31 +157,22 @@ func (s Store) loadEntityMap() (map[string]contracts.Entity, error) {
 }
 
 func (s Store) walkYAMLFiles(relDir string, visitor func(content []byte) error) error {
-	dir, err := s.workspace.Resolve(relDir)
+	files, err := s.workspace.ReadRegularTree(relDir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		return nil
+	for _, file := range files {
+		if !strings.HasSuffix(strings.ToLower(file.Path), ".yaml") {
+			continue
+		}
+		if err := visitor(file.Content); err != nil {
+			return fmt.Errorf("read %q: %w", filepath.Join(relDir, file.Path), err)
+		}
 	}
-
-	return filepath.WalkDir(dir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".yaml") {
-			return nil
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read %q: %w", path, err)
-		}
-		return visitor(content)
-	})
+	return nil
 }
 
 func (s Store) writeYAML(relPath string, payload any) error {

@@ -20,6 +20,38 @@ type Root struct {
 	Path         string
 	ManifestPath string
 	Manifest     Manifest
+	root         *os.Root
+}
+
+// Close releases a descriptor-backed subroot opened with OpenSubroot. Roots
+// returned by Open do not own an open descriptor and therefore are no-ops.
+func (r Root) Close() error {
+	if r.root == nil {
+		return nil
+	}
+	return r.root.Close()
+}
+
+// OpenSubroot opens a workspace-relative directory and keeps its descriptor
+// alive for a sequence of related operations. Callers should use this when a
+// check and a subsequent rename/remove/write must share one root identity.
+func (r Root) OpenSubroot(relPath string) (Root, error) {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return Root{}, err
+	}
+	parent, err := r.openFilesystemRoot()
+	if err != nil {
+		return Root{}, err
+	}
+	child, err := parent.OpenRoot(clean)
+	if r.root == nil {
+		_ = parent.Close()
+	}
+	if err != nil {
+		return Root{}, err
+	}
+	return Root{Path: filepath.Join(r.Path, clean), root: child}, nil
 }
 
 func Open(root string) (Root, error) {

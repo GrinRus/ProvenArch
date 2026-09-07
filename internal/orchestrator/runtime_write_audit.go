@@ -16,6 +16,7 @@ import (
 	"time"
 
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
+	"github.com/GrinRus/ProvenArch/internal/workspace"
 )
 
 const (
@@ -191,6 +192,11 @@ func snapshotProtectedWorkspaceFilesWithFailures(workspaceRoot string) (map[stri
 	if err != nil {
 		return map[string]runtimeProtectedFileSnapshot{}, fmt.Errorf("runtime write audit workspace root unavailable: %w", err)
 	}
+	workspaceHandle, err := (workspace.Root{Path: absWorkspace}).OpenSubroot(".")
+	if err != nil {
+		return map[string]runtimeProtectedFileSnapshot{}, fmt.Errorf("runtime write audit workspace root unavailable: %w", err)
+	}
+	defer workspaceHandle.Close()
 	roots := []string{
 		"workspace.yaml",
 		filepath.Join("schemas"),
@@ -199,8 +205,7 @@ func snapshotProtectedWorkspaceFilesWithFailures(workspaceRoot string) (map[stri
 	}
 	out := map[string]runtimeProtectedFileSnapshot{}
 	for _, relRoot := range roots {
-		absRoot := filepath.Join(absWorkspace, relRoot)
-		info, err := os.Lstat(absRoot)
+		info, err := workspaceHandle.Lstat(relRoot)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return out, fmt.Errorf("runtime write audit protected root unavailable: %s: %w", relRoot, err)
@@ -208,7 +213,7 @@ func snapshotProtectedWorkspaceFilesWithFailures(workspaceRoot string) (map[stri
 			continue
 		}
 		if !info.IsDir() {
-			snapshot, ok, snapshotErr := protectedFileSnapshotWithError(absRoot)
+			snapshot, ok, snapshotErr := protectedFileSnapshotAt(workspaceHandle, relRoot)
 			if snapshotErr != nil {
 				return out, fmt.Errorf("runtime write audit protected file snapshot failed: %w", snapshotErr)
 			}
@@ -217,21 +222,21 @@ func snapshotProtectedWorkspaceFilesWithFailures(workspaceRoot string) (map[stri
 			}
 			continue
 		}
-		walkErr := filepath.WalkDir(absRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		walkErr := workspaceHandle.WalkDir(relRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
 			if entry == nil || entry.IsDir() {
 				return nil
 			}
-			snapshot, ok, snapshotErr := protectedFileSnapshotWithError(path)
+			snapshot, ok, snapshotErr := protectedFileSnapshotAt(workspaceHandle, path)
 			if snapshotErr != nil {
 				return snapshotErr
 			}
 			if !ok {
 				return nil
 			}
-			rel, relErr := filepath.Rel(absWorkspace, path)
+			rel, relErr := filepath.Rel(".", path)
 			if relErr != nil {
 				return nil
 			}
@@ -245,23 +250,21 @@ func snapshotProtectedWorkspaceFilesWithFailures(workspaceRoot string) (map[stri
 	return out, nil
 }
 
-func protectedFileSnapshot(path string) (runtimeProtectedFileSnapshot, bool) {
-	snapshot, ok, _ := protectedFileSnapshotWithError(path)
-	return snapshot, ok
-}
-
-func protectedFileSnapshotWithError(path string) (runtimeProtectedFileSnapshot, bool, error) {
-	info, err := os.Lstat(path)
+func protectedFileSnapshotAt(root workspace.Root, relPath string) (runtimeProtectedFileSnapshot, bool, error) {
+	info, err := root.Lstat(relPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return runtimeProtectedFileSnapshot{}, false, nil
 		}
 		return runtimeProtectedFileSnapshot{}, false, err
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return runtimeProtectedFileSnapshot{}, false, fmt.Errorf("protected workspace path is a symlink: %s", relPath)
+	}
 	if !info.Mode().IsRegular() {
 		return runtimeProtectedFileSnapshot{}, false, nil
 	}
-	content, err := os.ReadFile(filepath.Clean(path))
+	content, err := root.ReadFile(relPath)
 	if err != nil {
 		return runtimeProtectedFileSnapshot{}, false, err
 	}
@@ -342,30 +345,29 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 	if workspaceRoot == "" {
 		return nil, errors.New("runtime write audit workspace root is empty")
 	}
-	info, err := os.Lstat(workspaceRoot)
+	workspaceHandle, err := (workspace.Root{Path: workspaceRoot}).OpenSubroot(".")
 	if err != nil {
 		return nil, fmt.Errorf("runtime write audit workspace root unavailable: %w", err)
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("runtime write audit workspace root is not a directory: %s", workspaceRoot)
-	}
+	defer workspaceHandle.Close()
 	excluded := runtimeWriteAuditExcludedRoots(task)
 	entries := map[string]runtimeWorkspaceEntrySnapshot{}
-	err = filepath.WalkDir(workspaceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = workspaceHandle.WalkDir(".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry == nil {
 			return nil
 		}
-		absPath := absClean(path)
+		relPath := filepath.Clean(path)
+		if relPath == "." {
+			return nil
+		}
+		absPath := absClean(filepath.Join(workspaceRoot, relPath))
 		if absPath != workspaceRoot && runtimeWriteAuditPathExcluded(absPath, excluded, task) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		if absPath == workspaceRoot {
 			return nil
 		}
 		if entry.IsDir() && pathIsAncestorOfAny(absPath, excluded) {
@@ -373,30 +375,27 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 			// Their parent directories are envelope plumbing, not independent writes.
 			return nil
 		}
-		fileInfo, statErr := os.Lstat(path)
+		fileInfo, statErr := workspaceHandle.Lstat(relPath)
 		if statErr != nil {
 			return statErr
-		}
-		rel, relErr := filepath.Rel(workspaceRoot, path)
-		if relErr != nil {
-			return relErr
 		}
 		snapshot := runtimeWorkspaceEntrySnapshot{mode: fileInfo.Mode()}
 		switch {
 		case fileInfo.Mode().IsRegular():
-			digest, digestOK := fileDigest(path)
-			if !digestOK {
-				return fmt.Errorf("runtime write audit could not read workspace file: %s", path)
+			content, readErr := workspaceHandle.ReadFile(relPath)
+			if readErr != nil {
+				return fmt.Errorf("runtime write audit could not read workspace file: %s: %w", relPath, readErr)
 			}
-			snapshot.digest = digest
+			digest := sha256.Sum256(content)
+			snapshot.digest = hex.EncodeToString(digest[:])
 		case fileInfo.Mode()&os.ModeSymlink != 0:
-			target, readlinkErr := os.Readlink(path)
+			target, readlinkErr := workspaceHandle.Readlink(relPath)
 			if readlinkErr != nil {
 				return readlinkErr
 			}
 			snapshot.target = target
 		}
-		entries[filepath.ToSlash(rel)] = snapshot
+		entries[filepath.ToSlash(relPath)] = snapshot
 		return nil
 	})
 	if err != nil {
@@ -696,11 +695,30 @@ func (e *pipelineExecution) restoreRuntimeWriteAuditMutations(
 ) {
 	restored := []string{}
 	conflicts := []string{}
+	workspaceRoot := absClean(task.Workspace)
+	workspaceHandle, openErr := (workspace.Root{Path: workspaceRoot}).OpenSubroot(".")
+	if openErr != nil {
+		for _, rel := range normalizeAuditPaths(changed) {
+			conflicts = append(conflicts, rel)
+		}
+		e.addWarning(fmt.Sprintf("%s: protected workspace root could not be reopened", runtimeWriteAuditRestoreConflict))
+		e.logWarn(stepID, domainID, runtimeWriteAuditRestoreConflict, map[string]any{
+			"audit_code":     runtimeWriteAuditRestoreConflict,
+			"task_id":        task.TaskID,
+			"conflict_count": len(conflicts),
+			"conflict_paths": limitAuditPaths(conflicts),
+		})
+		return
+	}
+	defer workspaceHandle.Close()
 	for _, rel := range normalizeAuditPaths(changed) {
 		beforeSnapshot, hadBefore := before[rel]
 		afterSnapshot, hadAfter := after[rel]
-		path := filepath.Join(absClean(task.Workspace), filepath.FromSlash(rel))
-		current, currentOK := protectedFileSnapshot(path)
+		current, currentOK, currentErr := protectedFileSnapshotAt(workspaceHandle, filepath.FromSlash(rel))
+		if currentErr != nil {
+			conflicts = append(conflicts, rel)
+			continue
+		}
 		if hadAfter {
 			if !currentOK || current.digest != afterSnapshot.digest || current.mode != afterSnapshot.mode {
 				conflicts = append(conflicts, rel)
@@ -712,15 +730,11 @@ func (e *pipelineExecution) restoreRuntimeWriteAuditMutations(
 		}
 
 		if hadBefore {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			if err := workspaceHandle.MkdirAll(filepath.Dir(filepath.FromSlash(rel)), 0o755); err != nil {
 				conflicts = append(conflicts, rel)
 				continue
 			}
-			if err := os.WriteFile(path, beforeSnapshot.content, beforeSnapshot.mode); err != nil {
-				conflicts = append(conflicts, rel)
-				continue
-			}
-			if err := os.Chmod(path, beforeSnapshot.mode); err != nil {
+			if err := workspaceHandle.WriteFileAtomicMode(filepath.FromSlash(rel), beforeSnapshot.content, beforeSnapshot.mode); err != nil {
 				conflicts = append(conflicts, rel)
 				continue
 			}
@@ -729,7 +743,7 @@ func (e *pipelineExecution) restoreRuntimeWriteAuditMutations(
 		}
 
 		if !hadAfter {
-			if _, err := os.Lstat(path); err == nil {
+			if _, err := workspaceHandle.Lstat(filepath.FromSlash(rel)); err == nil {
 				conflicts = append(conflicts, rel)
 				continue
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -737,7 +751,7 @@ func (e *pipelineExecution) restoreRuntimeWriteAuditMutations(
 				continue
 			}
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := workspaceHandle.Remove(filepath.FromSlash(rel)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			conflicts = append(conflicts, rel)
 			continue
 		}

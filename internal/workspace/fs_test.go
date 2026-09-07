@@ -100,6 +100,39 @@ func TestWorkspaceReadWriteRejectSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestDescriptorBackedRootRejectsSymlinkSwap(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "sentinel.txt"), []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := Root{Path: t.TempDir()}
+	if err := os.MkdirAll(filepath.Join(ws.Path, "mutable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Path, "mutable", "old.txt"), []byte("inside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handle, err := ws.OpenSubroot(".")
+	if err != nil {
+		t.Fatalf("open descriptor-backed root: %v", err)
+	}
+	defer handle.Close()
+	if err := os.RemoveAll(filepath.Join(ws.Path, "mutable")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(ws.Path, "mutable")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := handle.WriteFileAtomic("mutable/created.txt", []byte("must not escape\n")); err == nil {
+		t.Fatal("expected descriptor-backed write to reject symlink swap")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "created.txt")); !os.IsNotExist(err) {
+		t.Fatalf("outside target changed after symlink swap, stat err=%v", err)
+	}
+}
+
 func TestWorkspaceReadWriteAllowsRelativeInRootSymlink(t *testing.T) {
 	ws := Root{Path: t.TempDir()}
 	if err := os.Mkdir(filepath.Join(ws.Path, "real"), 0o755); err != nil {
