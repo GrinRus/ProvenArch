@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd))"
 cd "$repo_root"
 
+node_bin="$(./scripts/resolve-node-tool.sh node)"
+node_dir="$(dirname "$node_bin")"
+export PATH="$node_dir:${PATH:-}"
+
 contract_tools_bin="${ACP_CONTRACT_TOOLS_BIN:-$repo_root/tools/contracts/node_modules/.bin}"
 
 require_contract_tool() {

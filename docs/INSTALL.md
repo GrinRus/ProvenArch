@@ -124,6 +124,9 @@ Prerequisites:
 - Go exact version из `.go-version` для security-patched local/release builds.
 - Node.js exact version из `.node-version`.
 - npm 10.x.
+- Для `make bootstrap` и полного DoD также нужны exact Python из `.python-version` и
+  ShellCheck 0.11.x или новее. Setup создаёт локальный `.venv`; детали и быстрый
+  `make preflight` описаны в [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/GrinRus/ProvenArch.git

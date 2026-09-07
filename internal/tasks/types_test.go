@@ -106,7 +106,7 @@ func TestParseRejectsUnknownFieldsAndInvalidIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode invalid scope task: %v", err)
 	}
-	if _, err := ParseTask(invalidScope); err == nil || !strings.Contains(err.Error(), "workspace-relative") {
+	if _, err := ParseTask(invalidScope); err == nil || !strings.Contains(err.Error(), "repository-relative path pattern") {
 		t.Fatalf("expected invalid scope rejection, got %v", err)
 	}
 	payload["scope"].(map[string]any)["repositories"].([]any)[0].(map[string]any)["paths"] = []any{"."}

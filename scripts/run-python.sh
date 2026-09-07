@@ -41,6 +41,10 @@ if [[ -n "${ACP_PYTHON_TOOL_CANDIDATES:-}" ]]; then
     fi
   done
 fi
+candidate_bins+=("$repo_root/.venv/bin/python")
+if [[ -n "${ACP_PYTHON_BASE_BIN:-}" ]]; then
+  candidate_bins+=("${ACP_PYTHON_BASE_BIN}")
+fi
 if [[ -n "$required_python_version" ]]; then
   required_major_minor="$(major_minor_version "$required_python_version")"
   candidate_bins+=("$HOME/.pyenv/versions/$required_python_version/bin/python" "$HOME/.local/bin/python$required_python_version" "$HOME/.local/bin/python$required_major_minor")
@@ -81,7 +85,8 @@ done
 
 if [[ -n "$required_python_version" ]]; then
   echo "Python $required_python_version is required by .python-version; no matching Python toolchain was found." >&2
-  echo "Install Python $required_python_version or set ACP_PYTHON_BIN=/path/to/python$required_python_version." >&2
+  echo "Install Python $required_python_version or set ACP_PYTHON_BASE_BIN=/path/to/python$required_python_version for worktree bootstrap." >&2
+  echo "ACP_PYTHON_BIN remains an explicit test-runtime override and takes precedence over the worktree venv." >&2
   if [[ -n "$first_mismatch" ]]; then
     echo "First discovered Python was $first_mismatch." >&2
   fi

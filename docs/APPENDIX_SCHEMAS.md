@@ -60,7 +60,10 @@
 Sharding policy в MVP:
 - `heuristics` строит structural full-coverage partition repo без overlap в `path_scopes`.
 - `semantic` больше не меняет shard boundaries и остаётся metadata-only surface поверх того же shard-plan.
-- runtime execution всегда анализирует все repo scopes из workspace; frontend/backend filtering в execution contract отсутствует.
+- legacy runtime execution без admitted Task path map анализирует repo scopes из workspace и
+  применяет `workspace.yaml` analysis filters. Для Task-first Attempt authoritative
+  `scope.repositories[].paths` сохраняется в immutable runtime snapshot и shard plan; mutable
+  workspace filters не могут расширить принятый scope.
 
 ### Важное ограничение
 `workspace.yaml` не конфигурирует workspace layout beyond repo sources и imports path.

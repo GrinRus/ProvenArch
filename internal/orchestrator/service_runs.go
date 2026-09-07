@@ -19,6 +19,10 @@ func (s *Service) ReconcileStaleRunsAfterRestart() {
 
 func (s *Service) StartAsyncRun(ctx context.Context, request RunRequest) (string, error) {
 	_ = s.cleanupRunLogs()
+	// Queue admission owns the request after this call returns. Detach the
+	// mutable snapshot graph so callers cannot change a queued Attempt's
+	// execution scope before the pending run starts.
+	request.RuntimeSnapshot = acpruntime.CloneAdmittedRuntimeSnapshot(request.RuntimeSnapshot)
 	if request.Pipeline == PipelineQA && strings.TrimSpace(request.Question) == "" {
 		return "", fmt.Errorf("question is required for qa runs")
 	}
@@ -684,30 +688,68 @@ func (s *Service) upsertRunsLocked(records ...runRecord) error {
 }
 
 func trimRunRegistry(runs map[string]*runRecord, configuredRetention int) {
+	records := make([]runRecord, 0, len(runs))
+	for _, record := range runs {
+		if record == nil {
+			continue
+		}
+		records = append(records, *record)
+	}
+	retained := retainRunRecords(records, configuredRetention)
+	keep := make(map[string]struct{}, len(retained))
+	for _, record := range retained {
+		keep[record.info.RunID] = struct{}{}
+	}
+	for runID := range runs {
+		if _, ok := keep[runID]; !ok {
+			delete(runs, runID)
+		}
+	}
+}
+
+// retainRunRecords applies the history budget only to terminal runs. In-flight
+// records are part of the admission/lifecycle contract and must remain
+// discoverable even when an old StartedAt would otherwise make them eviction
+// candidates. Unknown statuses are retained conservatively until they are
+// explicitly terminalized.
+func retainRunRecords(records []runRecord, configuredRetention int) []runRecord {
 	retention := configuredRetention
 	if retention <= 0 {
 		retention = runHistoryRetention
 	}
-	if len(runs) <= retention {
-		return
+	if len(records) == 0 {
+		return nil
 	}
 
-	runIDs := make([]string, 0, len(runs))
-	for runID := range runs {
-		runIDs = append(runIDs, runID)
-	}
-	sort.Slice(runIDs, func(i, j int) bool {
-		left := runs[runIDs[i]].info
-		right := runs[runIDs[j]].info
+	sort.Slice(records, func(i, j int) bool {
+		left := records[i].info
+		right := records[j].info
 		if left.StartedAt.Equal(right.StartedAt) {
 			return left.RunID < right.RunID
 		}
 		return left.StartedAt.Before(right.StartedAt)
 	})
-	removeCount := len(runs) - retention
-	for idx := 0; idx < removeCount; idx++ {
-		delete(runs, runIDs[idx])
+
+	terminalCount := 0
+	for _, record := range records {
+		if isTerminalRunStatus(record.info.Status) {
+			terminalCount++
+		}
 	}
+	terminalToDrop := terminalCount - retention
+	if terminalToDrop <= 0 {
+		return records
+	}
+
+	retained := make([]runRecord, 0, len(records)-terminalToDrop)
+	for _, record := range records {
+		if isTerminalRunStatus(record.info.Status) && terminalToDrop > 0 {
+			terminalToDrop--
+			continue
+		}
+		retained = append(retained, record)
+	}
+	return retained
 }
 
 func (s *Service) persistHistorySnapshotLocked(runs map[string]*runRecord) error {
@@ -721,20 +763,7 @@ func (s *Service) persistHistorySnapshotLocked(runs map[string]*runRecord) error
 	for _, record := range runs {
 		records = append(records, cloneRunRecord(*record))
 	}
-	sort.Slice(records, func(i, j int) bool {
-		if records[i].info.StartedAt.Equal(records[j].info.StartedAt) {
-			return records[i].info.RunID < records[j].info.RunID
-		}
-		return records[i].info.StartedAt.Before(records[j].info.StartedAt)
-	})
-
-	retention := s.historyRetention
-	if retention <= 0 {
-		retention = runHistoryRetention
-	}
-	if len(records) > retention {
-		records = records[len(records)-retention:]
-	}
+	records = retainRunRecords(records, s.historyRetention)
 
 	for _, record := range records {
 		items = append(items, runRecordToHistoryItem(record))
@@ -811,6 +840,7 @@ func runRecordToHistoryItem(record runRecord) runHistoryItem {
 		PermissionProfile:    record.info.PermissionProfile,
 		Timeouts:             record.info.Timeouts,
 		RepositoryScopes:     append([]string(nil), record.info.RepositoryScopes...),
+		RepositoryPathScopes: cloneRepositoryPathScopes(record.info.RepositoryPathScopes),
 		Warnings:             append([]string(nil), record.info.Warnings...),
 		PendingPermissions:   clonePermissionRequests(record.info.PendingPermissions),
 		ErrorCode:            record.info.ErrorCode,
@@ -861,6 +891,7 @@ func historyItemToRunRecord(item runHistoryItem) (runRecord, bool) {
 			PermissionProfile:    item.PermissionProfile,
 			Timeouts:             item.Timeouts,
 			RepositoryScopes:     append([]string(nil), item.RepositoryScopes...),
+			RepositoryPathScopes: cloneRepositoryPathScopes(item.RepositoryPathScopes),
 			Warnings:             append([]string(nil), item.Warnings...),
 			PendingPermissions:   clonePermissionRequests(item.PendingPermissions),
 			ErrorCode:            item.ErrorCode,
@@ -911,6 +942,7 @@ func cloneRunInfo(value RunInfo) RunInfo {
 	clone.ProviderModels = cloneProviderModelValues(value.ProviderModels)
 	clone.ProviderModelSources = cloneProviderModelSources(value.ProviderModelSources)
 	clone.RepositoryScopes = append([]string(nil), value.RepositoryScopes...)
+	clone.RepositoryPathScopes = cloneRepositoryPathScopes(value.RepositoryPathScopes)
 	clone.Warnings = append([]string(nil), value.Warnings...)
 	clone.PendingPermissions = clonePermissionRequests(value.PendingPermissions)
 	clone.RefreshSummary = cloneRefreshSummary(value.RefreshSummary)

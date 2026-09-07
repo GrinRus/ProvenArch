@@ -46,7 +46,7 @@ Layout `charter/`, `skills/`, `model/`, `reports/`, `proposals/`, `docs/` не �
 - `ref` задаёт желаемую ветку/тег/sha, если repo source поддерживает checkout/fetch semantics
 - для `git_url` без `ref` ACP перед pipeline execution делает fetch, определяет remote default `HEAD` и force-reset-ит только ACP-owned cache под `.acp/repos` на exact resolved commit SHA
 - resolved SHA для fetch-backed `git_url` возвращается в `resolved_repos[].resolved_sha` и сохраняется в run evidence; dry validation может не заполнять это поле
-- для `git_url` с `ref` выбранный ref остаётся source of truth и не заменяется remote default `HEAD`
+- для `git_url` с `ref` выбранный ref остаётся source of truth и не заменяется remote default `HEAD`; после fetch branch refs разрешаются через свежий `origin/<ref>` (а tag/SHA refs — напрямую), затем только ACP-owned cache переводится на detached exact commit SHA, поэтому moving remote branch не может незаметно переиспользовать stale local branch
 - `analysis.role` удалён из active contract; manifest с этим полем считается invalid breaking legacy input
 - для `path`-source ACP не делает checkout (non-mutating policy в пользовательском репозитории)
 - verify `ref` для `path`-source использует fallback-резолвинг: `<ref>` -> `origin/<ref>` -> `refs/remotes/origin/<ref>`
@@ -298,6 +298,8 @@ Manifest считается невалидным, если:
 - `workspace.repo.ref.invalid` (error): `ref` не резолвится ни локально, ни через origin-tracking fallback
 - `workspace.repo.ref.resolved_via_remote` (warning): `ref` был разрешён через remote-tracking ref
 - `workspace.repo.ref.head_mismatch` (warning): `ref` и текущий `HEAD` указывают на разные коммиты
+- `workspace.repo.git_url.ref_invalid` (error): remote `git_url` ref не резолвится после fetch
+- `workspace.repo.git_url.identity_mismatch` (error): resolved commit SHA не совпадает с cache `HEAD` после checkout
 
 ## 8) Planned Task control-plane persistence (Epic 23; not implemented)
 

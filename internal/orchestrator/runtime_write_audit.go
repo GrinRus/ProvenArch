@@ -378,26 +378,6 @@ func changedProtectedSnapshotPaths(before map[string]runtimeProtectedFileSnapsho
 	return normalizeAuditPaths(changed)
 }
 
-// changedSnapshotPaths retains the small digest-map helper used by older
-// package tests and callers; protected workspace audits use the richer typed
-// snapshot above so file modes can also be restored.
-func changedSnapshotPaths(before map[string]string, after map[string]string) []string {
-	seen := map[string]struct{}{}
-	for path := range before {
-		seen[path] = struct{}{}
-	}
-	for path := range after {
-		seen[path] = struct{}{}
-	}
-	changed := []string{}
-	for path := range seen {
-		if before[path] != after[path] {
-			changed = append(changed, path)
-		}
-	}
-	return normalizeAuditPaths(changed)
-}
-
 // restoreRuntimeWriteAuditMutations removes provider writes from protected
 // workspace surfaces after the audit has observed them. A restore is only
 // attempted when the file still matches the post-run snapshot; if another

@@ -36,7 +36,11 @@
       "required": ["name", "paths"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
-        "paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        "paths": {
+          "type": "array",
+          "description": "Normalized repository-relative path patterns; an empty array means the repository root.",
+          "items": {"type": "string", "minLength": 1}
+        }
       },
       "additionalProperties": false
     },

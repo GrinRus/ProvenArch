@@ -2,9 +2,9 @@ package api
 
 const (
 	evidenceAuthorityPromotedCurrent = "promoted_current"
-	evidenceAuthorityRunSnapshot     = "run_snapshot"
-	evidenceAuthorityQASnapshot      = "qa_snapshot"
-	evidenceAuthorityQAAudit         = "qa_audit"
+
+	evidenceAuthorityQASnapshot = "qa_snapshot"
+	evidenceAuthorityQAAudit    = "qa_audit"
 )
 
 type evidenceAuthority struct {

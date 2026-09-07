@@ -35,7 +35,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
   const [createdTaskId, setCreatedTaskId] = useState("");
   const [admissionIdempotencyKey] = useState(() => newIdempotencyKey());
   const scope = useMemo(() => taskScope(repos), [repos]);
-  const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode, runtimeProvider: normalizedProvider });
+  const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode });
   const canSubmit = goal.trim().length > 0 && readiness.ok && !busy;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -151,11 +151,10 @@ function deriveTaskTitle(goal: string): string {
   return normalized.length > 72 ? `${normalized.slice(0, 69).trimEnd()}…` : normalized || "Architecture question";
 }
 
-function runnerReadiness(input: { workspaceReady: boolean; scope: TaskScope; mode: RunnerMode; provider: RunnerProvider; runtimeMode: string; runtimeProvider: RunnerProvider }): { ok: boolean; label: string; detail: string } {
+function runnerReadiness(input: { workspaceReady: boolean; scope: TaskScope; mode: RunnerMode; provider: RunnerProvider; runtimeMode: string }): { ok: boolean; label: string; detail: string } {
   if (!input.workspaceReady) return { ok: false, label: "Blocked", detail: "Select and validate a workspace before creating a Task." };
   if (input.scope.repositories.length === 0) return { ok: false, label: "Scope needed", detail: "Add at least one configured repository before creating a Task." };
   if (!input.runtimeMode) return { ok: false, label: "Runner unavailable", detail: "Select a runtime in Setup before creating a Task." };
   if (input.mode !== input.runtimeMode) return { ok: false, label: "Mode mismatch", detail: `Current session is ${input.runtimeMode}; select the same mode for this Task.` };
-  if (input.provider !== input.runtimeProvider) return { ok: false, label: "Provider mismatch", detail: `Current session is bound to ${input.runtimeProvider}; select that provider for this Task.` };
   return { ok: true, label: "Ready", detail: `Task will snapshot ${input.mode} / ${input.provider} at admission.` };
 }

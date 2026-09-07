@@ -587,6 +587,13 @@ Partial update persisted execution-полей в `workspace.yaml`.
 В run envelope дополнительно сохраняются resolved `provider_models` и `provider_model_sources`,
 зафиксированные при принятии запуска.
 
+Для Task/Attempt запуска `provider_models`, `provider_model_sources`, `step_providers` и
+`step_provider_sources` являются копией immutable admission snapshot. Если модель/effort были
+заданы самим Task runner preset, source равен `task_preset`; ACP не заменяет его на `workspace`.
+После queue/restart эти поля восстанавливаются из Attempt без повторного resolve по текущему
+`workspace.yaml` или environment. В fake mode execution artifact по-прежнему сообщает neutral
+provider `fake`, тогда как selection surface сохраняет выбранный configured provider.
+
 ### GET `/api/runtime/permissions`
 Возвращает permission-профиль для текущего workspace:
 - `persisted` — значения из `workspace.yaml` (`runtime.profile.permissions`);
@@ -853,17 +860,18 @@ field; they must not infer a comparison when `review` is absent or unavailable.
 
 ### POST `/api/pipeline/runs/{run_id}/retry-plan`
 Для любого terminal analysis run (`succeeded|failed|canceled`) рассчитывает безопасную dependency
-closure. Для failed/canceled UI по умолчанию передаёт failed step/scopes; для succeeded оператор
-явно выбирает завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
+closure. Это compatible backend API; текущие Attempt и legacy diagnostics в UI read-only.
+Для failed/canceled client может передать failed step/scopes; для succeeded caller явно выбирает
+завершённый шаг, который нужно повторить. Optional request: `step_id`, `scope_ids[]`.
 Response содержит reused inputs, effective start step, downstream
 invalidations, estimated units, widening reason и `plan_hash`. Если parent staging отсутствует или
 любой переиспользуемый collect shard больше не проходит schema, document-set и task-identity
 validation, либо агрегированные final/citation indexes и их staged documents не проходят strict
 parse, parent identity и containment validation, planner явно расширяет retry до первого pipeline step.
 `estimated_units` — execution units: для scoped Collect он включает выбранные shard scopes и
-downstream steps, поэтому UI не должен подписывать это поле как количество pipeline steps. UI
-обязан отдельно показать reuse, execute closure, `invalidated_steps`, effective scope и причину
-dependency closure до запуска child run.
+downstream steps. Если client предоставляет interactive retry flow, он должен отличать units от
+pipeline steps и до запуска child run показать reuse, execute closure, `invalidated_steps`,
+effective scope и причину dependency closure.
 
 ### POST `/api/pipeline/runs/{run_id}/retry`
 Принимает исходные `step_id`, `scope_ids[]` и обязательный `plan_hash`. Backend повторно вычисляет
@@ -1346,6 +1354,11 @@ normalized `status`, `index_status`, `worktree_status`, `path`, nullable `origin
 old/new mode, HEAD/index object identity, worktree SHA-256, additions/deletions и flags
 `binary|unavailable`. Rename/copy не теряют source path.
 
+Inventory собирается пакетно: status/mode/OID identity читаются из одного
+`porcelain=v2 -z` снимка, а line stats — из одного общего `diff --numstat -z` прохода. Число Git
+процессов не зависит от количества изменённых файлов; selected preview hunks остаются отдельным
+запросом и не меняют полный `files[]` scope.
+
 `fingerprint` — SHA-256 канонического отсортированного manifest identity + полного inventory;
 он меняется при смене branch/HEAD/base, status/path/mode/index blob или рабочего содержимого.
 `state` — server-authored `clean | dirty | stale | blocked | unknown`. Optional query
@@ -1395,7 +1408,10 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 {
   "message": "chore: update ACP workspace artifacts",
   "expected_fingerprint": "<sha256>",
-  "expected_head_oid": "abc123"
+  "expected_head_oid": "abc123",
+  "task_id": "task_20260811_0001",
+  "attempt_id": "attempt_20260811_0001",
+  "run_id": "run_20260811_0001"
 }
 ```
 
@@ -1417,6 +1433,13 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 }
 ```
 
+When the optional `task_id`/`attempt_id`/`run_id` triple is complete, the server prepares a durable
+Git metadata publication intent before mutation and returns the linked publication on success. An
+intent/journal failure returns `500 publication_intent_failed` before Git is touched; a registry
+linkage failure returns `500 publication_linkage_failed` after the Git side effect, with recovery
+performed on a later server/workspace attach when strict identity proof is available. Partial context
+is rejected as `400 publication_context_invalid`.
+
 ### POST `/api/git/proposal-branch`
 Создаёт или переключает proposal-branch в bound workspace repo.
 
@@ -1436,6 +1459,10 @@ HTTP 200 с `ok=false`, `state=unknown`, пустым inventory и диагно�
 ```json
 { "ok": true, "branch": "proposal/beta-refresh" }
 ```
+
+The proposal-branch request accepts the same optional exact Task/Attempt/run triple and follows the
+same durable intent, strict recovery and `publication_intent_failed`/`publication_linkage_failed`
+error boundary.
 
 Обе mutation операции сериализованы общей admission lease с run/session mutations и запрещены,
 пока service имеет active или queued work (`409 run_active`). Несовпадение подтверждённых branch/HEAD/base/inventory
@@ -1706,15 +1733,26 @@ The implemented W23A3 boundary currently exposes:
   fall back to another Task or latest run.
 
 `POST /api/tasks/<task_id>/attempts` requires `idempotency_key` and optionally accepts `pipeline`
-(`init|refresh`) and `intent` (`start|queue`). It returns an immutable effective runtime snapshot,
-server-generated Attempt identity and an exact requested `run_id`. Repeating the same key and
-fingerprint returns the same identity; reusing it for different options returns
-`409 idempotency_conflict`. `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` requires a
-terminal parent and creates a child Attempt with `parent_attempt_id` and `retry_reason`.
+(`init|refresh`) and `intent` (`start|queue`). It is the root admission for a Task with no prior
+Attempts; after the first Attempt it returns typed `409 attempt_action_required`. It returns an
+immutable effective runtime snapshot, server-generated Attempt identity and an exact requested
+`run_id`. Repeating the same key and fingerprint returns the same identity; reusing it for different
+options returns `409 idempotency_conflict`. Capacity errors are typed (`run_active` or
+`attempt_queue_full`) and never supersede another Task's queued Attempt.
+`POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` accepts only a `failed`, `canceled` or
+`timeout` parent; `/rerun` accepts only a `succeeded` parent. Both create a child Attempt with
+`parent_attempt_id` and a distinct `retry_reason` default (`operator_retry` or `operator_rerun`),
+while the parent snapshot remains immutable. Both validate the current Task repository scope before
+persisting the child.
 Admission validates repository scope and runner before provider start, uses the shared admission
 lease, and returns `run_active`/`attempt_queue_full` instead of replacing another Task's queued
 Attempt. The Attempt registry watcher mirrors queued/running/terminal run state and retains the
 exact Task/Attempt/run join.
+
+The admitted repository path patterns are authoritative for Task-first execution. They are copied
+into the immutable runtime snapshot and persisted RunInfo/history so shard planning after queue or
+restart cannot broaden a Task by re-reading mutable workspace analysis filters. Legacy runs without
+this path snapshot retain the workspace discovery/filter behavior.
 
 Current `/api/pipeline/runs*` remains authoritative for implemented execution lifecycle and legacy
 run history during migration. Pre-contract runs remain readable but are not synthesized into Tasks.
@@ -1729,3 +1767,13 @@ inventory fingerprint in both the Task and Attempt registry records. Without the
 the response explicitly returns `publication.state=unavailable`; no latest-run, clean-worktree,
 branch-recency or legacy fallback is allowed. Existing full-workspace mutation scope and stale
 confirmation protections are unchanged.
+
+For contextual Git mutations, the server first writes a durable publication-intent marker to the ACP
+Git metadata journal (`acp-publication-journal.json`). The marker is removed after the registry
+transaction that writes the successful Task/Attempt linkage; either ordering remains recoverable on
+restart. If the process stops after Git changes but before linkage, a later server/workspace attach
+may recover the exact association only from the recorded pre-mutation identity plus strict
+commit-parent/message or target-branch proof; otherwise the marker remains pending and the publication
+stays unavailable. A linkage write failure therefore cannot report `Published` or silently attach
+another run, while the Git commit/branch remains recoverable and the journal stays outside the
+workspace publication scope.

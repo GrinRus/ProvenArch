@@ -1,7 +1,9 @@
 # Task and Attempt contract (W23A1–W23A4 foundation)
 
 Status: **W23A1–W23A4 schemas, durable registry, public Task APIs, Attempt admission and W23
-Task-first surfaces are implemented. W24 authority and W25 trusted live evidence remain gated.**
+Task-first surfaces are implemented. W24 effective-verdict authority is implemented; W25 trusted
+live qualification remains open.** See the [canonical stakeholder matrix](../STAKEHOLDER_DOC.md#0-canonical-stakeholder-matrix-source-of-truth)
+for implementation and release-evidence status.
 
 This document fixes the product identity and persistence boundary for the Task-first shell. Current
 `/api/pipeline/runs*` behavior remains readable for runtime lifecycle and legacy evidence, while
@@ -37,7 +39,7 @@ unknown/stale identity fails visibly and never falls back to another Task, Attem
 
 ## 4) Persistence
 
-The planned authoritative registry paths are:
+The authoritative registry paths are:
 
 ```text
 reports/taskruns/task-history.json
@@ -57,7 +59,7 @@ There is no automatic Task deletion in the MVP.
 
 ## 5) Task v1 public shape
 
-The 23A schema slice must define at least:
+The Task v1 schema defines:
 
 - `version`;
 - opaque server-generated `task_id`;
@@ -98,7 +100,22 @@ payload remains self-describing.
 
 Attempt status follows the linked run lifecycle while that run is retained. Terminalization copies
 a bounded immutable summary into Task history so archive/history remains useful after detailed run
-retention. A retry/rerun always creates a new child Attempt.
+retention. A retry after `failed|canceled|timeout` and a rerun after `succeeded` always create a
+new child Attempt; the parent snapshot is never edited. A second root admission is rejected after
+the first Attempt and must use one of these explicit child actions.
+
+The effective runtime snapshot is authoritative for every step. It preserves the admitted
+per-step provider and the provider-scoped model/effort values that the selected steps will use;
+`resolution_sources` may therefore include `task_preset` alongside `env`, `workspace`,
+`provider_default` and `request`. A restart or queued-run handoff must reconstruct this snapshot
+without consulting current workspace settings or environment variables. A fake-mode Attempt keeps
+the configured provider as its selection surface, while the execution artifact reports the neutral
+`fake` provider as defined by the pipeline contract.
+
+Each admitted `scope.repositories[].paths` value is repository-relative and may be a normalized
+path pattern. An empty `paths` array means the repository root. These patterns are copied into the
+runtime admission snapshot and shard plan; workspace analysis include/exclude settings are only a
+legacy fallback for runs that predate the Task-authoritative path snapshot.
 
 ## 7) Admission and coordination
 
@@ -112,7 +129,7 @@ retention. A retry/rerun always creates a new child Attempt.
   Task/Attempt/run identity; a token cannot represent a different request.
 - Queue/readiness/conflict responses expose exact Task, Attempt and run identities.
 
-## 8) Planned API surface
+## 8) Public API surface
 
 The implemented 23A surface exposes versioned JSON contracts for:
 
@@ -123,12 +140,16 @@ The implemented 23A surface exposes versioned JSON contracts for:
 - `POST /api/tasks/<task_id>/archive` and `/unarchive`;
 - `POST /api/tasks/<task_id>/attempts` — admit/start an Attempt idempotently;
 - `GET /api/tasks/<task_id>/attempts/<attempt_id>` — exact Attempt detail;
-- `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` — create an explicit child Attempt.
+- `POST /api/tasks/<task_id>/attempts/<attempt_id>/retry` — create a child after a failed,
+  canceled or timed-out Attempt;
+- `POST /api/tasks/<task_id>/attempts/<attempt_id>/rerun` — create a child after a succeeded
+  Attempt.
 
 Attempt admission accepts `{idempotency_key, pipeline?: init|refresh, intent?: start|queue}`. Retry
-accepts the same fields plus an optional `reason`; a retry requires a terminal parent and always
-creates a new child identity. Duplicate keys with the same canonical request fingerprint return the
-existing Attempt, while a reused key for a different Task revision/options returns
+and rerun accept the same fields plus an optional `reason`; each requires the matching terminal
+parent status and always creates a new child identity. The initial admission endpoint is valid only
+for a Task without prior Attempts. Duplicate keys with the same canonical request fingerprint return
+the existing Attempt, while a reused key for a different Task revision/options returns
 `409 idempotency_conflict`. Capacity errors are typed (`run_active` or `attempt_queue_full`) and
 never supersede another Task's queued Attempt.
 
@@ -155,13 +176,23 @@ Task/Attempt/run identities when present, action, branch/base/head identity, exa
 inventory fingerprint and resulting commit/branch identity. The association does not claim that all
 committed files belong exclusively to one Task.
 
+Because Git mutation and task-history persistence are separate filesystem transactions, a contextual
+commit or branch action first persists a compact publication-intent marker in the ACP Git metadata
+journal. The marker is removed after the registry transaction that links the resulting publication to
+both the Task and Attempt; either ordering remains recoverable on restart. If the process stops after
+the Git side effect, server/workspace attach may reconcile the marker only when the exact recorded
+parent/head (and commit message for a commit) or target branch identity proves that operation;
+otherwise the marker remains pending and publication stays unavailable. A clean tree, latest commit
+or recency never completes this recovery implicitly, and the journal never becomes a workspace
+publication artifact.
+
 ## 11) Compatibility and failure behavior
 
 - Current run APIs remain readable during migration and for legacy history.
 - Invalid Task/Attempt/scope/runner identity fails before provider execution.
 - Registry persistence failure leaves the previously durable Task view authoritative.
-- Partial Task/run linkage is surfaced as a recovery diagnostic; API/UI cannot silently attach the
-  Attempt to a different run.
+- Partial Task/run linkage is surfaced as a durable recovery marker/diagnostic; API/UI cannot
+  silently attach the Attempt to a different run or infer a successful publication.
 - Historical Task registry versions require an explicit dual-read decision before a writer version
   change.
 

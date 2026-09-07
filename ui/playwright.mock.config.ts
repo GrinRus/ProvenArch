@@ -1,9 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const baseURL = process.env.UI_E2E_BASE_URL ?? "http://127.0.0.1:18180";
-const outputDir = process.env.UI_E2E_PLAYWRIGHT_OUTPUT_DIR ?? "/tmp/provenarch-ui-mock-e2e/test-results";
-const webServerCommand = process.env.UI_E2E_WEB_SERVER_COMMAND ?? "npm run dev -- --host 127.0.0.1 --port 18180";
-const reuseExistingServer = process.env.CI ? false : true;
+const baseURL = process.env.UI_E2E_BASE_URL;
+if (!baseURL) {
+  throw new Error("Use npm run e2e:mock to allocate an isolated server, or set UI_E2E_BASE_URL explicitly.");
+}
+const serverURL = new URL(baseURL);
+const outputDir = process.env.UI_E2E_PLAYWRIGHT_OUTPUT_DIR ?? mkdtempSync(join(tmpdir(), "provenarch-ui-mock-results-"));
+const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+const serverPort = serverURL.port || (serverURL.protocol === "https:" ? "443" : "80");
+const webServerCommand = process.env.UI_E2E_WEB_SERVER_COMMAND ?? `npm run dev -- --host ${shellQuote(serverURL.hostname)} --port ${shellQuote(serverPort)} --strictPort`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -19,7 +27,7 @@ export default defineConfig({
   webServer: {
     command: webServerCommand,
     url: baseURL,
-    reuseExistingServer,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
     stdout: "pipe",
     stderr: "pipe",

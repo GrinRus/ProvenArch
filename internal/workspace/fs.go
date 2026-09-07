@@ -251,38 +251,6 @@ func randomHex(bytesCount int) string {
 	return hex.EncodeToString(raw)
 }
 
-func (r Root) WriteFileAtomicWithLastGood(relPath string, content []byte) error {
-	if err := r.WriteFileAtomic(relPath, content); err != nil {
-		return err
-	}
-	if err := r.WriteFileAtomic(lastGoodRelPath(relPath), content); err != nil {
-		return fmt.Errorf("write last-good copy: %w", err)
-	}
-	return nil
-}
-
-func (r Root) ReadFileWithLastGood(relPath string) (content []byte, recoveredFromLastGood bool, err error) {
-	content, err = r.ReadFile(relPath)
-	if err == nil {
-		return content, false, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		lastGood, lastGoodErr := r.ReadLastGoodFile(relPath)
-		if lastGoodErr == nil {
-			return lastGood, true, nil
-		}
-		return nil, false, err
-	}
-	lastGood, lastGoodErr := r.ReadLastGoodFile(relPath)
-	if lastGoodErr == nil {
-		return lastGood, true, nil
-	}
-	if errors.Is(lastGoodErr, os.ErrNotExist) {
-		return nil, false, err
-	}
-	return nil, false, lastGoodErr
-}
-
 func (r Root) ReadLastGoodFile(relPath string) ([]byte, error) {
 	return r.ReadFile(lastGoodRelPath(relPath))
 }

@@ -57,11 +57,6 @@ func ParseProvider(value string) (Provider, error) {
 	}
 }
 
-func ResolveProvider(cliValue string) (Provider, error) {
-	provider, _, err := ResolveProviderWithSource(cliValue)
-	return provider, err
-}
-
 func NormalizeMode(mode string) (string, error) {
 	normalized := strings.TrimSpace(strings.ToLower(mode))
 	if normalized == "" {

@@ -182,7 +182,7 @@ func TestScanSelectedRunPublicRequiresEffectiveAuthority(t *testing.T) {
 	}
 }
 
-func TestScanPromotedRunDetectsCanonicalDigestMismatch(t *testing.T) {
+func TestPromotedScanDetectsCanonicalDigestMismatch(t *testing.T) {
 	ws, runID := writeAuditFixture(t, false)
 	stagedPath := path.Join("reports", "taskruns", runID, "staging", "final", "reports", "as-is", "overview.md")
 	staged, err := ws.ReadFile(stagedPath)
@@ -192,13 +192,13 @@ func TestScanPromotedRunDetectsCanonicalDigestMismatch(t *testing.T) {
 	if err := ws.WriteFileAtomic("reports/as-is/overview.md", staged); err != nil {
 		t.Fatal(err)
 	}
-	if report := ScanPromotedRun(ws, runID); report.Status != StatusPass {
+	if report := scan(ws, runID, "promoted_current", nil); report.Status != StatusPass {
 		t.Fatalf("expected matching promoted bytes to pass, got %+v", report)
 	}
 	if err := ws.WriteFileAtomic("reports/as-is/overview.md", append(staged, []byte("\nuser edit\n")...)); err != nil {
 		t.Fatal(err)
 	}
-	report := ScanPromotedRun(ws, runID)
+	report := scan(ws, runID, "promoted_current", nil)
 	if !hasIssue(report, "audit.promoted.digest_mismatch") {
 		t.Fatalf("expected promoted digest mismatch, got %+v", report.Issues)
 	}

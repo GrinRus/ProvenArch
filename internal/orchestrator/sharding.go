@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"strings"
 	"sync"
 
@@ -19,20 +18,17 @@ type runtimeShardPlan struct {
 }
 
 type ShardPlanInput struct {
-	Workspace         workspace.Root
-	ResolvedRepoPaths map[string]string
-	ExecutionProfile  acpruntime.ExecutionValues
-	RepoScopes        []string
+	Workspace            workspace.Root
+	ResolvedRepoPaths    map[string]string
+	ExecutionProfile     acpruntime.ExecutionValues
+	RepoScopes           []string
+	RepositoryPathScopes map[string][]string
 }
 
 type ShardPlanResult struct {
 	Plans         []runtimeShardPlan
 	Warnings      []string
 	SemanticGraph []runtimeShardPlanGraphEdge
-}
-
-type ShardPlanner interface {
-	PlanRuntimeShards(input ShardPlanInput) ShardPlanResult
 }
 
 type defaultShardPlanner struct{}
@@ -44,10 +40,6 @@ type ShardScheduleRequest struct {
 	SummaryState     *runtimeShardSummaryState
 	Options          runtimeShardExecutionOptions
 	TaskSuffixPrefix string
-}
-
-type ShardScheduler interface {
-	ScheduleRuntimeShardRuns(ctx context.Context, request ShardScheduleRequest) ([]runtimeShardRunResult, error)
 }
 
 type defaultShardScheduler struct {

@@ -42,6 +42,14 @@ jobs:
             exit 0
           fi
           verifier_args=()
+          configured_modes=0
+          [ -n "${ACP_RELEASE_MATRIX_IDS:-}" ] && configured_modes=$((configured_modes + 1))
+          [ -n "${ACP_RELEASE_MATRIX_ID:-}" ] && configured_modes=$((configured_modes + 1))
+          [ -n "${ACP_RELEASE_VERDICT_PATH:-}" ] && configured_modes=$((configured_modes + 1))
+          if [ "$configured_modes" -ne 1 ]; then
+            echo "configure exactly one of ACP_RELEASE_MATRIX_IDS, ACP_RELEASE_MATRIX_ID or ACP_RELEASE_VERDICT_PATH" >&2
+            exit 1
+          fi
           if [ -n "${ACP_RELEASE_MATRIX_IDS:-}" ]; then
             verifier_args+=(--matrix-ids "$ACP_RELEASE_MATRIX_IDS")
           elif [ -n "${ACP_RELEASE_MATRIX_ID:-}" ]; then
@@ -49,7 +57,8 @@ jobs:
           elif [ -n "${ACP_RELEASE_VERDICT_PATH:-}" ]; then
             verifier_args+=(--verdict-path "$ACP_RELEASE_VERDICT_PATH")
           fi
-          ./scripts/run-python.sh scripts/verify-release-verdict.py "${verifier_args[@]}"
+          ./scripts/run-python.sh scripts/verify-release-verdict.py "${verifier_args[@]}" \
+            --tag "$GITHUB_REF_NAME" --source-sha "$GITHUB_SHA"
 
   release:
     needs: verify-release-evidence

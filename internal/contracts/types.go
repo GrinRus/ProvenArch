@@ -69,15 +69,6 @@ type LineRange struct {
 	End   int `json:"end" yaml:"end"`
 }
 
-type DocArtifact struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Title      string   `json:"title"`
-	Path       string   `json:"path"`
-	Format     string   `json:"format,omitempty"`
-	RelatedIDs []string `json:"related_ids,omitempty"`
-}
-
 type SemanticSnapshot struct {
 	Coverage  Coverage   `json:"coverage"`
 	Questions []Question `json:"questions"`

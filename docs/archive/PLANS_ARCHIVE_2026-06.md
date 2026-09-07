@@ -356,7 +356,7 @@ EP-20260527-ui-console-v2
 После утверждения 9-screen UI vision нужно зафиксировать Console V2 как реализуемый backlog поверх текущего stage-based UI baseline. Цель - собрать лучший вариант из Mission Control, Evidence Review Workbench, Domain Map, Run Timeline и Git Review Room без изменения backend/API contracts. В этот же feature wave должна войти миграция live E2E логики, иначе новый shell может пройти code review, но сломать trusted-machine release diagnostics.
 
 ### Goals (must have)
-- [x] Зафиксировать целевой design baseline в `docs/UI_CONSOLE_V2_DESIGN.md`.
+- [x] Зафиксировать целевой design baseline в `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`.
 - [x] Сохранить approved PNG references в `docs/assets/ui-console-v2/`.
 - [x] Добавить Epic 16 в `docs/BACKLOG.md` с кодовыми, UX и live E2E slices.
 - [x] Зафиксировать V2 live E2E contract: scenarios, selectors, diagnostics and reason taxonomy.
@@ -378,10 +378,10 @@ EP-20260527-ui-console-v2
 - [x] Не коммитить сгенерированные PNG mockups как product assets без отдельного owner decision.
 
 ### Approach
-1) Use `docs/UI_CONSOLE_V2_DESIGN.md` as the product/UX source for screen inventory, shell contract, state model and acceptance checklist.
+1) Use `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` as the product/UX source for screen inventory, shell contract, state model and acceptance checklist.
 2) Implement in reviewable PR slices from `docs/BACKLOG.md` Epic 16, starting with shared shell primitives and stage status model.
 3) Reuse existing hooks/API clients; keep backend/API schemas unchanged unless a later slice explicitly changes scope.
-4) Use the data source map in `docs/UI_CONSOLE_V2_DESIGN.md`; render explicit empty/partial states for missing data instead of silently adding API fields.
+4) Use the data source map in `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`; render explicit empty/partial states for missing data instead of silently adding API fields.
 5) Move stage surfaces one by one, preserving existing critical operator-facing selectors or migrating tests deliberately; do not reintroduce hidden compatibility DOM.
 6) Update `ui/e2e/live-flow.spec.ts` in the same wave:
    - `init-inspect`: validate Source/Readiness, run Analysis, inspect Review Evidence, check Publish gate, and assert top strip/right inspector/activity drawer on each transition.
@@ -801,7 +801,7 @@ Progress log:
 Status: done.
 
 Goals:
-- [x] Re-audit the implemented Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the saved PNG references.
+- [x] Re-audit the implemented Console V2 against `docs/BACKLOG.md` Epic 16, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and the saved PNG references.
 - [x] Fix operator-flow mismatches found by rendered UI QA without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
 - [x] Keep Source, Readiness and Analysis primary paths aligned with the target `Source -> Readiness -> Analysis -> Review -> Publish` journey.
 
@@ -831,7 +831,7 @@ Progress log:
 Status: done.
 
 Goals:
-- [x] Re-audit the current Console V2 implementation against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Re-audit the current Console V2 implementation against Epic 16, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
 - [x] Fix confirmed operator-flow bugs in Source, Analysis, Ask and Publish without changing backend API, schemas, runtime contracts, CLI flags or workspace contracts.
 - [x] Keep the first viewport aligned with the target Mission Control questions: workspace health, current pipeline status, blocker, reviewable evidence/logs and Git publication path.
 
@@ -861,7 +861,7 @@ Progress log:
 Status: done.
 
 Goals:
-- [x] Re-audit Console V2 recovery actions against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
+- [x] Re-audit Console V2 recovery actions against Epic 16, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and rendered local UI evidence.
 - [x] Fix confirmed operator-flow bugs where an empty-stage recovery action is shown but blocked, or readiness can be bypassed by a competing local action.
 - [x] Keep Source -> Readiness -> Analysis -> Review recovery behavior aligned with the approved Mission Control design.
 
@@ -890,7 +890,7 @@ Progress log:
 Status: done.
 
 Goals:
-- [x] Re-audit Publish Git Review Room against Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and the approved saved PNG baseline.
+- [x] Re-audit Publish Git Review Room against Epic 16, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and the approved saved PNG baseline.
 - [x] Fix confirmed publication-gate UI/UX bugs so commit and proposal-branch Git mutations are blocked consistently when hard publish blockers exist.
 - [x] Keep operator recovery clear: publication blockers must be visible in the gate panel, right inspector and action disabled states.
 
@@ -1006,7 +1006,7 @@ Progress log:
 Status: done.
 
 Goals:
-- [x] Re-audit current Console V2 against `docs/BACKLOG.md` Epic 16, `docs/UI_CONSOLE_V2_DESIGN.md` and all saved `docs/assets/ui-console-v2/*.png` references after 16U.
+- [x] Re-audit current Console V2 against `docs/BACKLOG.md` Epic 16, `docs/archive/design/UI_CONSOLE_V2_DESIGN.md` and all saved `docs/assets/ui-console-v2/*.png` references after 16U.
 - [x] Fix confirmed narrow desktop UI overflow where the fixed three-column shell leaves the central workbench too narrow for Review/Proposals/Publish stage grids.
 - [x] Preserve wide desktop first-viewport shell behavior and mobile page-scroll behavior.
 
@@ -1034,7 +1034,7 @@ Progress log:
 - `ui/src/App.tsx`, `ui/src/styles.css`, `ui/src/components/*`, `ui/src/hooks/*`, `ui/src/lib/*`
 - `ui/src/App.test.tsx`, `ui/e2e/live-flow.spec.ts`, `ui/playwright.live.config.ts` only if artifact output behavior changes
 - `scripts/frontend-live-e2e.sh` only if the public live shell changes; `scripts/frontend-status-reasons.sh` only if a separate classification slice changes reason taxonomy; `scripts/tests/frontend_live_e2e_contract_test.py`
-- `docs/UI_CONSOLE_V2_DESIGN.md`, `docs/BACKLOG.md`, `docs/PLANS.md`
+- `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`, `docs/BACKLOG.md`, `docs/PLANS.md`
 - implementation docs: `README.md`, `docs/ARCHITECTURE.md`, `docs/TESTING_STRATEGY.md`, `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 
 ### Acceptance criteria

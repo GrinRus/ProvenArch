@@ -1,8 +1,6 @@
 package providercommon
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,22 +9,6 @@ import (
 	acpruntime "github.com/GrinRus/ProvenArch/internal/runtime"
 	"github.com/GrinRus/ProvenArch/internal/runtime/runnerdiag"
 )
-
-func WrapCommandFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
-	message, rawOutputRefs := BuildFailureMessage(provider, task, "exec", cause, stdout, stderr, nil)
-	if errors.Is(cause, context.DeadlineExceeded) {
-		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeTimeout, message, stdout, stderr, rawOutputRefs, cause)
-	}
-	if errors.Is(cause, context.Canceled) {
-		return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunCanceled, message, stdout, stderr, rawOutputRefs, cause)
-	}
-	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRunnerUnavailable, message, stdout, stderr, rawOutputRefs, cause)
-}
-
-func WrapContractFailure(provider acpruntime.Provider, task acpruntime.Task, stdout string, stderr string, cause error) error {
-	message, rawOutputRefs := BuildFailureMessage(provider, task, "contract", cause, stdout, stderr, nil)
-	return acpruntime.WrapRunnerErrorWithDiagnostics(provider, acpruntime.ErrorCodeRuntimeContract, message, stdout, stderr, rawOutputRefs, cause)
-}
 
 func BuildFailureMessage(
 	provider acpruntime.Provider,

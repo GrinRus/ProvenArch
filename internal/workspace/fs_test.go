@@ -79,29 +79,6 @@ func TestWriteFileAtomicSurfacesParentSyncFailure(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomicWithLastGoodCanRecoverMissingCurrent(t *testing.T) {
-	ws := Root{Path: t.TempDir()}
-	rel := "reports/taskruns/run-history.json"
-	content := []byte("{\"version\":1,\"items\":[]}\n")
-	if err := ws.WriteFileAtomicWithLastGood(rel, content); err != nil {
-		t.Fatalf("write current and last-good: %v", err)
-	}
-	if err := os.Remove(filepath.Join(ws.Path, rel)); err != nil {
-		t.Fatalf("remove current: %v", err)
-	}
-
-	raw, recovered, err := ws.ReadFileWithLastGood(rel)
-	if err != nil {
-		t.Fatalf("read with last-good fallback: %v", err)
-	}
-	if !recovered {
-		t.Fatal("expected fallback to last-good")
-	}
-	if string(raw) != string(content) {
-		t.Fatalf("expected last-good content %q, got %q", string(content), string(raw))
-	}
-}
-
 func TestWorkspaceReadWriteRejectSymlinkEscape(t *testing.T) {
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("outside\n"), 0o644); err != nil {

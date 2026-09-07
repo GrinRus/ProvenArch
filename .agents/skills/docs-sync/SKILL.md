@@ -1,13 +1,30 @@
 ---
 name: acp-docs-sync
-description: Используй, когда изменения кода требуют обновления документации. Держит README/docs/ARCHITECTURE/docs/STAKEHOLDER_DOC в согласованном виде.
+description: Обновить затронутые behavior/spec/status документы ACP после изменения реализации, контракта, testing или agent workflow; проверить ссылки и согласованность источников.
 ---
 
-## Инструкции
-1) Определи, какие документы затронуты.
-2) Обнови docs так, чтобы они соответствовали поведению.
-3) Убедись, что нет противоречий между README/docs/ARCHITECTURE/docs/STAKEHOLDER_DOC и схемами.
+## Маршрутизация
 
-**Важно:** repository entrypoint `README.md` ведётся на EN. Детальные stakeholder/engineering
-документы пока ведутся преимущественно на RU; localized variants используют явный language suffix
-(`README.ru.md`, `*.en.md` и т.п.).
+Прочитать [DOCS_POLICY](../../../docs/DOCS_POLICY.md): там находятся language policy, владельцы
+содержания и карта «тип изменения → документы». [AGENT_DEVELOPMENT](../../../docs/AGENT_DEVELOPMENT.md)
+связывает код со specs и checks. Не дублировать эти карты в новых инструкциях.
+
+Определить, что изменилось для пользователя или maintainer, и обновить только соответствующие
+разделы. Runtime change обычно затрагивает PIPELINE_SPEC/ARCHITECTURE; API spec меняется при
+изменении API. Для schema diff использовать `acp-schema-guardian`; user-visible behavior отражать
+в CHANGELOG. Documentation-only slice не должен попутно менять runtime prompts или release policy.
+
+Статус брать из evidence active plan и canonical matrix в
+[STAKEHOLDER_DOC](../../../docs/STAKEHOLDER_DOC.md); [BACKLOG](../../../docs/BACKLOG.md) хранит
+acceptance. Расхождение документов требует проверки evidence, а не предположения о закрытом epic.
+Не переписывать статусы соседней remediation программы при локальной правке routing.
+
+## Проверка
+
+Выполнить `make verify-agent-guidance` для структуры skills/plans и локальных ссылок
+(прямой эквивалент — `./scripts/run-go.sh test ./internal/docsync`). Проверить смысл ссылок и claims вручную: green check
+не доказывает implementation status. Для изменённого контракта дополнительно выполнить
+`make contracts-check`; installation/toolchain route — [CONTRIBUTING](../../../CONTRIBUTING.md).
+
+Историю переносить по правилам PLANS/DOCS_POLICY, сохраняя ссылки и evidence. Не поддерживать
+вручную вторую stakeholder matrix или копии catalog/runbook constants.

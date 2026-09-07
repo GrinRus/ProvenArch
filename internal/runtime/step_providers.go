@@ -16,6 +16,10 @@ const (
 	ProviderSourceWorkspace ProviderSource = "workspace"
 	ProviderSourceEnv       ProviderSource = "env"
 	ProviderSourceOverride  ProviderSource = "override"
+	// ProviderSourceTaskPreset identifies a provider explicitly admitted from
+	// the Task runner preset. It is distinct from a mutable process override so
+	// the Attempt snapshot can preserve the source that won the admission.
+	ProviderSourceTaskPreset ProviderSource = "task_preset"
 )
 
 const (

@@ -6,6 +6,60 @@ export type PublishGateItem = {
   tone: "info" | "ok" | "warn" | "error";
 };
 
+export type PublishReviewContext = {
+  sourceMode: "snapshot" | "current";
+  routeRunId?: string;
+  selectedRunId?: string | null;
+  taskId?: string;
+  attemptId?: string;
+  selectedRunStatus?: string;
+  selectedRunAuthoritative?: boolean;
+  evidenceStatus?: string;
+  reviewRunId?: string;
+  reviewSourceRunId?: string;
+  reviewStatus?: string;
+};
+
+export function buildPublishContextGateItems(context: PublishReviewContext): PublishGateItem[] {
+  if (context.sourceMode === "current") {
+    return [];
+  }
+  const missingContext = [context.taskId, context.attemptId, context.routeRunId].some((value) => !value?.trim());
+  if (missingContext || context.selectedRunId !== context.routeRunId) {
+    return [{
+      label: "Exact Task publication context",
+      detail: "Select a completed Task Attempt before publishing; task, attempt and run identities must remain pinned together.",
+      tone: "error",
+    }];
+  }
+  if (context.selectedRunStatus !== "succeeded" || context.selectedRunAuthoritative !== true) {
+    return [{
+      label: "Authoritative Attempt",
+      detail: "The selected Attempt is not a successful authoritative run, so publication stays blocked.",
+      tone: "error",
+    }];
+  }
+  if (context.reviewStatus || context.reviewRunId !== context.routeRunId || context.reviewSourceRunId !== context.routeRunId) {
+    return [{
+      label: "Fresh review evidence",
+      detail: "Load review evidence generated for this exact run before publication; stale or mismatched review state is rejected.",
+      tone: "error",
+    }];
+  }
+  if (context.evidenceStatus !== "available") {
+    return [{
+      label: "Fresh review evidence",
+      detail: "The selected run evidence is missing, partial or stale; publication requires a complete current snapshot.",
+      tone: "error",
+    }];
+  }
+  return [{
+    label: "Exact Task publication context",
+    detail: `Task ${context.taskId} · Attempt ${context.attemptId} · Run ${context.routeRunId}; review evidence is current.`,
+    tone: "ok",
+  }];
+}
+
 export function comparePublishArtifactPriority(left: Artifact, right: Artifact): number {
   const priority = (artifact: Artifact): number => {
     switch (artifact.path) {

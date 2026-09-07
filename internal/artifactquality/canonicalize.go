@@ -269,11 +269,6 @@ func stripGeneratedRepoRootSuffix(value string) string {
 	return value[:idx]
 }
 
-func validateRepoEvidencePathExists(repoRoot string, evidencePath string) error {
-	_, err := resolveRepoEvidencePath(repoRoot, evidencePath)
-	return err
-}
-
 func validateRepoEvidence(repoRoot string, evidencePath string, lines *contracts.LineRange, excerpt, excerptHash string) error {
 	resolved, err := resolveRepoEvidencePath(repoRoot, evidencePath)
 	if err != nil {

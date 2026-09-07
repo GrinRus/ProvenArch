@@ -22,18 +22,6 @@ export function dedupeArtifactsByPath<T extends { path: string }>(items: T[]): T
   return Array.from(deduped.values()).sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export function indexArtifactPath<T extends { path: string }>(artifacts: T[], suffix: string): string | null {
-  const match = artifacts.find((artifact) => artifact.path.endsWith(suffix));
-  return match ? match.path : null;
-}
-
-export function splitListInput(input: string): string[] {
-  return input
-    .split(/[,\n]/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
 export function formatTimestamp(value?: string | null): string {
   if (!value) {
     return "-";

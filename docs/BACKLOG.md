@@ -4,7 +4,10 @@
 Для MVP-эпиков `Suggested PR slices` зафиксированы прямо в этом файле.
 Required CI для MVP опирается на schema/contracts, synthetic fixtures, fake runner + recorded artifacts и не требует live headless provider binaries.
 
-Статус выполнения и текущие активные engineering slices ведутся в `docs/STAKEHOLDER_DOC.md` (Canonical Stakeholder Matrix) и `docs/PLANS.md`; этот файл остаётся reference/acceptance backlog, а не единственным active tracker.
+Статус выполнения ведётся в [Canonical Stakeholder Matrix](STAKEHOLDER_DOC.md#0-canonical-stakeholder-matrix-source-of-truth),
+а текущая работа и её зависимости — в [индексе активных планов](PLANS.md#active-plan-index).
+Этот файл остаётся reference/acceptance backlog: наличие описанного slice не означает, что его нужно
+начать или что он ещё не реализован.
 
 ## Epic 1 — Управление workspace
 Acceptance:
@@ -226,7 +229,7 @@ Suggested PR slices:
 ## Epic 16 — ACP Console V2 UX + Live E2E Coverage
 
 Acceptance:
-- исторический UI baseline зафиксирован в `docs/UI_CONSOLE_V2_DESIGN.md`; его PNG references
+- исторический UI baseline зафиксирован в `docs/archive/design/UI_CONSOLE_V2_DESIGN.md`; его PNG references
   удалены после supersession и не являются текущим target
 - implementation baseline после rebase на `origin/main` `3aa458a`: текущий UI уже имеет
   stage shell, компактный activity drawer/artifact links, optional `UI_E2E_QA_SMOKE=1`,
@@ -492,7 +495,7 @@ Suggested PR slices:
 ## Epic 19 — Code Quality Audit Remediation (Local-first MVP)
 
 Status: implementation-complete and merged into `main` at `02716bb`.
-Source-of-truth findings — `docs/CODE_AUDIT_2026-07-10.md` at baseline
+Source-of-truth findings — `docs/archive/audits/CODE_AUDIT_2026-07-10.md` at baseline
 `122e4c9b5a91b29e243677c0dac0fe2ebfca226b`.
 
 ### Goal
@@ -896,14 +899,14 @@ Context:
   однако недостаточно надёжно отвечает на вопросы «какой run я смотрю», «какие данные
   проверены», «что именно будет закоммичено» и «что считается завершённым».
 - Это corrective successor для UI/IA частей Epics 16–17. Его historical target описан в
-  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) и
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md`](archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_DESIGN.md) и
   superseded task-first Epic 23. После
   реализации Epic 20 primary IA `Home / Runs / Knowledge / Changes`, contextual Setup и global
   Ask заменяют требование о восьми обязательных numbered stages; backend/runtime contracts,
   local-first boundary, deterministic required CI и release live-E2E guardrails сохраняются.
 - Historical delivery order, обязательные contract-first PR, code/test map, cutover/rollback и
   reference matrix были зафиксированы в
-  [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
+  [`UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md`](archive/design/UI_ARCHITECTURE_CHANGE_REVIEW_MIGRATION_PLAN.md).
   План отображает эти же `20A–20N` и не является вторым roadmap.
 - Исходный trust audit подтвердил несколько defects: selected historical run терял обязательный
   `staged_path`, UI обещает `Commit selected artifacts`, хотя backend выполняет `git add -A`,
@@ -2435,7 +2438,11 @@ selected-run snapshot that fails provider-free integrity checks. Technical `PASS
 must move toward the orchestrator; provider-authored findings and questions remain advisory semantic
 input and never bypass deterministic validation.
 
-### Confirmed gaps on current `main`
+### Historical entry gaps (before W24 implementation)
+
+The following findings motivated the epic. They describe its entry baseline, not current `main`;
+the implementation notes under each slice and the canonical stakeholder matrix record the resulting
+state. W24G remains deferred and trusted live qualification remains separate.
 
 - validator artifact admission parses `validator-verdict.json`, but does not bind its `run_id` or
   `checked_paths` to the current runtime task;

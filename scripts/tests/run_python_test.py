@@ -75,6 +75,47 @@ class RunPythonTest(unittest.TestCase):
             self.assertIn("Python 3.10.9 is required", result.stderr)
             self.assertNotIn("should-not-run", result.stdout)
 
+    def test_discovers_worktree_venv_without_shell_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".python-version").write_text("3.10.8\n", encoding="utf-8")
+            self._write_fake_python(root / ".venv" / "bin", "3.10.8", "python")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("ACP_PYTHON_")}
+            result = subprocess.run(
+                ["bash", str(self.runner), "--venv-marker"],
+                env={**env, "PROVENARCH_ROOT": str(root)},
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual("--venv-marker", result.stdout.strip())
+
+    def test_explicit_python_override_precedes_worktree_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".python-version").write_text("3.10.8\n", encoding="utf-8")
+            venv_python = self._write_fake_python(root / ".venv" / "bin", "3.10.8", "python")
+            venv_python.write_text(venv_python.read_text().replace('printf "%s\\n" "$@"', 'echo unexpected-venv'), encoding="utf-8")
+            override = self._write_fake_python(root / "override", "3.10.8")
+            result = subprocess.run(
+                ["bash", str(self.runner), "--override-marker"],
+                env={**os.environ, "PROVENARCH_ROOT": str(root), "ACP_PYTHON_BIN": str(override)},
+                capture_output=True, text=True, check=True,
+            )
+            self.assertEqual("--override-marker", result.stdout.strip())
+
+    def test_base_locator_yields_to_worktree_venv_after_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".python-version").write_text("3.10.8\n", encoding="utf-8")
+            base = self._write_fake_python(root / "base", "3.10.8")
+            base.write_text(base.read_text().replace('printf "%s\\n" "$@"', 'echo base-runtime'), encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("ACP_PYTHON_")}
+            env.update({"PROVENARCH_ROOT": str(root), "ACP_PYTHON_BASE_BIN": str(base)})
+            before = subprocess.run(["bash", str(self.runner), "--marker"], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual("base-runtime", before.stdout.strip())
+            self._write_fake_python(root / ".venv/bin", "3.10.8", "python")
+            after = subprocess.run(["bash", str(self.runner), "--marker"], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual("--marker", after.stdout.strip())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GrinRus/ProvenArch/internal/pathscope"
 	"github.com/GrinRus/ProvenArch/internal/validation"
 )
 
@@ -469,8 +470,8 @@ func validateScope(scope Scope, label string) []string {
 				problems = append(problems, fmt.Sprintf("%s.repositories[%d].paths[%d] is required", label, index, pathIndex))
 				continue
 			}
-			if strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") {
-				problems = append(problems, fmt.Sprintf("%s.repositories[%d].paths[%d] must be workspace-relative", label, index, pathIndex))
+			if _, err := pathscope.Compile(clean); err != nil {
+				problems = append(problems, fmt.Sprintf("%s.repositories[%d].paths[%d] must be a normalized repository-relative path pattern: %v", label, index, pathIndex, err))
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPublishFolderSummaries, buildPublishGateItems, comparePublishArtifactPriority, gitDiffScopeHint, slugify } from "./publishUtils";
+import { buildPublishContextGateItems, buildPublishFolderSummaries, buildPublishGateItems, comparePublishArtifactPriority, gitDiffScopeHint, slugify } from "./publishUtils";
 
 const artifact = (path: string, label = path) => ({ path, kind: "markdown", label });
 
@@ -31,5 +31,41 @@ describe("publish selectors", () => {
     expect(gitDiffScopeHint(null)).toContain("full workspace Git inventory");
     expect(slugify(" Orders & API ")).toBe("orders-api");
     expect(slugify("***")).toBe("my-service");
+  });
+
+  it("blocks unbound, partial and mismatched review contexts", () => {
+    const base = {
+      sourceMode: "snapshot" as const,
+      routeRunId: "run-current",
+      selectedRunId: "run-current",
+      taskId: "task-current",
+      attemptId: "attempt-current",
+      selectedRunStatus: "succeeded",
+      selectedRunAuthoritative: true,
+      evidenceStatus: "available",
+      reviewRunId: "run-current",
+      reviewSourceRunId: "run-current",
+      reviewStatus: "",
+    };
+    expect(buildPublishContextGateItems({ ...base, taskId: "" })[0].tone).toBe("error");
+    expect(buildPublishContextGateItems({ ...base, evidenceStatus: "partial" })[0].detail).toContain("partial");
+    expect(buildPublishContextGateItems({ ...base, reviewSourceRunId: "run-old" })[0].detail).toContain("mismatched");
+  });
+
+  it("accepts only a current exact Task review context", () => {
+    const gate = buildPublishContextGateItems({
+      sourceMode: "snapshot",
+      routeRunId: "run-current",
+      selectedRunId: "run-current",
+      taskId: "task-current",
+      attemptId: "attempt-current",
+      selectedRunStatus: "succeeded",
+      selectedRunAuthoritative: true,
+      evidenceStatus: "available",
+      reviewRunId: "run-current",
+      reviewSourceRunId: "run-current",
+      reviewStatus: "",
+    });
+    expect(gate).toEqual([{ label: "Exact Task publication context", detail: "Task task-current · Attempt attempt-current · Run run-current; review evidence is current.", tone: "ok" }]);
   });
 });

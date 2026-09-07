@@ -6,7 +6,6 @@ export type RunExplorerState = {
   runList: RunListItem[];
   coordination: RunCoordination;
   runActionStatus: string;
-  cancelBusy: boolean;
 };
 
 export type RunExplorerAction =
@@ -14,10 +13,8 @@ export type RunExplorerAction =
   | { type: "setRunStatus"; runStatus: RunStatusResponse | null }
   | { type: "setRunList"; runList: RunListItem[] }
   | { type: "setCoordination"; coordination: RunCoordination }
-  | { type: "upsertRunListItem"; item: RunListItem }
   | { type: "clearRunStatusForRun"; runId: string }
-  | { type: "setRunActionStatus"; runActionStatus: string }
-  | { type: "setCancelBusy"; cancelBusy: boolean };
+  | { type: "setRunActionStatus"; runActionStatus: string };
 
 export const initialRunExplorerState: RunExplorerState = {
   runId: null,
@@ -25,7 +22,6 @@ export const initialRunExplorerState: RunExplorerState = {
   runList: [],
   coordination: {},
   runActionStatus: "",
-  cancelBusy: false,
 };
 
 export function runExplorerReducer(state: RunExplorerState, action: RunExplorerAction): RunExplorerState {
@@ -38,11 +34,6 @@ export function runExplorerReducer(state: RunExplorerState, action: RunExplorerA
       return { ...state, runList: action.runList };
     case "setCoordination":
       return { ...state, coordination: action.coordination };
-    case "upsertRunListItem":
-      return {
-        ...state,
-        runList: [action.item, ...state.runList.filter((run) => run.run_id !== action.item.run_id)],
-      };
     case "clearRunStatusForRun":
       if (state.runStatus?.run_id !== action.runId) {
         return state;
@@ -50,8 +41,6 @@ export function runExplorerReducer(state: RunExplorerState, action: RunExplorerA
       return { ...state, runStatus: null };
     case "setRunActionStatus":
       return { ...state, runActionStatus: action.runActionStatus };
-    case "setCancelBusy":
-      return { ...state, cancelBusy: action.cancelBusy };
     default:
       return state;
   }

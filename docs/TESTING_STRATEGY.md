@@ -71,6 +71,14 @@
   workspace containment and byte-identical read-only scans; response version remains `1`
 - fixture contract gate проверяет parse/semantics recorded artifacts (`meta.step_id`, `repo_scopes`)
 - `git_url` freshness проверяется только на local bare remotes: unpinned cache должен fetch/reset-иться на новый remote default `HEAD`, pinned SHA/ref остаётся выбранным ref, а `path` checkout не мутируется
+- Git diff inventory tests use `status --porcelain=v2 -z` and batched `numstat` fixtures to preserve
+  spaces, rename/copy source paths, staged/unstaged modes/OIDs, binary/deleted/untracked stats and
+  full-workspace fingerprint semantics; a synthetic 275-file regression asserts a fixed Git-command
+  budget and the accompanying benchmark reports `git-procs` as a diagnostic metric.
+- Task/Attempt runtime snapshot tests use mixed per-step providers and independent env/workspace/
+  provider-default model sources, then compare the admitted snapshot with its queued/restart
+  reconstruction. Invalid persisted provider identity must fail closed rather than re-resolving
+  mutable workspace settings or silently selecting a fallback adapter.
 - collect contract fixtures must include at least one authored document and one repo-backed
   citation; sparse `documents: []`, `citations: []`, empty document/citation binding arrays,
   unknown citation document IDs, and one-way document/citation bindings are negative fixtures,
@@ -144,10 +152,13 @@ Baseline scenario set:
   - `CancelRun` для active run даёт cooperative cancel + `failed` + `error_code=run_canceled`, очередь продолжает работать
   - workspace-owned persistence использует fault-injection tests для atomic write failure points: before write, before rename и parent directory sync; failed writes must not leave partial current JSON or stale temp files
   - run-history persistence пишет `.last-good`; service startup recovers from malformed current `reports/taskruns/run-history.json` when the last-good copy is valid and records a recovery diagnostic path
+  - run-history retention budgets only terminal records; every `queued`/`running` run remains in memory and persisted history with its Task/Attempt linkage under terminal pressure
   - async run panic isolation covers terminal `failed/internal_failure` history, service survival after a panicking runner, active-slot/cancel cleanup and pending-run continuation; direct `Service.Run` panic tests continue to require caller-visible re-panic
   - server-owned shutdown tests cover active run context cancellation, queued pending run `run_canceled` terminalization without runner start, post-shutdown `ErrServiceClosed`, and API `Serve` context cancellation waiting for orchestrator shutdown
+  - Attempt registry watchers are server-owned: run cancellation and server shutdown publish the terminal Attempt before watcher cancellation, repeated shutdown is safe, and the watcher WaitGroup is quiescent without goroutine/race leaks
   - coherent API session generation tests cover request-scoped workspace/service/runtime snapshots, direct/onboarding effective runtime readback, `409` conflicts for workspace switch/runtime switch/runtime profile mutation during active async work, unchanged manifest on conflict, and concurrent polling plus mutation attempts under `go test -race ./internal/api`
   - initial async run queueing returns a history persistence error before launching the background run when `run-history.json` cannot be written
+  - contextual Git commit/proposal-branch publication prepares an atomic `.git/acp-publication-journal.json` intent, clears it on Git no-op/failure, and restart reconciliation links only exact parent/message or branch/head matches; ambiguous pending intents remain unavailable
   - stale persisted `queued` run при старте сервиса reconciled в `failed` + `error_code=run_reconciled_after_restart`
   - stale persisted `running` run auto-resume-ится с тем же `run_id`, если присутствуют resumable shard artifacts; иначе reconciled в `failed` + `error_code=run_reconciled_after_restart`
 - runtime timeout control:
@@ -245,7 +256,7 @@ Baseline scenario set:
 - workspace sandbox root для integration tests без записи вне test workspace
 - internal runtime/orchestration seams:
   - `internal/runtimeprofile` keeps runtime profile patch validation/merge/manifest rewrite shared below API adapters
-  - `RuntimeTaskExecutor` keeps task envelope/timeout/heartbeat/provider execution behavior characterization-covered without coupling it to sharding planner tests
+  - `defaultRuntimeTaskExecutor` keeps task envelope/timeout/heartbeat/provider execution behavior characterization-covered without coupling it to sharding planner tests
   - `run_finalization.go`, `step_handlers.go` and `artifact_registry.go` keep terminal status, step dispatch and artifact list behavior in narrow files while existing async/docflow/sharding tests preserve external run contracts
   - `sharding_coordinator.go`, `sharding_scheduler.go`, `sharding_summary_store.go`, `sharding_artifacts.go` and `sharding_planner.go` keep planning, scheduling, summary/checkpoint persistence, artifact materialization and apply/replay coordination in separate files while preserving the existing sharding characterization tests
   - `ShardSummaryStore` keeps persisted shard-summary/checkpoint behavior covered separately from scheduler ordering and apply/replay coordinator behavior
@@ -269,18 +280,21 @@ Implemented required jobs:
   - `go test ./...`
   - `./scripts/run-python.sh -m unittest discover -s scripts/tests -p '*_test.py'`
   - includes docs-consistency gate (`internal/docsync`) для truth-sync/stale-marker/CLI-docs parity checks
+  - agent guidance checks validate skill metadata/unique names, local file/fragment and script
+    references, and active plan index/status/body structure; these checks do not infer semantic
+    completion or release readiness from checkboxes
   - includes harness regression fixtures for batch failure classification (`scripts/tests/*`)
   - `make test-stress` (coordinator explicit-queue and pending-supersession regression loop)
   - `go build ./cmd/acp`
 - `ui`
   - `./scripts/run-npm.sh ci --prefix ui`
-  - `./scripts/run-npm.sh run typecheck --prefix ui`
   - `./scripts/run-npm.sh run test --prefix ui -- --run`
   - `./scripts/run-npm.sh run build --prefix ui`
-  - `make verify-ui-determinism` builds the exact checked-out commit in two independent
-    temp roots and compares sorted `ui/dist` path/digest manifests
-  - `make verify-ui-dist` rebuilds and re-embeds `internal/api/ui_dist`, then fails if the
-    tracked embedded bundle is stale
+  - `make verify-ui-determinism` builds the current worktree in two independent temp roots and
+    compares sorted `ui/dist` path/digest manifests; set `UI_SOURCE=HEAD` or an exact Git ref to
+    verify committed sources explicitly
+  - `make verify-ui-dist` builds into temporary output and compares `internal/api/ui_dist`
+    without rewriting the embedded bundle or requiring staging
 
 Implemented additional jobs:
 - `lint`
@@ -288,11 +302,15 @@ Implemented additional jobs:
   - covers Go formatting, ShellCheck for production shell scripts and UI typecheck in one
     local/CI-equivalent entrypoint
 - `golden`
-  - `TestScenarioFixturesDeterministicInitPipeline`
-  - `TestScenarioFixtureLayoutExists`
-  - `TestScenarioRunnerFixturesContractAndSemantics`
-  - `TestScenarioDomainTaskEnvelopesDeterministic`
-  - `TestDeterministicSnapshotScopeExcludesRunSpecificArtifacts`
+  - `scripts/run-golden-tests.sh` first checks that every expected test is present in the compiled
+    package, then runs the exact anchored selection as JSON and requires a `pass` event for every
+    test. A rename/removal or Go's successful `[no tests to run]` result is therefore a failure.
+  - `TestScenarioFixturesHaveTrackedGoldenSnapshots`
+  - `TestPersistPromotedArchitectureSnapshotCopiesOnlyArchitectureRoots`
+  - `TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts`
+  - `TestRefreshSelectivelyReplaysUnaffectedBaselineShards`
+  - `TestRunProgressUsesOnlyDeterministicPipelineSteps`
+  - `TestWriteRefreshMaterializationRecordsPreservedAndRemoved`
 - `smoke-cli`
   - `acp run --workspace ... --pipeline init --runtime fake --non-interactive`
   - `acp run --workspace ... --pipeline refresh --runtime fake --non-interactive`
@@ -310,6 +328,8 @@ Implemented additional jobs:
   - installs Chromium and runs `npm run e2e:mock --prefix ui`, which executes eight local
     provider-free Playwright scenarios and fails on skipped scenarios, console errors or critical
     horizontal overflow
+  - mock E2E allocates a private results directory and loopback server per invocation; it never
+    silently reuses a server from another worktree or deletes another run's evidence
   - optional local coverage is available through `npm run coverage --prefix ui`; it uses locked
     `@vitest/coverage-v8`, includes all `ui/src` implementation files and writes ignored
     `ui/coverage/coverage-summary.json` / `coverage-final.json`
@@ -326,6 +346,18 @@ Release workflow hardening:
   `ACP_RELEASE_MATRIX_IDS` for composite release evidence, or the compatible single-matrix
   `ACP_RELEASE_VERDICT_PATH` / `ACP_RELEASE_MATRIX_ID`; the write-enabled GoReleaser/provenance job has
   `needs: verify-release-evidence`.
+- release verdicts use schema version 2 and must carry clean-tree/generator provenance, a valid,
+  fresh `source_sha`, canonical `baseline`/`parallel-default` execution settings, zero runtime-flow
+  issue counters/provider-budget exhaustion/artifact-quality findings, complete two-sweep/two-profile/
+  provider records, non-empty per-record artifacts with SHA-256 digests, and matching Provider
+  Matrix/Run Details plus tracked verdict/profile-matrix artifacts. The tag workflow
+  passes `--tag "$GITHUB_REF_NAME" --source-sha "$GITHUB_SHA"`; qualification source must be an
+  ancestor of that exact tag commit, so evidence from an unrelated history fails closed. SWE
+  assessments must match the matrix/source SHA, include assessor and timestamp, reference the exact
+  verdict file, and be `accepted`.
+- owner waivers are limited to the exact tracked
+  `reports/release_owner_waiver_<tag>.json` payload and remain `UNQUALIFIED PRERELEASE`; unknown
+  fields, extra waived requirements, missing tag binding, or a tag/source mismatch are rejected.
 - GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 
@@ -538,21 +570,23 @@ Release workflow hardening:
 
 - любой required CI run проходит без live network dependencies
 - любое изменение schema/spec/examples требует update fixtures/golden в том же PR
-- live headless provider smoke не блокирует merge; для обязательного CI используется только `contracts`, `backend`, `ui`, `golden`, `smoke-cli`, `smoke-api`
+- live headless provider smoke не блокирует merge; deterministic CI policy включает `contracts`, `backend`, `ui`, `lint`, `golden`, `smoke-cli`, `smoke-api`; фактические branch-protection settings проверяются отдельно
 - release gate выполняется вручную перед релизом на trusted машине по `docs/RELEASE_LIVE_E2E_RUNBOOK.md`
 - pre-tag release check использует `scripts/verify-release-verdict.py` поверх уже созданного `reports/release_verdict_<matrix-id>.json`; это не required CI и не live runner
 - scenario fixtures и golden outputs считаются канонической regression surface до появления production-scale test corpus
-- optional readable golden export доступен для review-diff:
-  - `ACP_EXPORT_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
+- readable golden exports уже находятся в `fixtures/scenarios/*/golden/readable/` и доступны для review-diff.
+  Текущий golden job проверяет сохранённые snapshots и отдельные deterministic snapshot/refresh
+  regression paths; сравнение свежего pipeline output с этими историческими exports не выполняется.
 - tracked generated artifacts policy:
   - `internal/api/ui_dist/*` и `fixtures/scenarios/*/golden/readable/*` остаются versioned в git как часть baseline/release surface
   - `make verify-readable-fixtures` checks every readable export path/digest against its adjacent
     machine `snapshot.sha256`; machine-only snapshot entries remain valid
   - UI source changes must leave `internal/api/ui_dist/*` fresh: run `make build` to regenerate
-    the embedded bundle and `make verify-ui-dist` to prove the committed bundle matches the
+    the embedded bundle and `make verify-ui-dist` to prove the working-tree bundle matches the
     current Vite output.
-  - controlled snapshot refresh:
-  - `ACP_UPDATE_SCENARIO_GOLDEN=1 go test ./internal/orchestrator -run TestScenarioFixturesDeterministicInitPipeline -count=1`
+  - автоматической команды export/update этих исторических snapshots сейчас нет. Изменение
+    generation baseline требует отдельного fixture slice с проверяемым способом генерации и review
+    согласованного diff readable outputs и `snapshot.sha256`; static digest check не заменяет генерацию.
 
 ## 9) Технологические defaults
 

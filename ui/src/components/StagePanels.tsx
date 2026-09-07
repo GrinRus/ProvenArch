@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import { AnalysisLiveDiagnosticsPanel, type AnalysisLiveDiagnostics, type AnalysisLiveMetric, type AnalysisLiveTrace } from "./AnalysisDiagnosticsPanel";
-import { ModalDialog } from "./ModalDialog";
-import { RuntimeProfileSettingsPanel } from "./RuntimeProfileSettingsPanel";
 import { RunStatusPanel } from "./RunStatusPanel";
 import { RecoveryPanel, RunResultPanel, StructuredRunProgress, TargetedRerunPanel } from "./RunOutcome";
 import { TabNav, tabPanelProps } from "./TabNav";
@@ -21,7 +19,7 @@ import {
   numericField,
   rawOutputRefsFromEntry,
 } from "../features/analysis/analysisUtils";
-import { isRunCanceled, isRunReconciledAfterRestart, isRunnerUnavailable, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
+import { isRunnerUnavailable, runOutcomeLabel, runOutcomeTone } from "../lib/runState";
 import {
   groupArtifactsByFolder,
 } from "../lib/artifactFilters";
@@ -39,7 +37,6 @@ import {
   reviewRouteDescription,
 } from "../features/review/reviewUtils";
 import { deriveReviewDomainMap } from "../features/review/reviewDomainMapUtils";
-import { failureEvidenceSummary, failureRecoveryGuidance } from "../features/analysis/analysisRecoveryUtils";
 export { ReadinessStagePanel, SourceStagePanel } from "../features/setup/SetupStagePanels";
 export { PublishStagePanel } from "../features/publish/PublishStagePanel";
 import { GitDiffView } from "./GitDiffView";
@@ -73,9 +70,6 @@ import type {
 import type { LoadGitDiffOptions } from "../lib/gitDiffApi";
 export type AnalysisStageProps = {
   detailMode?: boolean;
-  readOnly?: boolean;
-  busy: boolean;
-  cancelBusy: boolean;
   runId: string | null;
   runStatus: RunStatusResponse | null;
   runList: RunListItem[];
@@ -94,10 +88,6 @@ export type AnalysisStageProps = {
   gitDiff: GitDiffResponse | null;
   gitDiffStatus: string;
   onLoadGitDiff: (options: LoadGitDiffOptions) => void;
-  focusBlockerSignal: number;
-  onRunPipeline: (pipeline: "init" | "refresh", intent?: "start" | "queue") => void;
-  onCancelSelectedRun: () => void;
-  onCancelRun: (runId: string) => void;
   onSelectRun: (runId: string) => void;
   onOpenArtifact: (path: string) => void;
 	onOpenArchitecture: () => void;
@@ -105,9 +95,6 @@ export type AnalysisStageProps = {
 
 export function AnalysisStagePanel({
   detailMode = false,
-  readOnly = false,
-  busy,
-  cancelBusy,
   runId,
   runStatus,
   runList,
@@ -126,17 +113,12 @@ export function AnalysisStagePanel({
   gitDiff,
   gitDiffStatus,
   onLoadGitDiff,
-  focusBlockerSignal,
-  onRunPipeline,
-  onCancelSelectedRun,
-  onCancelRun,
   onSelectRun,
   onOpenArtifact,
 	onOpenArchitecture,
 }: AnalysisStageProps) {
   const blockerDetailsRef = useRef<HTMLElement>(null);
   const [selectedStepID, setSelectedStepID] = useState("");
-  const [queueConfirmationOpen, setQueueConfirmationOpen] = useState(false);
   const [stepReviewView, setStepReviewView] = useState<"artifacts" | "logs" | "evidence" | "diff">("artifacts");
   const stepTimeline = buildAnalysisStepTimeline(runStatus, runLogs);
   const reviewSteps = runReviewSummary?.steps ?? [];
@@ -159,13 +141,6 @@ export function AnalysisStagePanel({
     blockerDetailsRef.current?.scrollIntoView?.({ block: "center" });
     blockerDetailsRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (focusBlockerSignal <= 0) {
-      return;
-    }
-    focusBlockerDetails();
-  }, [focusBlockerDetails, focusBlockerSignal]);
 
   useEffect(() => {
     if (preferredReviewStep && !reviewSteps.some((step) => step.step_id === selectedStepID)) {
@@ -193,57 +168,24 @@ export function AnalysisStagePanel({
         <StatusBadge tone={selectedRunIsActive ? "warn" : runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
       </div>
 
-      {!detailMode && !readOnly ? <section className="analysis-launcher-hero" aria-labelledby="analysis-launcher-title">
-        <div className="analysis-launcher-copy"><p className="eyebrow">{hasPromotedArchitecture ? "Current snapshot · refresh available" : "Setup complete · ready to run"}</p><h2 id="analysis-launcher-title">{hasPromotedArchitecture ? "Keep the shared architecture current" : "Build the first trustworthy architecture snapshot"}</h2><p>{hasPromotedArchitecture ? "A refresh compares new evidence with the promoted baseline and stops for review before anything is published." : "ProvenArch inspects repository evidence, generates the model and documentation, validates citations, then stops for review before anything is published."}</p></div>
-        <div className="analysis-launcher-actions"><button type="button" className="ui-button tone-primary" onClick={() => onRunPipeline(hasPromotedArchitecture ? "refresh" : "init")} disabled={busy || Boolean(coordination.active_run_id)}>{hasPromotedArchitecture ? "Refresh analysis" : "Run initial analysis"}</button><button type="button" className="ui-button" onClick={() => onOpenArchitecture()}>Review current architecture</button></div>
-      </section> : null}
-
-      {readOnly ? <p className="status info" data-testid="legacy-read-only-notice">Legacy run evidence is read-only. Starting, retrying, queueing and canceling runs are unavailable.</p> : <div className="actions">
-        <button type="button" onClick={() => onRunPipeline("init")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-init-btn">
-          Run initial analysis
-        </button>
-        <button type="button" onClick={() => onRunPipeline("refresh")} disabled={busy || Boolean(coordination.active_run_id)} data-testid="run-refresh-btn">
-          Refresh architecture
-        </button>
-        {coordination.active_run_id ? (
-          <button type="button" onClick={() => setQueueConfirmationOpen(true)} disabled={busy} data-testid="run-queue-refresh-btn">
-            Queue refresh after current run
-          </button>
-        ) : null}
-        <button type="button" onClick={onCancelSelectedRun} disabled={busy || cancelBusy || !runId || !selectedRunIsActive} data-testid="run-cancel-btn">
-          Cancel selected run
-        </button>
-      </div>}
+      <p className="status info" data-testid="legacy-read-only-notice">Legacy run evidence is read-only. Starting, retrying, queueing and canceling runs are unavailable.</p>
       {coordination.active_run_id ? <p className="hint" data-testid="run-active-start-reason">Ordinary start is unavailable while <code>{coordination.active_run_id}</code> is active.</p> : null}
       {coordination.pending ? (
         <section className="subsection" data-testid="pending-run-summary">
           <h2>Pending refresh</h2>
           <p><code>{coordination.pending.run_id}</code> · {coordination.pending.pipeline}. A newly queued refresh replaces this pending run.</p>
-          {!readOnly ? <button type="button" onClick={() => onCancelRun(coordination.pending!.run_id)} disabled={busy || cancelBusy}>Cancel pending refresh</button> : null}
         </section>
       ) : null}
       {runActionStatus ? <p className="status warn">{runActionStatus}</p> : null}
       {detailMode && runStatus?.pipeline === "refresh" ? <RefreshExecutionSummary runStatus={runStatus} /> : null}
-
-      {!readOnly ? <ModalDialog
-        open={queueConfirmationOpen}
-        title={coordination.pending ? "Replace pending refresh" : "Queue refresh"}
-        description={coordination.pending
-          ? `Active run ${coordination.active_run_id}; pending ${coordination.pending.run_id} will be canceled as run_superseded.`
-          : `Refresh will start after active run ${coordination.active_run_id}.`}
-        confirmLabel={coordination.pending ? "Replace pending refresh" : "Queue refresh after current run"}
-        busy={busy}
-        onCancel={() => setQueueConfirmationOpen(false)}
-        onConfirm={() => { setQueueConfirmationOpen(false); onRunPipeline("refresh", "queue"); }}
-      /> : null}
 
 	  {detailMode && runStatus?.status === "succeeded" && !runReviewSummary?.result ? <AnalysisOutcomeFallback runStatus={runStatus} artifacts={artifacts} onOpenArchitecture={onOpenArchitecture} /> : null}
 	  <StructuredRunProgress runStatus={runStatus} review={runReviewSummary} onReviewDetails={handleReviewBlocker} />
       {detailMode ? (
         <div className="run-studio-body">
 		  <RunResultPanel review={runReviewSummary} onExploreArchitecture={onOpenArchitecture} />
-		  <TargetedRerunPanel runStatus={runStatus} review={runReviewSummary} busy={busy} readOnly={readOnly} onRetryStarted={onSelectRun} />
-		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} busy={busy} readOnly={readOnly} onRetryStarted={onSelectRun} onReviewDetails={handleReviewBlocker} />
+		  <TargetedRerunPanel runStatus={runStatus} review={runReviewSummary} />
+		  <RecoveryPanel runStatus={runStatus} review={runReviewSummary} />
           <AnalysisRunTimeline steps={stepTimeline} />
           <AnalysisStepReview
             steps={reviewSteps}
@@ -300,173 +242,6 @@ function RefreshExecutionSummary({ runStatus }: { runStatus: RunStatusResponse }
         <div><dt>Reason</dt><dd>{summary.reason_codes.length > 0 ? summary.reason_codes.join(", ") : "none"}</dd></div>
         <div><dt>Artifacts</dt><dd>{summary.updated} updated · {summary.preserved} preserved · {summary.removed} removed · {summary.uncertain} uncertain</dd></div>
       </dl>
-    </section>
-  );
-}
-
-export function AnalysisRunProgress({
-  runId,
-  runStatus,
-  runtimeLabel,
-  warningCount,
-  errorCount,
-  stepTimeline,
-  blockerCount,
-  actionLabel,
-  onReviewBlocker,
-}: {
-  runId: string | null;
-  runStatus: RunStatusResponse | null;
-  runtimeLabel: string;
-  warningCount: number;
-  errorCount: number;
-  stepTimeline: AnalysisStep[];
-  blockerCount: number;
-  actionLabel: string;
-  onReviewBlocker: () => void;
-}) {
-  const completedSteps = stepTimeline.filter((step) => step.state === "done").length;
-  const activeOrFailed = stepTimeline.find((step) => step.state === "active" || step.state === "failed");
-  const hasBlocker = blockerCount > 0 || runStatus?.status === "failed" || Boolean(runStatus?.error_code);
-  const terminal = runStatus?.status === "succeeded" || runStatus?.status === "failed" || runStatus?.status === "canceled";
-  const stepLabel = runStatus?.status === "failed" ? "Stopped at" : terminal ? "Outcome" : "Current step";
-  const stepValue = runStatus?.status === "succeeded"
-    ? "Completed"
-    : runStatus?.status === "canceled"
-      ? "Canceled"
-      : runStatus?.current_step ?? activeOrFailed?.id ?? "Not running";
-  return (
-    <section className="analysis-progress" data-testid="analysis-run-progress">
-      <div className="section-heading-row">
-        <h2>Run status</h2>
-        <StatusBadge tone={runOutcomeTone(runStatus)}>{runOutcomeLabel(runStatus)}</StatusBadge>
-      </div>
-      <div className="analysis-progress-grid">
-        <div>
-          <span className="metric-label">Run ID</span>
-          <strong>{runId ?? "none selected"}</strong>
-        </div>
-        <div>
-          <span className="metric-label">Runtime/provider</span>
-          <strong>{runtimeLabel}</strong>
-        </div>
-        <div>
-          <span className="metric-label">{stepLabel}</span>
-          <strong>{stepValue}</strong>
-        </div>
-        <div>
-          <span className="metric-label">Progress</span>
-          <strong>
-            {completedSteps}/{stepTimeline.length} steps
-          </strong>
-        </div>
-        <div>
-          <span className="metric-label">Warnings/errors</span>
-          <strong>
-            {warningCount} / {errorCount}
-          </strong>
-        </div>
-      </div>
-      {hasBlocker ? (
-        <button type="button" data-testid="analysis-review-blocker-btn" onClick={onReviewBlocker}>
-          {actionLabel}
-        </button>
-      ) : null}
-    </section>
-  );
-}
-
-export function AnalysisFailureRecovery({
-  busy,
-  runStatus,
-  runtimeLabel,
-  warningCount,
-  issueCount,
-  artifactCount,
-  pendingPermissionCount,
-  liveDiagnostics,
-  onRetry,
-  onReviewBlocker,
-}: {
-  busy: boolean;
-  runStatus: RunStatusResponse | null;
-  runtimeLabel: string;
-  warningCount: number;
-  issueCount: number;
-  artifactCount: number;
-  pendingPermissionCount: number;
-  liveDiagnostics: AnalysisLiveDiagnostics;
-  onRetry: (pipeline: "init" | "refresh") => void;
-  onReviewBlocker: () => void;
-}) {
-  if (runStatus?.status !== "failed") {
-    return null;
-  }
-
-  const retryPipeline = runStatus.pipeline === "refresh" ? "refresh" : "init";
-  const errorCode = runStatus.error_code || "unclassified";
-  const blockedStep = runStatus.current_step || `${retryPipeline}.unknown`;
-  const evidenceSummary = failureEvidenceSummary(artifactCount, issueCount);
-  const canceled = isRunCanceled(errorCode);
-  const reconciled = isRunReconciledAfterRestart(errorCode);
-  const title = canceled ? "Canceled run" : reconciled ? "Recovered after restart" : "Recovery path";
-  const badgeLabel = canceled ? "canceled" : reconciled ? "recovered" : "failed";
-  const badgeTone = canceled || reconciled ? "warn" : "error";
-  const stepLabel = canceled ? "Stopped step" : reconciled ? "Recovered step" : "Blocked step";
-  const retainedRun = canceled || reconciled;
-  const retryLabel = retainedRun ? `Run ${retryPipeline} again` : `Retry ${retryPipeline}`;
-  const reviewLabel = retainedRun ? "Review retained evidence" : "Review blocker details";
-  const retentionHint = canceled
-    ? "Starting again creates a new run; the canceled run and its taskrun evidence stay in History."
-    : reconciled
-      ? "Starting again creates a new run; the reconciled run and its taskrun evidence stay in History."
-      : "Retry starts a new run; the failed run remains available in History for audit and comparison.";
-
-  return (
-    <section className="analysis-recovery-panel" data-testid="analysis-failure-recovery">
-      <div className="section-heading-row">
-        <div>
-          <h2>{title}</h2>
-          <p className="hint">{failureRecoveryGuidance(errorCode, pendingPermissionCount)}</p>
-        </div>
-        <StatusBadge tone={badgeTone}>{badgeLabel}</StatusBadge>
-      </div>
-
-      <div className="analysis-recovery-grid">
-        <div>
-          <span className="metric-label">Classification</span>
-          <strong>{errorCode}</strong>
-        </div>
-        <div>
-          <span className="metric-label">{stepLabel}</span>
-          <strong>{blockedStep}</strong>
-        </div>
-        <div>
-          <span className="metric-label">Evidence kept</span>
-          <strong>{evidenceSummary}</strong>
-        </div>
-        <div>
-          <span className="metric-label">Warnings</span>
-          <strong>{warningCount}</strong>
-        </div>
-        <div>
-          <span className="metric-label">Runtime/provider</span>
-          <strong>{runtimeLabel}</strong>
-        </div>
-      </div>
-
-      {runStatus.error ? <p className="status err">{runStatus.error}</p> : null}
-      <AnalysisLiveDiagnosticsPanel diagnostics={liveDiagnostics} />
-
-      <div className="actions analysis-recovery-actions">
-        <button type="button" data-testid="analysis-retry-run-btn" onClick={() => onRetry(retryPipeline)} disabled={busy}>
-          {retryLabel}
-        </button>
-        <button type="button" className="secondary" data-testid="analysis-review-recovery-btn" onClick={onReviewBlocker}>
-          {reviewLabel}
-        </button>
-      </div>
-      <p className="hint">{retentionHint}</p>
     </section>
   );
 }
@@ -1268,8 +1043,4 @@ export function ProposalsStagePanel({
       </div>
     </section>
   );
-}
-
-export function RuntimeSettingsStagePanel(props: ComponentProps<typeof RuntimeProfileSettingsPanel>) {
-  return <RuntimeProfileSettingsPanel {...props} />;
 }

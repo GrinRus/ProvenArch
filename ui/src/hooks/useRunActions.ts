@@ -2,9 +2,9 @@ import { useCallback, useRef } from "react";
 import type { Dispatch } from "react";
 
 import type { RunCoordination, RunListItem, RunStatusResponse } from "../lib/appContracts";
-import { getPipelineRunStatus, listPipelineRuns, requestRunCancel, startPipelineRun } from "../lib/runApi";
+import { getPipelineRunStatus, listPipelineRuns } from "../lib/runApi";
 import type { RunExplorerAction } from "../lib/runExplorerState";
-import { finalStatuses, pickBootstrapRun, reconcileSelectedRunID } from "../lib/runState";
+import { finalStatuses, pickBootstrapRun } from "../lib/runState";
 import { isAbortError, useRequestGate } from "./useRequestGate";
 import { useRunUpdatePolling } from "./useRunUpdatePolling";
 
@@ -12,17 +12,13 @@ type RunActionsContext = {
   dispatch: Dispatch<RunExplorerAction>;
   runId: string | null;
   runStatus: RunStatusResponse | null;
-  coordination: RunCoordination;
-  selectedRunIsActive: boolean;
   runLogsEOF: boolean;
-  setBusy: (busy: boolean) => void;
   setError: (message: string | null) => void;
   setRunID: (runId: string | null) => void;
   setRunStatus: (runStatus: RunStatusResponse | null) => void;
   setRunList: (runList: RunListItem[]) => void;
   setCoordination: (coordination: RunCoordination) => void;
   setRunActionStatus: (status: string) => void;
-  setCancelBusy: (busy: boolean) => void;
   resetRunLogs: () => void;
   fetchRunLogs: (runId: string, reset?: boolean) => Promise<unknown>;
   fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
@@ -34,17 +30,13 @@ export function useRunActions({
   dispatch,
   runId,
   runStatus,
-  coordination,
-  selectedRunIsActive,
   runLogsEOF,
-  setBusy,
   setError,
   setRunID,
   setRunStatus,
   setRunList,
   setCoordination,
   setRunActionStatus,
-  setCancelBusy,
   resetRunLogs,
   fetchRunLogs,
   fetchRunLogsUntilEOF,
@@ -174,156 +166,12 @@ export function useRunActions({
     setRunID,
   });
 
-  const handleRunPipeline = useCallback(
-    async (pipeline: "init" | "refresh", intent: "start" | "queue" = "start"): Promise<string | null> => {
-      setBusy(true);
-      setError(null);
-      setRunActionStatus("");
-      let acceptedRunID = "";
-      try {
-        const payload = await startPipelineRun(pipeline, intent);
-        acceptedRunID = payload.run_id;
-        const provisionalRun = buildProvisionalRun(pipeline, payload);
-        dispatch({
-          type: "upsertRunListItem",
-          item: provisionalRun,
-        });
-        if (intent === "queue" && coordination.active_run_id) {
-          await loadRunList(100);
-          setRunActionStatus(`Refresh ${payload.run_id} queued; the selected evidence remains unchanged.`);
-          return payload.run_id;
-        }
-        clearArtifacts();
-        resetRunLogs();
-        setRunID(payload.run_id);
-        setRunStatus(provisionalRun);
-        setRunActionStatus(`Run ${payload.run_id} accepted; reconciling details.`);
-        const status = await fetchRunStatus(payload.run_id);
-        await fetchRunLogs(payload.run_id, true);
-        if (status && finalStatuses.has(status.status)) await fetchRunLogsUntilEOF(payload.run_id);
-        await loadRunList(100);
-        setRunActionStatus("");
-        return payload.run_id;
-      } catch (requestError) {
-        if (acceptedRunID) {
-          setRunActionStatus(`Run ${acceptedRunID} accepted; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
-          return acceptedRunID;
-        }
-        setError(requestError instanceof Error ? requestError.message : "failed to start pipeline");
-        return null;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [
-      clearArtifacts,
-      dispatch,
-      fetchRunLogs,
-      fetchRunLogsUntilEOF,
-      fetchRunStatus,
-      loadRunList,
-      coordination.active_run_id,
-      resetRunLogs,
-      setBusy,
-      setError,
-      setRunActionStatus,
-      setRunID,
-    ]
-  );
-
-  const handleCancelRun = useCallback(async (targetRunID: string) => {
-    if (!targetRunID) {
-      return;
-    }
-
-    setCancelBusy(true);
-    setError(null);
-    setRunActionStatus("");
-    try {
-      const response = await requestRunCancel(targetRunID);
-
-      if (response.status === 202) {
-        setRunActionStatus(`Cancel requested for ${targetRunID}`);
-        try {
-          await loadRunList(100);
-          const status = await fetchRunStatus(targetRunID);
-          if (status && finalStatuses.has(status.status)) {
-            await fetchRunLogsUntilEOF(targetRunID);
-          } else {
-            await fetchRunLogs(targetRunID, false);
-          }
-        } catch (requestError) {
-          setRunActionStatus(`Cancel requested for ${targetRunID}; reconciling details failed: ${errorMessage(requestError, "run details are temporarily unavailable")}`);
-        }
-        return;
-      }
-
-      if (response.status === 404) {
-        const latestRuns = await loadRunList(100);
-        const nextSelectedRunID = reconcileSelectedRunID(targetRunID, latestRuns);
-        if (targetRunID === runId && nextSelectedRunID !== targetRunID) {
-          dispatch({ type: "clearRunStatusForRun", runId: targetRunID });
-          resetRunLogs();
-          clearArtifacts();
-          if (nextSelectedRunID) {
-            await handleSelectRun(nextSelectedRunID, { silentErrors: true });
-            setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-          } else {
-            setRunID(null);
-            setRunActionStatus("Selected run no longer exists.");
-          }
-        } else {
-          setRunActionStatus("Selected run no longer exists.");
-        }
-        return;
-      }
-
-      if (response.status === 409) {
-        setRunActionStatus("Selected run is already terminal.");
-        await loadRunList(100);
-        const status = await fetchRunStatus(targetRunID);
-        if (status && finalStatuses.has(status.status)) {
-          await fetchRunLogsUntilEOF(targetRunID);
-        }
-        return;
-      }
-
-      throw new Error("failed to cancel selected run");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "failed to cancel selected run");
-    } finally {
-      setCancelBusy(false);
-    }
-  }, [
-    clearArtifacts,
-    dispatch,
-    fetchRunLogs,
-    fetchRunLogsUntilEOF,
-    fetchRunStatus,
-    handleSelectRun,
-    loadRunList,
-    resetRunLogs,
-    runId,
-    setCancelBusy,
-    setError,
-    setRunActionStatus,
-    setRunID,
-  ]);
-
-  const handleCancelSelectedRun = useCallback(async () => {
-    if (!runId || !selectedRunIsActive) return;
-    await handleCancelRun(runId);
-  }, [handleCancelRun, runId, selectedRunIsActive]);
-
   return {
     bootstrapRuns,
     loadRunList,
     pollRunUpdates,
-    handleRunPipeline,
     fetchRunStatus,
     handleSelectRun,
-    handleCancelSelectedRun,
-    handleCancelRun,
   };
 }
 
@@ -332,28 +180,4 @@ function activeRunResumeMessage(status: string, runID: string): string {
     return `Resumed active run ${runID}.`;
   }
   return `Selected latest completed run ${runID}.`;
-}
-
-function buildProvisionalRun(pipeline: "init" | "refresh", payload: { run_id: string; status: string }): RunStatusResponse {
-  return {
-    run_id: payload.run_id,
-    pipeline,
-    status: normalizeRunStartStatus(payload.status),
-    started_at: new Date().toISOString(),
-    finished_at: null,
-    warnings: [],
-    error_code: null,
-    error: null,
-  };
-}
-
-function normalizeRunStartStatus(status: string): RunStatusResponse["status"] {
-  if (status === "queued" || status === "running" || status === "succeeded" || status === "failed") {
-    return status;
-  }
-  return "queued";
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
