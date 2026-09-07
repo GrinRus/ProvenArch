@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "repository": "GrinRus/ProvenArch",
+  "captured_at": "2026-09-07T12:46:54Z",
+  "source_sha": "7b7388deccbea93a5e76a5a54a075f2f0ebf7d00",
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "backend",
+      "contracts",
+      "golden",
+      "smoke-api",
+      "smoke-cli",
+      "ui"
+    ]
+  },
+  "branch_protection": {
+    "enforce_admins": true,
+    "required_pull_request_reviews": {
+      "dismiss_stale_reviews": true,
+      "require_code_owner_reviews": false,
+      "required_approving_review_count": 0
+    }
+  },
+  "tag_ruleset": {
+    "name": "protect release tags",
+    "target": "tag",
+    "enforcement": "active",
+    "include": ["refs/tags/v*"],
+    "rules": ["deletion", "non_fast_forward"],
+    "bypass_actors": []
+  },
+  "release_environment": {
+    "name": "github-release",
+    "required_reviewers": ["GrinRus"],
+    "prevent_self_review": false
+  },
+  "owner_waiver": {
+    "path_template": "reports/release_owner_waiver_<tag>.json",
+    "decision": "owner_waived",
+    "release_state": "UNQUALIFIED PRERELEASE",
+    "required_fields": [
+      "schema_version",
+      "tag",
+      "decision",
+      "release_state",
+      "waived_requirements",
+      "approved_by",
+      "reason",
+      "base_qualification_sha"
+    ],
+    "waived_requirements": [
+      "qwen-code live evidence",
+      "claude-code live evidence",
+      "composite release verdict"
+    ],
+    "unknown_fields_rejected": true
+  },
+  "evidence_sources": [
+    "GET /repos/GrinRus/ProvenArch/branches/main/protection",
+    "GET /repos/GrinRus/ProvenArch/rulesets",
+    "GET /repos/GrinRus/ProvenArch/environments",
+    "GET /repos/GrinRus/ProvenArch/rulesets/{protect-release-tags-id}"
+  ]
+}

@@ -15,7 +15,7 @@ UI_SOURCE ?= WORKTREE
 # Parallelize independent worktrees, not install/check/build targets in this checkout.
 .NOTPARALLEL:
 
-.PHONY: bootstrap preflight contracts contracts-install contracts-check test test-stress lint build offline-closure verify-agent-guidance verify-readable-fixtures verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
+.PHONY: bootstrap preflight contracts contracts-install contracts-check test test-stress lint build offline-closure verify-agent-guidance verify-readable-fixtures verify-release-governance verify-ui-determinism verify-ui-dist run-backend run-ui quickstart-local
 
 bootstrap:
 	bash ./scripts/setup-dev.sh
@@ -85,6 +85,9 @@ verify-readable-fixtures:
 
 verify-agent-guidance:
 	$(GO) test ./internal/docsync
+
+verify-release-governance:
+	$(PYTHON) scripts/verify-release-governance.py
 
 verify-ui-determinism:
 	bash ./scripts/verify-ui-deterministic-build.sh "$(UI_SOURCE)"

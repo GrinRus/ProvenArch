@@ -358,6 +358,11 @@ Release workflow hardening:
 - owner waivers are limited to the exact tracked
   `reports/release_owner_waiver_<tag>.json` payload and remain `UNQUALIFIED PRERELEASE`; unknown
   fields, extra waived requirements, missing tag binding, or a tag/source mismatch are rejected.
+- Versioned GitHub governance evidence lives in
+  [`docs/release-governance.json`](release-governance.json); usage and live comparison are
+  documented in [`docs/RELEASE_GOVERNANCE.md`](RELEASE_GOVERNANCE.md). `make verify-release-governance`
+  checks the snapshot and local release surfaces, while its read-only `--live` mode compares
+  branch protection, tag ruleset and `github-release` reviewers with the current GitHub API.
 - GitHub environment required reviewers, protected tags, branch protection, Dependabot alerts/security updates, secret scanning, and push protection are repository settings and must be enforced by owners/admins.
 ## 7) Базовый набор тестов
 
