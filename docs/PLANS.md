@@ -77,7 +77,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-06/REM-07/REM-08/REM-09/REM-10/REM-11/REM-12/REM-13/REM-14/REM-15 merged; REM-16 is blocked by stabilization while REM-03B remains authorization-gated |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-03A/REM-04..REM-24 merged; REM-03B remains authorization-gated and release-blocking; REM-25 is the final documentation reconciliation |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -133,23 +133,26 @@ Original unnumbered live follow-ups remain in [Retained live follow-up notes](#r
 They are retained qualification evidence, not an additional ready-to-run queue.
 Completed plan bodies and the obsolete operational/queue mirrors are preserved in the
 [September archive](archive/PLANS_ARCHIVE_2026-09.md). Owner/admin decisions, incomplete DoD and
-trusted release qualification remain here; this reconciliation does not close REM-25.
+trusted release qualification remain here; historical archive entries are not rewritten by REM-25.
 
 ## Active Plans
 
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, REM-19, REM-20 and REM-21 merged in PR #308; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-03A and REM-04..REM-24 are merged on current `origin/main`;
+the REM-25 documentation reconciliation is implemented in this slice; REM-03B remains an
+authorization-gated, release-blocking admin operation.
 
-Next action: Refresh from the merged PR #308 and re-evaluate the ordered queue for REM-22.
-REM-22 remains blocked by stabilization and earlier dependency completion. Keep release status
-explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
-REM-25 remains blocked by REM-03..24.
+Next action: after this fact-based REM-25 documentation reconciliation is merged, rerun the final
+deterministic DoD from post-merge `origin/main`. This documentation slice must not claim release
+readiness or change GitHub settings; release remains blocked until REM-03B has explicit
+authorization plus before/after/rollback evidence.
 
-Current queue truth: independent REM slices through REM-21 are merged; REM-03B remains
-authorization-gated, REM-04/REM-05 and REM-22 remain stabilization/dependency-blocked, and REM-23+
-remain dependency-blocked until the next ready slice is reproduced on fresh `origin/main`.
+Current queue truth: the stabilization-sensitive and code-remediation slices through REM-24 are
+merged (including REM-03A); REM-03B is the only unresolved P1 boundary. REM-25 is therefore
+allowed as a docs-only reconciliation exception: it records the merged evidence and current
+Task-first flow while preserving the explicit `release-blocked` state.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -372,9 +375,9 @@ stabilization-sensitive P1 становится ready, он возвращает
 | --- | --- | --- | --- | --- | --- |
 | 1 | REM-01 | P0 | Release verifier принимает только полное, свежее и связанное с release tag/source SHA evidence; stale, fabricated, incomplete, mismatched assessment и over-broad waiver fixtures fail closed. | none | merged in PR #269 |
 | 2 | REM-02 | P1 | Golden workflow доказывает запуск ожидаемых test cases и падает при rename/removal или zero-match вместо успешного `[no tests to run]`. | REM-01 | merged in PR #274 |
-| 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | blocked-by-dependency; REM-03B authorization-gated |
-| 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | blocked-by-stabilization |
-| 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | blocked-by-stabilization |
+| 3 | REM-03 | P1 | `REM-03A` versioned evidence/check PR проверяет expected required checks, ruleset и owner-waiver governance; `REM-03B` — отдельная явно авторизованная admin-only operation с before/after/rollback evidence. До обеих частей обход release truth не считается закрытым. | REM-01, REM-02; explicit authority for REM-03B | REM-03A merged in PR #310; REM-03B authorization-gated |
+| 4 | REM-04 | P1 | Runtime write audit становится deny-by-default: разрешённые roots заданы явно, unknown/unclassified writes и audit failure блокируют promotion/release evidence. | stabilization merge, reproduce finding, REM-01 | merged in PR #311 |
+| 5 | REM-05 | P1 | Root-bounded file operations и restore/promotion защищены от symlink swap и check/use races; adversarial filesystem tests не выходят за workspace. | stabilization merge, REM-04 | merged in PR #312 |
 | 6 | REM-06 | P1 | Retention никогда не удаляет active/queued run и его Task/Attempt evidence; restart/pressure tests подтверждают lifecycle invariant. | REM-01..03, либо REM-03 admin blocker явно сохраняет release-blocked status | merged in PR #276 |
 | 7 | REM-07 | P1 | Task/run watchers завершаются при shutdown/cancel, не переживают server lifecycle и не создают goroutine/race leak. | REM-06 | merged in PR #279 |
 | 8 | REM-08 | P1 | Queued Attempt сохраняет immutable admission context и после restart исполняется либо fail-closed с понятной диагностикой, без silent context drift. | REM-06, REM-07 | merged in PR #281 |
@@ -389,12 +392,18 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | merged in PR #300 |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | merged in PR #305 |
 | 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | merged in PR #306 |
-| 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-19 | in progress on `3672ed5a` |
-| 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | blocked-by-dependency |
-| 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | blocked-by-stabilization-and-dependency |
-| 23 | REM-23 | P2 | UI hotspots разделены по data/state/view seams, общие states унифицированы, а route-level regression suite остаётся зелёной. | REM-17..21 | blocked-by-dependency |
-| 24 | REM-24 | P2 | Wall-clock sleeps/flaky waits заменены deterministic clocks/events; повторные focused runs не дают flakes. | stabilization merge, REM-06..08, REM-22 | blocked-by-stabilization-and-dependency |
-| 25 | REM-25 | P2 | Specs, architecture, testing strategy, stakeholder mirror, examples и active/archive plans синхронизированы с фактом; дублированные stale claims удалены. | REM-01..24 resolved | blocked-by-program |
+| 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-19 | merged in PR #307 |
+| 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | merged in PR #308 |
+| 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | merged in PR #313 |
+| 23 | REM-23 | P2 | UI hotspots разделены по data/state/view seams, общие states унифицированы, а route-level regression suite остаётся зелёной. | REM-17..21 | merged in PR #309 |
+| 24 | REM-24 | P2 | Wall-clock sleeps/flaky waits заменены deterministic clocks/events; повторные focused runs не дают flakes. | stabilization merge, REM-06..08, REM-22 | merged in PR #314 |
+| 25 | REM-25 | P2 | Specs, architecture, testing strategy, stakeholder mirror, examples и active/archive plans синхронизированы с фактом; дублированные stale claims удалены. | REM-01..24 resolved; docs-only exception preserves REM-03B release blocker | implemented in current docs-only reconciliation; release blocker preserved |
+
+**REM-25 readiness exception.** All implementation slices through REM-24, including versioned
+REM-03A governance evidence, are merged on `origin/main`. REM-03B is an external GitHub admin
+operation and remains intentionally unresolved without owner authorization. REM-25 may update
+truthful documentation and tracker surfaces without mutating settings or claiming `RELEASE READY`;
+its completion records the blocker rather than closing it.
 
 ### Slice definition of ready
 
@@ -1329,6 +1338,56 @@ slice. Rebase from exact fresh `origin/main` and repeat focused evidence if remo
   and the full deterministic `make test` (Go, 308 Python tests, UI) passed. PR #296 passed all
   required CI checks and squash-merged as `origin/main=8185d898`; no stabilization-owned files
   changed. Neighbor thread remains externally blocked on disk/parallel tests/Claude availability.
+
+### REM-25 slice plan — fact-based documentation reconciliation
+
+**Goal.** Synchronize current user-facing flow and remediation status with the implementation on
+fresh `origin/main`, while keeping the unresolved `REM-03B` administrative boundary explicit. The
+slice is documentation-only and may not imply release readiness.
+
+**Finding / baseline.** After PRs #309–#314, `origin/main=41124f49` contains the completed
+REM-03A and REM-04..REM-24 implementation slices, but the active plan still described REM-22 as
+blocked and REM-20/REM-21 as unfinished. User-facing README/install/troubleshooting pages still
+described a brief-first/Console V2 onboarding path even though the binary uses
+`Workspace -> Repositories -> Provider & readiness -> Review & start -> New Task`. The canonical
+Architecture, Stakeholder Matrix and Testing Strategy already describe the current behavior and
+are reviewed as no-change inputs; historical BACKLOG/archive claims remain dated evidence.
+
+**Readiness exception.** REM-03A is merged and the read-only governance comparison passes, but
+REM-03B still requires owner/admin authorization plus before/after/rollback evidence. This slice
+records that release blocker and does not mutate GitHub settings, waiver policy or release state.
+
+**Non-goals.** Не менять runtime/API/schema/fixtures, GitHub branch protection or rulesets,
+provider behavior, canonical live matrices, historical archive/backlog narratives, or
+stabilization-owned `docs/ARCHITECTURE.md` and runtime paths. Не объявлять `RELEASE READY`.
+
+**Affected paths.** `README.md`, `docs/INSTALL.md`, `docs/TROUBLESHOOTING.md`, this active plan,
+and a focused `internal/docsync` regression that guards the current user-facing flow and queue
+truth. `docs/ARCHITECTURE.md`, `docs/STAKEHOLDER_DOC.md`, `docs/TESTING_STRATEGY.md`, specs and
+examples are checked against the source-priority rules; no edit is needed where their claims are
+already factual.
+
+**Acceptance / regression.**
+
+- [x] Active queue records exact merged state through REM-24, distinguishes REM-03A from the
+      authorization-gated REM-03B, and keeps release status explicitly blocked.
+- [x] README, installation and troubleshooting instructions no longer direct users through the
+      retired brief-first or Console V2 flow; they describe the four Guided Setup steps and
+      explicit New Task start.
+- [x] Focused doc-sync regression rejects reintroduction of those stale user-flow claims and
+      requires the REM-03B blocker wording.
+- [x] `make verify-agent-guidance`, `./scripts/run-go.sh test ./internal/docsync`, and the full
+      deterministic DoD pass without stabilization-path edits.
+
+**Rollback / stop condition.** Revert the single docs PR if it changes historical evidence,
+contradicts `TASK_SPEC`/`ARCHITECTURE`, hides the admin blocker, or introduces a second status
+source. Stop before merge if the neighbor expands into any candidate path or `origin/main` moves
+without renewed status and source review.
+
+- 2026-09-07: Fresh `origin/main=41124f49` and the clean neighboring stabilization checkout were
+  rechecked. `make verify-release-governance --live` passed read-only, proving versioned REM-03A
+  governance evidence matches current GitHub settings; no authorization or rollback record exists
+  for REM-03B. The docs-only exception preserves that release blocker.
 
 ## EP-20260811-task-attempt-contracts
 
