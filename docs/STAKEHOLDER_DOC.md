@@ -2,7 +2,7 @@
 
 > **Название:** AI-native Architecture Control Plane (Local-first MVP)  
 > **Версия:** v1.3 (implementation-aligned)
-> **Дата:** 5 September 2026 (documentation cleanup, current UI and regression evidence alignment; no new release evidence)
+> **Дата:** 7 September 2026 (Task-first Setup/Task handoff documentation alignment; no new release evidence)
 > **Аудитория:** tech leads, staff/principal engineers, архитекторы, platform teams, engineering managers  
 > **Важно:** required CI и deterministic baseline работают на process-scoped runtime policy: `fake` default, `headless` opt-in для реальных локальных прогонов; live provider permission mode по умолчанию `trusted_full_access`, `managed` включается явно в `workspace.yaml`.
 > **Q&A boundary (target/current split):** UI stage `Ask` target — async runtime-backed `qa.ask` run over existing workspace artifacts via `POST /api/qa/runs`; deterministic `acp qa` + read-only `POST /api/qa/ask` остаются compatibility/fake baseline surfaces.
@@ -26,7 +26,7 @@ README/ARCHITECTURE/PLANS/PIPELINE_SPEC должны ссылаться на н�
 | Q&A capability with UI + CLI + public API surface | target upgraded | UI uses async `/api/qa/runs`; deterministic `internal/qa` + `acp qa` + `POST /api/qa/ask` remain compatibility/fake baseline |
 | Public `POST /api/qa/ask` | done (Epic 11) | read-only wrapper over deterministic workspace-backed QA service |
 | User-friendly install + first-run readiness surface | done (trust shell cutover) | `.goreleaser.yml`, `.github/workflows/release.yml`, `install.sh`, `LICENSE`, `cmd/acp/main.go` (`acp version`, `acp doctor`), `internal/api/server.go`, `ui/src/components/ProductShell.tsx`, `ui/src/components/StagePanels.tsx`, `ui/src/App.test.tsx` |
-| Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts Guided Setup with Workspace, Sources, Analysis brief, Runner/readiness and Review/start; direct `acp serve --workspace` remains compatibility path. |
+| Onboarding-first workspace/source/runner setup | done (usability hardening) | `acp serve` without `--workspace` starts Guided Setup with Workspace, Sources, Provider/readiness and Review/start; the Review CTA opens explicit New Task creation, while direct `acp serve --workspace` remains a compatibility path. |
 | Code quality audit remediation | done (Epic 19 merged at `02716bb`) | `docs/archive/audits/CODE_AUDIT_2026-07-10.md` + `docs/BACKLOG.md` Epic 19: slices `19A..19X` landed crash consistency, lifecycle/shutdown, contract/citation correctness, UI stale-state/editor safety, deterministic build/tooling/release gates, semantic restoration, accessibility primitives and confirmed dead-code cleanup. Required deterministic DoD remains `make contracts`, `make test`, `make lint`, `make build`; live providers remain trusted-machine release gate only. Local frontend security hardening remains Wave 1+ non-goal |
 | Console evidence trust and IA reset | done (Epic 20 implementation; later remediation remains separate) | The native History shell provides `Tasks / Architecture / Changes` plus first-class `/settings`; Architecture exposes Map/Documents/Diagrams/Model/Findings, Tasks keeps a selected-task preview and outcome-first detail, and Changes requires an explicit review package before publication. The explicit `/tasks/legacy` read-only migration surface, contextual evidence, deep URL context, run-pinned review, server-authored coordination/runtime identity, safe Git publication, responsive navigation/context drawer, current-workspace authority and global read-only Ask remain preserved. |
 | Task-first UI, runner presets and content-aware artifact workbenches | **done (W23B1–W23N + deterministic Q10 closure, 2026-08-23)** | [`spec/TASK_SPEC.md`](spec/TASK_SPEC.md), [`UI_TASK_FIRST_PRODUCT_DESIGN.md`](UI_TASK_FIRST_PRODUCT_DESIGN.md), [`UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md`](UI_TASK_FIRST_PRODUCT_MIGRATION_PLAN.md) and 2026-08-11 Task/Attempt ADRs fix the target identity/persistence/admission/publication boundary; typed Task/Attempt routes, a scope/runner-aware New Task composer with Attempt admission, selected-task Inbox preview, exact-run semantic outcome, Attempt-bound Pipeline Studio, explicit Task-scoped current Architecture, Map/Documents/Diagrams/Model/Findings workbenches, evidence-chain drill-down, exact Task-scoped Changes context, explicit Ask/Runner authority boundaries, Task state/accessibility coverage and a primary nav limited to Tasks/Architecture/Changes now exist without legacy-run fallback. Q10 additionally verifies one Changes workbench, Architecture Home default selection, truthful unavailable outcomes, route heading focus/scroll reset, collapsed Inbox/Settings disclosures, responsive overflow/touch-target and critical axe checks. Pre-Task runs remain only under explicit read-only `/tasks/legacy` migration routes. |
@@ -102,19 +102,19 @@ Epic matrix:
 - пользователь поднимает сервис одной командой `acp serve`; default runtime остаётся `fake`;
 - UI открывает onboarding: выбирает или создаёт `arch-workspace`, либо открывает Recent workspace; ACP готовит fixed layout и `git init` для workspace root;
 - в шаге `Sources` пользователь добавляет один или несколько target repos через local checkout path или Git URL; sources сохраняются в существующий `workspace.yaml.repos[]`;
-- onboarding summary показывает текущий шаг, главный blocker и next action, а `Ready` объясняет, почему `Open console` или `Run first analysis` ещё disabled;
+- onboarding summary показывает текущий шаг, главный blocker и next action, а `Ready` объясняет, почему `Open console` или `Create first Task` ещё disabled;
 - складывает выгрузки docs (например из Confluence) в `docs.imports_path` (default `docs/imports/`);
 - ведёт `<docs.imports_path>/index.yaml` как metadata index импортированных материалов;
 - в шаге `Runner` выбирает `fake` для deterministic walkthrough или explicit live provider; для headless provider видит expected command, `ACP_*_CMD` override и readiness blocker до первого live analysis.
 - pipeline/QA start, смена workspace/runner и Git publication сериализованы одной admission lease; пока есть active или queued run, session/runtime/profile/Git mutations возвращают явный conflict, а UI/API продолжают показывать effective runtime текущей service generation до terminal state.
 
-2) **Analysis brief и Конституция проекта**
-- в Guided Setup пользователь сохраняет brief с целью и границами анализа;
-- pipeline step0 использует brief и baseline workspace inputs для Конституции проекта;
-- отдельного Charter/baseline bundle editor в текущем UI нет; Git publication выполняется явно через Changes.
+2) **Task goal/scope и Конституция проекта**
+- Guided Setup сохраняет workspace, источники и readiness; goal и scope пользователь задаёт явно в New Task;
+- pipeline step0 использует Task snapshot и baseline workspace inputs для Конституции проекта;
+- отдельного setup brief или Charter/baseline bundle editor в текущем UI нет; Git publication выполняется явно через Changes.
 
 3) **Запуск Init pipeline**
-- пользователь запускает первый анализ после readiness checks в Guided Setup или создаёт Task с выбранными scope и runner через `New Task`.
+- после readiness checks пользователь создаёт Task с выбранными scope и runner через `New Task`; pipeline запускается только явным действием `Start task`.
 
 4) **Результат**
 - в `model/` появляется каноническая as‑is модель (entity-per-file);
@@ -328,7 +328,7 @@ arch-workspace/
 
 2) **UI (локальный web-интерфейс)**  
    - primary navigation `Tasks / Architecture / Changes`; Settings, Guided Setup, Ask и runtime diagnostics доступны как utilities
-   - Guided Setup сохраняет workspace, sources, analysis brief и runner/readiness; Settings предоставляет runner presets и advanced workspace/source/runtime controls
+   - Guided Setup сохраняет workspace, sources и runner/readiness; New Task сохраняет goal/scope и создаёт Attempt только явным действием; Settings предоставляет runner presets и advanced workspace/source/runtime controls
    - Task Inbox, New Task и Task detail показывают intent, scope, runner, outcome и immutable Attempt history
    - Attempt detail и Pipeline Studio показывают read-only progress, blockers, warnings/error и retained evidence; `/tasks/legacy` хранит pre-Task run logs/artifacts и техническую диагностику без start/cancel/retry/rerun controls
    - Architecture предоставляет Map/Documents/Diagrams/Model/Findings, Markdown/Mermaid preview и contextual evidence с explicit partial states

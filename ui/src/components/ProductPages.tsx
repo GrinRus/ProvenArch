@@ -13,7 +13,7 @@ export function GuidedSetupPage({ step, onStepChange, children }: { step: SetupS
   return (
     <section className="guided-setup" data-testid="guided-setup-page">
       <header className="setup-page-heading">
-        <div><p className="eyebrow">Workspace setup</p><h1>Prepare your first architecture task</h1><p className="hint">Connect sources, define the question and confirm local readiness before analysis writes to the workspace.</p></div>
+        <div><p className="eyebrow">Workspace setup</p><h1>Prepare your first architecture task</h1><p className="hint">Connect sources, confirm local readiness, then create a Task with its goal and scope.</p></div>
         <span className="setup-progress">{guidedSetupSteps.findIndex((item) => item.id === step) + 1} of {guidedSetupSteps.length}</span>
       </header>
       <div className="setup-workbench">
