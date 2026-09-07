@@ -248,10 +248,12 @@ machine:
 - opt-in `managed` mode narrows automatic approvals to the runtime task envelope;
 - managed mode is a policy boundary, not a hard process sandbox;
 - the provider's network behavior and data handling follow that provider's CLI and configuration;
-- a runtime write audit fails an otherwise successful step when protected workspace surfaces or an
-  analyzed repository are unexpectedly changed; protected workspace files are restored when their
-  post-run fingerprint is still unchanged, while concurrent edits are left untouched and surfaced
-  as a restore conflict.
+- a runtime write audit fails an otherwise successful step when protected workspace surfaces, an
+  analyzed repository, or any unclassified workspace path is unexpectedly changed; only the
+  explicit provider staging roots and orchestrator-owned run log/history roots are allowlisted;
+  protected workspace files are restored when their post-run fingerprint is still unchanged, while
+  concurrent edits are left untouched and surfaced as a restore conflict; an incomplete audit
+  snapshot fails closed.
 
 Use a disposable checkout or a clean branch for sensitive live runs, and review the workspace
 before committing it. Workspaces may contain repository context, prompts, findings, questions, and
