@@ -79,6 +79,8 @@ func TestRuntimeWriteAuditAllowsOrchestratorOwnedRunStateWrites(t *testing.T) {
 		filepath.Join(ws.Path, filepath.FromSlash(runLogsPath), "run-1.ndjson"),
 		filepath.Join(ws.Path, filepath.FromSlash(runHistoryPath)),
 		filepath.Join(ws.Path, filepath.FromSlash(runHistoryPath+".last-good")),
+		filepath.Join(ws.Path, filepath.FromSlash(filepath.Dir(runHistoryPath)), ".run-history.json.tmp-test"),
+		filepath.Join(ws.Path, filepath.FromSlash(filepath.Dir(runHistoryPath)), ".run-history.json.last-good.tmp-test"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("create orchestrator state root: %v", err)

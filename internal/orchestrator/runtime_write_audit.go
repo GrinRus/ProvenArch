@@ -359,7 +359,7 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 			return nil
 		}
 		absPath := absClean(path)
-		if absPath != workspaceRoot && pathInsideAny(absPath, excluded) {
+		if absPath != workspaceRoot && runtimeWriteAuditPathExcluded(absPath, excluded, task) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -408,6 +408,30 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 func pathInsideAny(path string, roots []string) bool {
 	for _, root := range roots {
 		if pathInsideOrEqual(path, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeWriteAuditPathExcluded(path string, roots []string, task acpruntime.Task) bool {
+	if pathInsideAny(path, roots) {
+		return true
+	}
+	workspaceRoot := absClean(task.Workspace)
+	if workspaceRoot == "" {
+		return false
+	}
+	historyDir := filepath.Dir(filepath.Join(workspaceRoot, filepath.FromSlash(runHistoryPath)))
+	if absClean(filepath.Dir(path)) != absClean(historyDir) {
+		return false
+	}
+	base := filepath.Base(path)
+	for _, historyName := range []string{
+		filepath.Base(runHistoryPath),
+		filepath.Base(runHistoryPath + ".last-good"),
+	} {
+		if strings.HasPrefix(base, "."+historyName+".tmp-") {
 			return true
 		}
 	}
