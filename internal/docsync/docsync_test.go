@@ -176,9 +176,9 @@ func TestQAPublicAPIDocsMatchImplementedRoute(t *testing.T) {
 	t.Parallel()
 
 	apiSpec := readDoc(t, "docs/spec/API_SPEC.md")
-	server := readDoc(t, "internal/api/server.go")
-	assertContains(t, server, `mux.HandleFunc("/api/qa/ask", s.handleQAAsk)`)
-	assertContains(t, server, `mux.HandleFunc("/api/qa/runs", s.handleQARuns)`)
+	routes := readDoc(t, "internal/api/routes.go")
+	assertContains(t, routes, `pattern: "/api/qa/ask", handler: s.handleQAAsk`)
+	assertContains(t, routes, `pattern: "/api/qa/runs", handler: s.handleQARuns`)
 	assertContains(t, apiSpec, "### POST `/api/qa/runs`")
 	assertContains(t, apiSpec, "### GET `/api/qa/runs/<run_id>`")
 	assertContains(t, apiSpec, "### POST `/api/qa/ask`")
