@@ -20,8 +20,8 @@ type RunActionsContext = {
   setCoordination: (coordination: RunCoordination) => void;
   setRunActionStatus: (status: string) => void;
   resetRunLogs: () => void;
-  fetchRunLogs: (runId: string, reset?: boolean) => Promise<unknown>;
-  fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
+  fetchRunLogs: (runId: string, reset?: boolean, signal?: AbortSignal) => Promise<unknown>;
+  fetchRunLogsUntilEOF: (runId: string, signal?: AbortSignal) => Promise<void>;
   clearArtifacts: () => void;
   fetchArtifacts: (runId: string) => Promise<void>;
 };
@@ -47,9 +47,12 @@ export function useRunActions({
   const selectionSequenceRef = useRef(0);
 
   const loadRunList = useCallback(
-    async (limit = 100): Promise<RunListItem[]> => {
-      const payload = await listPipelineRuns(limit);
+    async (limit = 100, signal?: AbortSignal): Promise<RunListItem[]> => {
+      const payload = await listPipelineRuns(limit, signal ? { signal } : undefined);
       const items = payload.items ?? [];
+      if (signal?.aborted) {
+        return items;
+      }
       setRunList(items);
       setCoordination(payload.coordination ?? {});
       return items;
@@ -58,11 +61,11 @@ export function useRunActions({
   );
 
   const fetchRunStatus = useCallback(
-    async (id: string, allowMissing = false, selectionIsCurrent?: () => boolean): Promise<RunStatusResponse | null> => {
+    async (id: string, allowMissing = false, selectionIsCurrent?: () => boolean, externalSignal?: AbortSignal): Promise<RunStatusResponse | null> => {
       const token = runStatusRequest.begin(`${id}:${allowMissing ? "allow-missing" : "strict"}`);
       try {
-        const typed = await getPipelineRunStatus(id, allowMissing, { signal: token.signal });
-        if (!runStatusRequest.isCurrent(token)) {
+        const typed = await getPipelineRunStatus(id, allowMissing, { signal: externalSignal ?? token.signal });
+        if (externalSignal?.aborted || !runStatusRequest.isCurrent(token)) {
           return null;
         }
         if (!typed) {

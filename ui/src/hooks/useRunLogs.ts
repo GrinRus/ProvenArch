@@ -98,7 +98,7 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
     setRunLogsEOF(Boolean(payload.eof));
   }
 
-  async function fetchRunLogs(id: string, reset = false): Promise<RunLogsResponse | null> {
+  async function fetchRunLogs(id: string, reset = false, externalSignal?: AbortSignal): Promise<RunLogsResponse | null> {
     if (!id) {
       return null;
     }
@@ -109,9 +109,9 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
     const token = logsRequest.begin(`${id}:${reset ? "reset" : "page"}:${cursor}`);
     try {
       const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`, {
-        signal: token.signal,
+        signal: externalSignal ?? token.signal,
       });
-      if (!logsRequest.isCurrent(token)) {
+      if (externalSignal?.aborted || !logsRequest.isCurrent(token)) {
         return null;
       }
       mergeRunLogsPayload(payload, reset, cursor);
@@ -126,7 +126,7 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
     }
   }
 
-  async function fetchRunLogsUntilEOF(id: string) {
+  async function fetchRunLogsUntilEOF(id: string, externalSignal?: AbortSignal) {
     if (!id) {
       return;
     }
@@ -136,9 +136,9 @@ export function useRunLogs({ runId }: UseRunLogsOptions) {
     try {
       for (let page = 0; page < 25; page += 1) {
         const payload = await fetchJSON<RunLogsResponse>(`/api/pipeline/runs/${id}/logs?cursor=${cursor}&limit=${runLogsPageLimit}`, {
-          signal: token.signal,
+          signal: externalSignal ?? token.signal,
         });
-        if (!logsRequest.isCurrent(token)) {
+        if (externalSignal?.aborted || !logsRequest.isCurrent(token)) {
           return;
         }
         mergeRunLogsPayload(payload, reset, cursor);

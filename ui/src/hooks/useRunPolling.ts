@@ -1,29 +1,13 @@
-import { useEffect } from "react";
+import { usePollingLoop } from "./usePollingLoop";
 
 type UseRunPollingOptions = {
   shouldPollRunDetails: boolean;
-  runId: string | null;
-  runLogsCursor: number;
-  runLogsEOF: boolean;
-  pollRunUpdates: () => Promise<void>;
+  pollRunUpdates: (signal: AbortSignal) => Promise<boolean | void>;
 };
 
 export function useRunPolling({
   shouldPollRunDetails,
-  runId,
-  runLogsCursor,
-  runLogsEOF,
   pollRunUpdates,
 }: UseRunPollingOptions) {
-  useEffect(() => {
-    if (!shouldPollRunDetails) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      void pollRunUpdates();
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [shouldPollRunDetails, runId, runLogsCursor, runLogsEOF, pollRunUpdates]);
+  usePollingLoop({ enabled: shouldPollRunDetails, poll: pollRunUpdates });
 }

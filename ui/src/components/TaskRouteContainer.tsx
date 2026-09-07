@@ -14,6 +14,7 @@ import {
 } from "../lib/taskApi";
 import { Button, PageHeader } from "./SemanticPrimitives";
 import { isAbortError, useRequestGate } from "../hooks/useRequestGate";
+import { usePollingLoop } from "../hooks/usePollingLoop";
 
 type TaskRouteContainerProps = {
   view: TaskRouteView;
@@ -240,33 +241,34 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
     });
     return () => controller.abort();
   }, [taskId]);
-  useEffect(() => {
-    if (!task || !attempts.some((attempt) => attempt.status === "queued" || attempt.status === "running")) return;
-    const controller = new AbortController();
-    const refresh = async () => {
-      try {
-        const [nextTask, nextAttempts] = await Promise.all([getTask(taskId, controller.signal), listTaskAttempts(taskId, controller.signal)]);
-        if (controller.signal.aborted) return;
-        const latest = nextAttempts.items[nextAttempts.items.length - 1];
-        let nextReview: RunReviewSummaryResponse | null = null;
-        if (latest && !["queued", "running"].includes(latest.status)) {
-          nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
-        }
-        if (controller.signal.aborted) return;
-        setTask(nextTask);
-        setAttempts(nextAttempts.items);
-        if (nextReview) {
-          setReview(nextReview);
-          notifySettledOutcome(latest, nextReview);
-        }
-      } catch {
-        // Keep the last known state visible; the next poll retries and the
-        // explicit page-level error remains reserved for initial loading.
+  const refreshTask = async (signal: AbortSignal): Promise<boolean> => {
+    try {
+      const [nextTask, nextAttempts] = await Promise.all([getTask(taskId, signal), listTaskAttempts(taskId, signal)]);
+      if (signal.aborted) return true;
+      const latest = nextAttempts.items[nextAttempts.items.length - 1];
+      let nextReview: RunReviewSummaryResponse | null = null;
+      if (latest && !["queued", "running"].includes(latest.status)) {
+        nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal });
       }
-    };
-    const timer = window.setInterval(() => void refresh(), 1000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [taskId, task, attempts, onOutcomeSettled]);
+      if (signal.aborted) return true;
+      setTask(nextTask);
+      setAttempts(nextAttempts.items);
+      if (nextReview) {
+        setReview(nextReview);
+        notifySettledOutcome(latest, nextReview);
+      }
+      return true;
+    } catch (requestError) {
+      if (isAbortError(requestError) || signal.aborted) return true;
+      // Keep the last known state visible; the next poll retries and the
+      // explicit page-level error remains reserved for initial loading.
+      return false;
+    }
+  };
+  usePollingLoop({
+    enabled: Boolean(task && attempts.some((attempt) => attempt.status === "queued" || attempt.status === "running")),
+    poll: refreshTask,
+  });
 
   async function archive(archived: boolean) {
     if (!task) return;
@@ -320,16 +322,16 @@ function AttemptDetail({ taskId, attemptId, filters, onSelectTask, onOpenStudio 
     void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => { if (!controller.signal.aborted) { setAttempt(nextAttempt); setState("loaded"); } }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Attempt could not be loaded"); setState("error"); } });
     return () => controller.abort();
   }, [taskId, attemptId]);
-  useEffect(() => {
-    if (!attempt || !["queued", "running"].includes(attempt.status)) return;
-    const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => {
-        if (!controller.signal.aborted) setAttempt(nextAttempt);
-      }).catch(() => undefined);
-    }, 1000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [taskId, attemptId, attempt]);
+  const refreshAttempt = async (signal: AbortSignal): Promise<boolean> => {
+    try {
+      const nextAttempt = await getTaskAttempt(taskId, attemptId, signal);
+      if (!signal.aborted) setAttempt(nextAttempt);
+      return true;
+    } catch (requestError) {
+      return isAbortError(requestError) || signal.aborted;
+    }
+  };
+  usePollingLoop({ enabled: Boolean(attempt && ["queued", "running"].includes(attempt.status)), poll: refreshAttempt });
   return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<div className="actions"><Button density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>{attempt ? <Button density="compact" onClick={() => onOpenStudio?.(taskId, attempt.attempt_id)} data-testid="attempt-open-studio">Open Pipeline Studio</Button> : null}</div>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
 }
 
@@ -351,24 +353,22 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
     }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Pipeline Studio could not be loaded"); setState("error"); } });
     return () => controller.abort();
   }, [taskId, attemptId]);
-  useEffect(() => {
-    if (!attempt || !["queued", "running"].includes(attempt.status)) return;
-    const controller = new AbortController();
-    const refresh = async () => {
-      try {
-        const nextAttempt = await getTaskAttempt(taskId, attemptId, controller.signal);
-        if (controller.signal.aborted) return;
-        setAttempt(nextAttempt);
-        const nextReview = await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        setReview(nextReview);
-      } catch {
-        // Keep the last structured progress while the next poll retries.
-      }
-    };
-    const timer = window.setInterval(() => void refresh(), 1000);
-    return () => { controller.abort(); window.clearInterval(timer); };
-  }, [taskId, attemptId, attempt]);
+  const refreshStudio = async (signal: AbortSignal): Promise<boolean> => {
+    try {
+      const nextAttempt = await getTaskAttempt(taskId, attemptId, signal);
+      if (signal.aborted) return true;
+      setAttempt(nextAttempt);
+      const nextReview = await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal });
+      if (signal.aborted) return true;
+      setReview(nextReview);
+      return true;
+    } catch (requestError) {
+      if (isAbortError(requestError) || signal.aborted) return true;
+      // Keep the last structured progress while the next poll retries.
+      return false;
+    }
+  };
+  usePollingLoop({ enabled: Boolean(attempt && ["queued", "running"].includes(attempt.status)), poll: refreshStudio });
   const steps = review?.steps.length ? review.steps : fallbackStudioSteps(attempt?.pipeline);
   const active = attempt?.status === "queued" || attempt?.status === "running";
   const terminalFailure = Boolean(attempt && ["failed", "canceled", "timeout"].includes(attempt.status));
