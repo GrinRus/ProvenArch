@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { expectNoCriticalAxeViolations } from "./axe";
+import { expectNoCriticalAxeViolations, expectReducedMotionRespect } from "./axe";
 
 const scenario = (process.env.UI_E2E_SCENARIO ?? "init-inspect").trim().toLowerCase();
 const screenshotOutputDir = (process.env.UI_E2E_OUTPUT_DIR ?? "").trim();
@@ -401,7 +401,8 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await expect(page.locator("details.task-filters-advanced")).not.toHaveAttribute("open");
   await expect(page.locator("details.task-empty-groups")).not.toHaveAttribute("open");
-  await page.getByTestId("task-inbox-new").click();
+  await page.getByTestId("task-inbox-new").focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByTestId("task-composer")).toBeVisible();
   await expect(page.locator('[data-route-heading="true"]')).toBeFocused();
   await page.getByTestId("task-title").fill("Map checkout architecture");
@@ -449,11 +450,13 @@ test("Task-first mock: create Task -> immutable Attempt -> architecture -> full 
   await page.getByLabel("Commit message").fill("docs: publish Task architecture");
   await page.getByTestId("publish-commit-selected-btn").click();
   await expect(page.getByRole("dialog")).toContainText("Commit all workspace changes");
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Cancel" })).toBeFocused();
   await page.getByRole("dialog").getByRole("button", { name: "Commit all workspace changes" }).click();
   await expect(page.getByTestId("publish-commit-plan")).toContainText("committed: docs: publish Task architecture");
   expect(commitMessages).toEqual(["docs: publish Task architecture"]);
   await expectNoHorizontalOverflow(page);
   await expectNoCriticalAxeViolations(page);
+  await expectReducedMotionRespect(page);
   expect(consoleErrors).toEqual([]);
   await captureEvidenceScreenshot(page, "happy-path-publish.png");
 

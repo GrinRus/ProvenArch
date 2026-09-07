@@ -44,7 +44,7 @@ export function ProductShell({ destination, workflow, workspacePath, runtimeLabe
           <button className="product-icon-button" type="button" data-testid="console-refresh-btn" aria-label="Refresh workspace data" onClick={onRefresh}><span className="shell-icon shell-icon-refresh" aria-hidden="true" /></button>
           <a className="product-icon-button" href={destinationPaths.settings} data-testid="settings-utility" aria-label="Workspace configuration" aria-current={destination === "settings" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("settings"); }}><span className="shell-icon shell-icon-settings" aria-hidden="true" /></a>
           <a className="product-icon-button" href={destinationPaths.setup} data-testid="setup-utility" aria-label="Lifecycle menu" aria-current={destination === "setup" ? "page" : undefined} onClick={(event) => { event.preventDefault(); onDestinationChange("setup"); }}><span className="shell-icon shell-icon-more" aria-hidden="true" /></a>
-          <button className="product-icon-button" type="button" aria-label="Details" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><span className="shell-icon shell-icon-info" aria-hidden="true">i</span></button>
+          <button className="product-icon-button" type="button" aria-label="Details" aria-expanded={drawerOpen} aria-controls="workspace-details-drawer" onClick={() => setDrawerOpen(true)}><span className="shell-icon shell-icon-info" aria-hidden="true">i</span></button>
         </div>
       </header>
       <div className={`product-layout ${navCollapsed ? "nav-collapsed" : ""}`}>
