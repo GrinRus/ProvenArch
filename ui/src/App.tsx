@@ -145,6 +145,7 @@ export default function App() {
   const workspaceSetup = useWorkspaceSetup({
     setBusy,
     setError,
+    workspaceKey: onboardingWorkspacePath,
     publicationContext: destination === "changes" && route.source === "snapshot" ? { taskId: route.taskId, attemptId: route.attemptId, runId: route.runId } : undefined,
     loadPublicationDiff: () => runExplorer.loadGitDiff({ runId: null }),
   });
@@ -431,7 +432,7 @@ export default function App() {
       setOnboardingCreateWorkspace(create);
       syncOnboardingStatus(status);
       if (status.workspace_ready && status.manifest_present) {
-        await bootstrapWorkspaceSetup();
+        await bootstrapWorkspaceSetup(status.workspace || path);
         await handleValidateWorkspace();
       }
     } catch (requestError) {
@@ -1002,6 +1003,7 @@ export default function App() {
 	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer
 	    workspaceReady={validateResult?.ok === true}
 	    repos={guidedRepos}
+	    workspaceKey={validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath}
 	    runtimeMode={effectiveRuntimeMode}
 	    runtimeProvider={effectiveRuntimeProvider}
 	    onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
@@ -1079,8 +1081,9 @@ export default function App() {
 	  ) : null}
 	  {destination === "knowledge" ? (
 		<Suspense fallback={<section className="panel stage-panel"><p className="status info">Loading Architecture Explorer…</p></section>}><KnowledgePage
-		  architecture={architecture}
-		  knowledge={knowledge}
+			architecture={architecture}
+			knowledge={knowledge}
+			workspaceKey={validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath}
 		  workspaceHealth={workspaceHealthReport}
 		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
 		  error={knowledgeError}

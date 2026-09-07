@@ -140,16 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, and REM-18 merged; REM-19 is in progress; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, and REM-19 merged; REM-20 is in progress; REM-03B remains authorization-gated.
 
-Next action: Implement and verify the isolated REM-19 bounded polling lifecycle slice
-from fresh `origin/main=17615c2f`, then review/push/merge it. Keep release status
+Next action: Implement and verify the isolated REM-20 persisted draft/recovery slice
+from fresh `origin/main=3672ed5a`, then review/push/merge it. Keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: independent REM slices through REM-18 are merged; REM-19 is the first ready
-task after REM-18 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05 remain
-stabilization-dependent, and REM-20+ remain dependency-blocked until this slice is merged.
+Current queue truth: independent REM slices through REM-19 are merged; REM-20 is the first ready
+task after REM-19 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05 remain
+stabilization-dependent, and REM-21+ remain dependency-blocked until this slice is merged.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -211,6 +211,26 @@ back off to a bounded delay; hidden/offline state stops new work and resume is i
 unmount/terminal state leaves no timer or listener; focused tests cover sequential execution,
 backoff, pause/resume and existing run/task/QA behavior; deterministic UI/contract/build CI remains
 green.
+
+### REM-20 slice plan — persisted user drafts and recovery
+
+Before: Task Composer, workspace Setup manifest/editor and editable workspace Markdown keep changes
+only in React state. Refresh, switching workspace, or a failed save can therefore silently discard
+the user's latest draft even when navigation guards are present.
+
+After: each editable surface stores a versioned local draft keyed by workspace and surface identity,
+restores it on remount or workspace switch, keeps it after failed writes, and clears it only after a
+successful save/start. Storage failures fall back to the in-memory draft; backend/API authority and
+the existing explicit navigation/before-unload confirmation remain unchanged.
+
+Scope: `ui/src/lib/draftStorage.ts`, Task Composer, `useManifestEditor`/`useWorkspaceSetup`, App
+workspace handoff wiring, editable Markdown in `KnowledgePage`, focused component/utility tests,
+`docs/ARCHITECTURE.md` and this tracker. No backend/API/schema changes.
+
+Acceptance: Task, Setup and editable Markdown drafts survive remount/refresh-equivalent transitions
+and are isolated by workspace; failed save/admission retains the draft; successful save/start clears
+it; cancel explicitly discards an editable Markdown draft; malformed or unavailable browser storage
+does not break the flow; deterministic UI/contract/build CI remains green.
 
 ### Context
 
@@ -309,8 +329,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization PR #303, REM-12..15 | merged in PR #304 |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | merged in PR #300 |
 | 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | merged in PR #305 |
-| 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | in progress on `17615c2f` |
-| 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
+| 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | merged in PR #306 |
+| 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-19 | in progress on `3672ed5a` |
 | 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | blocked-by-dependency |
 | 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | blocked-by-stabilization-and-dependency |
 | 23 | REM-23 | P2 | UI hotspots разделены по data/state/view seams, общие states унифицированы, а route-level regression suite остаётся зелёной. | REM-17..21 | blocked-by-dependency |

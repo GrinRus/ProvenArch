@@ -1,12 +1,14 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { GuidedRepo } from "../lib/appContracts";
 import { admitTaskAttempt, createTask, newIdempotencyKey, type TaskScope } from "../lib/taskApi";
+import { clearDraft, draftStorageKey, readDraft, writeDraft } from "../lib/draftStorage";
 import { Button, PageHeader } from "./SemanticPrimitives";
 
 type TaskComposerProps = {
   workspaceReady: boolean;
   repos: GuidedRepo[];
+  workspaceKey?: string;
   runtimeMode: string;
   runtimeProvider: string;
   onCreated: (taskId: string) => void;
@@ -22,21 +24,57 @@ const providers: Array<{ id: RunnerProvider; label: string }> = [
   { id: "codex-code", label: "Codex" },
 ];
 
-export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvider, onCreated, onStarted }: TaskComposerProps) {
+type TaskComposerDraft = {
+  title: string;
+  goal: string;
+  context: string;
+  mode: RunnerMode;
+  provider: RunnerProvider;
+};
+
+export function TaskComposer({ workspaceReady, repos, workspaceKey, runtimeMode, runtimeProvider, onCreated, onStarted }: TaskComposerProps) {
   const normalizedMode = runtimeMode === "fake" || runtimeMode === "headless" ? runtimeMode : "";
   const normalizedProvider = providers.some((item) => item.id === runtimeProvider) ? runtimeProvider as RunnerProvider : "claude-code";
-  const [title, setTitle] = useState("");
-  const [goal, setGoal] = useState("");
-  const [context, setContext] = useState("");
-  const [mode, setMode] = useState<RunnerMode>((normalizedMode || "fake") as RunnerMode);
-  const [provider, setProvider] = useState<RunnerProvider>(normalizedProvider);
+  const draftScope = workspaceKey?.trim() || repos.map((repo) => `${repo.name}:${repo.path}:${repo.git_url}`).sort().join("|");
+  const draftKey = draftStorageKey("task-composer", draftScope);
+  const initialDraft = readDraft<TaskComposerDraft>(draftKey)?.value;
+  const [title, setTitle] = useState(() => initialDraft?.title ?? "");
+  const [goal, setGoal] = useState(() => initialDraft?.goal ?? "");
+  const [context, setContext] = useState(() => initialDraft?.context ?? "");
+  const [mode, setMode] = useState<RunnerMode>(() => initialDraft?.mode ?? (normalizedMode || "fake") as RunnerMode);
+  const [provider, setProvider] = useState<RunnerProvider>(() => initialDraft?.provider ?? normalizedProvider);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createdTaskId, setCreatedTaskId] = useState("");
+  const [draftRestored, setDraftRestored] = useState(Boolean(initialDraft));
+  const draftKeyRef = useRef(draftKey);
   const [admissionIdempotencyKey] = useState(() => newIdempotencyKey());
   const scope = useMemo(() => taskScope(repos), [repos]);
   const readiness = runnerReadiness({ workspaceReady, scope, mode, provider, runtimeMode: normalizedMode });
   const canSubmit = goal.trim().length > 0 && readiness.ok && !busy;
+
+  useEffect(() => {
+    if (draftKeyRef.current === draftKey) return;
+    draftKeyRef.current = draftKey;
+    const nextDraft = readDraft<TaskComposerDraft>(draftKey)?.value;
+    setTitle(nextDraft?.title ?? "");
+    setGoal(nextDraft?.goal ?? "");
+    setContext(nextDraft?.context ?? "");
+    setMode(nextDraft?.mode ?? (normalizedMode || "fake") as RunnerMode);
+    setProvider(nextDraft?.provider ?? normalizedProvider);
+    setCreatedTaskId("");
+    setError("");
+    setDraftRestored(Boolean(nextDraft));
+  }, [draftKey, normalizedMode, normalizedProvider]);
+
+  useEffect(() => {
+    if (busy) return;
+    if (!title.trim() && !goal.trim() && !context.trim()) {
+      clearDraft(draftKey);
+      return;
+    }
+    writeDraft(draftKey, { title, goal, context, mode, provider });
+  }, [busy, context, draftKey, goal, mode, provider, title]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,6 +101,8 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
       } catch (requestError) {
         throw new Error(`Task created, but Attempt admission failed: ${requestError instanceof Error ? requestError.message : "unknown admission error"}`);
       }
+      clearDraft(draftKey);
+      setDraftRestored(false);
       if (onStarted) onStarted(task.task_id, attempt.attempt_id);
       else onCreated(task.task_id);
     } catch (requestError) {
@@ -76,6 +116,7 @@ export function TaskComposer({ workspaceReady, repos, runtimeMode, runtimeProvid
     <section className="panel stage-panel task-composer" data-testid="task-composer">
       <PageHeader title="New Task" purpose="Start with the architecture question. Scope and runner defaults are captured with the Task." state={<span className={`status ${readiness.ok ? "ok" : "warn"}`}>{readiness.label}</span>} action={<Button tone="primary" type="submit" form="task-composer-form" data-testid="task-create-header" disabled={!canSubmit}>{busy ? "Starting…" : "Start Task"}</Button>} />
       {!workspaceReady ? <p className="status warn" role="status" data-testid="task-composer-workspace-blocked">Workspace and runtime readiness are unavailable. No Task will be created.</p> : null}
+      {draftRestored ? <p className="status info" role="status" data-testid="task-composer-draft-restored">Recovered an unsaved Task draft for this workspace. Save it by starting the Task or keep editing.</p> : null}
       {error ? <p className="status err" role="alert" data-testid="task-composer-error">{error}</p> : null}
       <div className="task-composer-layout">
       <div className="task-composer-form">

@@ -5,6 +5,7 @@ import type { KnowledgeView } from "../lib/appRoutes";
 import { architectureFromKnowledge, loadArtifactText, loadRepositoryEvidenceAPI, saveEditableArtifact, type RepositoryEvidence } from "../lib/workspaceApi";
 import { levelLabel } from "../lib/architectureLabels";
 import { EvidenceViewer } from "./EvidenceViewer";
+import { clearDraft, draftStorageKey, readDraft, writeDraft } from "../lib/draftStorage";
 
 const ArchitectureMap = lazy(() => import("./ArchitectureMap").then((module) => ({ default: module.ArchitectureMap })));
 
@@ -24,6 +25,7 @@ export function KnowledgePage({
   view,
   selectedEntityID,
   selectedArtifactPath,
+  workspaceKey,
   workspaceHealth,
   onViewChange,
   onEntityChange,
@@ -40,6 +42,7 @@ export function KnowledgePage({
   view: KnowledgeView;
   selectedEntityID?: string;
   selectedArtifactPath?: string;
+  workspaceKey?: string;
   workspaceHealth?: WorkspaceHealthResponse | null;
   onViewChange: (view: KnowledgeView) => void;
   onEntityChange: (id?: string) => void;
@@ -135,8 +138,8 @@ export function KnowledgePage({
 	  {repositoryEvidenceStatus === "unavailable" ? <p className="status warn" role="status">Repository evidence is unavailable in the configured checkout.</p> : null}
 	  {repositoryEvidence ? <section className="repository-evidence-viewer panel" data-testid="repository-evidence-viewer"><header><div><p className="eyebrow">Repository source · read-only</p><h2>{repositoryEvidence.repo}</h2><code>{repositoryEvidence.path}</code></div><button type="button" onClick={() => setRepositoryEvidence(null)}>Close source</button></header><EvidenceViewer path={`${repositoryEvidence.repo}:${repositoryEvidence.path}`} content={repositoryEvidence.content} sourceMode="repository" provenance="live" /></section> : null}
 
-      {architecture && architecture.status !== "unavailable" && activePageView === "documents" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="documents" /> : null}
-      {architecture && architecture.status !== "unavailable" && activePageView === "diagrams" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="diagrams" /> : null}
+      {architecture && architecture.status !== "unavailable" && activePageView === "documents" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} workspaceKey={workspaceKey} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="documents" /> : null}
+      {architecture && architecture.status !== "unavailable" && activePageView === "diagrams" ? <DocumentsWorkspace architecture={architecture} selectedArtifactPath={selectedArtifactPath} workspaceKey={workspaceKey} onDocumentChange={onDocumentChange} onOpenArtifact={onOpenArtifact} mode="diagrams" /> : null}
       {architecture && architecture.status !== "unavailable" && activePageView === "findings" ? <FindingsView architecture={architecture} onOpenArtifact={onOpenArtifact} onOpenRepositoryEvidence={openRepositoryEvidence} /> : null}
 
       {architecture && architecture.status !== "unavailable" && activePageView === "model" ? <ModelWorkbench architecture={architecture} selectedEntityID={selectedEntityID} onEntityChange={onEntityChange} onOpenRepositoryEvidence={openRepositoryEvidence} /> : null}
@@ -202,10 +205,11 @@ function ModelWorkbench({ architecture, selectedEntityID, onEntityChange, onOpen
   </section>;
 }
 
-function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChange, onOpenArtifact, mode }: { architecture: ArchitectureResponse; selectedArtifactPath?: string; onDocumentChange?: (path?: string) => void; onOpenArtifact: (path: string) => void; mode: "documents" | "diagrams" }) {
+function DocumentsWorkspace({ architecture, selectedArtifactPath, workspaceKey, onDocumentChange, onOpenArtifact, mode }: { architecture: ArchitectureResponse; selectedArtifactPath?: string; workspaceKey?: string; onDocumentChange?: (path?: string) => void; onOpenArtifact: (path: string) => void; mode: "documents" | "diagrams" }) {
   const documents = architecture.artifacts.filter((artifact) => mode === "diagrams" ? artifact.path.endsWith(".mmd") : artifact.path.endsWith(".md")).sort((left, right) => left.path.localeCompare(right.path));
   const preferredPath = mode === "documents" ? architectureHomePath(architecture, documents) : undefined;
   const selectedPath = selectedArtifactPath && documents.some((artifact) => artifact.path === selectedArtifactPath) ? selectedArtifactPath : preferredPath ?? documents[0]?.path;
+  const markdownDraftKey = editableDraftKey(workspaceKey, selectedPath, mode);
   const [content, setContent] = useState("");
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -227,14 +231,19 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
     setStatus("loading");
     void loadArtifactText(selectedPath).then((value) => {
       if (!active) return;
+      const persistedDraft = markdownDraftKey ? readDraft<MarkdownDraft>(markdownDraftKey)?.value : null;
       setContent(value ?? "");
-      setDraft(value ?? "");
+      setDraft(persistedDraft?.content ?? value ?? "");
       setStatus(value === null ? "error" : "loaded");
-      setEditMode(false);
-      setSaveStatus("");
+      setEditMode(Boolean(persistedDraft));
+      setSaveStatus(persistedDraft ? "Recovered an unsaved Markdown draft; save or cancel it." : "");
     });
     return () => { active = false; };
-  }, [selectedPath]);
+  }, [markdownDraftKey, selectedPath]);
+  useEffect(() => {
+    if (!editable || !editMode || !markdownDraftKey || draft === content) return;
+    writeDraft(markdownDraftKey, { path: selectedPath ?? "", content: draft, baseContent: content });
+  }, [content, draft, editMode, editable, markdownDraftKey, selectedPath]);
   return <div className="architecture-documents" data-testid={`architecture-${mode}`}>
     <aside className="architecture-document-tree" aria-label={`${mode === "documents" ? "Document" : "Diagram"} tree`}>
       <div><p className="eyebrow">{mode === "documents" ? "Documents" : "Diagrams"}</p><h2>{documents.length} available</h2><p className="hint">Selected promoted workspace authority.</p></div>
@@ -245,12 +254,12 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
         {editable ? <div className="markdown-editor-toolbar" aria-label="Markdown editor controls">
           <span className="hint">Editable workspace Markdown · lossless text is preserved until save.</span>
           <div>
-            <button type="button" className="ui-button tone-neutral" onClick={() => { if (editMode) setDraft(content); setEditMode((value) => !value); setSaveStatus(""); }}>{editMode ? "Cancel" : "Edit Markdown"}</button>
-            {editMode ? <button type="button" className="ui-button tone-primary" disabled={draft === content || saveStatus === "Saving…"} onClick={() => void (async () => { setSaveStatus("Saving…"); try { await saveEditableArtifact(selectedPath, draft); setContent(draft); setEditMode(false); setSaveStatus("Saved to the editable workspace surface."); } catch (error) { setSaveStatus(error instanceof Error ? error.message : "Markdown save failed."); } })()}>Save</button> : null}
+            <button type="button" className="ui-button tone-neutral" onClick={() => { if (editMode) { setDraft(content); if (markdownDraftKey) clearDraft(markdownDraftKey); } setEditMode((value) => !value); setSaveStatus(""); }}>{editMode ? "Cancel" : "Edit Markdown"}</button>
+            {editMode ? <button type="button" className="ui-button tone-primary" disabled={draft === content || saveStatus === "Saving…"} onClick={() => void (async () => { setSaveStatus("Saving…"); try { await saveEditableArtifact(selectedPath, draft); setContent(draft); if (markdownDraftKey) clearDraft(markdownDraftKey); setEditMode(false); setSaveStatus("Saved to the editable workspace surface."); } catch (error) { setSaveStatus(error instanceof Error ? error.message : "Markdown save failed."); } })()}>Save</button> : null}
           </div>
         </div> : <p className="status info markdown-read-only-note">Promoted Architecture documents are read-only evidence. Edit is available only for editable workspace Markdown under <code>charter/</code> or <code>skills/</code>.</p>}
         {editMode ? <textarea className="markdown-editor" data-testid="markdown-editor" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={`Edit ${selectedPath}`} rows={24} /> : <EvidenceViewer key={selectedPath} path={selectedPath} content={content} sourceMode="promoted_current" onOpenArtifact={onOpenArtifact} />}
-        {saveStatus ? <p className={saveStatus.startsWith("Saved") ? "status ok" : saveStatus === "Saving…" ? "status info" : "status err"} role="status">{saveStatus}</p> : null}
+        {saveStatus ? <p className={saveStatus.startsWith("Saved") ? "status ok" : saveStatus === "Saving…" || saveStatus.startsWith("Recovered") ? "status info" : "status err"} role="status">{saveStatus}</p> : null}
         {mode === "diagrams" ? <MermaidEvidenceContext architecture={architecture} onOpenArtifact={onOpenArtifact} /> : null}
       </> : status === "loading" ? <p className="status info">Loading document…</p> : status === "error" ? <p className="status err">The selected promoted document is unavailable.</p> : <p className="empty-state">Select a document to inspect its content.</p>}
     </section>
@@ -262,6 +271,13 @@ function DocumentsWorkspace({ architecture, selectedArtifactPath, onDocumentChan
       <button type="button" className="ui-button tone-primary" onClick={() => selectedPath && onOpenArtifact(selectedPath)} disabled={!selectedPath}>Open source artifact</button>
     </aside>
   </div>;
+}
+
+type MarkdownDraft = { path: string; content: string; baseContent: string };
+
+function editableDraftKey(workspaceKey: string | undefined, selectedPath: string | undefined, mode: "documents" | "diagrams"): string {
+  if (mode !== "documents" || !workspaceKey || !selectedPath || !isEditableMarkdownPath(selectedPath)) return "";
+  return draftStorageKey("markdown-editor", `${workspaceKey}:${selectedPath}`);
 }
 
 function architectureHomePath(architecture: ArchitectureResponse, documents: KnowledgeArtifact[]): string | undefined {
