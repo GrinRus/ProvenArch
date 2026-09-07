@@ -77,7 +77,7 @@ Remediation program и release gates остаются отдельными scope
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |
-| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-03A/REM-04..REM-24 merged; REM-03B remains authorization-gated and release-blocking; REM-25 is the final documentation reconciliation |
+| [EP-20260905-audit-remediation-program](#ep-20260905-audit-remediation-program) | active | REM-01/REM-02/REM-03A/REM-04..REM-25 merged; REM-03B remains authorization-gated and release-blocking |
 | [EP-20260811-task-attempt-contracts](#ep-20260811-task-attempt-contracts) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260811-task-first-ui](#ep-20260811-task-first-ui) | blocked | recorded validation or trusted qualification remains open |
 | [EP-20260812-task-first-live-evidence-alignment](#ep-20260812-task-first-live-evidence-alignment) | blocked | recorded validation or trusted qualification remains open |
@@ -140,19 +140,16 @@ trusted release qualification remain here; historical archive entries are not re
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-03A and REM-04..REM-24 are merged on current `origin/main`;
-the REM-25 documentation reconciliation is implemented in this slice; REM-03B remains an
-authorization-gated, release-blocking admin operation.
+Status: active — REM-01, REM-02, REM-03A and REM-04..REM-25 are merged on current `origin/main`;
+REM-03B remains an authorization-gated, release-blocking admin operation.
 
-Next action: after this fact-based REM-25 documentation reconciliation is merged, rerun the final
-deterministic DoD from post-merge `origin/main`. This documentation slice must not claim release
-readiness or change GitHub settings; release remains blocked until REM-03B has explicit
-authorization plus before/after/rollback evidence.
+Next action: obtain explicit owner/admin authorization for REM-03B, then record its exact GitHub
+setting delta with before/after/rollback evidence. The post-merge deterministic DoD is complete;
+this program and release remain blocked until that external operation is authorized and evidenced.
 
-Current queue truth: the stabilization-sensitive and code-remediation slices through REM-24 are
-merged (including REM-03A); REM-03B is the only unresolved P1 boundary. REM-25 is therefore
-allowed as a docs-only reconciliation exception: it records the merged evidence and current
-Task-first flow while preserving the explicit `release-blocked` state.
+Current queue truth: the stabilization-sensitive and code-remediation slices through REM-24 and
+the REM-25 documentation reconciliation are merged (including REM-03A); REM-03B is the only
+unresolved P1 boundary and remains explicitly `release-blocked`.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -397,7 +394,7 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | merged in PR #313 |
 | 23 | REM-23 | P2 | UI hotspots разделены по data/state/view seams, общие states унифицированы, а route-level regression suite остаётся зелёной. | REM-17..21 | merged in PR #309 |
 | 24 | REM-24 | P2 | Wall-clock sleeps/flaky waits заменены deterministic clocks/events; повторные focused runs не дают flakes. | stabilization merge, REM-06..08, REM-22 | merged in PR #314 |
-| 25 | REM-25 | P2 | Specs, architecture, testing strategy, stakeholder mirror, examples и active/archive plans синхронизированы с фактом; дублированные stale claims удалены. | REM-01..24 resolved; docs-only exception preserves REM-03B release blocker | implemented in current docs-only reconciliation; release blocker preserved |
+| 25 | REM-25 | P2 | Specs, architecture, testing strategy, stakeholder mirror, examples и active/archive plans синхронизированы с фактом; дублированные stale claims удалены. | REM-01..24 resolved; docs-only exception preserves REM-03B release blocker | merged in PR #315; release blocker preserved |
 
 **REM-25 readiness exception.** All implementation slices through REM-24, including versioned
 REM-03A governance evidence, are merged on `origin/main`. REM-03B is an external GitHub admin
@@ -1388,6 +1385,10 @@ without renewed status and source review.
   rechecked. `make verify-release-governance --live` passed read-only, proving versioned REM-03A
   governance evidence matches current GitHub settings; no authorization or rollback record exists
   for REM-03B. The docs-only exception preserves that release blocker.
+- 2026-09-07: PR #315 squash-merged as `origin/main=a62be68a`; its remote branch was deleted. The
+  post-merge deterministic DoD passed from that SHA: contracts, guidance, governance, lint, build,
+  full Go suite, 314 Python tests and 272 UI tests. REM-25 is closed; REM-03B remains the only
+  unresolved P1 and no release-readiness claim is made.
 
 ## EP-20260811-task-attempt-contracts
 
