@@ -122,6 +122,25 @@ comparison presentation; это не новый persisted model ID и не из�
 - основа slug строится из human-readable canonical name или стабильного anchor
 - `db.<engine>.<slug>` использует отдельный engine slug, например `db.postgres.payments`
 
+При нормализации semantic snapshot типы `service-platform` и `application-service` считаются
+эквивалентами canonical family `service`, чтобы наблюдения одного logical service из разных
+shard-ов сливались детерминированно.
+
+Для `team.*` type alias `approval-owner` также нормализуется в canonical family `team`.
+
+Для `infra.*` type alias `change-data-capture-service` также нормализуется в canonical family
+`infrastructure`, чтобы CDC deployment и infrastructure observations одного logical repository
+сливались детерминированно.
+
+Для canonical `datastore.*.clickhouse` допускаются узкие name aliases `analytics`,
+`preaggregation` и `session recording`: provider shards часто называют один ClickHouse по
+роли конкретного workload-а. Иные несовместимые datastore names остаются hard collision.
+
+Repeated weak edge IDs from one logical repository may be re-keyed from their endpoint pair
+before the final identity check. Relation aliases `route`, `routes`, `routes-to`, and `routes to`
+are equivalent to canonical `routes_to`; incompatible relation types or repositories remain hard
+collisions.
+
 ### HTTP path slug
 Для `api.http.<service-slug>.<method>.<path-slug>`:
 - HTTP method → lowercase (`get`, `post`, `put`, `delete`, ...)

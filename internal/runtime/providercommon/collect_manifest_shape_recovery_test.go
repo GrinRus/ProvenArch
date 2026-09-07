@@ -268,6 +268,31 @@ EOF
 	}
 }
 
+func TestProvenanceKindRecoveryCanonicalizesInferredFromBuildAlias(t *testing.T) {
+	t.Parallel()
+	task := newCollectTask(t, "run-collect-provenance-kind-inferred-from-build")
+	prepareProvenanceKindRecoveryTask(t, &task)
+	manifest := provenanceKindAliasFixture(t, task, "shard-pack-manifest.json")
+	manifest = strings.Replace(manifest, `"kind": "asserted"`, `"kind": "inferred_from_build"`, 1)
+	manifestPath := filepath.Join(task.WriteRoot, ShardPackManifestFileName)
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recoverCollectManifestProvenanceKindAliases(task); err != nil {
+		t.Fatalf("recover inferred_from_build alias: %v", err)
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"kind": "inferred_from_build"`) {
+		t.Fatal("inferred_from_build alias was not canonicalized")
+	}
+	if !strings.Contains(string(raw), `"kind": "inference"`) {
+		t.Fatal("canonical inference provenance kind missing")
+	}
+}
+
 func TestProvenanceKindRecoveryRejectsArbitraryAliasesWithoutMutation(t *testing.T) {
 	t.Parallel()
 	task := newCollectTask(t, "run-collect-provenance-kind-arbitrary")

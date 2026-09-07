@@ -174,6 +174,11 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		"- Every outputs[].path must be relative to draft_final_root and every referenced draft file must exist before exit.",
 		"- Absolute target checks must use write_root/draft_final_root exactly; relative CWD checks are invalid.",
 	)
+	if strings.TrimSpace(task.StepID) == "init.step1.collect" || strings.TrimSpace(task.StepID) == "refresh.step1.collect" {
+		lines = append(lines,
+			"- PATH SAFETY FOR COLLECT REPAIR: the provider process working directory is the exact write_root for this shard. Set write_root = Path.cwd() and write the authored document plus shard-pack-manifest.json as Path.cwd()/filename; do not manually retype, shorten, or reconstruct any long /private/tmp/... batch or taskrun path. Read repository evidence only through the exact read_context_roots supplied in this task, passed as arguments rather than abbreviated hardcoded paths.",
+		)
+	}
 	switch strings.TrimSpace(task.StepID) {
 	case "init.step0.constitution":
 		lines = append(lines,
@@ -185,6 +190,7 @@ func ComposeDraftArtifactRepairPrompt(provider acpruntime.Provider, task acprunt
 		lines = append(lines,
 			"- The heredoc as-is files are bootstrap-only repair targets, not valid final content.",
 			"- Before final exit, replace recovery scaffold text with evidence-backed as-is content from read_context_roots.",
+			"- PATH SAFETY FOR STEP2: the provider process working directory is the exact draft_final_root. Use Path.cwd() (or ./overview.md, ./summary.md, and ./architect-summary.md) for markdown writes; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
 			"- Final action must be: ensure asis-draft-manifest.json and every referenced draft file exist and no referenced draft file contains unchanged bootstrap/recovery scaffold.",
 		)
 		lines = append(lines, "AS-IS DRAFT MANIFEST CANONICAL SHAPE:")
@@ -241,6 +247,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		"- Do not create or preserve recovery scaffold text as final content.",
 		"- First focused work unit: execute one bounded filesystem command that reads the current draft manifest and bounded staged evidence, then rewrites every referenced markdown target in that same command before any optional extended analysis.",
 		"- If you use Python for this bounded filesystem command, invoke python3 explicitly. Never invoke python; some trusted live hosts do not provide a python binary.",
+		"- Shell assignments such as MANIFEST=/path are not exported to child processes. If Python needs a path, pass it as a positional argument (for example: python3 - \"$MANIFEST\" <<'PY' and read sys.argv[1]) or export the variable explicitly before invoking Python; never use os.environ[...] with a bare, unexported NAME=/path assignment.",
 		"- Fresh mutation is required: the harness ignores pre-existing bootstrap files until you rewrite every markdown target in this enrichment command.",
 		"- Do not spend the whole run reading evidence without a write; make a marker-free evidence-backed rewrite for every markdown target in the first command, then refine it if time remains.",
 		fmt.Sprintf("- Read and keep the existing manifest target in write_root: %q.", manifestTarget),
@@ -297,13 +304,21 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 		lines = append(lines,
 			"- For typed shard-summary JSON with items[], planned = len(items), succeeded = count of items where status == \"succeeded\", failed = count of items where status == \"failed\"; pending/checkpointed/other statuses are incomplete coverage and must be named separately.",
 			"- Do not report planned=unknown or failed=unknown when a readable current-run typed shard-summary items[] list is available.",
-			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts and an explicit no-shard-coverage-blocker statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\" Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
+			"- When a readable typed shard-summary shows failed=0 and no pending/checkpointed/other statuses, write exact current-run counts in the literal key=value shape planned=<n> succeeded=<n> failed=<n> incomplete=<n> and an explicit no-shard-coverage-blocker statement. A prose or slash form such as \"Shard completeness: 16/16 succeeded\" is not sufficient. Do not write generic conditional phrases such as \"if present above\", \"any failed or incomplete shards\", \"failed shards require rerun\", or \"failed or incomplete shards remain coverage gaps\".",
 			"- Do not infer shard counts from lexical occurrences of words such as failed/error/summary inside markdown or manifests.",
+			"- PATH SAFETY FOR STEP2 ENRICHMENT: this provider process runs with cwd equal to draft_final_root. Use Path.cwd() for overview.md, summary.md, and architect-summary.md; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Locate typed summaries under taskruns_dir using run_dir.name + \"*shard-summary*.json\". If a script needs current-run evidence, pass the exact run id as an argument or derive it from Path.cwd(); do not hardcode a guessed or abbreviated /private/tmp path.",
 		)
 	}
 	lines = append(lines,
 		"DRAFT ENRICHMENT TARGETS:",
 	)
+	if draftEnrichmentManifestMayBeMissing(validationErr) {
+		lines = append(lines,
+			"- The runtime draft manifest may be absent after the previous provider attempt. If the exact manifest target is missing, create it before rewriting markdown using the normative skeleton below; preserve its outputs[] paths exactly and do not add fields.",
+			"NORMATIVE DRAFT MANIFEST SKELETON:",
+			skeleton,
+		)
+	}
 	if len(outputs) == 0 {
 		lines = append(lines, "- Read the existing draft manifest outputs[] and enrich every referenced markdown draft file.")
 	} else {
@@ -371,6 +386,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 			steppolicy.ArchitectureHomeProcessNarrationPolicyLine(),
 			"- summary.md must contain: planned/succeeded/failed shard completeness; evidence density/readability notes; key citations or staged artifact refs; and remaining gaps.",
 			"- For shard completeness, derive planned/succeeded/failed from typed shard-plan/shard-summary artifacts when visible, including shard-summary items[].status; otherwise use observed shard directories and shard-pack-manifest.json counts. Never count the words failed/error/summary lexically inside manifests or markdown.",
+			"- The required completeness format is literal key=value tokens separated by single spaces: planned=<n> succeeded=<n> failed=<n> incomplete=<n>. A prose or slash form such as 'Shard completeness: 16/16 succeeded' is not sufficient; when typed status is 16/16/0/0, write exactly 'planned=16 succeeded=16 failed=0 incomplete=0' in both summary.md and architect-summary.md.",
 			"- If planned shard status is not explicitly visible, write planned=unknown, succeeded=<observed shard-pack-manifest.json count>, failed=unknown, and name the missing typed shard-plan/shard-summary surface instead of fabricating failed counts.",
 			"- Do not list final-run-index.json or citation-index.json from a different run_id as current-run evidence. Current-run markdown may mention only current_run_id taskrun paths.",
 			"- final-run-index.json and citation-index.json are downstream/final staging artifacts and may not exist yet during step2. If they are absent, omit final-index availability from the as-is markdown; do not write that current-run final/citation indexes are missing, not observed, not found, or unavailable.",
@@ -498,6 +514,7 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 					fmt.Sprintf("- Rewrite every referenced markdown target again in one filesystem command, with special attention to %s.", focusTarget),
 					"- Read the current-run typed shard-plan/shard-summary files listed above when present and compute planned, succeeded, failed, and incomplete counts from items[].status.",
 					"- If the typed shard-summary shows all shards succeeded, write exact counts and an explicit no-shard-coverage-blocker statement in overview.md, summary.md, and architect-summary.md.",
+					"- Copy the exact literal planned=<n> succeeded=<n> failed=<n> incomplete=<n> from the validator error or typed summary into summary.md and architect-summary.md; a table with separate Metric/Count rows is not sufficient.",
 					"- Do not use generic conditional phrases such as any failed or incomplete shards, failed shards require rerun, failed or incomplete shards remain coverage gaps, or if present above.",
 					"- The operator decision summary must say what is complete now, what residual artifact-quality risks remain, and what the operator should inspect next without suggesting nonexistent shard failures.",
 				)
@@ -565,6 +582,15 @@ func ComposeDraftArtifactEnrichmentPrompt(provider acpruntime.Provider, task acp
 	return strings.Join(lines, "\n")
 }
 
+func draftEnrichmentManifestMayBeMissing(validationErr error) bool {
+	if validationErr == nil {
+		return false
+	}
+	text := strings.ToLower(validationErr.Error())
+	return strings.Contains(text, "read runtime draft manifest") ||
+		strings.Contains(text, "parse runtime draft manifest")
+}
+
 func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.Provider, task acpruntime.Task, manifestFile string, manifestTarget string, outputs []runtimedrafts.Output, statusEvidenceFiles []string, validationErr error) string {
 	lines := []string{
 		fmt.Sprintf("You are ACP runtime provider %q in compact step2 draft enrichment retry mode.", provider),
@@ -574,6 +600,7 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 		"- The command must read a small current-run evidence set and overwrite every step2 markdown target under draft_final_root before it exits.",
 		"- Do not run the earlier heredoc/bootstrap draft command and do not perform an open-ended workspace, repository, or sibling-taskrun sweep.",
 		"- Do not return semantic JSON or use stdout as the artifact. Success requires fresh provider-authored markdown mutations on disk.",
+		"- Shell assignments such as MANIFEST=/path are not exported to child processes. If Python needs a path, pass it as a positional argument (for example: python3 - \"$MANIFEST\" <<'PY' and read sys.argv[1]) or export the variable explicitly before invoking Python; never use os.environ[...] with a bare, unexported NAME=/path assignment.",
 		fmt.Sprintf("- Read/preserve the current manifest target: %q.", manifestTarget),
 		fmt.Sprintf("- Draft root for markdown overwrites: %q.", strings.TrimSpace(task.DraftFinalRoot)),
 		fmt.Sprintf(`- write_root = %q`, strings.TrimSpace(task.WriteRoot)),
@@ -600,8 +627,9 @@ func composeDraftArtifactEnrichmentCompactStep2RetryPrompt(provider acpruntime.P
 	}
 	lines = append(lines,
 		"- If typed shard-summary items[] is readable, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), incomplete=count(status not succeeded/failed).",
-		"- When typed shard-summary shows all shards succeeded, write this exact class of statement in summary.md and architect-summary.md: \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+		"- When typed shard-summary shows all shards succeeded, write the exact key=value literal from items[].status in summary.md and architect-summary.md (for example: \"planned=16 succeeded=16 failed=0 incomplete=0\"). Do not use slash notation such as \"Shard completeness: 16/16 succeeded\" as a substitute; also state that current-run shard coverage is not a blocker.",
 		"- Do not infer shard counts from lexical occurrences of failed/error in markdown or manifests.",
+		"- PATH SAFETY FOR STEP2 RETRY: the provider process cwd is the exact draft_final_root. Use Path.cwd() for the three markdown targets; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
 		"- Required markdown overwrite targets:",
 	)
 	markdownTargets := 0
@@ -734,6 +762,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 		"- Do not print the command, fenced code, or a Python script as assistant text. The command must actually execute and mutate files before exit.",
 		"- A plain-text response containing `python3 - <<'PY'` without filesystem mutation is classified as failed command-text enrichment.",
 		"- The command must use python3, read bounded current-run evidence, and overwrite every markdown target listed below before it exits.",
+		"- Shell assignments such as MANIFEST=/path are not exported to child processes. If Python needs a path, pass it as a positional argument (for example: python3 - \"$MANIFEST\" <<'PY' and read sys.argv[1]) or export the variable explicitly before invoking Python; never use os.environ[...] with a bare, unexported NAME=/path assignment.",
 		"- Do not run or copy the earlier heredoc/bootstrap draft command.",
 		"- Do not write deterministic filler, raw JSON dumps, placeholder text, or recovery mechanics as final markdown.",
 		fmt.Sprintf("- Manifest target to read/preserve: %q.", manifestTarget),
@@ -791,6 +820,11 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- Final self-check inside the command: every markdown target was freshly overwritten, is marker-free, has balanced backticks/fences, and contains operator-facing evidence, gaps, and next decision content.",
 		)
 	}
+	if strings.TrimSpace(task.StepID) == "init.step2.asis_docs" || strings.TrimSpace(task.StepID) == "refresh.step2.asis_docs" {
+		lines = append(lines,
+			"- PATH SAFETY FOR STEP2 RETRY: the provider process cwd is the exact draft_final_root. Use Path.cwd() for the three markdown targets; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / \"runtime\" / \"step2_as_is\". Never manually retype, shorten, or reconstruct the long absolute /private/tmp path, and never omit the timestamp/profile segment.",
+		)
+	}
 	if draftEnrichmentValidationMentionsCommandTextRetry(validationErr) {
 		lines = append(lines,
 			"- The previous enrichment printed a shell/Python command as text instead of executing it. This retry is accepted only if the provider runtime observes actual file mutations under draft_final_root.",
@@ -831,7 +865,7 @@ func composeDraftArtifactEnrichmentCommandTextRetryPrompt(provider acpruntime.Pr
 			"- summary.md must state shard completeness from typed shard status when visible plus evidence density/readability and gaps.",
 			"- architect-summary.md must state what is complete, what is missing, and what the operator should inspect or decide next.",
 			"- If a typed shard-summary JSON with items[] is visible, compute planned=len(items), succeeded=count(status==\"succeeded\"), failed=count(status==\"failed\"), and incomplete=count of pending/checkpointed/other statuses.",
-			"- When typed shard-summary shows all shards succeeded, summary.md must include an exact statement such as \"Shard completeness: 16/16 succeeded; no failed, pending, or incomplete shard statuses were observed in the current-run typed shard summary.\"",
+			"- When typed shard-summary shows all shards succeeded, summary.md and architect-summary.md must include the exact key=value completeness literal planned=<n> succeeded=<n> failed=<n> incomplete=<n> (for example, planned=16 succeeded=16 failed=0 incomplete=0) and an explicit no-shard-coverage-blocker statement; do not substitute slash notation such as \"Shard completeness: 16/16 succeeded\".",
 			"- Do not dump shard-summary metadata keys such as meta, step_id, domain_id, strategy, max_parallel_tasks, failure_policy, or shard_discovery_mode as evidence bullets.",
 			"- Do not claim the staging shard directory contains 0 files or 0 shards when typed shard-summary items[] or shard-pack-manifest.json files are visible.",
 			"- Do not write `Shard pack manifests: none observed`, `no shard manifests observed`, or equivalent empty-shard evidence claims when typed shard-summary items[] or shard-pack-manifest.json files are visible.",

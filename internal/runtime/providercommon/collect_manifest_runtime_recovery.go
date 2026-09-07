@@ -23,6 +23,9 @@ type collectManifestRuntimeRecoveryReport struct {
 	EntityCount   int
 	EdgeCount     int
 	EvidencePath  string
+	// RecoveryCause is internal telemetry only. Keep it out of the authored
+	// semantic snapshot so execution details cannot leak into user documents.
+	RecoveryCause string
 }
 
 type collectManifestRuntimeRecoveryDoc struct {
@@ -47,7 +50,7 @@ func recoverCollectManifestFromAuthoredDocs(task acpruntime.Task, cause error) (
 
 	repo := collectManifestRecoveryRepo(task)
 	evidencePath := collectManifestRecoveryEvidencePath(task, docs)
-	manifest := buildRecoveredCollectManifest(task, docs, repo, evidencePath, cause)
+	manifest := buildRecoveredCollectManifest(task, docs, repo, evidencePath)
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return collectManifestRuntimeRecoveryReport{}, fmt.Errorf("encode recovered collect manifest: %w", err)
@@ -65,6 +68,7 @@ func recoverCollectManifestFromAuthoredDocs(task acpruntime.Task, cause error) (
 		EntityCount:   len(manifest.Semantic.Entities),
 		EdgeCount:     len(manifest.Semantic.Edges),
 		EvidencePath:  evidencePath,
+		RecoveryCause: compactRecoveryCause(cause),
 	}, nil
 }
 
@@ -132,7 +136,7 @@ func collectRuntimeRecoveryDocs(writeRoot string) ([]collectManifestRuntimeRecov
 	return docs, nil
 }
 
-func buildRecoveredCollectManifest(task acpruntime.Task, docs []collectManifestRuntimeRecoveryDoc, repo string, evidencePath string, cause error) contracts.ShardPackManifest {
+func buildRecoveredCollectManifest(task acpruntime.Task, docs []collectManifestRuntimeRecoveryDoc, repo string, evidencePath string) contracts.ShardPackManifest {
 	runID := firstNonEmptyString(task.RunID, "run-1")
 	stepID := firstNonEmptyString(task.StepID, "init.step1.collect")
 	shardSlug := slugComponent(firstNonEmptyString(task.ShardID, task.DomainID, strings.Join(task.PathScopes, "-"), "shard"))
@@ -181,14 +185,14 @@ func buildRecoveredCollectManifest(task acpruntime.Task, docs []collectManifestR
 		ArtifactRoot: artifactRoot,
 		RepoScopes:   nonEmptyStringList(append([]string{task.RepoScope}, task.RepoScopes...)),
 		PathScopes:   nonEmptyStringList(task.PathScopes),
-		Summary:      "Runtime recovered shard-pack-manifest.json from provider-authored collect documents after manifest-only repair did not complete.",
+		Summary:      "The manifest was reconstructed from provider-authored collect documents because a complete manifest was unavailable.",
 		Documents:    documents,
 		Citations:    citations,
-		Semantic:     recoveredCollectSemantic(task, docs, repo, evidencePath, shardSlug, topic, cause),
+		Semantic:     recoveredCollectSemantic(task, docs, repo, evidencePath, shardSlug, topic),
 	}
 }
 
-func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntimeRecoveryDoc, repo string, evidencePath string, shardSlug string, topic string, cause error) contracts.SemanticSnapshot {
+func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntimeRecoveryDoc, repo string, evidencePath string, shardSlug string, topic string) contracts.SemanticSnapshot {
 	repoStem := idComponent(firstNonEmptyString(repo, "repo"))
 	shardStem := idComponent(firstNonEmptyString(shardSlug, topic, "shard"))
 	repoEntityID := "svc." + repoStem
@@ -355,10 +359,7 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 		}
 	}
 
-	missing := []string{"provider did not complete shard-pack-manifest.json before runtime contract recovery"}
-	if cause != nil {
-		missing = append(missing, "manifest-only provider repair failure: "+compactRecoveryCause(cause))
-	}
+	missing := []string{"A complete provider-authored manifest was unavailable; some coverage may be incomplete."}
 	observedNames := "the provider-authored collect documents"
 	if len(termNames) > 0 {
 		observedNames = strings.Join(termNames[:minInt(len(termNames), 6)], ", ")
@@ -369,8 +370,8 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			Observed: dedupeStrings(observed),
 			Missing:  dedupeStrings(missing),
 			Notes: []string{
-				"Runtime recovery is limited to manifest reconstruction from provider-authored markdown and bounded scoped evidence.",
-				"Downstream quality gates still decide whether recovered artifacts are complete enough for acceptance.",
+				"Coverage is based on provider-authored markdown and bounded scoped evidence; inferred relationships should be reviewed.",
+				"Treat inferred relationships as provisional until corroborated by source evidence.",
 			},
 		},
 		Questions: []contracts.Question{{
@@ -385,7 +386,7 @@ func recoveredCollectSemantic(task acpruntime.Task, docs []collectManifestRuntim
 			ID:          "finding." + questionIDStem + ".manifest_recovery_applied",
 			Severity:    "medium",
 			Title:       "Collect manifest recovered from authored documents",
-			Description: fmt.Sprintf("The provider wrote collect markdown that identified %s but did not complete shard-pack-manifest.json during the primary or manifest-only repair process. Runtime recovery reconstructed the manifest from the provider-authored documents so downstream validation can surface remaining quality gaps instead of accepting an empty shard.", observedNames),
+			Description: fmt.Sprintf("The authored collect documents identified %s, while a complete shard-pack manifest was unavailable. The available evidence was preserved to surface coverage gaps rather than leaving the shard empty.", observedNames),
 			RuleID:      "rule.collect_manifest.runtime_recovery",
 			RelatedIDs:  append([]string{shardEntityID}, termEntityIDs[:minInt(len(termEntityIDs), 4)]...),
 			Provenance: contracts.Provenance{

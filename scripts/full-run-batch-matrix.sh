@@ -465,7 +465,9 @@ write_current_profile_status() {
   mkdir -p "$(dirname "$CURRENT_PROFILE_STATUS_FILE")"
   python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$CURRENT_PROFILE_ID" "$CURRENT_PROFILE_SLUG" "$CURRENT_BATCH_ID" "$CURRENT_SOURCE_KIND" "$CURRENT_EXPECTED_REPO_COUNT" "$CURRENT_REPOS_FILE" "$CURRENT_SWEEP_ID" "$CURRENT_SWEEP_STRATEGY" "$CURRENT_SWEEP_MAX_PARALLEL" "$CURRENT_SWEEP_FAILURE_POLICY" "$CURRENT_SWEEP_SHARD_MODE" "$CURRENT_BATCH_ROOT" "$CURRENT_DRIVER_LOG" "$MATRIX_ID" "$E2E_MATRIX_FILE" "$MATRIX_SELECTED_PROVIDERS_CSV" "$MATRIX_SELECTED_RUN_INDEXES_CSV" <<'PY'
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -500,7 +502,24 @@ payload = {
     "raw_output_refs": [],
     "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
 }
-path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def atomic_write_json(target: Path, value: dict) -> None:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+atomic_write_json(path, payload)
 PY
 }
 
@@ -515,7 +534,9 @@ update_current_profile_status_artifacts() {
   [[ -z "$CURRENT_PROFILE_STATUS_FILE" ]] && return 0
   python3 - "$CURRENT_PROFILE_STATUS_FILE" "$status" "$failure_reason" "$run_matrix_tsv" "$run_matrix_md" "$frontend_matrix_md" "$execution_report_md" "$inventory_json" <<'PY'
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -540,7 +561,24 @@ if sys.argv[8] and sys.argv[8] != "-":
     except Exception:
         payload["raw_output_refs"] = []
 payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def atomic_write_json(target: Path, value: dict) -> None:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+atomic_write_json(path, payload)
 PY
 }
 
@@ -725,12 +763,31 @@ finalize_running_profile_statuses_on_exit() {
   [[ -d "$MATRIX_STATUS_ROOT" ]] || return 0
   python3 - "$MATRIX_STATUS_ROOT" "$failure_reason" <<'PY'
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 failure_reason = sys.argv[2]
+
+
+def atomic_write_json(target: Path, value: dict) -> None:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
 for path in sorted(root.glob("*.json")):
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -743,7 +800,7 @@ for path in sorted(root.glob("*.json")):
     payload["status"] = "failed"
     payload["failure_reason"] = failure_reason
     payload["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, payload)
 PY
 }
 
@@ -754,6 +811,7 @@ reconcile_stale_profile_statuses() {
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -770,6 +828,21 @@ except Exception:
 stale_sec = stale_override if stale_override > 0 else max(heartbeat_sec * 3, 30)
 now = datetime.now(timezone.utc)
 changed = 0
+
+
+def atomic_write_json(target: Path, value: dict) -> None:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
 
 
 def parse_ts(value: Optional[str]) -> Optional[datetime]:
@@ -850,7 +923,7 @@ for path in sorted(root.glob("*.json")):
     payload["status"] = "failed"
     payload["failure_reason"] = "infra_incomplete_cycle"
     payload["updated_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    path.write_text(json.dumps(payload, ensure_ascii=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, payload)
     changed += 1
 
 print(changed)

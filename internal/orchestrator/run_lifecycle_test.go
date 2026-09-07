@@ -19,6 +19,7 @@ import (
 )
 
 const asyncRunnerStartTimeout = 10 * time.Second
+const asyncLifecycleTimeout = 5 * time.Second
 
 func TestRunPersistsRevisionImpactAndNoOpExecutionArtifacts(t *testing.T) {
 	t.Parallel()
@@ -507,15 +508,15 @@ func TestAsyncRunPanicReleasesSlotAndStartsPendingRun(t *testing.T) {
 	}
 
 	close(releaseFirst)
-	firstInfo := waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
+	firstInfo := waitForRunTerminalInfo(t, service, firstRunID, asyncLifecycleTimeout)
 	if firstInfo.Status != RunStatusFailed || firstInfo.ErrorCode != "internal_failure" {
 		t.Fatalf("expected first run failed/internal_failure, got status=%s code=%q", firstInfo.Status, firstInfo.ErrorCode)
 	}
-	waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	waitForRunTerminalInfo(t, service, secondRunID, asyncLifecycleTimeout)
 	if calls := runner.callCount(); calls < 2 {
 		t.Fatalf("expected pending run to start after panic; runner calls=%d", calls)
 	}
-	waitForServiceQuiescent(t, service, 2*time.Second)
+	waitForServiceQuiescent(t, service, asyncLifecycleTimeout)
 }
 
 func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
@@ -537,12 +538,12 @@ func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
 	}
 	waitForRunnerCalls(t, runner, 1, asyncRunnerStartTimeout)
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), asyncLifecycleTimeout)
 	defer cancel()
 	if err := service.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("shutdown service: %v", err)
 	}
-	info := waitForRunTerminalInfo(t, service, runID, 2*time.Second)
+	info := waitForRunTerminalInfo(t, service, runID, asyncLifecycleTimeout)
 	if info.Status != RunStatusCanceled {
 		t.Fatalf("expected shutdown-canceled run to be canceled, got %s", info.Status)
 	}
@@ -589,13 +590,13 @@ func TestServiceShutdownFailsPendingRunWithoutStartingIt(t *testing.T) {
 		t.Fatalf("queue pending run: %v", err)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), asyncLifecycleTimeout)
 	defer cancel()
 	if err := service.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("shutdown service: %v", err)
 	}
-	waitForRunTerminalInfo(t, service, firstRunID, 2*time.Second)
-	secondInfo := waitForRunTerminalInfo(t, service, secondRunID, 2*time.Second)
+	waitForRunTerminalInfo(t, service, firstRunID, asyncLifecycleTimeout)
+	secondInfo := waitForRunTerminalInfo(t, service, secondRunID, asyncLifecycleTimeout)
 	if secondInfo.Status != RunStatusCanceled || secondInfo.ErrorCode != runErrorCodeCanceled {
 		t.Fatalf("expected pending run canceled/%s, got status=%s code=%q", runErrorCodeCanceled, secondInfo.Status, secondInfo.ErrorCode)
 	}

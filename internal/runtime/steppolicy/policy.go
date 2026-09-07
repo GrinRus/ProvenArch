@@ -244,6 +244,8 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 	case "init.step1.collect", "refresh.step1.collect":
 		lines = append(lines,
 			`- Do NOT delegate to agent/subagent helpers and do NOT use todo_write-style planning.`,
+			`- PATH SAFETY FOR COLLECT: the provider process working directory is the exact write_root for this shard. Set write_root = Path.cwd() and write the authored document plus shard-pack-manifest.json as Path.cwd()/<filename>; do not manually retype, shorten, or reconstruct any long /private/tmp/... batch or taskrun path. Read repository evidence only through the exact read_context_roots supplied in this task; pass those roots as arguments instead of hardcoding guessed or abbreviated paths.`,
+			`- If a validation command needs the repository root, derive it from the exact read_context_roots value or pass that value as a positional argument; never copy a similarly named batch path with omitted timestamp/profile segments.`,
 			`- The first collect filesystem work unit may contain only two mechanically simple commands: one bounded evidence read/list, then one direct literal write of the authored document plus shard-pack-manifest.json.`,
 			`- Cap the bounded evidence read/list to at most 8 representative files and at most the first 6000 bytes from each file; oversized files are truncated or skipped while the work unit continues.`,
 			`- Do not run analysis-only narration, status/progress text, todo/planning, broad repository sweeps, or any second read-only preflight before the direct literal write command.`,
@@ -262,10 +264,13 @@ func DocFirstFilesystemPolicy(task acpruntime.Task) string {
 			`- After the first artifact pair exists, perform a bounded enrichment pass over the assigned repo/path scope; final semantic arrays must contain repo-specific entities/edges/findings/questions or an explicit evidence-backed insufficient-evidence finding/question.`,
 			`- The final collect markdown must not describe itself as an initial/temporary artifact, interrupted evidence read, or content that "will be repaired"; if concrete file evidence is unavailable, record a gap without claiming the artifact is pending later replacement.`,
 			`- The final collect markdown must not mention bounded reads/passes, guessed paths/files/evidence, expected-missing path checks, recovery attempts, or runtime repair mechanics; unsupported expected files belong only in coverage gaps/questions without citations.`,
+			`- Collect authored markdown must never publish internal execution paths such as .acp/repos/, reports/taskruns/, staging/final/, staging/shards/, write_root, or draft_final_root; use stable repo:path references (for example, posthog:services/README.md) or canonical report paths instead.`,
 			`- shard-pack-manifest.json must describe every authored document, its canonical stable path, citations, and semantic snapshot.`,
 			`- In shard-pack-manifest.json, semantic MUST include coverage, questions, entities, edges, and findings.`,
 			`- Use only canonical collect vocabulary: semantic.coverage.observed, semantic.questions[*].id + semantic.questions[*].text, semantic.edges[*].type, and object-shaped provenance blocks.`,
 			`- Every semantic.questions[] item must include id and text; every semantic.findings[] item must include id, severity, title, and provenance.`,
+			`- Before writing shard-pack-manifest.json, build the exact set of semantic.entities[*].id values in that same manifest. Every edge.from and edge.to MUST be one of those exact IDs; if an endpoint is not declared, omit that edge and record the relationship as an evidence gap/question instead of guessing or inventing an endpoint entity.`,
+			`- Emit at most one entity object for an exact ID within a shard manifest; merge same-file observations into that object and keep its type/name compatible with the ID vocabulary.`,
 			`- Do NOT emit semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 			`- You may be flexible in document structure, but promotion and rendering depend on manifest citations/topics remaining accurate.`,
 			`- After writing the evidence-backed pair, avoid broad repository exploration; only minimal manifest/JSON repair needed for the current shard is allowed afterwards.`,
@@ -539,6 +544,10 @@ func AsIsFirstActionSection(task acpruntime.Task) string {
 		"Run at most one bounded current-run evidence read/list command as the next action. Then immediately run one mechanically simple direct-literal write command that writes all three markdown targets first and the manifest last.",
 		"Do not emit an assistant message, status sentence, or analysis-only response before this command; the first provider item must be command_execution.",
 		"Do not run a second read-only preflight, broad repo sweep, sibling taskrun inspection, prior-report templating, or analysis-only response before the writes.",
+		"The bounded read/list command must not use `for f` loops, shell variables, command substitution, nested quote interpolation, or generated scripts; invoke only simple literal path checks/reads. If that one read command fails, do not retry it: immediately run the direct-literal write command with conservative evidence-backed content and explicit gaps.",
+		"The direct-literal write command must not use loops, shell variables, command substitution, awk/jq/Python/Node, or dynamically assembled heredoc delimiters; use one simple /bin/zsh -lc command with literal absolute targets and single-quoted heredocs.",
+		"PATH SAFETY FOR THIS STEP: the provider process working directory is the exact draft_final_root. To avoid transcription errors in the long absolute run path, use Path.cwd() (or the literal relative names overview.md, summary.md, and architect-summary.md) for draft markdown targets, and derive the runtime task root as Path.cwd().parents[2]. Do not manually retype, shorten, or reconstruct the /private/tmp/... run path.",
+		"When reading typed shard status, derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and locate the summary with taskruns_dir.glob(run_dir.name + \"*shard-summary*.json\") (or an exact run id argument); never invent a shortened taskrun path. The expected files must be written under the current provider cwd, not a similarly named prior or abbreviated run directory.",
 		"AS-IS FIRST-PASS WRITE SEQUENCE:",
 		asIsFirstPassWriteSequence(task),
 		"Use the manifest JSON below as the shape guide for the command output; copy keys/types exactly, but write operator-facing markdown from observed evidence instead of copying scaffold prose.",
@@ -724,6 +733,8 @@ func currentRunEvidenceIndexLines(task acpruntime.Task, kind currentRunEvidenceK
 			`- As-is enrichment must use the typed shard plan/summary, shard-pack-manifest summaries, final-run-index.json, and citation-index.json when visible.`,
 			`- summary.md and architect-summary.md must state exact shard completeness counts in this literal shape when evidence is visible: planned=<n> succeeded=<n> failed=<n> incomplete=<n>.`,
 			`- If typed shard completeness shows failed=0 and incomplete=0, summary.md and architect-summary.md must include an explicit no-shard-coverage-blocker statement that says current-run shard coverage is not a blocker and must not include generic failed/incomplete caveats.`,
+			`- PATH SAFETY FOR AS-IS ENRICHMENT: this provider process runs with cwd equal to draft_final_root. Use Path.cwd() for overview.md, summary.md, and architect-summary.md; derive run_dir = Path.cwd().parents[2], taskruns_dir = run_dir.parent, and write_root = run_dir / "runtime" / "step2_as_is". Locate typed summaries under taskruns_dir using run_dir.name + "*shard-summary*.json". Never manually copy or abbreviate the long absolute path (especially never omit the timestamp/profile segment).`,
+			`- If a script needs current-run evidence, pass the exact task root/run id as an argument or derive it from Path.cwd(); do not hardcode a guessed /private/tmp path and do not use ambient prior-run directories.`,
 			`- overview.md and architect-summary.md must cite concrete repo/path or staged citation/index references from the current run, not generic scaffold language.`,
 		)
 		lines = append(lines, ArchitectureHomeEvidenceReferenceLines(task)...)
@@ -889,12 +900,18 @@ func currentRunShardCompletenessPromptLine(task acpruntime.Task) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		`- Current-run typed shard completeness observed from %q: planned=%d succeeded=%d failed=%d incomplete=%d. Copy this exact literal into summary/proposal text when shard status is mentioned.`,
+		`- AUTHORITATIVE CURRENT-RUN COUNTS: typed shard completeness observed from %q is planned=%d succeeded=%d failed=%d incomplete=%d. Copy this exact key=value literal byte-for-byte into both summary.md and architect-summary.md before any prose: planned=%d succeeded=%d failed=%d incomplete=%d. Treat this literal as authoritative even if a helper script cannot resolve the long path because of quoting or a path typo; never fall back to planned=unknown/failed=unknown when these counts are supplied, and do not substitute slash notation such as %d/%d succeeded.`,
 		filepath.ToSlash(path),
 		counts.Planned,
 		counts.Succeeded,
 		counts.Failed,
 		counts.Incomplete,
+		counts.Planned,
+		counts.Succeeded,
+		counts.Failed,
+		counts.Incomplete,
+		counts.Planned,
+		counts.Succeeded,
 	)
 }
 
@@ -1814,6 +1831,7 @@ func CollectArtifactRepairHints(initialProblem string) []string {
 		`- Do NOT emit top-level semantic payloads on stdout; keep semantic only inside shard-pack-manifest.json.`,
 		`- semantic.entities[*] MUST remain full entity objects with provenance included; do not drop entities[*].provenance during repair.`,
 		`- semantic.edges[*] MUST remain objects with canonical keys type/from/to; do not use kind/source/target aliases.`,
+		`- Every semantic edge.from and edge.to MUST exactly match an id declared in semantic.entities in the same manifest; omit unsupported relationships and record the evidence gap/question instead of emitting a dangling endpoint.`,
 		`- semantic.findings[*] MUST remain objects and each finding MUST include id, severity, title, and provenance; never replace findings with plain strings or bullet text.`,
 		`- semantic.questions/entities/edges/findings must stay object-only arrays; booleans, nulls, and string-valued findings are invalid.`,
 		`- Do NOT leave claim_ids empty for cited repository evidence; preserve concrete repo-backed claim ids whenever the evidence supports them.`,

@@ -1461,13 +1461,26 @@ func TestNormalizeSemanticSnapshotNormalizesCanonicalIDTypeFamilies(t *testing.T
 	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
 		{ID: "svc.bank.of.anthos", Type: "service", Name: "Bank of Anthos", Provenance: evidence("README.md")},
 		{ID: "svc.bank.of.anthos", Type: "application", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "svc.bank.of.anthos", Type: "platform", Name: "Bank of Anthos", Provenance: evidence("README.md")},
+		{ID: "svc.bank.of.anthos", Type: "service-platform", Name: "Bank of Anthos platform", Provenance: evidence("docker-compose.yml")},
+		{ID: "svc.bank.of.anthos", Type: "application-service", Name: "Bank of Anthos application service", Provenance: evidence("settings.gradle")},
+		{ID: "svc.bank.of.anthos", Type: "domain", Name: "Bank of Anthos", Provenance: evidence("docs/README.md")},
+		{ID: "svc.bank.of.anthos", Type: "component", Name: "Bank of Anthos", Provenance: evidence("package.json")},
+		{ID: "svc.bank.of.anthos", Type: "application-component", Name: "Bank of Anthos", Provenance: evidence("playwright/package.json")},
+		{ID: "svc.bank.of.anthos", Type: "service-group", Name: "Bank of Anthos", Provenance: evidence("README.adoc")},
 		{ID: "db.bank.of.anthos.accounts", Type: "stateful-workload", Name: "accounts-db PostgreSQL StatefulSet", Provenance: evidence("kubernetes-manifests/accounts-db.yaml")},
 		{ID: "db.bank.of.anthos.accounts", Type: "datastore", Name: "Accounts database", Provenance: evidence("README.md")},
 		{ID: "team.bank.of.anthos.default-maintainers", Type: "team", Name: "maintainers", Provenance: evidence(".github/CODEOWNERS")},
 		{ID: "team.bank.of.anthos.default-maintainers", Type: "owner-group", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "review-team", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")},
+		{ID: "team.bank.of.anthos.default-maintainers", Type: "approval-owner", Name: "GoogleCloudPlatform maintainers", Provenance: evidence(".github/CODEOWNERS")},
+		{ID: "infra.ftgo.cdc", Type: "infrastructure", Name: "Eventuate CDC service", Provenance: evidence("docker-compose.yml")},
+		{ID: "infra.ftgo.cdc", Type: "change-data-capture-service", Name: "Eventuate CDC service", Provenance: evidence("docker-compose.yml")},
+		{ID: "svc.bank.of.anthos", Type: "service-domain", Name: "Bank of Anthos", Provenance: evidence("README.adoc")},
+		{ID: "svc.bank.of.anthos", Type: "application-surface", Name: "Bank of Anthos", Provenance: evidence("package.json")},
 	}}, newSemanticRepoAliasResolver(map[string]string{"bank-of-anthos": "/tmp/repos/bank-of-anthos"}, nil))
 
-	if got, want := len(snapshot.Entities), 3; got != want {
+	if got, want := len(snapshot.Entities), 4; got != want {
 		t.Fatalf("expected one canonical entity per ID family, got=%d: %#v", got, snapshot.Entities)
 	}
 	for _, entity := range snapshot.Entities {
@@ -1478,7 +1491,139 @@ func TestNormalizeSemanticSnapshotNormalizesCanonicalIDTypeFamilies(t *testing.T
 			t.Fatalf("db ID family must normalize to datastore, got %#v", entity)
 		case strings.HasPrefix(entity.ID, "team.") && entity.Type != "team":
 			t.Fatalf("team ID family must normalize to team, got %#v", entity)
+		case strings.HasPrefix(entity.ID, "infra.") && entity.Type != "infrastructure":
+			t.Fatalf("infrastructure ID family must normalize to infrastructure, got %#v", entity)
 		}
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesSvcClickhouseDatastoreServiceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.posthog.clickhouse", Type: "datastore", Name: "ClickHouse analytics store", Provenance: evidence("docker-compose.base.yml")},
+		{ID: "svc.posthog.clickhouse", Type: "service", Name: "ClickHouse analytics store", Provenance: evidence("docker-compose.dev-full.yml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected svc clickhouse aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "service"; got != want {
+		t.Fatalf("expected svc clickhouse alias to normalize to service, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesRuntimeDeploymentTopologyAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "runtime.posthog.compose", Type: "runtime", Name: "PostHog Docker Compose local/hobby runtime", Provenance: evidence("docker-compose.base.yml")},
+		{ID: "runtime.posthog.compose", Type: "deployment-topology", Name: "PostHog base Compose runtime", Provenance: evidence("docker-compose.dev.yml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected runtime/deployment-topology aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "runtime"; got != want {
+		t.Fatalf("expected runtime alias to normalize to runtime, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesSvcInfrastructureServiceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.posthog.temporal", Type: "infrastructure", Name: "Temporal workflow runtime", Provenance: evidence("docker-compose.dev.yml")},
+		{ID: "svc.posthog.temporal", Type: "service", Name: "Temporal dynamic configuration surface", Provenance: evidence("docker/temporal/dynamicconfig/README.md")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected svc infrastructure/service aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "service"; got != want {
+		t.Fatalf("expected svc alias to normalize to service, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesComponentServiceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "component.posthog.web", Type: "component", Name: "Web application", Provenance: evidence("docker-compose.dev-full.yml")},
+		{ID: "component.posthog.web", Type: "service", Name: "PostHog web application", Provenance: evidence("docker-compose.dev-full.yml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected component/service aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "component"; got != want {
+		t.Fatalf("expected component alias to normalize to component, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesTechTechnologyFrameworkAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "tech.django", Type: "technology", Name: "Django", Provenance: evidence("products/README.md")},
+		{ID: "tech.django", Type: "framework", Name: "Django", Provenance: evidence("pyproject.toml")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected tech technology/framework aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "technology"; got != want {
+		t.Fatalf("expected tech alias to normalize to technology, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesSvcClickhouseAnalyticalDatabaseAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.posthog.clickhouse", Type: "analytical-database", Name: "Local ClickHouse analytical database", Provenance: evidence("devenv/README.md")},
+		{ID: "svc.posthog.clickhouse", Type: "service", Name: "PostHog ClickHouse migration and topology surface", Provenance: evidence("clickhouse/migrations/README.md")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected svc clickhouse analytical-database aliases to merge, got=%d: %#v", got, snapshot.Entities)
+	}
+	if got, want := snapshot.Entities[0].Type, "service"; got != want {
+		t.Fatalf("expected svc clickhouse analytical-database alias to normalize to service, got=%q", got)
+	}
+}
+
+func TestNormalizeSemanticSnapshotMergesCaptureLogsNameOrderAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{Entities: []contracts.Entity{
+		{ID: "svc.posthog.capture-logs", Type: "service", Name: "Capture logs and traces service", Provenance: evidence("docker-compose.base.yml")},
+		{ID: "svc.posthog.capture-logs", Type: "service", Name: "PostHog OTLP log capture service", Provenance: evidence("rust/capture-logs/README.md")},
+	}}, newSemanticRepoAliasResolver(map[string]string{"posthog": "/tmp/repos/posthog"}, nil))
+
+	if got, want := len(snapshot.Entities), 1; got != want {
+		t.Fatalf("expected capture-logs aliases to merge, got=%d: %#v", got, snapshot.Entities)
 	}
 }
 
@@ -1732,6 +1877,56 @@ func TestNormalizeSemanticSnapshotLeavesAmbiguousEndpointTokenUnchanged(t *testi
 
 	if got, want := snapshot.Edges[0].To, "store.ledgerdb"; got != want {
 		t.Fatalf("ambiguous endpoint token must remain unresolved for validator, got=%q want=%q", got, want)
+	}
+}
+
+func TestNormalizeSemanticSnapshotRewritesExactStoreNamespaceAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "sample", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "datastore.sample.clickhouse", Type: "datastore", Name: "ClickHouse", Provenance: evidence("docker-compose.yml")},
+			{ID: "store.sample.session-recording.clickhouse", Type: "datastore", Name: "Session-recording ClickHouse", Provenance: evidence("session-recording/README.md")},
+		},
+		Edges: []contracts.Edge{
+			{ID: "edge.migrations", Type: "configures", From: "store.sample.clickhouse-migrations", To: "store.sample.clickhouse", Provenance: evidence("devenv/README.md")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"sample": "/tmp/repos/sample"}, nil))
+
+	if got, want := snapshot.Edges[0].To, "datastore.sample.clickhouse"; got != want {
+		t.Fatalf("expected exact store namespace alias rewrite, got %q want %q", got, want)
+	}
+}
+
+func TestNormalizeSemanticSnapshotPrefersCanonicalStoreAliasOverConflictingProviderAlias(t *testing.T) {
+	t.Parallel()
+
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{
+			Kind:       "observation",
+			Confidence: 0.8,
+			Evidence:   []contracts.Evidence{{Repo: "sample", Path: path}},
+		}
+	}
+	snapshot := normalizeSemanticSnapshot(contracts.SemanticSnapshot{
+		Entities: []contracts.Entity{
+			{ID: "datastore.sample.redis", Type: "datastore", Name: "Redis Pub/Sub", Provenance: evidence("docker-compose.dev.yml")},
+			{ID: "datastore.sample.redis7", Type: "datastore", Name: "Redis 7 cache", Aliases: []string{"store.sample.redis"}, Provenance: evidence("docker-compose.base.yml")},
+		},
+		Edges: []contracts.Edge{
+			{ID: "edge.capture.redis", Type: "depends_on", From: "svc.sample.capture", To: "store.sample.redis", Provenance: evidence("docker-compose.dev.yml")},
+		},
+	}, newSemanticRepoAliasResolver(map[string]string{"sample": "/tmp/repos/sample"}, nil))
+
+	if got, want := snapshot.Edges[0].To, "datastore.sample.redis"; got != want {
+		t.Fatalf("expected canonical store namespace alias to win over conflicting provider alias, got %q want %q", got, want)
 	}
 }
 

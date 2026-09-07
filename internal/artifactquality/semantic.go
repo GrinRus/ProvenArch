@@ -151,11 +151,62 @@ func semanticEntitiesCanMerge(left, right contracts.Entity) bool {
 		return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(right.Name) != ""
 	}
 	leftID := strings.ToLower(strings.TrimSpace(left.ID))
+	if leftType == "datastore" && strings.HasPrefix(leftID, "datastore.") {
+		return semanticDatastoreNamesAgree(left.ID, left.Name, right.Name)
+	}
+	if leftType == "service" && strings.HasSuffix(leftID, ".capture-logs") {
+		return semanticCaptureLogsNamesAgree(left.Name, right.Name)
+	}
 	if (strings.HasPrefix(leftID, "external.system.") && leftType == "external.system") ||
 		(strings.HasPrefix(leftID, "infra.") && leftType == "infrastructure") {
 		return semanticExternalSystemNamesAgree(left.ID, left.Name, right.Name)
 	}
 	return semanticNameAgreesWithID(left.ID, left.Name) && semanticNameAgreesWithID(left.ID, right.Name)
+}
+
+// semanticCaptureLogsNamesAgree permits the exact capture-logs service ID to
+// be described either as "capture logs" or "log capture". The canonical ID
+// is stable, while provider wording legitimately changes the word order.
+func semanticCaptureLogsNamesAgree(leftName, rightName string) bool {
+	matches := func(name string) bool {
+		token := semanticNameToken(name)
+		return strings.Contains(token, "capture") && strings.Contains(token, "log")
+	}
+	return matches(leftName) && matches(rightName)
+}
+
+// semanticDatastoreNamesAgree permits the provider to describe one canonical
+// datastore using a product name or a narrow, product-specific role alias.
+// Datastore IDs are stable identities, while shard-local names often describe
+// the workload using terms such as "analytics" or "preaggregation".
+func semanticDatastoreNamesAgree(id, leftName, rightName string) bool {
+	if semanticNameAgreesWithID(id, leftName) && semanticNameAgreesWithID(id, rightName) {
+		return true
+	}
+	idLeaf := strings.TrimSpace(id)
+	if splitAt := strings.LastIndexAny(idLeaf, ".:/\\"); splitAt >= 0 {
+		idLeaf = idLeaf[splitAt+1:]
+	}
+	aliases := map[string][]string{
+		"clickhouse": {"analytics", "preaggregation", "sessionrecording"},
+	}
+	allowed := aliases[semanticNameToken(idLeaf)]
+	if len(allowed) == 0 {
+		return false
+	}
+	matches := func(name string) bool {
+		nameToken := semanticNameToken(name)
+		if nameToken == "" {
+			return false
+		}
+		for _, alias := range allowed {
+			if strings.Contains(nameToken, semanticNameToken(alias)) {
+				return true
+			}
+		}
+		return false
+	}
+	return matches(leftName) && matches(rightName)
 }
 
 // semanticExternalSystemNamesAgree permits the same repository to describe a
@@ -194,7 +245,7 @@ func semanticEdgesCanRekey(left, right contracts.Edge) bool {
 	if strings.TrimSpace(left.ID) == "" || strings.TrimSpace(left.ID) != strings.TrimSpace(right.ID) {
 		return false
 	}
-	if normalizeSemanticType(left.Type) != normalizeSemanticType(right.Type) {
+	if normalizeSemanticEdgeType(left.Type) != normalizeSemanticEdgeType(right.Type) {
 		return false
 	}
 	leftRepo := semanticLogicalRepo(left.Provenance.Evidence)
@@ -202,9 +253,22 @@ func semanticEdgesCanRekey(left, right contracts.Edge) bool {
 	return leftRepo != "" && leftRepo == rightRepo
 }
 
+// normalizeSemanticEdgeType keeps the collision gate tolerant of the small
+// relation-vocabulary aliases emitted by providers. These aliases describe
+// the same directed relationship and are re-keyed from their endpoint pair
+// during snapshot normalization; unrelated relation types remain collisions.
+func normalizeSemanticEdgeType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "route", "routes", "routes-to", "routes to":
+		return "routes_to"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
 func normalizeSemanticType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "database", "data-store", "data store":
+	case "database", "data-store", "data store", "analytical-database", "analytical database":
 		return "datastore"
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
@@ -215,15 +279,23 @@ func normalizeSemanticTypeForID(id, value string) string {
 	typeName := normalizeSemanticType(value)
 	id = strings.ToLower(strings.TrimSpace(id))
 	switch {
-	case strings.HasPrefix(id, "svc.") && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service"}, typeName):
+	case strings.HasPrefix(id, "runtime.") && containsSemanticType([]string{"runtime", "deployment-topology"}, typeName):
+		return "runtime"
+	case strings.HasPrefix(id, "component.") && containsSemanticType([]string{"component", "service"}, typeName):
+		return "component"
+	case strings.HasPrefix(id, "tech.") && containsSemanticType([]string{"technology", "framework"}, typeName):
+		return "technology"
+	case (strings.HasPrefix(id, "svc.") || strings.HasPrefix(id, "service.")) && containsSemanticType([]string{"service", "application", "system", "dependency", "backend-service", "kubernetes-service", "platform", "service-platform", "application-service", "application-surface", "domain", "component", "application-component", "service-group", "repository", "api-gateway", "gateway", "service-suite", "service-landscape", "service-system", "service-domain", "data-service", "infrastructure"}, typeName):
+		return "service"
+	case (strings.HasPrefix(id, "svc.") || strings.HasPrefix(id, "service.")) && strings.HasSuffix(id, ".clickhouse") && typeName == "datastore":
 		return "service"
 	case strings.HasPrefix(id, "system.") && containsSemanticType([]string{"system", "application", "service", "backend-service", "kubernetes-service"}, typeName):
 		return "system"
 	case strings.HasPrefix(id, "db.") && containsSemanticType([]string{"datastore", "stateful-workload", "database-workload"}, typeName):
 		return "datastore"
-	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners"}, typeName):
+	case strings.HasPrefix(id, "team.") && containsSemanticType([]string{"team", "owner-group", "repository-owners", "owner-team", "review-owner", "review-team", "approval-owner", "ownership-policy"}, typeName):
 		return "team"
-	case strings.HasPrefix(id, "infra.") && containsSemanticType([]string{"infrastructure", "runtime-platform", "platform", "compute-platform", "kubernetes-cluster"}, typeName):
+	case strings.HasPrefix(id, "infra.") && containsSemanticType([]string{"infrastructure", "runtime-platform", "platform", "compute-platform", "kubernetes-cluster", "datastore", "database-infrastructure", "message-broker", "messaging-infrastructure", "coordination-service", "coordination-infrastructure", "change-data-capture-service"}, typeName):
 		return "infrastructure"
 	default:
 		return typeName
@@ -267,6 +339,12 @@ func semanticNameAgreesWithID(id, name string) bool {
 		return false
 	}
 	if idToken == nameToken || strings.Contains(nameToken, idToken) || strings.Contains(idToken, nameToken) {
+		return true
+	}
+	// Providers sometimes use the singular "object store" for an
+	// object-storage entity. Keep this alias narrow and tied to the exact
+	// canonical ID leaf so unrelated datastore names remain collisions.
+	if idToken == "objectstorage" && strings.Contains(nameToken, "objectstore") {
 		return true
 	}
 	for _, suffix := range []string{"database", "datastore", "db", "service"} {

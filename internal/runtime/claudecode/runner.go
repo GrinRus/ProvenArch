@@ -136,6 +136,13 @@ func (a claudeAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activ
 	if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep1Collect {
 		preArtifactWindow = 5 * time.Minute
 		retryPreArtifactWindow = 5 * time.Minute
+	} else if acpruntime.StepProviderKeyForStepID(task.StepID) == acpruntime.StepProviderStep2AsIs {
+		// Architecture Home is the largest single draft prompt and Claude can
+		// spend several minutes reasoning before its first filesystem write.
+		// Keep the live runner from killing a healthy invocation at the default
+		// three-minute pre-artifact boundary; retries use the same grace window.
+		preArtifactWindow = 5 * time.Minute
+		retryPreArtifactWindow = 5 * time.Minute
 	}
 	return providercommon.WithCollectArtifactEnrichmentWindow(task, providercommon.ActivityPolicy{
 		MonitorArtifacts:            monitorArtifacts,
@@ -157,7 +164,7 @@ func (a claudeAdapter) RecoveryPolicy(task acpruntime.Task) providercommon.Recov
 		ClassifySilentRetryExhaustionUnavailable: true,
 	}
 	switch acpruntime.StepProviderKeyForStepID(task.StepID) {
-	case acpruntime.StepProviderStep0Constitution, acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep3Findings, acpruntime.StepProviderStep4Proposals:
+	case acpruntime.StepProviderStep0Constitution, acpruntime.StepProviderStep1Collect, acpruntime.StepProviderStep2AsIs, acpruntime.StepProviderStep3Findings, acpruntime.StepProviderStep4Proposals:
 		policy.RetryZeroOutputPreArtifactStallOnce = true
 	}
 	return policy
