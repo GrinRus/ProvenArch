@@ -486,10 +486,6 @@ func TestTaskAttemptChildRejectsEditedForeignScopeBeforePersistence(t *testing.T
 	if len(listed.Items) != 1 {
 		t.Fatalf("foreign child was persisted despite scope rejection: %+v", listed.Items)
 	}
-	// Retry admission starts an asynchronous fake run. Wait for its terminal
-	// projection before TempDir cleanup so final history writes cannot race
-	// directory removal.
-	waitForTerminalAttempt(t, server, retryPayload.Attempt.AttemptID)
 }
 
 func TestTaskAttemptRetryRejectsArchivedTask(t *testing.T) {
