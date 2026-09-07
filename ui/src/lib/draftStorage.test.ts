@@ -26,8 +26,21 @@ describe("draftStorage", () => {
   });
 
   it("fails safely when browser storage is unavailable", () => {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    expect(writeDraft("key", { value: true })).toBe(false);
-    expect(() => clearDraft("key")).not.toThrow();
+    const originalStorage = window.localStorage;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => { throw new Error("unavailable"); },
+        setItem: () => { throw new Error("quota"); },
+        removeItem: () => { throw new Error("unavailable"); },
+        clear: () => undefined,
+      },
+    });
+    try {
+      expect(writeDraft("key", { value: true })).toBe(false);
+      expect(() => clearDraft("key")).not.toThrow();
+    } finally {
+      Object.defineProperty(window, "localStorage", { configurable: true, value: originalStorage });
+    }
   });
 });
