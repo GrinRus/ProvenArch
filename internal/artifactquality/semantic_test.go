@@ -89,6 +89,68 @@ func TestValidateSemanticIDCollisionsAllowsSameRepoEntityObservations(t *testing
 	}
 }
 
+func TestValidateSemanticIDCollisionsAllowsSvcInfrastructureServiceAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "svc.posthog.temporal",
+		Type:       "infrastructure",
+		Name:       "Temporal workflow runtime",
+		Provenance: evidence("docker-compose.dev.yml"),
+	}
+	right := contracts.Entity{
+		ID:         "svc.posthog.temporal",
+		Type:       "service",
+		Name:       "Temporal dynamic configuration surface",
+		Provenance: evidence("docker/temporal/dynamicconfig/README.md"),
+	}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left, right}},
+	); err != nil {
+		t.Fatalf("svc infrastructure/service aliases should merge, got %v", err)
+	}
+	crossRepo := right
+	crossRepo.Provenance = evidence("../other-repo/temporal.md")
+	crossRepo.Provenance.Evidence[0].Repo = "other-repo"
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{crossRepo}},
+	); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("svc infrastructure/service aliases across repositories should remain a collision, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsComponentServiceAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "component.posthog.web",
+		Type:       "component",
+		Name:       "Web application",
+		Provenance: evidence("docker-compose.dev-full.yml"),
+	}
+	right := contracts.Entity{
+		ID:         "component.posthog.web",
+		Type:       "service",
+		Name:       "PostHog web application",
+		Provenance: evidence("docker-compose.dev-full.yml"),
+	}
+	if err := ValidateSemanticIDCollisions(contracts.SemanticSnapshot{Entities: []contracts.Entity{left, right}}); err != nil {
+		t.Fatalf("component/service aliases should merge, got %v", err)
+	}
+	crossRepo := right
+	crossRepo.Provenance = evidence("../other-repo/web.md")
+	crossRepo.Provenance.Evidence[0].Repo = "other-repo"
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{crossRepo}},
+	); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("component/service aliases across repositories should remain a collision, got %v", err)
+	}
+}
+
 func TestValidateSemanticIDCollisionsRejectsSameRepoUnrelatedEntityObservation(t *testing.T) {
 	left := contracts.Entity{
 		ID:   "svc.bank.accounts-db",
@@ -312,6 +374,51 @@ func TestValidateSemanticIDCollisionsAllowsSvcClickhouseAnalyticalDatabaseAlias(
 		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
 	); err != nil {
 		t.Fatalf("same-repo svc clickhouse analytical-database/service aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsAllowsRuntimeDeploymentTopologyAlias(t *testing.T) {
+	evidence := func(path string) contracts.Provenance {
+		return contracts.Provenance{Kind: "observation", Evidence: []contracts.Evidence{{Repo: "posthog", Path: path}}}
+	}
+	left := contracts.Entity{
+		ID:         "runtime.posthog.compose",
+		Type:       "runtime",
+		Name:       "PostHog Docker Compose local/hobby runtime",
+		Provenance: evidence("docker-compose.base.yml"),
+	}
+	right := contracts.Entity{
+		ID:         "runtime.posthog.compose",
+		Type:       "deployment-topology",
+		Name:       "PostHog base Compose runtime",
+		Provenance: evidence("docker-compose.dev.yml"),
+	}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err != nil {
+		t.Fatalf("same-repo runtime/deployment-topology aliases should merge, got %v", err)
+	}
+}
+
+func TestValidateSemanticIDCollisionsRejectsRuntimeAliasAcrossRepos(t *testing.T) {
+	left := contracts.Entity{
+		ID:   "runtime.posthog.compose",
+		Type: "runtime",
+		Name: "PostHog Docker Compose runtime",
+		Provenance: contracts.Provenance{
+			Kind:     "observation",
+			Evidence: []contracts.Evidence{{Repo: "posthog", Path: "docker-compose.base.yml"}},
+		},
+	}
+	right := left
+	right.Type = "deployment-topology"
+	right.Provenance.Evidence = []contracts.Evidence{{Repo: "other-repo", Path: "docker-compose.yml"}}
+	if err := ValidateSemanticIDCollisions(
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{left}},
+		contracts.SemanticSnapshot{Entities: []contracts.Entity{right}},
+	); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("runtime aliases across repositories should remain a collision, got %v", err)
 	}
 }
 

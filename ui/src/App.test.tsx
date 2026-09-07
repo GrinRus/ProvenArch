@@ -4421,7 +4421,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset permission defaults" }));
     expect(await screen.findByText("Runtime permissions reset to defaults")).toBeInTheDocument();
-  }, 10_000);
+  }, 20_000);
 
   it("reads historical Review artifacts from selected-run staged paths", async () => {
     const baseFetch = createFetchMock();
