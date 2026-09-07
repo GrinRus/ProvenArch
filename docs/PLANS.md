@@ -140,16 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15 and REM-17 merged; REM-16 is in progress after stabilization PR #303; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, and REM-17 merged; REM-18 is in progress; REM-03B remains authorization-gated.
 
-Next action: Implement and verify the isolated REM-16 copy/route/docs slice from fresh
-`origin/main=d4d2c97e`, then review/push/merge it. Keep release status
+Next action: Implement and verify the isolated REM-18 async route/workspace response-gating slice
+from fresh `origin/main=9412fa82`, then review/push/merge it. Keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: all independent REM slices through REM-15 and REM-17 are merged; REM-16 is the
-first ready P1 after stabilization PR #303. REM-03B remains authorization-gated, REM-04/REM-05
-remain stabilization-dependent, and later REM-18+ remain dependency-blocked.
+Current queue truth: independent REM slices through REM-16 and REM-17 are merged; REM-18 is the
+first ready task after REM-16 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05
+remain stabilization-dependent, and REM-19+ remain dependency-blocked until this slice is merged.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -170,6 +170,27 @@ Acceptance: Setup renders exactly four URL-backed steps; stale Analysis-brief pr
 the Review CTA reaches `/tasks/new` without starting a pipeline; `/setup?step=brief` still
 canonicalizes to `/setup?step=review`; current docs agree with the route and Task/Attempt specs.
 
+### REM-18 slice plan — async route/workspace response gates
+
+Before: the run-focused surfaces already use `useRequestGate`, but Task Inbox pagination, nested
+Task/Attempt review loads, and workspace manifest/identity/validation/current-artifact requests can
+still resolve after a route, filter, or workspace transition and overwrite newer visible state.
+
+After: every request in this slice is abort-aware and generation-scoped. Late success and error
+responses are ignored, pagination cannot append into a newer filter result, and nested review/current
+workspace artifact loads cannot replace the exact route context that initiated them.
+
+Scope: `ui/src/components/TaskRouteContainer.tsx`, `ui/src/hooks/useManifestEditor.ts`,
+`ui/src/hooks/useWorkspaceIdentity.ts`, `ui/src/lib/workspaceApi.ts`, `ui/src/App.tsx`, focused
+deferred/out-of-order component coverage, and this tracker. No backend/API contract changes and no
+changes to runtime polling semantics beyond route-scoped response suppression.
+
+Acceptance: changing Task Inbox filters while a page request is pending drops the late page/error;
+changing Task or Attempt route while review data is pending keeps the new route's state; workspace
+manifest/identity/validation and current-workspace artifact responses are abortable and cannot update
+state after a newer generation; focused component tests cover late success and late error paths; the
+full deterministic UI/contract/build CI remains green.
+
 ### Context
 
 Follow-up аудит от 2026-09-05 оценил не только локальные дефекты, но и соответствие реализации
@@ -180,8 +201,8 @@ reviewable slice и защищена regression evidence.
 
 Соседний stabilization lane с semantic alias/collision handling, document-flow assembly и trusted
 Codex live qualification принят PR #303 (`d4d2c97e`) и проверен на свежем `origin/main`. Поэтому
-REM-16 возвращён в ordered-ready queue; на каждой следующей итерации всё равно проверяется новый
-stabilization scope, чтобы не пересекать параллельные изменения.
+REM-16 принят PR #304 (`9412fa82`). REM-18 реализуется от нового `origin/main`, а semantic overlap
+со stabilization scope по-прежнему проверяется перед merge.
 
 Этот remediation slice не объявляет release readiness. REM-03B остаётся отдельной
 authorization-gated admin operation.
@@ -264,9 +285,9 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 13 | REM-13 | P1 | Task composer и admission передают полный scope/runner contract; UI summary, API snapshot и runtime execution совпадают. | REM-12 | merged in PR #292 |
 | 14 | REM-14 | P1 | Edit/retry/rerun semantics различены: immutable Attempt не мутируется, новый Attempt наследует только явно разрешённые Task values. | REM-13 | merged in PR #294 |
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | merged in PR #296 |
-| 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization PR #303, REM-12..15 | in progress on `d4d2c97e` |
+| 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization PR #303, REM-12..15 | merged in PR #304 |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | merged in PR #300 |
-| 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | blocked-by-dependency |
+| 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | in progress on `9412fa82` |
 | 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | blocked-by-dependency |
 | 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
 | 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | blocked-by-dependency |

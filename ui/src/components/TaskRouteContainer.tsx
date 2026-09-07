@@ -13,6 +13,7 @@ import {
   type TaskAttempt,
 } from "../lib/taskApi";
 import { Button, PageHeader } from "./SemanticPrimitives";
+import { isAbortError, useRequestGate } from "../hooks/useRequestGate";
 
 type TaskRouteContainerProps = {
   view: TaskRouteView;
@@ -75,24 +76,36 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
   const [error, setError] = useState("");
   const [loadMoreBusy, setLoadMoreBusy] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const listRequest = useRequestGate("task-inbox");
+  const networkFilters = useMemo(() => ({
+    lifecycle: filters.lifecycle,
+    runner: filters.runner,
+    repository: filters.repository,
+    from: filters.from,
+    to: filters.to,
+  }), [filters.from, filters.lifecycle, filters.repository, filters.runner, filters.to]);
+  const filterKey = [networkFilters.lifecycle ?? "", networkFilters.runner ?? "", networkFilters.repository ?? "", networkFilters.from ?? "", networkFilters.to ?? ""].join("|");
 
   useEffect(() => {
-    const controller = new AbortController();
+    const token = listRequest.begin(`list:${filterKey}`);
     setStatus("loading");
     setError("");
-    void listTasks(filters, "", controller.signal).then((response) => {
-      if (controller.signal.aborted) return;
+    setLoadMoreBusy(false);
+    void listTasks(networkFilters, "", token.signal).then((response) => {
+      if (!listRequest.isCurrent(token)) return;
       setTasks(Array.isArray(response.items) ? response.items : []);
       setNextCursor(typeof response.next_cursor === "string" ? response.next_cursor : "");
       setHasMore(response.has_more === true);
       setStatus("loaded");
     }).catch((requestError) => {
-      if (controller.signal.aborted) return;
+      if (isAbortError(requestError) || !listRequest.isCurrent(token)) return;
       setError(requestError instanceof Error ? requestError.message : "Task list could not be loaded");
       setStatus("error");
+    }).finally(() => {
+      listRequest.finish(token);
     });
-    return () => controller.abort();
-  }, [filters.lifecycle, filters.runner, filters.repository, filters.from, filters.to]);
+    return () => listRequest.abort();
+  }, [filterKey, listRequest, networkFilters]);
 
   const visibleTasks = useMemo(() => {
     const needle = filters.search?.toLocaleLowerCase().trim();
@@ -111,16 +124,20 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
 
   async function loadMore() {
     if (!nextCursor || loadMoreBusy) return;
+    const token = listRequest.begin(`more:${filterKey}:${nextCursor}`);
     setLoadMoreBusy(true);
     try {
-      const response = await listTasks(filters, nextCursor);
+      const response = await listTasks(networkFilters, nextCursor, token.signal);
+      if (!listRequest.isCurrent(token)) return;
       setTasks((current) => [...current, ...response.items]);
       setNextCursor(response.next_cursor);
       setHasMore(response.has_more);
     } catch (requestError) {
+      if (isAbortError(requestError) || !listRequest.isCurrent(token)) return;
       setError(requestError instanceof Error ? requestError.message : "More Tasks could not be loaded");
     } finally {
-      setLoadMoreBusy(false);
+      if (listRequest.isCurrent(token)) setLoadMoreBusy(false);
+      listRequest.finish(token);
     }
   }
 
@@ -209,6 +226,7 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
       const latest = nextAttempts.items[nextAttempts.items.length - 1];
       if (latest?.run_id && latest.status !== "queued" && latest.status !== "running") {
         const nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         setReview(nextReview);
         notifySettledOutcome(latest, nextReview);
       } else {
@@ -326,7 +344,9 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
     void getTaskAttempt(taskId, attemptId, controller.signal).then(async (nextAttempt) => {
       if (controller.signal.aborted) return;
       setAttempt(nextAttempt);
-      setReview(await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal }));
+      const nextReview = await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setReview(nextReview);
       setState("loaded");
     }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Pipeline Studio could not be loaded"); setState("error"); } });
     return () => controller.abort();
@@ -339,7 +359,9 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
         const nextAttempt = await getTaskAttempt(taskId, attemptId, controller.signal);
         if (controller.signal.aborted) return;
         setAttempt(nextAttempt);
-        setReview(await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal }));
+        const nextReview = await getPipelineRunReviewSummary(nextAttempt.run_id, true, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setReview(nextReview);
       } catch {
         // Keep the last structured progress while the next poll retries.
       }

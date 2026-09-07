@@ -34,6 +34,16 @@ vi.mock("../lib/runApi", () => ({
 
 import { getPipelineRunReviewSummary } from "../lib/runApi";
 
+function deferredResponse<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("TaskRouteContainer", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -67,6 +77,84 @@ describe("TaskRouteContainer", () => {
     const row = await screen.findByLabelText("Open Task Payments");
     fireEvent.keyDown(row, { key: "Enter" });
     expect(onSelectTask).toHaveBeenCalledWith("task-1", {});
+  });
+
+  it("drops a late Task page after the Inbox filter changes", async () => {
+    const latePage = deferredResponse<{ items: ProductTask[]; next_cursor: string; has_more: boolean }>();
+    const filteredTask = { ...task, task_id: "task-filtered", title: "Filtered Payments" } as ProductTask;
+    const lateTask = { ...task, task_id: "task-late-page", title: "Late page" } as ProductTask;
+    vi.mocked(listTasks)
+      .mockImplementationOnce(async () => ({ items: [task as ProductTask], next_cursor: "cursor-old", has_more: true }))
+      .mockImplementationOnce(async () => latePage.promise)
+      .mockImplementationOnce(async () => ({ items: [filteredTask], next_cursor: "", has_more: false }));
+
+    const { rerender } = render(<TaskRouteContainer view="inbox" filters={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load more Tasks" }));
+    rerender(<TaskRouteContainer view="inbox" filters={{ runner: "qwen-code" }} />);
+    await screen.findByTestId("task-row-task-filtered");
+
+    latePage.resolve({ items: [lateTask], next_cursor: "", has_more: false });
+    await waitFor(() => expect(screen.queryByTestId("task-row-task-late-page")).not.toBeInTheDocument());
+    expect(screen.getByTestId("task-route-inbox")).toHaveTextContent("Filtered Payments");
+  });
+
+  it("ignores a late Task page error after the Inbox filter changes", async () => {
+    const latePage = deferredResponse<{ items: ProductTask[]; next_cursor: string; has_more: boolean }>();
+    const filteredTask = { ...task, task_id: "task-filtered-error", title: "Filtered after error" } as ProductTask;
+    vi.mocked(listTasks)
+      .mockImplementationOnce(async () => ({ items: [task as ProductTask], next_cursor: "cursor-old", has_more: true }))
+      .mockImplementationOnce(async () => latePage.promise)
+      .mockImplementationOnce(async () => ({ items: [filteredTask], next_cursor: "", has_more: false }));
+
+    const { rerender } = render(<TaskRouteContainer view="inbox" filters={{}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load more Tasks" }));
+    rerender(<TaskRouteContainer view="inbox" filters={{ runner: "qwen-code" }} />);
+    await screen.findByTestId("task-row-task-filtered-error");
+
+    latePage.reject(new Error("late page failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByTestId("task-inbox-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-route-inbox")).toHaveTextContent("Filtered after error");
+  });
+
+  it("keeps a newer Task route when an older review response resolves late", async () => {
+    const lateOldReview = deferredResponse<Awaited<ReturnType<typeof getPipelineRunReviewSummary>>>();
+    const taskFor = (taskId: string, title: string, runId: string) => ({
+      ...task,
+      task_id: taskId,
+      title,
+      attempts: [{ attempt_id: `${taskId}-attempt`, run_id: runId, status: "succeeded", updated_at: "2026-08-11T10:01:00Z" }],
+      outcome: { state: "available", attempt_id: `${taskId}-attempt`, run_id: runId },
+    } as ProductTask);
+    const attemptFor = (taskId: string, runId: string) => ({
+      version: 1,
+      attempt_id: `${taskId}-attempt`,
+      task_id: taskId,
+      run_id: runId,
+      status: "succeeded",
+      pipeline: "init",
+      admitted_at: "2026-08-11T10:00:00Z",
+      task_revision: 1,
+    } as TaskAttempt);
+    const reviewFor = (runId: string, summary: string) => ({
+      run_id: runId,
+      result: { state: "completed", summary, produced: {}, partial_scopes: 0, failed_scopes: 0, promotion: { changed: true, current_usable: true }, recommended_action: "review_architecture" },
+    } as never);
+    vi.mocked(getTask).mockImplementation(async (taskId) => taskFor(taskId, taskId === "task-old" ? "Old Task" : "New Task", taskId === "task-old" ? "run-old" : "run-new"));
+    vi.mocked(listTaskAttempts).mockImplementation(async (taskId) => ({ items: [attemptFor(taskId, taskId === "task-old" ? "run-old" : "run-new")] }));
+    vi.mocked(getPipelineRunReviewSummary).mockImplementation(async (runId) => runId === "run-old" ? lateOldReview.promise : reviewFor("run-new", "New route outcome"));
+
+    const { rerender } = render(<TaskRouteContainer view="detail" taskId="task-old" filters={{}} />);
+    await waitFor(() => expect(getPipelineRunReviewSummary).toHaveBeenCalledWith("run-old", true, expect.anything()));
+    rerender(<TaskRouteContainer view="detail" taskId="task-new" filters={{}} />);
+    await waitFor(() => expect(screen.getByTestId("task-outcome")).toHaveTextContent("New route outcome"));
+
+    lateOldReview.resolve(reviewFor("run-old", "Old route outcome"));
+    await waitFor(() => {
+      expect(screen.getByTestId("task-route-detail")).toHaveTextContent("New Task");
+      expect(screen.getByTestId("task-outcome")).toHaveTextContent("New route outcome");
+      expect(screen.getByTestId("task-outcome")).not.toHaveTextContent("Old route outcome");
+    });
   });
 
   it("keeps exact Task and Attempt identities visible while loading", () => {

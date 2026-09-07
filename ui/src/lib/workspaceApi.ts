@@ -1,26 +1,26 @@
 import { fetchJSON } from "./api";
 import type { ArchitectureResponse, BaselineBundleResponse, KnowledgeResponse, ValidateResponse, WorkspaceHealthResponse } from "./appContracts";
 
-export async function loadWorkspaceManifest(): Promise<string> {
-  const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest");
+export async function loadWorkspaceManifest(init?: RequestInit): Promise<string> {
+  const manifest = await fetchJSON<{ content: string }>("/api/workspace/manifest", init);
   return manifest.content ?? "";
 }
 
-export async function loadBaselineBundleAPI(): Promise<BaselineBundleResponse> {
-  return fetchJSON<BaselineBundleResponse>("/api/workspace/bundle");
+export async function loadBaselineBundleAPI(init?: RequestInit): Promise<BaselineBundleResponse> {
+  return fetchJSON<BaselineBundleResponse>("/api/workspace/bundle", init);
 }
 
-export async function loadWorkspaceHealthAPI(): Promise<WorkspaceHealthResponse> {
-  const payload = await fetchJSON<Partial<WorkspaceHealthResponse>>("/api/workspace/health");
+export async function loadWorkspaceHealthAPI(init?: RequestInit): Promise<WorkspaceHealthResponse> {
+  const payload = await fetchJSON<Partial<WorkspaceHealthResponse>>("/api/workspace/health", init);
   return normalizeWorkspaceHealthResponse(payload);
 }
 
-export async function loadKnowledgeAPI(): Promise<KnowledgeResponse> {
-  return fetchJSON<KnowledgeResponse>("/api/knowledge");
+export async function loadKnowledgeAPI(init?: RequestInit): Promise<KnowledgeResponse> {
+  return fetchJSON<KnowledgeResponse>("/api/knowledge", init);
 }
 
-export async function loadArchitectureAPI(): Promise<ArchitectureResponse> {
-  const payload = await fetchJSON<Partial<ArchitectureResponse>>("/api/architecture");
+export async function loadArchitectureAPI(init?: RequestInit): Promise<ArchitectureResponse> {
+  const payload = await fetchJSON<Partial<ArchitectureResponse>>("/api/architecture", init);
   const levels = ["context", "container", "component", "code"] as const;
   if (!payload.views || !levels.every((level) => {
     const view = payload.views?.[level];
@@ -51,8 +51,8 @@ function evidenceRepositories(value: unknown): string[] {
   return Array.from(new Set(repos)).sort();
 }
 
-export async function loadArtifactText(path: string): Promise<string | null> {
-  const response = await fetch(`/api/artifacts?path=${encodeURIComponent(path)}`);
+export async function loadArtifactText(path: string, init?: RequestInit): Promise<string | null> {
+  const response = await fetch(`/api/artifacts?path=${encodeURIComponent(path)}`, init);
   if (!response.ok) {
     return null;
   }
@@ -67,8 +67,9 @@ export async function loadRepositoryEvidenceAPI(repo: string, path: string): Pro
   return response.json() as Promise<RepositoryEvidence>;
 }
 
-export async function validateWorkspaceAPI(): Promise<ValidateResponse> {
+export async function validateWorkspaceAPI(init?: RequestInit): Promise<ValidateResponse> {
   const response = await fetch("/api/workspace/validate", {
+    ...init,
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });

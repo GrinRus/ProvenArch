@@ -4,6 +4,7 @@ import type { Diagnostic, GuidedRepo, ValidateResponse } from "../lib/appContrac
 import { splitAnalysisScopeLines } from "../lib/analysisScope";
 import { guidedReposReducer, initialGuidedRepos, parseGuidedSetupFromManifest } from "../lib/workspaceSetupState";
 import { loadWorkspaceManifest, saveWorkspaceManifest, validateWorkspaceAPI } from "../lib/workspaceApi";
+import { isAbortError, useRequestGate } from "./useRequestGate";
 
 type UseManifestEditorOptions = {
   setBusy: (busy: boolean) => void;
@@ -20,6 +21,8 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   const [hasUnsavedManifestDraft, setHasUnsavedManifestDraft] = useState(false);
   const manifestContentRef = useRef("");
   const formRevisionRef = useRef(0);
+  const manifestLoadRequest = useRequestGate("workspace-manifest-load");
+  const workspaceValidationRequest = useRequestGate("workspace-validation");
 
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
@@ -49,9 +52,10 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   }
 
   async function loadManifest() {
+    const token = manifestLoadRequest.begin();
     try {
-      const content = await loadWorkspaceManifest();
-      if (setupDirtyRef.current) {
+      const content = await loadWorkspaceManifest({ signal: token.signal });
+      if (!manifestLoadRequest.isCurrent(token) || setupDirtyRef.current) {
         return;
       }
       manifestContentRef.current = content;
@@ -64,24 +68,33 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
         setGuidedDocsImportsPath(guidedSetup.docsImportsPath);
       }
     } catch (requestError) {
+      if (isAbortError(requestError) || !manifestLoadRequest.isCurrent(token)) {
+        return;
+      }
       manifestContentRef.current = "";
       setManifestContent("");
       throw requestError;
+    } finally {
+      manifestLoadRequest.finish(token);
     }
   }
 
   async function handleValidateWorkspace(): Promise<ValidateResponse | null> {
+    const token = workspaceValidationRequest.begin();
     setBusy(true);
     setError(null);
     try {
-      const result = await validateWorkspaceAPI();
+      const result = await validateWorkspaceAPI({ signal: token.signal });
+      if (!workspaceValidationRequest.isCurrent(token)) return null;
       setValidateResult(result);
       return result;
     } catch (requestError) {
+      if (isAbortError(requestError) || !workspaceValidationRequest.isCurrent(token)) return null;
       setError(requestError instanceof Error ? requestError.message : "workspace validation failed");
       return null;
     } finally {
-      setBusy(false);
+      if (workspaceValidationRequest.isCurrent(token)) setBusy(false);
+      workspaceValidationRequest.finish(token);
     }
   }
 
