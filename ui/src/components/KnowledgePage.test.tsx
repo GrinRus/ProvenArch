@@ -126,6 +126,23 @@ describe("KnowledgePage", () => {
     expect(screen.queryByRole("button", { name: "Edit Markdown" })).not.toBeInTheDocument();
   });
 
+  it("recovers an unsaved editable Markdown draft for the same workspace", async () => {
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("# Editable charter\n", { status: 200 })));
+    function Harness() {
+      return <KnowledgePage knowledge={{ ...partialKnowledge, artifacts: [...partialKnowledge.artifacts, { path: "charter/readme.md", kind: "document", name: "readme.md" }] }} loading={false} error="" view="documents" selectedArtifactPath="charter/readme.md" workspaceKey="/workspace-a" onViewChange={vi.fn()} onEntityChange={vi.fn()} onDocumentChange={vi.fn()} onOpenArtifact={vi.fn()} />;
+    }
+    const first = render(<Harness />);
+    await screen.findByText("Editable charter");
+    fireEvent.click(screen.getByRole("button", { name: "Edit Markdown" }));
+    fireEvent.change(await screen.findByTestId("markdown-editor"), { target: { value: "# Unsaved charter" } });
+    first.unmount();
+
+    render(<Harness />);
+    expect(await screen.findByDisplayValue("# Unsaved charter")).toBeInTheDocument();
+    expect(screen.getByText("Recovered an unsaved Markdown draft; save or cancel it.")).toBeInTheDocument();
+  });
+
   it("filters the map and mobile fallback by canonical owner and domain tags", () => {
     const filteredKnowledge: KnowledgeResponse = {
       ...partialKnowledge,

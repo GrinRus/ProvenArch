@@ -6,7 +6,10 @@ import { TaskComposer } from "./TaskComposer";
 
 const repos: GuidedRepo[] = [{ id: "repo-1", name: "payments", mode: "path", path: "/work/payments", git_url: "", ref: "", analysis_include: "src, docs", analysis_exclude: "" }];
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 describe("TaskComposer", () => {
   it("shows inline readiness and creates a Task with immutable runner intent", async () => {
@@ -84,5 +87,23 @@ describe("TaskComposer", () => {
     render(<TaskComposer workspaceReady runtimeMode="fake" runtimeProvider="claude-code" repos={[]} onCreated={vi.fn()} />);
     expect(screen.getByTestId("task-scope-empty")).toBeInTheDocument();
     expect(screen.getByTestId("task-create-submit")).toBeDisabled();
+  });
+
+  it("recovers drafts after remount and keeps them scoped to the workspace", () => {
+    const props = { workspaceReady: true, repos, runtimeMode: "fake", runtimeProvider: "claude-code", onCreated: vi.fn() } as const;
+    const first = render(<TaskComposer {...props} workspaceKey="/workspace-a" />);
+    fireEvent.change(screen.getByTestId("task-title"), { target: { value: "Draft task" } });
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Review recovery" } });
+    first.unmount();
+
+    const recovered = render(<TaskComposer {...props} workspaceKey="/workspace-a" />);
+    expect(screen.getByDisplayValue("Draft task")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Review recovery")).toBeInTheDocument();
+    expect(screen.getByTestId("task-composer-draft-restored")).toBeInTheDocument();
+    recovered.unmount();
+
+    render(<TaskComposer {...props} workspaceKey="/workspace-b" />);
+    expect(screen.getByTestId("task-goal")).toHaveValue("");
+    expect(screen.queryByTestId("task-composer-draft-restored")).not.toBeInTheDocument();
   });
 });

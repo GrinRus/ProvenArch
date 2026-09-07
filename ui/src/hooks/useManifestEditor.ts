@@ -1,17 +1,25 @@
-import { useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { Diagnostic, GuidedRepo, ValidateResponse } from "../lib/appContracts";
 import { splitAnalysisScopeLines } from "../lib/analysisScope";
 import { guidedReposReducer, initialGuidedRepos, parseGuidedSetupFromManifest } from "../lib/workspaceSetupState";
 import { loadWorkspaceManifest, saveWorkspaceManifest, validateWorkspaceAPI } from "../lib/workspaceApi";
 import { isAbortError, useRequestGate } from "./useRequestGate";
+import { clearDraft, draftStorageKey, readDraft, writeDraft } from "../lib/draftStorage";
 
 type UseManifestEditorOptions = {
   setBusy: (busy: boolean) => void;
   setError: (message: string | null) => void;
+  workspaceKey?: string;
 };
 
-export function useManifestEditor({ setBusy, setError }: UseManifestEditorOptions) {
+type WorkspaceSetupDraft = {
+  manifestContent: string;
+  guidedRepos: GuidedRepo[];
+  guidedDocsImportsPath: string;
+};
+
+export function useManifestEditor({ setBusy, setError, workspaceKey }: UseManifestEditorOptions) {
   const [validateResult, setValidateResult] = useState<ValidateResponse | null>(null);
   const [manifestContent, setManifestContent] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -23,6 +31,40 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
   const formRevisionRef = useRef(0);
   const manifestLoadRequest = useRequestGate("workspace-manifest-load");
   const workspaceValidationRequest = useRequestGate("workspace-validation");
+  const draftKey = draftStorageKey("workspace-setup", workspaceKey ?? "");
+  const restoredDraftKeyRef = useRef("");
+
+  function restoreWorkspaceDraft(key: string): boolean {
+    const draft = readDraft<WorkspaceSetupDraft>(key)?.value;
+    if (!draft) return false;
+    setupDirtyRef.current = true;
+    formRevisionRef.current += 1;
+    manifestContentRef.current = draft.manifestContent;
+    setManifestContent(draft.manifestContent);
+    dispatchGuidedRepos({ type: "replace", repos: draft.guidedRepos });
+    setGuidedDocsImportsPath(draft.guidedDocsImportsPath);
+    setValidateResult(null);
+    setHasUnsavedManifestDraft(true);
+    setManifestStatus("Recovered an unsaved workspace draft; save to persist it.");
+    return true;
+  }
+
+  useEffect(() => {
+    const normalizedWorkspaceKey = workspaceKey?.trim();
+    if (!normalizedWorkspaceKey) return;
+    const key = draftStorageKey("workspace-setup", normalizedWorkspaceKey);
+    if (restoredDraftKeyRef.current === key) return;
+    restoredDraftKeyRef.current = key;
+    if (!restoreWorkspaceDraft(key)) {
+      setupDirtyRef.current = false;
+      setHasUnsavedManifestDraft(false);
+    }
+  }, [workspaceKey]);
+
+  useEffect(() => {
+    if (!workspaceKey?.trim() || !hasUnsavedManifestDraft) return;
+    writeDraft(draftKey, { manifestContent, guidedRepos, guidedDocsImportsPath });
+  }, [draftKey, guidedDocsImportsPath, guidedRepos, hasUnsavedManifestDraft, manifestContent, workspaceKey]);
 
   const validationDiagnosticsByRepo = useMemo(() => {
     if (!validateResult) {
@@ -51,7 +93,15 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
     return formRevisionRef.current === revision && manifestContentRef.current === content;
   }
 
-  async function loadManifest() {
+  async function loadManifest(workspaceKeyOverride?: string) {
+    const effectiveWorkspaceKey = workspaceKeyOverride?.trim() || workspaceKey?.trim();
+    const effectiveDraftKey = effectiveWorkspaceKey ? draftStorageKey("workspace-setup", effectiveWorkspaceKey) : "";
+    if (effectiveDraftKey && restoredDraftKeyRef.current !== effectiveDraftKey) {
+      restoredDraftKeyRef.current = effectiveDraftKey;
+      if (restoreWorkspaceDraft(effectiveDraftKey)) return;
+      setupDirtyRef.current = false;
+      setHasUnsavedManifestDraft(false);
+    }
     const token = manifestLoadRequest.begin();
     try {
       const content = await loadWorkspaceManifest({ signal: token.signal });
@@ -215,6 +265,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
         setValidateResult(validation);
         setupDirtyRef.current = false;
         setHasUnsavedManifestDraft(false);
+        clearDraft(draftKey);
         setManifestStatus("Saved workspace.yaml");
       } else {
         setupDirtyRef.current = true;
@@ -239,6 +290,7 @@ export function useManifestEditor({ setBusy, setError }: UseManifestEditorOption
         setValidateResult(validation);
         setupDirtyRef.current = false;
         setHasUnsavedManifestDraft(false);
+        clearDraft(draftKey);
         setManifestStatus("Saved workspace.yaml");
       } else {
         setupDirtyRef.current = true;
