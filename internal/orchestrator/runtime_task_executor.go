@@ -171,6 +171,20 @@ func (executor defaultRuntimeTaskExecutor) RunRuntimeTask(ctx context.Context, r
 	// restore it after that task has already completed.
 	e.runtimeWriteAuditMu.Lock()
 	writeAudit := beginRuntimeWriteAudit(task)
+	if len(writeAudit.failures) > 0 {
+		for _, failure := range normalizeAuditPaths(writeAudit.failures) {
+			e.reportRuntimeWriteAuditFailure(stepID, domainID, task, failure)
+		}
+		auditErr := acpruntime.WrapRunnerError(
+			resolvedProvider,
+			acpruntime.ErrorCodeRuntimeContract,
+			strings.Join(normalizeAuditPaths(writeAudit.failures), "; "),
+			nil,
+		)
+		e.runtimeWriteAuditMu.Unlock()
+		e.logError(stepID, domainID, "runtime write audit failed before provider execution", runtimeFailureLogFields(task, auditErr, "", ""))
+		return runtimePreparedExecution{}, auditErr
+	}
 	result, err := runner.Run(taskCtx, task)
 	auditErr := e.completeRuntimeWriteAudit(stepID, domainID, resolvedProvider, task, writeAudit)
 	e.runtimeWriteAuditMu.Unlock()

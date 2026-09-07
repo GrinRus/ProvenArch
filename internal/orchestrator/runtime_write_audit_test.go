@@ -36,6 +36,100 @@ func TestRuntimeWriteAuditIgnoresStagedRootWrites(t *testing.T) {
 	}
 }
 
+func TestRuntimeWriteAuditFailsOnUnclassifiedWorkspaceMutation(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	path := filepath.Join(ws.Path, "reports", "as-is", "overview.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create unclassified report root: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("provider wrote outside its task envelope\n"), 0o644); err != nil {
+		t.Fatalf("write unclassified workspace file: %v", err)
+	}
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
+
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
+	if !hasWarningContaining(execution.warnings, runtimeWriteAuditUnexpectedMutation) {
+		t.Fatalf("expected unclassified mutation warning, got %#v", execution.warnings)
+	}
+	if !hasLogField(logs, "category", "workspace_unclassified") {
+		t.Fatalf("expected unclassified workspace category, got %#v", logs)
+	}
+	if !hasLogFieldStringSlice(logs, "changed_paths", "reports/as-is/overview.md") {
+		t.Fatalf("expected changed path in audit log, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditAllowsOrchestratorOwnedRunStateWrites(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	execution, _ := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	for _, path := range []string{
+		filepath.Join(ws.Path, filepath.FromSlash(runLogsPath), "run-1.ndjson"),
+		filepath.Join(ws.Path, filepath.FromSlash(runHistoryPath)),
+		filepath.Join(ws.Path, filepath.FromSlash(runHistoryPath+".last-good")),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create orchestrator state root: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("orchestrator-owned state\n"), 0o644); err != nil {
+			t.Fatalf("write orchestrator state %s: %v", path, err)
+		}
+	}
+	if err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before); err != nil {
+		t.Fatalf("did not expect orchestrator-owned state writes to fail audit: %v", err)
+	}
+}
+
+func TestRuntimeWriteAuditFailsClosedWhenWorkspaceSnapshotIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	execution, logs := newWriteAuditExecution(ws)
+	if err := os.RemoveAll(ws.Path); err != nil {
+		t.Fatalf("remove workspace: %v", err)
+	}
+
+	before := beginRuntimeWriteAudit(task)
+	if len(before.failures) == 0 {
+		t.Fatal("expected preflight audit failure for unavailable workspace")
+	}
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
+	if !hasWarningContaining(execution.warnings, runtimeWriteAuditFailed) {
+		t.Fatalf("expected fail-closed audit warning, got %#v", execution.warnings)
+	}
+	if !hasLogWithMessage(logs, runtimeWriteAuditFailed) {
+		t.Fatalf("expected fail-closed audit log, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditRejectsWorkspaceAsProviderWriteRoot(t *testing.T) {
+	t.Parallel()
+
+	ws := writeAuditWorkspace(t)
+	task := writeAuditTask(ws, nil)
+	task.WriteRoot = ws.Path
+	snapshot := beginRuntimeWriteAudit(task)
+	if len(snapshot.failures) == 0 {
+		t.Fatal("expected workspace root write envelope to fail closed")
+	}
+}
+
 func TestRuntimeWriteAuditFailsOnProtectedWorkspaceMutation(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +248,33 @@ func TestRuntimeWriteAuditFailsOnRepoMutation(t *testing.T) {
 	}
 	if !hasLogField(logs, "category", "repo") {
 		t.Fatalf("expected repo mutation log category, got %#v", logs)
+	}
+}
+
+func TestRuntimeWriteAuditAuditsRepositoryNestedInWorkspace(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	ws := writeAuditWorkspace(t)
+	repoRoot := writeAuditGitRepoAt(t, filepath.Join(ws.Path, "repos", "payments-service"))
+	task := writeAuditTask(ws, []string{repoRoot})
+	execution, logs := newWriteAuditExecution(ws)
+
+	before := beginRuntimeWriteAudit(task)
+	if len(before.repoStatuses) != 1 {
+		t.Fatalf("expected nested repository to have an audited status: %#v", before.repoStatuses)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "README.md"), []byte("# changed\n"), 0o644); err != nil {
+		t.Fatalf("mutate nested repo file: %v", err)
+	}
+	err := execution.completeRuntimeWriteAudit("init.step1.collect", "", acpruntime.ProviderCodexCode, task, before)
+	if !isRuntimeContractError(err) {
+		t.Fatalf("expected runtime contract error, got %v", err)
+	}
+	if !hasLogField(logs, "category", "repo") {
+		t.Fatalf("expected repo category for nested repository mutation, got %#v", logs)
 	}
 }
 
@@ -324,7 +445,14 @@ func newWriteAuditExecution(ws workspace.Root) (*pipelineExecution, *[]RunLogEnt
 func writeAuditGitRepo(t *testing.T) string {
 	t.Helper()
 
-	repoRoot := t.TempDir()
+	return writeAuditGitRepoAt(t, t.TempDir())
+}
+
+func writeAuditGitRepoAt(t *testing.T, repoRoot string) string {
+	t.Helper()
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("create git repo root: %v", err)
+	}
 	runGitForAudit(t, repoRoot, "init")
 	runGitForAudit(t, repoRoot, "config", "user.email", "test@example.invalid")
 	runGitForAudit(t, repoRoot, "config", "user.name", "ACP Test")
@@ -384,6 +512,22 @@ func hasLogField(logs *[]RunLogEntry, key string, value string) bool {
 			continue
 		}
 		if got, ok := entry.Fields[key].(string); ok && got == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLogFieldStringSlice(logs *[]RunLogEntry, key string, value string) bool {
+	if logs == nil {
+		return false
+	}
+	for _, entry := range *logs {
+		values, ok := entry.Fields[key].([]string)
+		if !ok {
+			continue
+		}
+		if stringSliceContains(values, value) {
 			return true
 		}
 	}
