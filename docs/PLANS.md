@@ -140,16 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, and REM-17 merged; REM-18 is in progress; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, and REM-18 merged; REM-19 is in progress; REM-03B remains authorization-gated.
 
-Next action: Implement and verify the isolated REM-18 async route/workspace response-gating slice
-from fresh `origin/main=9412fa82`, then review/push/merge it. Keep release status
+Next action: Implement and verify the isolated REM-19 bounded polling lifecycle slice
+from fresh `origin/main=17615c2f`, then review/push/merge it. Keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: independent REM slices through REM-16 and REM-17 are merged; REM-18 is the
-first ready task after REM-16 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05
-remain stabilization-dependent, and REM-19+ remain dependency-blocked until this slice is merged.
+Current queue truth: independent REM slices through REM-18 are merged; REM-19 is the first ready
+task after REM-18 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05 remain
+stabilization-dependent, and REM-20+ remain dependency-blocked until this slice is merged.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -190,6 +190,27 @@ changing Task or Attempt route while review data is pending keeps the new route'
 manifest/identity/validation and current-workspace artifact responses are abortable and cannot update
 state after a newer generation; focused component tests cover late success and late error paths; the
 full deterministic UI/contract/build CI remains green.
+
+### REM-19 slice plan — bounded polling lifecycle and browser availability
+
+Before: run explorer, Task/Attempt detail, Pipeline Studio and Ask each own independent one-second
+`setInterval` loops. A slow request can overlap the next tick, transient failures keep the same request
+rate forever, and hidden/offline browser surfaces continue scheduling work until unmount.
+
+After: all product polling uses one shared sequential loop. A successful cycle returns to the base
+interval, failures use capped exponential backoff, and no next cycle is scheduled while the tab is
+hidden or the browser is offline. Visibility/online recovery schedules one fresh cycle immediately;
+unmount or a route becoming terminal aborts the in-flight request and removes all listeners/timers.
+
+Scope: `ui/src/hooks/usePollingLoop.ts`, the run/task/attempt/studio polling consumers,
+`ui/src/features/qa/AskStagePanel.tsx`, focused lifecycle tests, the architecture behavior note and
+this tracker. No backend/API/schema changes, no SSE, and no changes to terminal run semantics.
+
+Acceptance: each polling consumer has at most one in-flight request and one owned timer; failures
+back off to a bounded delay; hidden/offline state stops new work and resume is immediate; component
+unmount/terminal state leaves no timer or listener; focused tests cover sequential execution,
+backoff, pause/resume and existing run/task/QA behavior; deterministic UI/contract/build CI remains
+green.
 
 ### Context
 
@@ -287,8 +308,8 @@ stabilization-sensitive P1 становится ready, он возвращает
 | 15 | REM-15 | P1 | Create/admit/queue transitions атомарны и честно отображаются в UI; ошибка admission не создаёт phantom active Task/Attempt. | REM-13, REM-14 | merged in PR #296 |
 | 16 | REM-16 | P1 | Architecture/Setup copy, route handoff и docs описывают один фактический Task-first flow без legacy primary-path claims. | stabilization PR #303, REM-12..15 | merged in PR #304 |
 | 17 | REM-17 | P1 | Publish action доступен только для exact current Attempt, проверенного inventory fingerprint и свежего review evidence; stale UI state fail closed. | REM-10, REM-13..15 | merged in PR #300 |
-| 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | in progress on `9412fa82` |
-| 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | blocked-by-dependency |
+| 18 | REM-18 | P2 | Route/workspace changes отменяют или игнорируют устаревшие async responses; component tests покрывают out-of-order success/error. | REM-15, REM-17 | merged in PR #305 |
+| 19 | REM-19 | P2 | Polling имеет единый bounded lifecycle, backoff и visibility/offline behavior без дублированных timers и бесконечного request churn. | REM-18 | in progress on `17615c2f` |
 | 20 | REM-20 | P2 | User drafts имеют явную persistence/recovery policy; navigation, refresh, failed save и workspace switch не приводят к silent data loss. | REM-18 | blocked-by-dependency |
 | 21 | REM-21 | P2 | Keyboard/focus, landmarks, labels, contrast и reduced-motion проходят automated checks и ручной smoke ключевого journey. | REM-18..20 | blocked-by-dependency |
 | 22 | REM-22 | P2 | Backend hotspots декомпозированы только после behavior locks; boundaries уменьшают coupling без изменения artifact semantics. | stabilization merge, REM-04..08 | blocked-by-stabilization-and-dependency |

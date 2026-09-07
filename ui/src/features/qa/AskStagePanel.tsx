@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArtifactPathButton, StatusBadge } from "../../components/ConsolePrimitives";
 import { ModalDialog } from "../../components/ModalDialog";
 import { useRequestGate, isAbortError } from "../../hooks/useRequestGate";
+import { usePollingLoop } from "../../hooks/usePollingLoop";
 import {
   createQAProposalDraft,
   getQARun,
@@ -43,7 +44,6 @@ export function AskStagePanel({
   const [proposalBusy, setProposalBusy] = useState(false);
   const historyRequest = useRequestGate("qa-history");
   const detailRequest = useRequestGate("qa-detail");
-  const pollRequest = useRequestGate("qa-poll");
   const selectedRunIDRef = useRef<string | null>(null);
   const qaRunRef = useRef<QARunResponse | null>(null);
   const selectionSequenceRef = useRef(0);
@@ -119,38 +119,28 @@ export function AskStagePanel({
     };
   }, []);
 
-  useEffect(() => {
-    if (!qaRun?.run_id || !qaRunActive) {
-      return;
-    }
-    const runID = qaRun.run_id;
-    let canceled = false;
-    const refresh = async () => {
-      const token = pollRequest.begin(runID);
-      try {
-        const next = await getQARun(runID, token.signal);
-        if (!canceled && pollRequest.isCurrent(token) && selectedRunIDRef.current === runID) {
-          setQARun(next);
-          setSelectedRunID(next.run_id);
-          setRunHistory((current) => mergeQARunHistory(next, current, "preserve"));
-          setHistoryStatus("");
-          setStatus(next.status === "succeeded" ? "Q&A run completed." : next.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
-        }
-      } catch (error) {
-        if (!isAbortError(error) && !canceled && pollRequest.isCurrent(token) && selectedRunIDRef.current === runID) {
-          setStatus(error instanceof Error ? error.message : "Q&A run polling failed");
-        }
-      } finally {
-        pollRequest.finish(token);
+  const refreshQARun = async (signal: AbortSignal): Promise<boolean> => {
+    const runID = qaRun?.run_id;
+    if (!runID) return true;
+    try {
+      const next = await getQARun(runID, signal);
+      if (!signal.aborted && selectedRunIDRef.current === runID) {
+        setQARun(next);
+        setSelectedRunID(next.run_id);
+        setRunHistory((current) => mergeQARunHistory(next, current, "preserve"));
+        setHistoryStatus("");
+        setStatus(next.status === "succeeded" ? "Q&A run completed." : next.status === "failed" ? "Q&A run failed." : "Q&A run is running.");
       }
-    };
-    const interval = window.setInterval(() => void refresh(), 1000);
-    return () => {
-      canceled = true;
-      pollRequest.abort();
-      window.clearInterval(interval);
-    };
-  }, [qaRun?.run_id, qaRunActive]);
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || signal.aborted) return true;
+      if (selectedRunIDRef.current === runID) {
+        setStatus(error instanceof Error ? error.message : "Q&A run polling failed");
+      }
+      return false;
+    }
+  };
+  usePollingLoop({ enabled: Boolean(qaRun?.run_id && qaRunActive), poll: refreshQARun });
 
   async function refreshHistory() {
     const token = historyRequest.begin("manual");

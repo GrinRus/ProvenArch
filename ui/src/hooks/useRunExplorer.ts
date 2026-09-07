@@ -37,7 +37,6 @@ export function useRunExplorer({ setError }: UseRunExplorerOptions) {
   } = artifactsState;
   const {
     runLogs,
-    runLogsCursor,
     runLogsEOF,
     runLogsStatus,
     runLogsViewMode,
@@ -122,9 +121,6 @@ export function useRunExplorer({ setError }: UseRunExplorerOptions) {
 
   useRunPolling({
     shouldPollRunDetails: shouldPollRunDetails && evidenceSnapshot.status !== "loading",
-    runId,
-    runLogsCursor,
-    runLogsEOF,
     pollRunUpdates,
   });
 

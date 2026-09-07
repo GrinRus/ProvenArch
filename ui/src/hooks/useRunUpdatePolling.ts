@@ -8,11 +8,11 @@ import { activeStatuses, reconcileSelectedRunID } from "../lib/runState";
 type UseRunUpdatePollingOptions = {
   clearArtifacts: () => void;
   dispatch: Dispatch<RunExplorerAction>;
-  fetchRunLogs: (runId: string, reset?: boolean) => Promise<unknown>;
-  fetchRunLogsUntilEOF: (runId: string) => Promise<void>;
-  fetchRunStatus: (id: string, allowMissing?: boolean) => Promise<RunStatusResponse | null>;
+  fetchRunLogs: (runId: string, reset?: boolean, signal?: AbortSignal) => Promise<unknown>;
+  fetchRunLogsUntilEOF: (runId: string, signal?: AbortSignal) => Promise<void>;
+  fetchRunStatus: (id: string, allowMissing?: boolean, selectionIsCurrent?: () => boolean, signal?: AbortSignal) => Promise<RunStatusResponse | null>;
   handleSelectRun: (id: string, options?: { silentErrors?: boolean }) => Promise<void>;
-  loadRunList: (limit?: number) => Promise<RunListItem[]>;
+  loadRunList: (limit?: number, signal?: AbortSignal) => Promise<RunListItem[]>;
   resetRunLogs: () => void;
   runId: string | null;
   runLogsEOF: boolean;
@@ -39,11 +39,11 @@ export function useRunUpdatePolling({
   const currentRunIdRef = useRef(runId);
   currentRunIdRef.current = runId;
 
-  return useCallback(async () => {
+  return useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     try {
-      const latestRuns = await loadRunList(100);
-      if (!runId || currentRunIdRef.current !== runId) {
-        return;
+      const latestRuns = await loadRunList(100, signal);
+      if (signal?.aborted || !runId || currentRunIdRef.current !== runId) {
+        return true;
       }
       const nextSelectedRunID = reconcileSelectedRunID(runId, latestRuns);
       if (nextSelectedRunID !== runId) {
@@ -53,20 +53,21 @@ export function useRunUpdatePolling({
           clearArtifacts();
           await handleSelectRun(nextSelectedRunID, { silentErrors: true });
           setRunActionStatus(`Selected run no longer exists; switched to ${nextSelectedRunID}.`);
-          return;
+          return true;
         }
         const previousStatus = runStatus?.status ?? null;
-        const currentStatus = await fetchRunStatus(runId, true);
+        const currentStatus = await fetchRunStatus(runId, true, undefined, signal);
+        if (signal?.aborted) return true;
         if (currentStatus) {
           if (activeStatuses.has(currentStatus.status)) {
-            await fetchRunLogs(runId, false);
-            return;
+            await fetchRunLogs(runId, false, signal);
+            return true;
           }
           const statusChanged = previousStatus !== currentStatus.status;
           if (statusChanged || !runLogsEOF) {
-            await fetchRunLogsUntilEOF(runId);
+            await fetchRunLogsUntilEOF(runId, signal);
           }
-          return;
+          return true;
         }
         dispatch({ type: "clearRunStatusForRun", runId });
         resetRunLogs();
@@ -77,23 +78,26 @@ export function useRunUpdatePolling({
         } else {
           setRunID(null);
         }
-        return;
+        return true;
       }
       const previousStatus = runStatus?.status ?? null;
-      const status = await fetchRunStatus(runId);
+      const status = await fetchRunStatus(runId, false, undefined, signal);
+      if (signal?.aborted) return true;
       if (!status) {
-        return;
+        return true;
       }
       if (activeStatuses.has(status.status)) {
-        await fetchRunLogs(runId, false);
-        return;
+        await fetchRunLogs(runId, false, signal);
+        return true;
       }
       const statusChanged = previousStatus !== status.status;
       if (statusChanged || !runLogsEOF) {
-        await fetchRunLogsUntilEOF(runId);
+        await fetchRunLogsUntilEOF(runId, signal);
       }
+      return true;
     } catch {
       // keep UI responsive even if polling fails temporarily
+      return false;
     }
   }, [
     clearArtifacts,
