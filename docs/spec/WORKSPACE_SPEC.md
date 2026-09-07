@@ -145,7 +145,10 @@ Managed policy первого slice:
 - deny writes в analyzed repos, `workspace.yaml`, `schemas/*`, `docs/spec/*`, `charter/*`, path traversal, absolute/symlink escape outside allowed roots;
 - workspace-owned filesystem operations resolve from an opened root handle: relative symlinks may
   target only another location inside the same workspace; absolute, dangling and escaping symlinks
-  fail closed. Critical writes, including initial `workspace.yaml`, use a same-directory temporary
+  fail closed, including a concurrent symlink swap between validation and mutation. Promotion,
+  rollback and runtime-audit snapshot/restore paths keep one descriptor-backed handle for the
+  check/use sequence and never fall back to an absolute-path operation. Critical writes, including
+  initial `workspace.yaml`, use a same-directory temporary
   file, file sync, atomic rename and parent-directory sync;
 - `network|package_install|shell|unknown` требуют пользователя; в non-interactive `fail_fast` это terminal `runtime_permission_required`;
 - live provider approve-loop включается только provider-by-provider при наличии structured permission events. Если structured protocol недоступен, `managed` fail-fast без PTY text parsing.

@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -104,9 +103,7 @@ func (e *pipelineExecution) auditSelectedRunBeforePromotion() (artifactaudit.Rep
 
 type promotionGeneration struct {
 	rootRel            string
-	rootAbs            string
 	journalRel         string
-	journalAbs         string
 	artifacts          []Artifact
 	extraFilePaths     []string
 	staleArtifactPaths []string
@@ -160,31 +157,29 @@ func (e *pipelineExecution) buildPromotionGeneration() (promotionGeneration, err
 		journalRel: path.Join(baseRel, "promotion-journal"),
 	}
 
-	rootAbs, err := e.workspace.Resolve(generation.rootRel)
-	if err != nil {
-		return promotionGeneration{}, err
-	}
-	journalAbs, err := e.workspace.Resolve(generation.journalRel)
-	if err != nil {
-		return promotionGeneration{}, err
-	}
-	generation.rootAbs = rootAbs
-	generation.journalAbs = journalAbs
-
 	if err := maybeFailPromotionOperation(promotionFaultPrepareGeneration, generation.rootRel); err != nil {
 		return promotionGeneration{}, err
 	}
-	if err := os.RemoveAll(generation.rootAbs); err != nil {
+	workspaceRoot, err := e.workspace.OpenSubroot(".")
+	if err != nil {
+		return promotionGeneration{}, err
+	}
+	defer workspaceRoot.Close()
+	if err := workspaceRoot.RemoveAll(generation.rootRel); err != nil {
 		return promotionGeneration{}, fmt.Errorf("reset promotion generation: %w", err)
 	}
-	if err := os.RemoveAll(generation.journalAbs); err != nil {
+	if err := workspaceRoot.RemoveAll(generation.journalRel); err != nil {
 		return promotionGeneration{}, fmt.Errorf("reset promotion journal: %w", err)
 	}
-	if err := os.MkdirAll(generation.rootAbs, 0o755); err != nil {
+	if err := workspaceRoot.MkdirAll(generation.rootRel, 0o755); err != nil {
 		return promotionGeneration{}, fmt.Errorf("create promotion generation: %w", err)
 	}
 
-	generationRoot := workspace.Root{Path: generation.rootAbs}
+	generationRoot, err := workspaceRoot.OpenSubroot(generation.rootRel)
+	if err != nil {
+		return promotionGeneration{}, err
+	}
+	defer generationRoot.Close()
 	for _, prefix := range managedCanonicalArtifactPrefixes() {
 		if err := generationRootEnsureDir(generationRoot, prefix); err != nil {
 			return promotionGeneration{}, err
@@ -249,13 +244,13 @@ func (e *pipelineExecution) buildPromotionGeneration() (promotionGeneration, err
 }
 
 func (e *pipelineExecution) validatePromotionGeneration(generation promotionGeneration) error {
-	generationRoot := workspace.Root{Path: generation.rootAbs}
+	generationRoot, err := e.workspace.OpenSubroot(generation.rootRel)
+	if err != nil {
+		return err
+	}
+	defer generationRoot.Close()
 	for _, prefix := range managedCanonicalArtifactPrefixes() {
-		abs, err := generationRoot.Resolve(prefix)
-		if err != nil {
-			return err
-		}
-		stat, err := os.Stat(abs)
+		stat, err := generationRoot.Stat(prefix)
 		if err != nil {
 			return fmt.Errorf("validate promotion generation root %q: %w", prefix, err)
 		}
@@ -268,11 +263,7 @@ func (e *pipelineExecution) validatePromotionGeneration(generation promotionGene
 		if !isManagedCanonicalDocumentPath(canonicalPath) {
 			return fmt.Errorf("validate promotion generation: canonical path %q is unmanaged", canonicalPath)
 		}
-		abs, err := generationRoot.Resolve(canonicalPath)
-		if err != nil {
-			return err
-		}
-		stat, err := os.Stat(abs)
+		stat, err := generationRoot.Stat(canonicalPath)
 		if err != nil {
 			return fmt.Errorf("validate promotion generation artifact %q: %w", canonicalPath, err)
 		}
@@ -285,60 +276,35 @@ func (e *pipelineExecution) validatePromotionGeneration(generation promotionGene
 
 func (e *pipelineExecution) collectStaleManagedCanonicalPaths(generation promotionGeneration) ([]string, error) {
 	expected := map[string]struct{}{}
-	generationRoot := workspace.Root{Path: generation.rootAbs}
+	generationRoot, err := e.workspace.OpenSubroot(generation.rootRel)
+	if err != nil {
+		return nil, err
+	}
+	defer generationRoot.Close()
 	for _, prefix := range managedCanonicalArtifactPrefixes() {
-		absRoot, err := generationRoot.Resolve(prefix)
+		files, err := generationRoot.ReadRegularTree(prefix)
 		if err != nil {
-			return nil, err
-		}
-		if err := filepath.WalkDir(absRoot, func(item string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			relPath, err := filepath.Rel(generation.rootAbs, item)
-			if err != nil {
-				return err
-			}
-			expected[filepath.ToSlash(relPath)] = struct{}{}
-			return nil
-		}); err != nil {
 			return nil, fmt.Errorf("walk promotion generation root %q: %w", prefix, err)
+		}
+		for _, file := range files {
+			expected[filepath.ToSlash(filepath.Join(prefix, file.Path))] = struct{}{}
 		}
 	}
 
 	stale := map[string]struct{}{}
 	for _, prefix := range managedCanonicalArtifactPrefixes() {
-		absRoot, err := e.workspace.Resolve(prefix)
+		files, err := e.workspace.ReadRegularTree(prefix)
 		if err != nil {
-			return nil, err
-		}
-		if _, err := os.Stat(absRoot); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			return nil, fmt.Errorf("inspect managed canonical surface %q: %w", prefix, err)
 		}
-		if err := filepath.WalkDir(absRoot, func(item string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			relPath, err := filepath.Rel(e.workspace.Path, item)
-			if err != nil {
-				return err
-			}
-			canonicalPath := filepath.ToSlash(relPath)
+		for _, file := range files {
+			canonicalPath := filepath.ToSlash(filepath.Join(prefix, file.Path))
 			if _, ok := expected[canonicalPath]; !ok {
 				stale[canonicalPath] = struct{}{}
 			}
-			return nil
-		}); err != nil {
-			return nil, fmt.Errorf("walk managed canonical surface %q: %w", prefix, err)
 		}
 	}
 	return setKeysSorted(stale), nil
@@ -346,23 +312,28 @@ func (e *pipelineExecution) collectStaleManagedCanonicalPaths(generation promoti
 
 type promotionActivationRecord struct {
 	prefix    string
-	targetAbs string
-	backupAbs string
+	targetRel string
+	backupRel string
 	hadTarget bool
 	activated bool
 }
 
 func (e *pipelineExecution) activatePromotionGeneration(generation promotionGeneration) error {
-	if err := os.RemoveAll(generation.journalAbs); err != nil {
+	workspaceRoot, err := e.workspace.OpenSubroot(".")
+	if err != nil {
+		return err
+	}
+	defer workspaceRoot.Close()
+	if err := workspaceRoot.RemoveAll(generation.journalRel); err != nil {
 		return fmt.Errorf("reset promotion journal: %w", err)
 	}
-	if err := os.MkdirAll(generation.journalAbs, 0o755); err != nil {
+	if err := workspaceRoot.MkdirAll(generation.journalRel, 0o755); err != nil {
 		return fmt.Errorf("create promotion journal: %w", err)
 	}
 
 	records := []promotionActivationRecord{}
 	rollback := func(cause error) error {
-		if rollbackErr := rollbackPromotionActivation(records); rollbackErr != nil {
+		if rollbackErr := rollbackPromotionActivation(workspaceRoot, records); rollbackErr != nil {
 			return fmt.Errorf("%w; rollback failed: %v", cause, rollbackErr)
 		}
 		return cause
@@ -371,16 +342,12 @@ func (e *pipelineExecution) activatePromotionGeneration(generation promotionGene
 	prefixes := managedCanonicalArtifactPrefixes()
 	sort.Strings(prefixes)
 	for _, prefix := range prefixes {
-		sourceAbs := filepath.Join(generation.rootAbs, filepath.FromSlash(prefix))
-		if err := ensurePromotionSourceDir(sourceAbs); err != nil {
+		sourceRel := path.Join(generation.rootRel, prefix)
+		if err := ensurePromotionSourceDir(workspaceRoot, sourceRel); err != nil {
 			return rollback(fmt.Errorf("prepare promotion source %q: %w", prefix, err))
 		}
-		targetAbs, err := e.workspace.Resolve(prefix)
-		if err != nil {
-			return rollback(err)
-		}
-		backupAbs := filepath.Join(generation.journalAbs, filepath.FromSlash(prefix))
-		record, err := activatePromotionPath(prefix, sourceAbs, targetAbs, backupAbs)
+		backupRel := path.Join(generation.journalRel, prefix)
+		record, err := activatePromotionPath(workspaceRoot, prefix, sourceRel, prefix, backupRel)
 		if err != nil {
 			if record.hadTarget || record.activated {
 				records = append(records, record)
@@ -391,13 +358,9 @@ func (e *pipelineExecution) activatePromotionGeneration(generation promotionGene
 	}
 
 	for _, canonicalPath := range generation.extraFilePaths {
-		sourceAbs := filepath.Join(generation.rootAbs, filepath.FromSlash(canonicalPath))
-		targetAbs, err := e.workspace.Resolve(canonicalPath)
-		if err != nil {
-			return rollback(err)
-		}
-		backupAbs := filepath.Join(generation.journalAbs, filepath.FromSlash(canonicalPath))
-		record, err := activatePromotionPath(canonicalPath, sourceAbs, targetAbs, backupAbs)
+		sourceRel := path.Join(generation.rootRel, canonicalPath)
+		backupRel := path.Join(generation.journalRel, canonicalPath)
+		record, err := activatePromotionPath(workspaceRoot, canonicalPath, sourceRel, canonicalPath, backupRel)
 		if err != nil {
 			if record.hadTarget || record.activated {
 				records = append(records, record)
@@ -407,28 +370,28 @@ func (e *pipelineExecution) activatePromotionGeneration(generation promotionGene
 		records = append(records, record)
 	}
 
-	_ = os.RemoveAll(generation.journalAbs)
-	_ = os.RemoveAll(generation.rootAbs)
+	_ = workspaceRoot.RemoveAll(generation.journalRel)
+	_ = workspaceRoot.RemoveAll(generation.rootRel)
 	return nil
 }
 
-func activatePromotionPath(prefix string, sourceAbs string, targetAbs string, backupAbs string) (promotionActivationRecord, error) {
+func activatePromotionPath(root workspace.Root, prefix string, sourceRel string, targetRel string, backupRel string) (promotionActivationRecord, error) {
 	record := promotionActivationRecord{
 		prefix:    prefix,
-		targetAbs: targetAbs,
-		backupAbs: backupAbs,
+		targetRel: targetRel,
+		backupRel: backupRel,
 	}
-	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(targetRel), 0o755); err != nil {
 		return record, fmt.Errorf("create canonical parent for %q: %w", prefix, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(backupAbs), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(backupRel), 0o755); err != nil {
 		return record, fmt.Errorf("create promotion journal parent for %q: %w", prefix, err)
 	}
-	if _, err := os.Lstat(targetAbs); err == nil {
+	if _, err := root.Lstat(targetRel); err == nil {
 		if err := maybeFailPromotionOperation(promotionFaultBackupCanonical, prefix); err != nil {
 			return record, err
 		}
-		if err := os.Rename(targetAbs, backupAbs); err != nil {
+		if err := root.Rename(targetRel, backupRel); err != nil {
 			return record, fmt.Errorf("journal canonical artifact %q: %w", prefix, err)
 		}
 		record.hadTarget = true
@@ -438,36 +401,36 @@ func activatePromotionPath(prefix string, sourceAbs string, targetAbs string, ba
 	if err := maybeFailPromotionOperation(promotionFaultActivateCanonical, prefix); err != nil {
 		return record, err
 	}
-	if err := os.Rename(sourceAbs, targetAbs); err != nil {
+	if err := root.Rename(sourceRel, targetRel); err != nil {
 		return record, fmt.Errorf("activate canonical artifact %q: %w", prefix, err)
 	}
 	record.activated = true
 	return record, nil
 }
 
-func rollbackPromotionActivation(records []promotionActivationRecord) error {
+func rollbackPromotionActivation(root workspace.Root, records []promotionActivationRecord) error {
 	var rollbackErr error
 	for idx := len(records) - 1; idx >= 0; idx-- {
 		record := records[idx]
-		if err := os.RemoveAll(record.targetAbs); err != nil && rollbackErr == nil {
+		if err := root.RemoveAll(record.targetRel); err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("remove partial canonical artifact %q: %w", record.prefix, err)
 		}
 		if !record.hadTarget {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(record.targetAbs), 0o755); err != nil && rollbackErr == nil {
+		if err := root.MkdirAll(filepath.Dir(record.targetRel), 0o755); err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("recreate canonical parent for %q: %w", record.prefix, err)
 			continue
 		}
-		if err := os.Rename(record.backupAbs, record.targetAbs); err != nil && rollbackErr == nil {
+		if err := root.Rename(record.backupRel, record.targetRel); err != nil && rollbackErr == nil {
 			rollbackErr = fmt.Errorf("restore canonical artifact %q: %w", record.prefix, err)
 		}
 	}
 	return rollbackErr
 }
 
-func ensurePromotionSourceDir(abs string) error {
-	stat, err := os.Stat(abs)
+func ensurePromotionSourceDir(root workspace.Root, rel string) error {
+	stat, err := root.Stat(rel)
 	if err == nil {
 		if !stat.IsDir() {
 			return fmt.Errorf("not a directory")
@@ -475,17 +438,13 @@ func ensurePromotionSourceDir(abs string) error {
 		return nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return os.MkdirAll(abs, 0o755)
+		return root.MkdirAll(rel, 0o755)
 	}
 	return err
 }
 
 func generationRootEnsureDir(root workspace.Root, rel string) error {
-	abs, err := root.Resolve(rel)
-	if err != nil {
-		return err
-	}
-	return os.MkdirAll(abs, 0o755)
+	return root.MkdirAll(rel, 0o755)
 }
 
 func (e *pipelineExecution) promotionRunID() string {
@@ -540,14 +499,10 @@ func rebuildDerivedModel(root workspace.Root, store model.Store, finalRunIndex *
 		return fmt.Errorf("rebuild derived model: final run index is missing")
 	}
 	for _, rel := range []string{"model/entities", "model/edges"} {
-		abs, err := root.Resolve(rel)
-		if err != nil {
-			return err
-		}
-		if err := os.RemoveAll(abs); err != nil {
+		if err := root.RemoveAll(rel); err != nil {
 			return fmt.Errorf("clear derived model dir %q: %w", rel, err)
 		}
-		if err := os.MkdirAll(abs, 0o755); err != nil {
+		if err := root.MkdirAll(rel, 0o755); err != nil {
 			return fmt.Errorf("recreate derived model dir %q: %w", rel, err)
 		}
 	}

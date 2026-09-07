@@ -47,7 +47,7 @@ func (r Root) EnsureLayout() error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 	for _, rel := range requiredLayoutDirs {
 		if err := root.MkdirAll(filepath.FromSlash(rel), 0o755); err != nil {
 			return fmt.Errorf("create layout directory %q: %w", rel, err)
@@ -65,7 +65,7 @@ func (r Root) Resolve(relPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 	if err := validateRootPath(root, clean); err != nil {
 		return "", err
 	}
@@ -91,11 +91,20 @@ func cleanRelativePath(relPath string) (string, error) {
 }
 
 func (r Root) openFilesystemRoot() (*os.Root, error) {
+	if r.root != nil {
+		return r.root, nil
+	}
 	root, err := os.OpenRoot(r.Path)
 	if err != nil {
 		return nil, fmt.Errorf("open workspace root: %w", err)
 	}
 	return root, nil
+}
+
+func (r Root) closeFilesystemRoot(root *os.Root) {
+	if r.root == nil && root != nil {
+		_ = root.Close()
+	}
 }
 
 // validateRootPath asks os.Root to resolve every existing component. A missing
@@ -135,6 +144,12 @@ func (r Root) WriteFile(relPath string, content []byte) error {
 }
 
 func (r Root) WriteFileAtomic(relPath string, content []byte) error {
+	return r.WriteFileAtomicMode(relPath, content, 0o644)
+}
+
+// WriteFileAtomicMode is the same descriptor-backed atomic write as
+// WriteFileAtomic, but lets rollback preserve an existing file mode.
+func (r Root) WriteFileAtomicMode(relPath string, content []byte, perm os.FileMode) error {
 	clean, err := cleanRelativePath(relPath)
 	if err != nil {
 		return err
@@ -143,11 +158,119 @@ func (r Root) WriteFileAtomic(relPath string, content []byte) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
-	if err := writeFileAtomic(root, clean, content, 0o644); err != nil {
+	defer r.closeFilesystemRoot(root)
+	if err := writeFileAtomic(root, clean, content, perm); err != nil {
 		return fmt.Errorf("write file atomically: %w", err)
 	}
 	return nil
+}
+
+func (r Root) MkdirAll(relPath string, perm os.FileMode) error {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.MkdirAll(clean, perm)
+}
+
+func (r Root) Remove(relPath string) error {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.Remove(clean)
+}
+
+func (r Root) RemoveAll(relPath string) error {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.RemoveAll(clean)
+}
+
+func (r Root) Rename(oldRelPath string, newRelPath string) error {
+	oldClean, err := cleanRelativePath(oldRelPath)
+	if err != nil {
+		return err
+	}
+	newClean, err := cleanRelativePath(newRelPath)
+	if err != nil {
+		return err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.Rename(oldClean, newClean)
+}
+
+func (r Root) Stat(relPath string) (os.FileInfo, error) {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return nil, err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.Stat(clean)
+}
+
+func (r Root) Lstat(relPath string) (os.FileInfo, error) {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return nil, err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.Lstat(clean)
+}
+
+func (r Root) Readlink(relPath string) (string, error) {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return "", err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return "", err
+	}
+	defer r.closeFilesystemRoot(root)
+	return root.Readlink(clean)
+}
+
+func (r Root) WalkDir(relPath string, walkFn fs.WalkDirFunc) error {
+	clean, err := cleanRelativePath(relPath)
+	if err != nil {
+		return err
+	}
+	root, err := r.openFilesystemRoot()
+	if err != nil {
+		return err
+	}
+	defer r.closeFilesystemRoot(root)
+	return fs.WalkDir(root.FS(), clean, walkFn)
 }
 
 // WriteDirectoryAtomicExclusive publishes a complete directory without exposing
@@ -164,7 +287,7 @@ func (r Root) WriteDirectoryAtomicExclusive(relDir string, files map[string][]by
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 
 	parent := filepath.Dir(cleanDir)
 	if err := root.MkdirAll(parent, 0o755); err != nil {
@@ -393,7 +516,7 @@ func (r Root) ReadFile(relPath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 	content, err := root.ReadFile(clean)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -413,7 +536,7 @@ func (r Root) ReadFileLimit(relPath string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 	file, err := root.Open(clean)
 	if err != nil {
 		return nil, fmt.Errorf("open limited file: %w", err)
@@ -432,6 +555,7 @@ func (r Root) ReadFileLimit(relPath string, maxBytes int64) ([]byte, error) {
 type TreeFile struct {
 	Path    string
 	Content []byte
+	Mode    os.FileMode
 }
 
 // ReadRegularTree returns a deterministic, immutable view of regular files
@@ -445,7 +569,7 @@ func (r Root) ReadRegularTree(relRoot string) ([]TreeFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer r.closeFilesystemRoot(root)
 
 	files := []TreeFile{}
 	err = fs.WalkDir(root.FS(), clean, func(name string, entry fs.DirEntry, walkErr error) error {
@@ -476,7 +600,7 @@ func (r Root) ReadRegularTree(relRoot string) ([]TreeFile, error) {
 		if err != nil {
 			return err
 		}
-		files = append(files, TreeFile{Path: filepath.ToSlash(rel), Content: append([]byte(nil), raw...)})
+		files = append(files, TreeFile{Path: filepath.ToSlash(rel), Content: append([]byte(nil), raw...), Mode: info.Mode().Perm()})
 		return nil
 	})
 	if err != nil {
