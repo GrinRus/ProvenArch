@@ -1797,6 +1797,31 @@ describe("App", () => {
     expect(screen.queryByTestId("charter-artifact-editor")).not.toBeInTheDocument();
   });
 
+  it("keeps Guided Setup copy and handoff aligned with the Task-first flow", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    await renderConsoleApp("/setup?step=workspace");
+    await screen.findByTestId("guided-setup-page");
+
+    expect(screen.getByText("1 of 4")).toBeInTheDocument();
+    expect(screen.getByText("Connect sources, confirm local readiness, then create a Task with its goal and scope.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Analysis brief/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("stage-readiness"));
+    fireEvent.click(screen.getByTestId("workspace-validate-btn"));
+    await screen.findByTestId("workspace-validate-result");
+    fireEvent.click(screen.getByTestId("setup-doctor-btn"));
+    await screen.findByTestId("setup-doctor-result");
+
+    fireEvent.click(screen.getByTestId("setup-step-review"));
+    expect(screen.getByText("4 of 4")).toBeInTheDocument();
+    const createTask = await screen.findByTestId("guided-create-task");
+    expect(createTask).not.toBeDisabled();
+    fireEvent.click(createTask);
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/new"));
+    expect(await screen.findByTestId("task-composer")).toBeInTheDocument();
+  });
+
   it("supports browser history navigation across destination paths", async () => {
     vi.stubGlobal("fetch", createFetchMock());
 
