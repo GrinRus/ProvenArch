@@ -1,20 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ProductShell } from "./components/ProductShell";
-import { TaskRouteContainer } from "./components/TaskRouteContainer";
-import { TaskComposer } from "./components/TaskComposer";
+import { AppConsoleView, type AppConsoleRouteData } from "./components/AppConsoleView";
 import { AppOverlays } from "./components/AppOverlays";
-import { ChangesWorkspace } from "./features/changes/ChangesWorkspace";
-import { LegacyRunPage } from "./components/LegacyRunPage";
 import { OnboardingShell } from "./components/OnboardingShell";
 import { RuntimeProfileSettingsPanel } from "./components/RuntimeProfileSettingsPanel";
-import { SettingsPage } from "./components/SettingsPage";
-import { SetupRoute } from "./components/SetupRoute";
-import {
-  AnalysisStagePanel,
-} from "./components/StagePanels";
-
-const KnowledgePage = lazy(() => import("./components/KnowledgePage").then((module) => ({ default: module.KnowledgePage })));
 import {
   runtimeExecutionLabels,
   runtimePermissionLabels,
@@ -33,7 +22,7 @@ import {
   type WorkspaceHealthResponse,
 } from "./lib/appContracts";
 import type { StageId } from "./lib/consoleTypes";
-import { formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type ChangesView, type KnowledgeView, type SettingsSection, type SetupStep, type ViewerMode } from "./lib/appRoutes";
+import { formatAppRoute, parseAppRoute, stageForRoute, type AppRoute, type SetupStep } from "./lib/appRoutes";
 import type { LoadGitDiffOptions } from "./lib/gitDiffApi";
 import { runtimeDisplayLabel } from "./lib/runtimeDisplay";
 import { deriveAppWorkflowState, derivePublicationState, selectedRunIssueCopy } from "./lib/appDerived";
@@ -985,221 +974,258 @@ export default function App() {
     );
   }
 
+  const routeData: AppConsoleRouteData = {
+    taskComposer: {
+      workspaceReady: validateResult?.ok === true,
+      repos: guidedRepos,
+      workspaceKey: validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath,
+      runtimeMode: effectiveRuntimeMode,
+      runtimeProvider: effectiveRuntimeProvider,
+      onCreated: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] }),
+      onStarted: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] }),
+    },
+    taskRoute: {
+      view: route.taskView ?? "inbox",
+      taskId: route.taskId,
+      attemptId: route.attemptId,
+      invalid: route.invalid,
+      filters: route.taskFilters,
+      onFiltersChange: (filters) => navigateRoute({ destination: "tasks", taskView: "inbox", taskFilters: filters, invalid: [] }),
+      onSelectTask: (taskId, filters) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: filters, invalid: [] }),
+      onSelectAttempt: (taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] }),
+      onOpenStudio: (taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: filters, invalid: [] }),
+      onBackToAttempt: (taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] }),
+      onNewTask: () => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] }),
+      onOpenArchitecture: (taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", taskId, invalid: [] }),
+      onOpenChanges: (taskId, attemptId, runId) => navigateRoute({ destination: "changes", taskId, attemptId, runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }),
+      onOutcomeSettled: handleTaskOutcomeSettled,
+    },
+    changes: {
+      view: route.changesView ?? "overview",
+      source: route.source ?? "snapshot",
+      page: {
+        runs: runList,
+        tasks: taskReviewCandidates.tasks,
+        tasksStatus: taskReviewCandidates.status,
+        tasksError: taskReviewCandidates.error,
+        onRetryTasks: taskReviewCandidates.reload,
+        selectedRunID: selectedChangesRunId,
+        selectedEvidenceStatus: evidenceSnapshot.status,
+        onViewChange: (view) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
+        onSelectChangeReview: (id, taskId, attemptId) => {
+          navigateRoute({ destination: "changes", taskId, attemptId, runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] });
+          void handleSelectRun(id);
+        },
+        onOpenRunStudio: (id) => {
+          navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] });
+          void handleSelectRun(id);
+        },
+        architectureComparison: selectedChangesComparison,
+        architectureComparisonMismatch: Boolean(selectedChangesRunId && architectureComparisonMismatch),
+        runReview: selectedChangesReview?.review,
+        taskId: route.taskId,
+        attemptId: route.attemptId,
+        onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
+      },
+      review: {
+        runId: selectedChangesRunId,
+        runStatus: selectedChangesRunStatus,
+        runList,
+        coverageSummary: selectedChangesRunId ? coverageSummary : "",
+        openQuestions: selectedChangesRunId ? openQuestions : "",
+        nonDiagramArtifacts: selectedChangesRunId ? nonDiagramArtifacts : [],
+        diagramArtifacts: selectedChangesRunId ? diagramArtifacts : [],
+        selectedArtifact: selectedChangesRunId ? selectedArtifact : "",
+        selectedArtifactContent: selectedChangesRunId ? selectedArtifactContent : "",
+        evidenceStatus: selectedChangesRunId ? evidenceSnapshot.status : "idle",
+        evidenceIssues: selectedChangesRunId ? evidenceSnapshot.issues : [],
+        reviewSummary: selectedChangesReview,
+        demo: selectedChangesRunStatus?.runtime_mode === "fake",
+        gitDiff: selectedChangesRunId ? gitDiff : null,
+        gitDiffStatus: selectedChangesRunId ? gitDiffStatus : "idle",
+        onLoadGitDiff: handleLoadGitDiff,
+        onSelectRun: (id) => void handleSelectRunAndRoute(id),
+        onOpenArtifact: (path) => void handleOpenArtifactAndReview(path),
+      },
+      proposals: {
+        artifacts: [
+          ...nonDiagramArtifacts,
+          ...diagramArtifacts,
+          ...(createdQAProposal ? [
+            { id: createdQAProposal.proposal_path, path: createdQAProposal.proposal_path, kind: "proposal", label: "Ask proposal draft" },
+            { id: createdQAProposal.evidence_path, path: createdQAProposal.evidence_path, kind: "proposal-evidence", label: "Ask proposal evidence" },
+            { id: createdQAProposal.source_path, path: createdQAProposal.source_path, kind: "proposal-source", label: "Ask proposal source" },
+          ] : []),
+        ],
+        selectedArtifact: createdQAProposal && currentArtifactPath.startsWith(createdQAProposal.path + "/") ? currentArtifactPath : selectedArtifact,
+        selectedArtifactContent: createdQAProposal && currentArtifactPath.startsWith(createdQAProposal.path + "/") ? currentArtifactContent : selectedArtifactContent,
+        openQuestions,
+        proposalBranch,
+        gitStatus,
+        runLogs,
+        gitDiff,
+        gitDiffStatus,
+        onLoadGitDiff: handleLoadGitDiff,
+        onOpenArtifact: (path) => void (createdQAProposal && path.startsWith(createdQAProposal.path + "/") ? handleOpenCreatedProposalArtifact(path) : handleOpenArtifactAndReview(path)),
+        onGoPublish: () => navigateRoute({ ...route, destination: "changes", changesView: "publish", invalid: [] }),
+      },
+      publish: {
+        busy,
+        gitMessage,
+        proposalBranch,
+        gitStatus,
+        gitError,
+        artifacts: [...nonDiagramArtifacts, ...diagramArtifacts],
+        selectedArtifact,
+        selectedArtifactContent,
+        openQuestions,
+        externalGateItems: publishExternalGateItems,
+        gitDiff,
+        gitDiffStatus,
+        onLoadGitDiff: handleLoadGitDiff,
+        onGitMessageChange: setGitMessage,
+        onProposalBranchChange: setProposalBranch,
+        onCommit: () => void handleGitCommit(),
+        onCreateProposalBranch: () => void handleCreateProposalBranch(),
+        onPreviewArtifact: (path) => void handleOpenArtifact(path, route.mode ?? "rendered"),
+      },
+      currentArtifact: currentArtifactPath ? { path: currentArtifactPath, content: currentArtifactContent } : null,
+      viewerMode: route.mode ?? "rendered",
+      askReturnAvailable: askReturnRoute !== null,
+      onViewerModeChange: (mode) => navigateRoute({ ...route, mode, invalid: [] }),
+      onOpenCurrentArtifact: (path) => void handleOpenCurrentArtifact(path),
+      onReturnToAsk: () => {
+        if (askReturnRoute) navigateRoute(askReturnRoute);
+        setAskOpen(true);
+        setAskReturnRoute(null);
+      },
+    },
+    knowledge: {
+      architecture,
+      knowledge,
+      workspaceKey: validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath,
+      workspaceHealth: workspaceHealthReport,
+      loading: knowledgeStatus === "loading" || knowledgeStatus === "idle",
+      error: knowledgeError,
+      view: route.knowledgeView ?? "map",
+      selectedEntityID: route.entity,
+      selectedArtifactPath: route.artifact,
+      onViewChange: (view) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] }),
+      onEntityChange: (entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] }),
+      onDocumentChange: (artifact) => navigateRoute(
+        { ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "map", source: "current", artifact, invalid: [] },
+        destination === "knowledge" && !route.artifact,
+      ),
+      onOpenArtifact: (path) => void handleOpenCurrentArtifact(path),
+      onOpenRuns: () => handleDestinationChange("tasks"),
+      taskId: route.taskId,
+      onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
+    },
+    settings: {
+      activeSection: route.settingsSection ?? "workspace",
+      workspacePath: validateResult?.workspace ?? workspaceRootPath ?? "bound workspace",
+      workspaceValid: validateResult?.ok === true,
+      runtimeLabel,
+      setupRuntime,
+      setupRuntimeProvider,
+      runtimeSettingsPanel,
+      onOpenSetup: () => handleDestinationChange("setup"),
+      onOpenChanges: () => handleDestinationChange("changes"),
+      onOpenRuns: () => handleDestinationChange("tasks"),
+      onRuntimeChange: setSetupRuntime,
+      onRuntimeProviderChange: setSetupRuntimeProvider,
+      onSaveRuntime: () => void handleOnboardingSaveRuntime(),
+      busy,
+      onSectionChange: (section) => navigateRoute({ ...route, destination: "settings", settingsSection: section, invalid: [] }),
+    },
+    setup: {
+      step: setupStep,
+      onStepChange: handleSetupStepChange,
+      busy,
+      guidedRepos,
+      guidedDocsImportsPath,
+      manifestContent,
+      manifestStatus,
+      validateResult,
+      validationDiagnosticsByRepo,
+      doctorResult: setupDoctorResult,
+      doctorStatus: setupDoctorStatus,
+      setupRuntime,
+      setupRuntimeProvider,
+      sourceRuntime: effectiveRuntimeMode,
+      sourceRuntimeProvider: effectiveRuntimeProvider,
+      onRepoChange: handleSetupRepoChange,
+      onAddRepo: handleSetupAddRepo,
+      onRemoveRepo: handleSetupRemoveRepo,
+      onDocsImportsPathChange: handleSetupDocsImportsPathChange,
+      onApplyGuidedWorkspaceSetup: handleSetupApplyGuidedWorkspaceSetup,
+      onSaveGuidedWorkspaceSetup: () => void handleSetupSaveGuidedWorkspaceSetup(),
+      onManifestChange: handleSetupManifestChange,
+      onSaveManifest: () => void handleSaveManifest(),
+      firstRunStatus,
+      selectedRunErrorCode: runStatus?.error_code,
+      selectedRunError: runStatus?.error,
+      onSetupRuntimeChange: handleSetupRuntimeChange,
+      onSetupRuntimeProviderChange: handleSetupRuntimeProviderChange,
+      onValidateWorkspace: () => void handleValidateWorkspaceWithHealth(),
+      onCheckDoctor: () => void handleSetupDoctorCheck(),
+      onCreateTask: () => navigateRoute({ destination: "tasks", taskView: "new", invalid: [] }),
+      runtimeSettingsPanel,
+      artifactCount,
+      workspaceHealthReport,
+      workspaceHealthStatus,
+      workspaceHealthError,
+      onRefreshWorkspaceHealth: () => void refreshWorkspaceHealth(),
+      runtimeTimeoutEffective,
+      runtimeExecutionEffective,
+      runtimePermissionEffective,
+      runtimeStepProviderEffective,
+    },
+    analysis: {
+      detailMode: Boolean(route.runId),
+      runId,
+      runStatus,
+      runList,
+      coordination,
+      runActionStatus,
+      selectedRunWarnings,
+      selectedRunIsActive,
+      runCounters,
+      pendingPermissions: runStatus?.pending_permissions ?? [],
+      runLogs,
+      artifacts: [...nonDiagramArtifacts, ...diagramArtifacts],
+      setupRuntime: runStatus?.runtime_mode ?? "",
+      setupRuntimeProvider: selectedRunProvider,
+      runReviewSummary,
+      runReviewStatus,
+      gitDiff,
+      gitDiffStatus,
+      onLoadGitDiff: handleLoadGitDiff,
+      onSelectRun: (id) => void handleSelectRunInRuns(id),
+      onOpenArtifact: (path) => void handleOpenArtifactAndReview(path),
+      onOpenArchitecture: () => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] }),
+    },
+  };
+
   return (
     <>
-      <ProductShell
-        destination={destination}
+      <AppConsoleView
+        route={route}
+        activeStage={activeStage}
         workflow={workflow}
+        destination={destination}
         workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
         runtimeLabel={runtimeLabel}
-        buildLabel={`${systemVersion.version} · ${systemVersion.commit}`}
-        buildTitle={`version=${systemVersion.version}; commit=${systemVersion.commit}; built=${systemVersion.built}`}
+        systemVersion={systemVersion}
         workspaceValid={validateResult?.ok === true}
+        error={error}
+        routeNotice={routeNotice}
+        routeData={routeData}
         onDestinationChange={handleDestinationChange}
         onAsk={() => setAskOpen(true)}
         onDiagnostics={() => { navigateRoute({ destination: "tasks", taskView: "legacy", invalid: [] }); setActiveStageState("analysis"); }}
         onRefresh={() => void handleConsoleRefresh()}
-      >
-	  {destination === "tasks" && route.taskView === "new" ? <TaskComposer
-	    workspaceReady={validateResult?.ok === true}
-	    repos={guidedRepos}
-	    workspaceKey={validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath}
-	    runtimeMode={effectiveRuntimeMode}
-	    runtimeProvider={effectiveRuntimeProvider}
-	    onCreated={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
-	    onStarted={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: route.taskFilters, invalid: [] })}
-	  /> : null}
-	  {destination === "tasks" && route.taskView !== "new" && route.taskView !== "legacy" ? <TaskRouteContainer
-	    view={route.taskView ?? "inbox"}
-	    taskId={route.taskId}
-	    attemptId={route.attemptId}
-	    invalid={route.invalid}
-	    filters={route.taskFilters}
-	    onFiltersChange={(filters) => navigateRoute({ destination: "tasks", taskView: "inbox", taskFilters: filters, invalid: [] })}
-	    onSelectTask={(taskId, filters) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, taskFilters: filters, invalid: [] })}
-	    onSelectAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
-	    onOpenStudio={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "studio", taskId, attemptId, taskFilters: filters, invalid: [] })}
-	    onBackToAttempt={(taskId, attemptId, filters) => navigateRoute({ destination: "tasks", taskView: "attempt", taskId, attemptId, taskFilters: filters, invalid: [] })}
-	    onNewTask={() => navigateRoute({ destination: "tasks", taskView: "new", taskFilters: route.taskFilters, invalid: [] })}
-	    onOpenArchitecture={(taskId) => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", taskId, invalid: [] })}
-	    onOpenChanges={(taskId, attemptId, runId) => navigateRoute({ destination: "changes", taskId, attemptId, runId, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] })}
-	    onOutcomeSettled={handleTaskOutcomeSettled}
-	  /> : null}
-	  {destination === "changes" ? (
-		<ChangesWorkspace
-		  view={route.changesView ?? "overview"}
-		  source={route.source ?? "snapshot"}
-		page={{
-			 runs: runList,
-			 tasks: taskReviewCandidates.tasks,
-			 tasksStatus: taskReviewCandidates.status,
-			 tasksError: taskReviewCandidates.error,
-			 onRetryTasks: taskReviewCandidates.reload,
-			selectedRunID: selectedChangesRunId,
-			selectedEvidenceStatus: evidenceSnapshot.status,
-			onViewChange: (view: ChangesView) => navigateRoute({ ...route, destination: "changes", changesView: view, invalid: [] }),
-				onSelectChangeReview: (id: string, taskId?: string, attemptId?: string) => { navigateRoute({ destination: "changes", taskId, attemptId, runId: id, runRequested: true, changesView: "overview", source: "snapshot", mode: "rendered", invalid: [] }); void handleSelectRun(id); },
-			onOpenRunStudio: (id: string) => { navigateRoute({ destination: "tasks", taskView: "legacy", runId: id, runRequested: true, invalid: [] }); void handleSelectRun(id); },
-			architectureComparison: selectedChangesComparison,
-			architectureComparisonMismatch: Boolean(selectedChangesRunId && architectureComparisonMismatch),
-			runReview: selectedChangesReview?.review,
-			taskId: route.taskId,
-			attemptId: route.attemptId,
-			onOpenTask: (taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] }),
-		  }}
-		  review={{ runId: selectedChangesRunId, runStatus: selectedChangesRunStatus, runList, coverageSummary: selectedChangesRunId ? coverageSummary : "", openQuestions: selectedChangesRunId ? openQuestions : "", nonDiagramArtifacts: selectedChangesRunId ? nonDiagramArtifacts : [], diagramArtifacts: selectedChangesRunId ? diagramArtifacts : [], selectedArtifact: selectedChangesRunId ? selectedArtifact : "", selectedArtifactContent: selectedChangesRunId ? selectedArtifactContent : "", evidenceStatus: selectedChangesRunId ? evidenceSnapshot.status : "idle", evidenceIssues: selectedChangesRunId ? evidenceSnapshot.issues : [], reviewSummary: selectedChangesReview, demo: selectedChangesRunStatus?.runtime_mode === "fake", gitDiff: selectedChangesRunId ? gitDiff : null, gitDiffStatus: selectedChangesRunId ? gitDiffStatus : "idle", onLoadGitDiff: handleLoadGitDiff, onSelectRun: (id) => void handleSelectRunAndRoute(id), onOpenArtifact: (path) => void handleOpenArtifactAndReview(path) }}
-		  proposals={{
-		    artifacts: [
-		      ...nonDiagramArtifacts,
-		      ...diagramArtifacts,
-		      ...(createdQAProposal ? [
-		        { id: createdQAProposal.proposal_path, path: createdQAProposal.proposal_path, kind: "proposal", label: "Ask proposal draft" },
-		        { id: createdQAProposal.evidence_path, path: createdQAProposal.evidence_path, kind: "proposal-evidence", label: "Ask proposal evidence" },
-		        { id: createdQAProposal.source_path, path: createdQAProposal.source_path, kind: "proposal-source", label: "Ask proposal source" },
-		      ] : []),
-		    ],
-		    selectedArtifact: createdQAProposal && currentArtifactPath.startsWith(`${createdQAProposal.path}/`) ? currentArtifactPath : selectedArtifact,
-		    selectedArtifactContent: createdQAProposal && currentArtifactPath.startsWith(`${createdQAProposal.path}/`) ? currentArtifactContent : selectedArtifactContent,
-		    openQuestions,
-		    proposalBranch,
-		    gitStatus,
-		    runLogs,
-		    gitDiff,
-		    gitDiffStatus,
-		    onLoadGitDiff: handleLoadGitDiff,
-		    onOpenArtifact: (path) => void (createdQAProposal && path.startsWith(`${createdQAProposal.path}/`) ? handleOpenCreatedProposalArtifact(path) : handleOpenArtifactAndReview(path)),
-		    onGoPublish: () => navigateRoute({ ...route, destination: "changes", changesView: "publish", invalid: [] }),
-		  }}
-		  publish={{ busy, gitMessage, proposalBranch, gitStatus, gitError, artifacts: [...nonDiagramArtifacts, ...diagramArtifacts], selectedArtifact, selectedArtifactContent, openQuestions, externalGateItems: publishExternalGateItems, gitDiff, gitDiffStatus, onLoadGitDiff: handleLoadGitDiff, onGitMessageChange: setGitMessage, onProposalBranchChange: setProposalBranch, onCommit: () => void handleGitCommit(), onCreateProposalBranch: () => void handleCreateProposalBranch(), onPreviewArtifact: (path) => void handleOpenArtifact(path, route.mode ?? "rendered") }}
-		  currentArtifact={currentArtifactPath ? { path: currentArtifactPath, content: currentArtifactContent } : null}
-		  viewerMode={route.mode ?? "rendered"}
-		  askReturnAvailable={askReturnRoute !== null}
-		  onViewerModeChange={(mode: ViewerMode) => navigateRoute({ ...route, mode, invalid: [] })}
-		  onOpenCurrentArtifact={(path) => void handleOpenCurrentArtifact(path)}
-		  onReturnToAsk={() => { if (askReturnRoute) navigateRoute(askReturnRoute); setAskOpen(true); setAskReturnRoute(null); }}
-		/>
-	  ) : null}
-	  {destination === "knowledge" ? (
-		<Suspense fallback={<section className="panel stage-panel"><p className="status info">Loading Architecture Explorer…</p></section>}><KnowledgePage
-			architecture={architecture}
-			knowledge={knowledge}
-			workspaceKey={validateResult?.workspace ?? workspaceRootPath ?? onboardingWorkspacePath}
-		  workspaceHealth={workspaceHealthReport}
-		  loading={knowledgeStatus === "loading" || knowledgeStatus === "idle"}
-		  error={knowledgeError}
-		  view={route.knowledgeView ?? "map"}
-		  selectedEntityID={route.entity}
-		  selectedArtifactPath={route.artifact}
-		  onViewChange={(view: KnowledgeView) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: view, source: "current", invalid: [] })}
-		  onEntityChange={(entity) => navigateRoute({ ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "model", source: "current", entity, invalid: [] })}
-			  onDocumentChange={(artifact) => navigateRoute(
-			    { ...route, destination: "knowledge", knowledgeView: route.knowledgeView ?? "map", source: "current", artifact, invalid: [] },
-			    destination === "knowledge" && !route.artifact,
-			  )}
-		  onOpenArtifact={(path) => void handleOpenCurrentArtifact(path)}
-		  onOpenRuns={() => handleDestinationChange("tasks")}
-		  taskId={route.taskId}
-		  onOpenTask={(taskId) => navigateRoute({ destination: "tasks", taskView: "detail", taskId, invalid: [] })}
-		/></Suspense>
-	  ) : null}
-	  {destination === "settings" ? (
-	    <SettingsPage
-	      activeSection={route.settingsSection ?? "workspace"}
-	      workspacePath={validateResult?.workspace ?? workspaceRootPath ?? "bound workspace"}
-	      workspaceValid={validateResult?.ok === true}
-	      runtimeLabel={runtimeLabel}
-	      setupRuntime={setupRuntime}
-	      setupRuntimeProvider={setupRuntimeProvider}
-	      runtimeSettingsPanel={runtimeSettingsPanel}
-	      onOpenSetup={() => handleDestinationChange("setup")}
-	      onOpenChanges={() => handleDestinationChange("changes")}
-	      onOpenRuns={() => handleDestinationChange("tasks")}
-	      onRuntimeChange={setSetupRuntime}
-	      onRuntimeProviderChange={setSetupRuntimeProvider}
-	      onSaveRuntime={() => void handleOnboardingSaveRuntime()}
-	      busy={busy}
-	      onSectionChange={(section: SettingsSection) => navigateRoute({ ...route, destination: "settings", settingsSection: section, invalid: [] })}
-	    />
-	  ) : null}
-
-      {destination === "setup" ? (
-        <SetupRoute
-          step={setupStep}
-          onStepChange={handleSetupStepChange}
-          busy={busy}
-          guidedRepos={guidedRepos}
-          guidedDocsImportsPath={guidedDocsImportsPath}
-          manifestContent={manifestContent}
-          manifestStatus={manifestStatus}
-          validateResult={validateResult}
-          validationDiagnosticsByRepo={validationDiagnosticsByRepo}
-          doctorResult={setupDoctorResult}
-          doctorStatus={setupDoctorStatus}
-          setupRuntime={setupRuntime}
-          setupRuntimeProvider={setupRuntimeProvider}
-          sourceRuntime={effectiveRuntimeMode}
-          sourceRuntimeProvider={effectiveRuntimeProvider}
-          onRepoChange={handleSetupRepoChange}
-          onAddRepo={handleSetupAddRepo}
-          onRemoveRepo={handleSetupRemoveRepo}
-          onDocsImportsPathChange={handleSetupDocsImportsPathChange}
-          onApplyGuidedWorkspaceSetup={handleSetupApplyGuidedWorkspaceSetup}
-          onSaveGuidedWorkspaceSetup={() => void handleSetupSaveGuidedWorkspaceSetup()}
-          onManifestChange={handleSetupManifestChange}
-          onSaveManifest={() => void handleSaveManifest()}
-          firstRunStatus={firstRunStatus}
-          selectedRunErrorCode={runStatus?.error_code}
-          selectedRunError={runStatus?.error}
-          onSetupRuntimeChange={handleSetupRuntimeChange}
-          onSetupRuntimeProviderChange={handleSetupRuntimeProviderChange}
-          onValidateWorkspace={() => void handleValidateWorkspaceWithHealth()}
-          onCheckDoctor={() => void handleSetupDoctorCheck()}
-          onCreateTask={() => navigateRoute({ destination: "tasks", taskView: "new", invalid: [] })}
-          runtimeSettingsPanel={runtimeSettingsPanel}
-          artifactCount={artifactCount}
-          workspaceHealthReport={workspaceHealthReport}
-          workspaceHealthStatus={workspaceHealthStatus}
-          workspaceHealthError={workspaceHealthError}
-          onRefreshWorkspaceHealth={() => void refreshWorkspaceHealth()}
-          runtimeTimeoutEffective={runtimeTimeoutEffective}
-          runtimeExecutionEffective={runtimeExecutionEffective}
-          runtimePermissionEffective={runtimePermissionEffective}
-          runtimeStepProviderEffective={runtimeStepProviderEffective}
-        />
-      ) : null}
-
-      {destination === "tasks" && route.taskView === "legacy" && activeStage === "analysis" ? (
-        <LegacyRunPage coordination={coordination} selectedRunID={route.runId}>
-        <AnalysisStagePanel
-          detailMode={Boolean(route.runId)}
-          runId={runId}
-          runStatus={runStatus}
-          runList={runList}
-          coordination={coordination}
-          runActionStatus={runActionStatus}
-          selectedRunWarnings={selectedRunWarnings}
-          selectedRunIsActive={selectedRunIsActive}
-          runCounters={runCounters}
-          pendingPermissions={runStatus?.pending_permissions ?? []}
-          runLogs={runLogs}
-          artifacts={[...nonDiagramArtifacts, ...diagramArtifacts]}
-          setupRuntime={runStatus?.runtime_mode ?? ""}
-          setupRuntimeProvider={selectedRunProvider}
-          runReviewSummary={runReviewSummary}
-          runReviewStatus={runReviewStatus}
-          gitDiff={gitDiff}
-          gitDiffStatus={gitDiffStatus}
-          onLoadGitDiff={handleLoadGitDiff}
-          onSelectRun={(id) => void handleSelectRunInRuns(id)}
-          onOpenArtifact={(path) => void handleOpenArtifactAndReview(path)}
-		  onOpenArchitecture={() => navigateRoute({ destination: "knowledge", knowledgeView: "map", source: "current", invalid: [] })}
-        />
-        </LegacyRunPage>
-      ) : null}
-
-      {error ? <p className="status err">Error: {error}</p> : null}
-      {routeNotice ? <p className="status warn" role="status" data-testid="route-notice">{routeNotice}</p> : null}
-      </ProductShell>
+      />
       <AppOverlays
         askOpen={askOpen}
         gitConfirmation={gitConfirmation}
