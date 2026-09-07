@@ -43,6 +43,7 @@ import { useRunExplorer } from "./hooks/useRunExplorer";
 import { useTaskReviewCandidates } from "./hooks/useTaskReviewCandidates";
 import { useRuntimeSettings } from "./hooks/useRuntimeSettings";
 import { useWorkspaceSetup } from "./hooks/useWorkspaceSetup";
+import { isAbortError, useRequestGate } from "./hooks/useRequestGate";
 import { enterOnboardingConsole, forgetOnboardingRecentWorkspace, loadOnboardingStatus, selectOnboardingRuntime, selectOnboardingWorkspace } from "./lib/onboardingApi";
 import { loadSystemDoctor, loadSystemVersion } from "./lib/systemApi";
 import { architectureFromKnowledge, loadArchitectureAPI, loadArtifactText, loadKnowledgeAPI, loadWorkspaceHealthAPI } from "./lib/workspaceApi";
@@ -86,6 +87,9 @@ export default function App() {
   const [workspaceHealthReport, setWorkspaceHealthReport] = useState<WorkspaceHealthResponse | null>(null);
   const [workspaceHealthStatus, setWorkspaceHealthStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [workspaceHealthError, setWorkspaceHealthError] = useState("");
+  const knowledgeRequest = useRequestGate("knowledge");
+  const workspaceHealthRequest = useRequestGate("workspace-health");
+  const currentArtifactRequest = useRequestGate("current-artifact");
   const routeFocusKey = [route.destination, route.taskView, route.taskId, route.attemptId, route.changesView, route.knowledgeView, route.settingsSection, route.setupStep, route.source].filter(Boolean).join(":");
   const previousRouteFocusKey = useRef(routeFocusKey);
 
@@ -351,31 +355,47 @@ export default function App() {
   }
 
   async function refreshKnowledge() {
+    const token = knowledgeRequest.begin();
     setKnowledgeStatus("loading");
     setKnowledgeError("");
     let architectureError: unknown;
     try {
-      const response = await loadArchitectureAPI();
+      const response = await loadArchitectureAPI({ signal: token.signal });
+      if (!knowledgeRequest.isCurrent(token)) return null;
       setArchitecture(response);
-      try { setKnowledge(await loadKnowledgeAPI()); } catch { setKnowledge(null); }
+      try {
+        const nextKnowledge = await loadKnowledgeAPI({ signal: token.signal });
+        if (!knowledgeRequest.isCurrent(token)) return null;
+        setKnowledge(nextKnowledge);
+      } catch (error) {
+        if (isAbortError(error) || !knowledgeRequest.isCurrent(token)) return null;
+        setKnowledge(null);
+      }
+      if (!knowledgeRequest.isCurrent(token)) return null;
       setKnowledgeStatus("loaded");
+      knowledgeRequest.finish(token);
       return null;
     } catch (requestError) {
+      if (isAbortError(requestError) || !knowledgeRequest.isCurrent(token)) return null;
       architectureError = requestError;
     }
     try {
-      const response = await loadKnowledgeAPI();
+      const response = await loadKnowledgeAPI({ signal: token.signal });
+      if (!knowledgeRequest.isCurrent(token)) return null;
       setKnowledge(response);
       setArchitecture(architectureFromKnowledge(response));
       setKnowledgeStatus("loaded");
       return response;
     } catch (requestError) {
+      if (isAbortError(requestError) || !knowledgeRequest.isCurrent(token)) return null;
       setKnowledge(null);
       setArchitecture(null);
       setKnowledgeStatus("error");
       const failure = architectureError ?? requestError;
       setKnowledgeError(failure instanceof Error ? failure.message : "architecture failed to load");
       return null;
+    } finally {
+      knowledgeRequest.finish(token);
     }
   }
 
@@ -514,18 +534,23 @@ export default function App() {
   }
 
   async function refreshWorkspaceHealth() {
+    const token = workspaceHealthRequest.begin();
     setWorkspaceHealthStatus("loading");
     setWorkspaceHealthError("");
     try {
-      const report = await loadWorkspaceHealthAPI();
+      const report = await loadWorkspaceHealthAPI({ signal: token.signal });
+      if (!workspaceHealthRequest.isCurrent(token)) return null;
       setWorkspaceHealthReport(report);
       setWorkspaceHealthStatus("loaded");
       return report;
     } catch (requestError) {
+      if (isAbortError(requestError) || !workspaceHealthRequest.isCurrent(token)) return null;
       setWorkspaceHealthReport(null);
       setWorkspaceHealthStatus("error");
       setWorkspaceHealthError(requestError instanceof Error ? requestError.message : "workspace health scan failed");
       return null;
+    } finally {
+      workspaceHealthRequest.finish(token);
     }
   }
 
@@ -609,16 +634,26 @@ export default function App() {
   }, [diagramArtifacts, handleOpenArtifact, navigateRoute, nonDiagramArtifacts, route.attemptId, route.changesView, route.destination, route.mode, route.taskId, runId]);
 
   const handleOpenCurrentArtifact = useCallback(async (path: string) => {
-    const content = await loadArtifactText(path);
-    if (content === null) {
+    const token = currentArtifactRequest.begin(path);
+    try {
+      const content = await loadArtifactText(path, { signal: token.signal });
+      if (!currentArtifactRequest.isCurrent(token)) return false;
+      if (content === null) {
+        setRouteNotice(`Artifact ${path} is unavailable in the current workspace.`);
+        return false;
+      }
+      setCurrentArtifactPath(path);
+      setCurrentArtifactContent(content);
+      navigateRoute({ destination: "changes", changesView: "evidence", source: "current", artifact: path, mode: route.mode ?? "rendered", invalid: [] });
+      return true;
+    } catch (error) {
+      if (isAbortError(error) || !currentArtifactRequest.isCurrent(token)) return false;
       setRouteNotice(`Artifact ${path} is unavailable in the current workspace.`);
       return false;
+    } finally {
+      currentArtifactRequest.finish(token);
     }
-    setCurrentArtifactPath(path);
-    setCurrentArtifactContent(content);
-    navigateRoute({ destination: "changes", changesView: "evidence", source: "current", artifact: path, mode: route.mode ?? "rendered", invalid: [] });
-    return true;
-  }, [navigateRoute, route.mode]);
+  }, [currentArtifactRequest, navigateRoute, route.mode]);
 
   const handleAskCitation = useCallback(async (path: string) => {
     setAskReturnRoute(route);
@@ -716,8 +751,12 @@ export default function App() {
   }, [architecture, consoleReady, knowledge, knowledgeStatus, navigateRoute, route]);
 
   useEffect(() => {
-    if (!consoleReady || route.destination !== "changes" || route.source !== "current" || !route.artifact || knowledgeStatus === "loading") return;
+    if (!consoleReady || route.destination !== "changes" || route.source !== "current" || !route.artifact || knowledgeStatus === "loading") {
+      currentArtifactRequest.abort();
+      return;
+    }
     if (knowledgeStatus === "idle") {
+      currentArtifactRequest.abort();
       void refreshKnowledge();
       return;
     }
@@ -729,16 +768,22 @@ export default function App() {
       return;
     }
     if (currentArtifactPath !== route.artifact) {
-      void loadArtifactText(route.artifact).then((content) => {
+      const token = currentArtifactRequest.begin(route.artifact);
+      void loadArtifactText(route.artifact, { signal: token.signal }).then((content) => {
+        if (!currentArtifactRequest.isCurrent(token)) return;
         if (content === null) {
           setRouteNotice(`Artifact ${route.artifact} is unreadable in the current workspace.`);
           return;
         }
         setCurrentArtifactPath(route.artifact ?? "");
         setCurrentArtifactContent(content);
-      });
+      }).catch((error) => {
+        if (isAbortError(error) || !currentArtifactRequest.isCurrent(token)) return;
+        setRouteNotice(`Artifact ${route.artifact} is unreadable in the current workspace.`);
+      }).finally(() => currentArtifactRequest.finish(token));
     }
-  }, [architecture, consoleReady, currentArtifactPath, knowledge, knowledgeStatus, navigateRoute, route]);
+    return () => currentArtifactRequest.abort();
+  }, [architecture, consoleReady, currentArtifactPath, currentArtifactRequest, knowledge, knowledgeStatus, navigateRoute, route]);
 
   useEffect(() => {
     if (!route.artifact) restoredArtifactRef.current = null;
