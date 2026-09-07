@@ -561,6 +561,60 @@ func TestServiceShutdownCancelsActiveRunAndRejectsNewStarts(t *testing.T) {
 	}
 }
 
+func TestServiceShutdownWaitsForAsyncRunQuiescence(t *testing.T) {
+	t.Parallel()
+
+	ws := createWorkspace(t)
+	runner := &shutdownBarrierRunner{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	service := NewService(
+		WithRunner(runner),
+		WithHistoryWorkspace(ws),
+	)
+	if _, err := service.StartAsyncRun(context.Background(), RunRequest{
+		Workspace:      ws,
+		Pipeline:       PipelineInit,
+		NonInteractive: true,
+	}); err != nil {
+		t.Fatalf("start async run: %v", err)
+	}
+	select {
+	case <-runner.started:
+	case <-time.After(asyncRunnerStartTimeout):
+		t.Fatal("runner did not start")
+	}
+
+	shutdownDone := make(chan error, 1)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), asyncLifecycleTimeout)
+	defer cancel()
+	go func() {
+		shutdownDone <- service.Shutdown(shutdownCtx)
+	}()
+	select {
+	case <-runner.canceled:
+	case <-time.After(asyncLifecycleTimeout):
+		t.Fatal("shutdown did not cancel the runner")
+	}
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned before async run quiescence: %v", err)
+	default:
+	}
+
+	close(runner.release)
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("shutdown service: %v", err)
+		}
+	case <-time.After(asyncLifecycleTimeout):
+		t.Fatal("shutdown did not wait for async run quiescence")
+	}
+}
+
 func TestServiceShutdownFailsPendingRunWithoutStartingIt(t *testing.T) {
 	t.Parallel()
 
@@ -1066,6 +1120,24 @@ type countingBlockingRunner struct {
 	release <-chan struct{}
 	mu      sync.Mutex
 	calls   int
+}
+
+type shutdownBarrierRunner struct {
+	started  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
+}
+
+func (runner *shutdownBarrierRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
+	close(runner.started)
+	<-ctx.Done()
+	close(runner.canceled)
+	<-runner.release
+	return acpruntime.Result{}, ctx.Err()
+}
+
+func (*shutdownBarrierRunner) Preflight(context.Context) error {
+	return nil
 }
 
 func (runner *countingBlockingRunner) Run(ctx context.Context, _ acpruntime.Task) (acpruntime.Result, error) {
