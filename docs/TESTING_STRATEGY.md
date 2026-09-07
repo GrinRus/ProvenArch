@@ -260,6 +260,7 @@ Baseline scenario set:
   - `run_finalization.go`, `step_handlers.go` and `artifact_registry.go` keep terminal status, step dispatch and artifact list behavior in narrow files while existing async/docflow/sharding tests preserve external run contracts
   - `sharding_coordinator.go`, `sharding_scheduler.go`, `sharding_summary_store.go`, `sharding_artifacts.go` and `sharding_planner.go` keep planning, scheduling, summary/checkpoint persistence, artifact materialization and apply/replay coordination in separate files while preserving the existing sharding characterization tests
   - `ShardSummaryStore` keeps persisted shard-summary/checkpoint behavior covered separately from scheduler ordering and apply/replay coordinator behavior
+  - `internal/api/routes.go` owns explicit system, workspace, runtime, artifact/Git, QA, pipeline and Task route groups; `routes_test.go` locks the complete ordered route inventory and rejects duplicate or orphaned registrations without changing handler semantics
   - `artifactquality` remains canonical wording source for collect/validator prompt snippets reused by runtime prompt contracts and baseline prompt packs
 - UI hook facades stay stable while internal hooks isolate run selection/polling/actions and workspace manifest/baseline/wizard/git actions; App tests preserve route-shell behavior and stable `data-testid` surfaces
 
