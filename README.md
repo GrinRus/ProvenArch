@@ -134,9 +134,9 @@ Open [http://127.0.0.1:8080](http://127.0.0.1:8080), then:
 
 1. Create or open a dedicated architecture workspace.
 2. Add one or more local Git checkout paths or Git URLs.
-3. Save a short analysis brief.
-4. Keep the default `fake` runner.
-5. Review readiness and start the first analysis.
+3. Keep the default `fake` runner and confirm provider readiness.
+4. Use `Review & start` to open `New Task`.
+5. Enter the task goal and repository scope, then select `Start Task`.
 
 The `fake` runtime makes no external AI calls. It produces deterministic synthetic baseline
 artifacts and verifies installation, workspace setup, the UI, pipeline wiring, validators, and

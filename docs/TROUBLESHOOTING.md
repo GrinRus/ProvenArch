@@ -100,7 +100,7 @@ ACP_CLAUDE_CMD=/path/to/claude acp serve --runtime headless --runtime-provider c
 
 ## UI показывает validation errors
 
-В onboarding откройте `Sources`; после входа в Console V2 откройте `Source`. Проверьте:
+В onboarding откройте `Repositories`; после входа в Task-first shell откройте `Settings` → `Repositories`. Проверьте:
 - repo source mode: `GitHub/GitLab URL` или `Local folder`
 - `Repo name` уникален внутри workspace
 - для local folder указан абсолютный путь к git checkout

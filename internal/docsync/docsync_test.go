@@ -571,6 +571,33 @@ func TestREADMEStaysUserFacing(t *testing.T) {
 	}
 }
 
+func TestCurrentTaskFirstFlowAndRemediationQueueStayAligned(t *testing.T) {
+	t.Parallel()
+
+	readme := readDoc(t, "README.md")
+	assertContains(t, readme, "Use `Review & start` to open `New Task`.")
+	assertContains(t, readme, "Enter the task goal and repository scope, then select `Start Task`.")
+	assertNotContains(t, readme, "Save a short analysis brief.")
+
+	install := readDoc(t, "docs/INSTALL.md")
+	assertContains(t, install, "`Provider & readiness`")
+	assertContains(t, install, "`Review & start`")
+	assertContains(t, install, "`Start Task`")
+	assertNotContains(t, install, "Console V2")
+
+	troubleshooting := readDoc(t, "docs/TROUBLESHOOTING.md")
+	assertContains(t, troubleshooting, "Task-first shell")
+	assertContains(t, troubleshooting, "`Repositories`")
+	assertNotContains(t, troubleshooting, "Console V2")
+
+	plans := readDoc(t, "docs/PLANS.md")
+	assertContains(t, plans, "REM-03A merged in PR #310")
+	assertContains(t, plans, "merged in PR #314")
+	assertContains(t, plans, "REM-03B remains an")
+	assertContains(t, plans, "authorization-gated, release-blocking admin operation")
+	assertContains(t, plans, "REM-25 readiness exception")
+}
+
 func TestGeneratedArtifactsPolicyIsDocumented(t *testing.T) {
 	t.Parallel()
 

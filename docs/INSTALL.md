@@ -63,13 +63,14 @@ acp serve
 При запуске без `--workspace` UI откроет onboarding:
 
 1. `Workspace`: выберите или создайте architecture workspace, например `$HOME/acp-workspaces/my-service`. Успешно открытые workspaces сохраняются в локальный список Recent workspaces; missing entries можно удалить кнопкой `Forget`.
-2. `Sources`: добавьте один или несколько target repositories через Git URL или local checkout path.
-3. `Runner`: выберите default `fake` для первого deterministic walkthrough.
-4. `Ready`: откройте Console V2 или запустите первый analysis.
+2. `Repositories`: добавьте один или несколько target repositories через Git URL или local checkout path.
+3. `Provider & readiness`: выберите default `fake` для первого deterministic walkthrough и проверьте readiness.
+4. `Review & start`: откройте `New Task`, задайте goal/scope и явно запустите первый Task.
 
 При reopening существующего workspace UI загружает repos из `workspace.yaml`. Если manifest валиден,
-после выбора runner можно сразу перейти в Console V2; если manifest невалиден, onboarding оставит
-оператора в `Sources` с actionable diagnostics.
+после проверки provider readiness onboarding переводит оператора в `Review & start`; первый analysis
+запускается только явным действием `Start Task` в `New Task`. Если manifest невалиден, onboarding
+оставит оператора в `Repositories` с actionable diagnostics.
 
 Launcher workspace path должен быть dedicated directory под текущим `$HOME` или system temp
 directory; используйте direct-mode `--workspace` для automation/advanced paths.
