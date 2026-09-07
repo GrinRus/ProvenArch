@@ -140,16 +140,16 @@ trusted release qualification remain here; this reconciliation does not close RE
 
 ## EP-20260905-audit-remediation-program
 
-Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, and REM-19 merged; REM-20 is in progress; REM-03B remains authorization-gated.
+Status: active — REM-01, REM-02, REM-06, REM-07, REM-08, REM-09, REM-10, REM-11, REM-12, REM-13, REM-14, REM-15, REM-16, REM-17, REM-18, REM-19, REM-20 and REM-21 merged in PR #308; REM-03B remains authorization-gated.
 
-Next action: Implement and verify the isolated REM-20 persisted draft/recovery slice
-from fresh `origin/main=3672ed5a`, then review/push/merge it. Keep release status
+Next action: Refresh from the merged PR #308 and re-evaluate the ordered queue for REM-22.
+REM-22 remains blocked by stabilization and earlier dependency completion. Keep release status
 explicitly blocked until REM-03B is authorized and applied with before/after/rollback evidence.
 REM-25 remains blocked by REM-03..24.
 
-Current queue truth: independent REM slices through REM-19 are merged; REM-20 is the first ready
-task after REM-19 and is in progress. REM-03B remains authorization-gated, REM-04/REM-05 remain
-stabilization-dependent, and REM-21+ remain dependency-blocked until this slice is merged.
+Current queue truth: independent REM slices through REM-21 are merged; REM-03B remains
+authorization-gated, REM-04/REM-05 and REM-22 remain stabilization/dependency-blocked, and REM-23+
+remain dependency-blocked until the next ready slice is reproduced on fresh `origin/main`.
 
 ### REM-16 slice plan — Task-first copy, route handoff and current docs
 
@@ -231,6 +231,65 @@ Acceptance: Task, Setup and editable Markdown drafts survive remount/refresh-equ
 and are isolated by workspace; failed save/admission retains the draft; successful save/start clears
 it; cancel explicitly discards an editable Markdown draft; malformed or unavailable browser storage
 does not break the flow; deterministic UI/contract/build CI remains green.
+
+### REM-21 slice plan — accessibility gates and focus continuity
+
+**Finding / baseline.** On fresh `origin/main=3c782f7d`, the shared browser helper in
+`ui/e2e/axe.ts` filtered out `serious` violations and therefore did not gate WCAG contrast failures.
+The first mock recovery journey reproduced two serious `color-contrast` findings: warning text
+`#bf6b36` rendered at 3.84:1 on the paper surface and 3.50:1 on the warning surface (both below
+the 4.5:1 AA threshold). The wide-screen persistent Details drawer also mounted without moving
+focus to its Close control or returning focus to the invoking Details button.
+
+**Goal.** Make the key Task-first browser journeys fail closed on critical and serious axe findings,
+keep warning-state text readable, prove reduced-motion CSS behavior, and preserve keyboard focus
+continuity when the persistent desktop context drawer opens and closes.
+
+**Non-goals.** Do not change API/schema/runtime contracts, provider behavior, publication semantics,
+the mobile modal focus trap, canonical live matrices, or stabilization-owned paths. Do not add a
+production accessibility library; axe remains a dev/e2e dependency already present in the repository.
+
+**Affected paths.** `ui/e2e/axe.ts`, the Task-first mock journey in
+`ui/e2e/happy-path-mock.spec.ts`, `ui/src/styles/tokens.css`,
+`ui/src/components/ContextDrawer.tsx`, its focused tests, and this tracker. No schema change is
+expected.
+
+**Acceptance.**
+
+- [x] All eight deterministic UI mock journeys pass axe with both `critical` and `serious` impact;
+      contrast, landmark and label regressions are no longer silently ignored.
+- [x] The warning palette passes AA contrast on paper and warning surfaces without changing the
+      meaning of warning states.
+- [x] The Task-first journey exercises keyboard activation, dialog initial focus, and reduced-motion
+      preferences; reduced motion leaves no active transition/animation duration above 0.01 ms.
+- [x] Persistent desktop Details moves focus to Close and returns focus to the opener; the existing
+      modal drawer retains Escape/trap/return-focus behavior.
+- [x] Focused/full UI tests, mock E2E, `make contracts`, `make test`, `make lint`, `make build` and
+      `make verify-agent-guidance` pass without stabilization-path edits.
+
+**Regression / rollback.** Keep the shared axe assertion descriptive so a failed rule and help text
+identify the exact surface. Roll back the palette or focus changes if a valid warning state loses its
+meaning, a drawer transition traps focus across the desktop/mobile breakpoint, or any Task-first
+journey loses keyboard reachability. Stop before delivery if the neighbor expands into these UI test,
+token or ContextDrawer paths.
+
+**Readiness / parallel stabilization.** Immediately before this slice, the neighbor checkout was
+clean but active at `codex/stabilization-live-e2e-20260907` revision `68c41e99`, ahead of its remote
+and with owned changes in `docs/ARCHITECTURE.md`, semantic/docflow runtime, live diagnostics and
+`ui/src/App.test.tsx`. REM-21 avoids those paths and does not start a live matrix.
+
+**Progress.**
+
+- 2026-09-07: Fresh base `origin/main=3c782f7d` and neighbor revision `68c41e99` were rechecked;
+  the serious contrast baseline was reproduced before implementation and the candidate scope stayed
+  outside stabilization-owned paths.
+- 2026-09-07: Implementation commit `7ea4b4fc` added the fail-closed axe gate, AA warning palette,
+  reduced-motion/keyboard smoke, and persistent drawer focus continuity. Clean-toolchain bundle
+  freshness required review fix `d0018a29` after the first CI attempt used a locally different
+  dependency tree; exact `ui/package-lock.json` install now makes `make verify-ui-dist` pass.
+- 2026-09-07: PR #308 passed required CI on `d0018a29` (backend, UI, contracts, golden, lint,
+  smoke-api, smoke-cli, CodeQL, dependency review and Go/JS analysis); squash merge is the delivery
+  action for this slice. No stabilization-owned path was changed.
 
 ### Context
 

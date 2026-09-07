@@ -152,7 +152,8 @@
   --accent-hover: #184936;
   --accent-soft: #e3eee7;
   --accent-line: #b8d0c1;
-  --warn: #bf6b36;
+  /* Keep warning text above WCAG AA on both paper and warning surfaces. */
+  --warn: #8c4f2d;
   --warn-soft: #fff0e4;
   --err: #a64032;
   --err-soft: #fceae5;

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 
 type ModalDialogProps = {
   open: boolean;
+  id?: string;
   title: string;
   description: string;
   confirmLabel?: string;
@@ -11,7 +12,7 @@ type ModalDialogProps = {
   onCancel: () => void;
 };
 
-export function ModalDialog({ open, title, description, confirmLabel, busy, children, onConfirm, onCancel }: ModalDialogProps) {
+export function ModalDialog({ open, id, title, description, confirmLabel, busy, children, onConfirm, onCancel }: ModalDialogProps) {
   const titleID = useId();
   const descriptionID = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -35,6 +36,7 @@ export function ModalDialog({ open, title, description, confirmLabel, busy, chil
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
       <div
         ref={dialogRef}
+        id={id}
         className="modal-dialog"
         role="dialog"
         aria-modal="true"
