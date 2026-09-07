@@ -498,6 +498,7 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 		return
 	}
 	s.runCancels[runID] = cancel
+	s.asyncRunsWG.Add(1)
 	if _, requested := s.cancelRequests[runID]; requested {
 		shouldCancelImmediately = true
 	}
@@ -508,6 +509,7 @@ func (s *Service) launchAsyncRun(ctx context.Context, runID string, request RunR
 	}
 
 	go func() {
+		defer s.asyncRunsWG.Done()
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				panicErr := fmt.Errorf("run panic: %v", recovered)
@@ -594,9 +596,23 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 	if err := s.waitForRunTerminal(ctx, activeRunID); err != nil {
 		terminalErr := s.terminalizeActiveRunAfterUnexpectedExit(activeRunID, context.Canceled, "run failed: service shutdown")
-		return errors.Join(pendingPersistenceErr, err, terminalErr)
+		return errors.Join(pendingPersistenceErr, err, terminalErr, s.waitForAsyncRuns(ctx))
 	}
-	return pendingPersistenceErr
+	return errors.Join(pendingPersistenceErr, s.waitForAsyncRuns(ctx))
+}
+
+func (s *Service) waitForAsyncRuns(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.asyncRunsWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Service) failQueuedRunLocked(runID string, finishedAt time.Time, errorCode string, errorMessage string) error {

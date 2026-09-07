@@ -81,6 +81,7 @@ type Service struct {
 	runtimeMode        string
 
 	mu             sync.RWMutex
+	asyncRunsWG    sync.WaitGroup
 	runs           map[string]*runRecord
 	runIDSequence  int
 	debounceWindow time.Duration
