@@ -421,6 +421,15 @@ func runtimeWriteAuditPathExcluded(path string, roots []string, task acpruntime.
 	if workspaceRoot == "" {
 		return false
 	}
+	// The orchestrator publishes run-level shard plans/summaries and quality
+	// snapshots beside the run directory while shard provider calls execute.
+	// These envelope files are not provider write surfaces and may legitimately
+	// change while another task is under audit.
+	runID := strings.TrimSpace(task.RunID)
+	taskrunDir := filepath.Join(workspaceRoot, "reports", "taskruns")
+	if runID != "" && filepath.Clean(filepath.Dir(path)) == filepath.Clean(taskrunDir) && strings.HasPrefix(filepath.Base(path), runID+"-") {
+		return true
+	}
 	historyDir := filepath.Dir(filepath.Join(workspaceRoot, filepath.FromSlash(runHistoryPath)))
 	if absClean(filepath.Dir(path)) != absClean(historyDir) {
 		return false
