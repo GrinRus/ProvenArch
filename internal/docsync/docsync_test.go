@@ -593,8 +593,9 @@ func TestCurrentTaskFirstFlowAndRemediationQueueStayAligned(t *testing.T) {
 	plans := readDoc(t, "docs/PLANS.md")
 	assertContains(t, plans, "REM-03A merged in PR #310")
 	assertContains(t, plans, "merged in PR #314")
-	assertContains(t, plans, "REM-03B remains an")
-	assertContains(t, plans, "authorization-gated, release-blocking admin operation")
+	assertContains(t, plans, "REM-03B was explicitly authorized")
+	assertContains(t, plans, "REM-03B verified no-op")
+	assertContains(t, plans, "docs/audits/REM-03B_GITHUB_GOVERNANCE_2026-09-08.json")
 	assertContains(t, plans, "REM-25 readiness exception")
 }
 

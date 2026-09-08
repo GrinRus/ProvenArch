@@ -31,3 +31,7 @@ The current evidence records:
   updates with no bypass actors;
 - `github-release` environment review by `GrinRus`;
 - exact tracked owner-waiver path, schema, release state, and allowed waived requirements.
+
+The separately authorized REM-03B governance operation was a no-op: the live snapshot already
+matched this manifest, so no GitHub setting was mutated. Before/after and rollback evidence is
+recorded in [the REM-03B audit artifact](audits/REM-03B_GITHUB_GOVERNANCE_2026-09-08.json).

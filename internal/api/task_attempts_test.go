@@ -264,6 +264,7 @@ func TestTaskAttemptRerunCreatesChildAttempt(t *testing.T) {
 	}
 	first.Body.Close()
 	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
+	waitForServiceIdle(t, server)
 
 	run := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+firstPayload.Attempt.AttemptID+"/rerun", `{"idempotency_key":"child-key","reason":"repair"}`)
 	var retryPayload struct {
@@ -714,6 +715,19 @@ func waitForTerminalAttempt(t *testing.T, server *Server, attemptID string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("attempt %s did not reach terminal state; coordination=%+v", attemptID, server.getService().Coordination())
+}
+
+func waitForServiceIdle(t *testing.T, server *Server) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		coordination := server.getService().Coordination()
+		if coordination.ActiveRunID == "" && coordination.Pending == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("service did not become idle before timeout; coordination=%+v", server.getService().Coordination())
 }
 
 func waitForAttemptStatus(t *testing.T, server *Server, attemptID string, want producttasks.AttemptStatus) {

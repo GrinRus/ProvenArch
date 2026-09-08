@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "operation": "REM-03B",
+  "repository": "GrinRus/ProvenArch",
+  "authorized_at": "2026-09-08T03:52:47Z",
+  "authorization": "Project owner explicitly authorized the REM-03B GitHub governance operation in the task conversation.",
+  "base_revision": "022d9cdfd87caf2dc3729dd80afeb51bcbf29855",
+  "manifest": "docs/release-governance.json",
+  "before": {
+    "captured_at": "2026-09-08T03:52:47Z",
+    "source": "GitHub REST API read-only snapshot",
+    "required_status_checks": {
+      "strict": true,
+      "contexts": [
+        "backend",
+        "contracts",
+        "golden",
+        "smoke-api",
+        "smoke-cli",
+        "ui"
+      ]
+    },
+    "branch_protection": {
+      "enforce_admins": true,
+      "required_pull_request_reviews": {
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": false,
+        "required_approving_review_count": 0
+      }
+    },
+    "tag_ruleset": {
+      "name": "protect release tags",
+      "target": "tag",
+      "enforcement": "active",
+      "include": ["refs/tags/v*"],
+      "rules": ["deletion", "non_fast_forward"],
+      "bypass_actors": []
+    },
+    "release_environment": {
+      "name": "github-release",
+      "required_reviewers": ["GrinRus"],
+      "prevent_self_review": false
+    }
+  },
+  "requested_delta": {
+    "kind": "align-live-settings-to-versioned-evidence",
+    "changes": []
+  },
+  "result": {
+    "kind": "no-op",
+    "mutation_performed": false,
+    "reason": "The live GitHub snapshot already matched docs/release-governance.json exactly."
+  },
+  "after": {
+    "captured_at": "2026-09-08T03:52:59Z",
+    "source": "scripts/verify-release-governance.py --live --repository GrinRus/ProvenArch",
+    "comparison": "accepted: live GitHub settings match versioned evidence",
+    "required_status_checks": {
+      "strict": true,
+      "contexts": [
+        "backend",
+        "contracts",
+        "golden",
+        "smoke-api",
+        "smoke-cli",
+        "ui"
+      ]
+    },
+    "branch_protection": {
+      "enforce_admins": true,
+      "required_pull_request_reviews": {
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": false,
+        "required_approving_review_count": 0
+      }
+    },
+    "tag_ruleset": {
+      "name": "protect release tags",
+      "target": "tag",
+      "enforcement": "active",
+      "include": ["refs/tags/v*"],
+      "rules": ["deletion", "non_fast_forward"],
+      "bypass_actors": []
+    },
+    "release_environment": {
+      "name": "github-release",
+      "required_reviewers": ["GrinRus"],
+      "prevent_self_review": false
+    }
+  },
+  "rollback": {
+    "status": "not-needed",
+    "reason": "No GitHub settings were mutated.",
+    "command": "No rollback command executed because mutation_performed=false; after any approved restoration, rerun scripts/verify-release-governance.py --live --repository GrinRus/ProvenArch.",
+    "recovery": "If a future drift is detected, an owner/admin must restore the manifest values and record a new before/after/rollback evidence entry."
+  }
+}
