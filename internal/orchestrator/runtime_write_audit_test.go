@@ -94,6 +94,63 @@ func TestRuntimeWriteAuditAllowsOrchestratorOwnedRunStateWrites(t *testing.T) {
 	}
 }
 
+func TestRuntimeWriteAuditExcludesWorkspaceGitRepository(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+
+	ws := writeAuditWorkspace(t)
+	runGitForAudit(t, ws.Path, "init")
+	runGitForAudit(t, ws.Path, "config", "user.email", "test@example.invalid")
+	runGitForAudit(t, ws.Path, "config", "user.name", "ACP Test")
+	runGitForAudit(t, ws.Path, "add", ".")
+	runGitForAudit(t, ws.Path, "commit", "-m", "initial")
+	task := writeAuditTask(ws, []string{ws.Path})
+
+	snapshot := beginRuntimeWriteAudit(task)
+	if len(snapshot.repoStatuses) != 0 {
+		t.Fatalf("workspace repository must not be audited as a source repo: %#v", snapshot.repoStatuses)
+	}
+}
+
+func TestRuntimeWriteAuditExcludesWorkspaceGitRepositoryAcrossSymlinkAliases(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	realRoot, err := os.MkdirTemp("/tmp", "provenarch-audit-")
+	if err != nil {
+		t.Skipf("/tmp unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(realRoot) })
+	canonicalRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil || canonicalRoot == realRoot {
+		t.Skip("/tmp has no distinct symlink alias on this host")
+	}
+	ws := workspace.Root{Path: realRoot}
+	if err := os.MkdirAll(filepath.Join(ws.Path, "charter"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Path, "workspace.yaml"), []byte("version: 1\nrepos: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws.Path, "charter", "overview.md"), []byte("# Charter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForAudit(t, ws.Path, "init")
+	runGitForAudit(t, ws.Path, "config", "user.email", "test@example.invalid")
+	runGitForAudit(t, ws.Path, "config", "user.name", "ACP Test")
+	runGitForAudit(t, ws.Path, "add", ".")
+	runGitForAudit(t, ws.Path, "commit", "-m", "initial")
+	task := writeAuditTask(ws, []string{canonicalRoot})
+
+	snapshot := beginRuntimeWriteAudit(task)
+	if len(snapshot.repoStatuses) != 0 {
+		t.Fatalf("workspace repository alias must not be audited as a source repo: %#v", snapshot.repoStatuses)
+	}
+}
+
 func TestRuntimeWriteAuditFailsClosedWhenWorkspaceSnapshotIsUnavailable(t *testing.T) {
 	t.Parallel()
 

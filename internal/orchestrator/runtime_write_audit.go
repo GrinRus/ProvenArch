@@ -549,7 +549,7 @@ func runtimeAuditRootIsExcluded(root string, task acpruntime.Task) bool {
 	}
 	// The workspace itself is a read context, but repositories nested under it
 	// remain independently auditable source roots.
-	if workspaceRoot != "" && root == workspaceRoot {
+	if workspaceRoot != "" && sameAuditPath(root, workspaceRoot) {
 		return true
 	}
 	for _, excluded := range []string{task.WriteRoot, task.DraftFinalRoot} {
@@ -846,6 +846,40 @@ func absClean(pathValue string) string {
 		return ""
 	}
 	return filepath.Clean(abs)
+}
+
+// auditPathIdentity resolves existing symlink aliases before comparing paths.
+// Workspace roots can be supplied through /tmp while Git reports /private/tmp
+// (or the inverse) on macOS. Treating those aliases as different repositories
+// would make the audit report the workspace's own managed files as mutations.
+func auditPathIdentity(pathValue string) string {
+	abs := absClean(pathValue)
+	if abs == "" {
+		return ""
+	}
+	current := abs
+	suffix := []string{}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for idx := len(suffix) - 1; idx >= 0; idx-- {
+				resolved = filepath.Join(resolved, suffix[idx])
+			}
+			return absClean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return abs
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func sameAuditPath(left string, right string) bool {
+	left = auditPathIdentity(left)
+	right = auditPathIdentity(right)
+	return left != "" && left == right
 }
 
 func pathInsideOrEqual(pathValue string, root string) bool {
