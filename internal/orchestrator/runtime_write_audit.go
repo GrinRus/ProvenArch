@@ -421,6 +421,15 @@ func runtimeWriteAuditPathExcluded(path string, roots []string, task acpruntime.
 	if workspaceRoot == "" {
 		return false
 	}
+	// The orchestrator publishes run-level shard plans/summaries and quality
+	// snapshots beside the run directory while shard provider calls execute.
+	// These envelope files are not provider write surfaces and may legitimately
+	// change while another task is under audit.
+	runID := strings.TrimSpace(task.RunID)
+	taskrunDir := filepath.Join(workspaceRoot, "reports", "taskruns")
+	if runID != "" && filepath.Clean(filepath.Dir(path)) == filepath.Clean(taskrunDir) && strings.HasPrefix(filepath.Base(path), runID+"-") {
+		return true
+	}
 	historyDir := filepath.Dir(filepath.Join(workspaceRoot, filepath.FromSlash(runHistoryPath)))
 	if absClean(filepath.Dir(path)) != absClean(historyDir) {
 		return false
@@ -549,7 +558,7 @@ func runtimeAuditRootIsExcluded(root string, task acpruntime.Task) bool {
 	}
 	// The workspace itself is a read context, but repositories nested under it
 	// remain independently auditable source roots.
-	if workspaceRoot != "" && root == workspaceRoot {
+	if workspaceRoot != "" && sameAuditPath(root, workspaceRoot) {
 		return true
 	}
 	for _, excluded := range []string{task.WriteRoot, task.DraftFinalRoot} {
@@ -846,6 +855,40 @@ func absClean(pathValue string) string {
 		return ""
 	}
 	return filepath.Clean(abs)
+}
+
+// auditPathIdentity resolves existing symlink aliases before comparing paths.
+// Workspace roots can be supplied through /tmp while Git reports /private/tmp
+// (or the inverse) on macOS. Treating those aliases as different repositories
+// would make the audit report the workspace's own managed files as mutations.
+func auditPathIdentity(pathValue string) string {
+	abs := absClean(pathValue)
+	if abs == "" {
+		return ""
+	}
+	current := abs
+	suffix := []string{}
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for idx := len(suffix) - 1; idx >= 0; idx-- {
+				resolved = filepath.Join(resolved, suffix[idx])
+			}
+			return absClean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return abs
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+func sameAuditPath(left string, right string) bool {
+	left = auditPathIdentity(left)
+	right = auditPathIdentity(right)
+	return left != "" && left == right
 }
 
 func pathInsideOrEqual(pathValue string, root string) bool {
