@@ -2403,6 +2403,32 @@ Document recovery ownership before publishing ` + "`finding.bank.data.recovery.g
 	}
 }
 
+func TestRuntimeDraftProposalActionabilityAcceptsRerunOperatorAction(t *testing.T) {
+	t.Parallel()
+
+	proposal := `## Top Actionable Findings
+
+- Finding ID: ` + "`finding.bank.manifest.recovery`" + `; Severity: ` + "`medium`" + `; Affected surface/path: ` + "`bank:README.md`" + `; Recommended operator action: rerun the collect step and regenerate the manifest; Residual gap: corroborating evidence remains pending.
+`
+	if !runtimeDraftProposalTextHasFindingActionability(proposal, []string{"finding.bank.manifest.recovery"}) {
+		t.Fatalf("expected rerun to count as a concrete operator action")
+	}
+}
+
+func TestRuntimeDraftDanglingReferenceAllowsSubstantiveFindingSummary(t *testing.T) {
+	t.Parallel()
+
+	changelog := `## Findings/proposals summary
+
+- ` + "`finding.bank.owner`" + ` (severity ` + "`medium`" + `; evidence ` + "`bank:README.md`" + `): proposal assigns the owner and escalation path. Residual gap: production confirmation remains pending.
+- The medium finding above is the only actionable item.
+`
+	findings := runtimeDraftFindingSummary{ids: []string{"finding.bank.owner"}}
+	if runtimeDraftTextHasDanglingProposalReference(changelog, findings) {
+		t.Fatalf("expected substantive finding summary to satisfy the dangling-reference check")
+	}
+}
+
 func TestValidateRequiredManifestAllowsExplicitNoActionableProposalGap(t *testing.T) {
 	t.Parallel()
 
