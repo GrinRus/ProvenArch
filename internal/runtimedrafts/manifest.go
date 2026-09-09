@@ -1058,7 +1058,8 @@ func runtimeDraftTextProposalCompletenessMismatch(text string, draftRoot string,
 	if !runtimeDraftTextHasConcreteEvidenceRef(text) {
 		return "does not include concrete repo/path, citation, or staged artifact evidence references"
 	}
-	if runtimeDraftTextHasDanglingProposalReference(text) {
+	findingsText, _ := readRuntimeDraftCurrentRunFindings(draftRoot, runID)
+	if runtimeDraftTextHasDanglingProposalReference(text, runtimeDraftSummarizeMarkdownFindings(findingsText)) {
 		return "references findings/proposals above without including substantive findings/proposals"
 	}
 
@@ -1304,7 +1305,11 @@ func runtimeDraftProposalTextHasFindingActionability(text string, findingIDs []s
 		if !runtimeDraftTextContainsAny(lower, []string{"recommended operator action", "recommended action", "operator action"}) {
 			continue
 		}
-		if !runtimeDraftTextContainsAny(lower, []string{"update ", "add ", "document ", "assign ", "remediate", "replace"}) {
+		if !runtimeDraftTextContainsAny(lower, []string{
+			"update ", "add ", "document ", "assign ", "remediate", "replace",
+			"rerun ", "regenerate ", "reconcile ", "confirm ", "verify ",
+			"record ", "implement ", "promote ", "remove ",
+		}) {
 			continue
 		}
 		if !strings.Contains(lower, "residual gap") {
@@ -1540,9 +1545,9 @@ func runtimeDraftMarkdownBodyHasSubstantiveContent(body string) bool {
 	return false
 }
 
-func runtimeDraftTextHasDanglingProposalReference(text string) bool {
+func runtimeDraftTextHasDanglingProposalReference(text string, findings runtimeDraftFindingSummary) bool {
 	lower := strings.ToLower(text)
-	if runtimeDraftTextHasSubstantiveLinkedProposalContent(lower) {
+	if runtimeDraftTextHasSubstantiveLinkedProposalContent(lower, findings.ids) {
 		return false
 	}
 	markers := []string{
@@ -1563,8 +1568,8 @@ func runtimeDraftTextHasDanglingProposalReference(text string) bool {
 	return false
 }
 
-func runtimeDraftTextHasSubstantiveLinkedProposalContent(lower string) bool {
-	if !strings.Contains(lower, "finding id:") {
+func runtimeDraftTextHasSubstantiveLinkedProposalContent(lower string, findingIDs []string) bool {
+	if len(findingIDs) == 0 || !runtimeDraftTextReferencesAnyFindingID(lower, findingIDs) {
 		return false
 	}
 	if !runtimeDraftTextContainsAny(lower, []string{
@@ -1573,6 +1578,10 @@ func runtimeDraftTextHasSubstantiveLinkedProposalContent(lower string) bool {
 		"operator action",
 		"proposed changes",
 		"follow-up plan",
+		"update ", "add ", "document ", "assign ", "remediate", "replace",
+		"rerun ", "regenerate ", "reconcile ", "confirm ", "verify ",
+		"record ", "implement ", "promote ", "remove ", "monitor ", "schedule ",
+		"updates ", "documents ", "assigns ", "reruns ", "regenerates ", "reconciles ", "confirms ", "verifies ",
 	}) {
 		return false
 	}
@@ -1581,11 +1590,13 @@ func runtimeDraftTextHasSubstantiveLinkedProposalContent(lower string) bool {
 		"affected path",
 		"related ids",
 		"evidence",
+		"repo:",
 	}) {
 		return false
 	}
 	return strings.Contains(lower, "residual gap") ||
 		strings.Contains(lower, "residual coverage gap") ||
+		strings.Contains(lower, "remaining gap") ||
 		strings.Contains(lower, "proposal implementation remains unverified")
 }
 
