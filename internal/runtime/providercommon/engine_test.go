@@ -1038,6 +1038,56 @@ exit 0
 	}
 }
 
+func TestRunHeadlessProviderRepairsDanglingSemanticEdgeBeforeCollectAdmission(t *testing.T) {
+	t.Parallel()
+
+	task := newCollectTask(t, "run-collect-repair-dangling-edge")
+	repairMarker := filepath.Join(task.Workspace, "dangling-edge-repair-called")
+	validManifest := collectManifestWithTwoCitationsJSON(task, "cite.bank.root.readme", "cite.bank.root.pom")
+	badManifest := strings.Replace(validManifest, `"to": "svc.bank"`, `"to": "svc.missing"`, 1)
+	initialScript := `#!/usr/bin/env bash
+set -eu
+mkdir -p ` + shellQuote(task.WriteRoot) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, "overview.md")) + ` <<'EOF'
+# Bank Overview
+
+README.md and pom.xml describe the bank service.
+EOF
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + badManifest + `
+EOF
+`
+	repairScript := `#!/usr/bin/env bash
+set -eu
+printf called > ` + shellQuote(repairMarker) + `
+cat >` + shellQuote(filepath.Join(task.WriteRoot, ShardPackManifestFileName)) + ` <<'EOF'
+` + validManifest + `
+EOF
+`
+	runner := testAdapter{
+		command:       writeEngineScript(t, initialScript),
+		repairCommand: writeEngineScript(t, repairScript),
+		recovery: RecoveryPolicy{
+			AcceptValidArtifactsAfterStop: true,
+			RepairCollectManifestOnce:     true,
+		},
+	}
+
+	result, err := RunHeadlessProvider(context.Background(), task, runner)
+	if err != nil {
+		t.Fatalf("expected dangling semantic edge repair success, got %v", err)
+	}
+	if result.Execution.Status != "succeeded" {
+		t.Fatalf("unexpected execution status: %+v", result.Execution)
+	}
+	if _, err := os.Stat(repairMarker); err != nil {
+		t.Fatalf("expected manifest-only repair to run for dangling semantic edge: %v", err)
+	}
+	if err := ValidateCollectArtifacts(task, acpruntime.ProviderQwenCode); err != nil {
+		t.Fatalf("repaired collect artifacts are invalid: %v", err)
+	}
+}
+
 func TestRunHeadlessProviderRecoversScaffoldCollectManifestBeforeProviderRepair(t *testing.T) {
 	t.Parallel()
 

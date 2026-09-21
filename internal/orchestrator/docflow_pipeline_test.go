@@ -119,7 +119,7 @@ func TestProposalRetryHydratesValidatedParentAndPromotesChild(t *testing.T) {
 	}
 }
 
-func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
+func TestDocFirstProviderFailDraftDoesNotBlockCleanPromotion(t *testing.T) {
 	t.Parallel()
 
 	ws := createWorkspace(t)
@@ -138,14 +138,11 @@ func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 		Pipeline:       PipelineInit,
 		NonInteractive: true,
 	})
-	if err == nil {
-		t.Fatalf("expected run error when validator verdict is FAIL")
+	if err != nil {
+		t.Fatalf("provider FAIL draft should remain advisory on a clean deterministic snapshot: %v", err)
 	}
-	if info.Status != RunStatusFailed {
-		t.Fatalf("expected failed status, got %s", info.Status)
-	}
-	if info.ErrorCode != "" {
-		t.Fatalf("expected empty error_code for validator verdict failure, got %q", info.ErrorCode)
+	if info.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded status, got %s (%s)", info.Status, info.Error)
 	}
 
 	finalIndex := readRunFinalRunIndex(t, ws.Path, info.RunID)
@@ -159,17 +156,21 @@ func TestDocFirstValidatorFailBlocksPromotionInBestEffort(t *testing.T) {
 			t.Fatalf("expected staged proposal %q: %v", document.StagedPath, stagedErr)
 		}
 		_, canonicalErr := os.Stat(filepath.Join(ws.Path, filepath.FromSlash(document.CanonicalPath)))
-		if canonicalErr == nil {
-			t.Fatalf("expected promotion to be blocked for %q", document.CanonicalPath)
-		}
-		if !errors.Is(canonicalErr, os.ErrNotExist) {
-			t.Fatalf("unexpected canonical proposal stat error for %q: %v", document.CanonicalPath, canonicalErr)
+		if canonicalErr != nil {
+			t.Fatalf("expected clean promotion for %q: %v", document.CanonicalPath, canonicalErr)
 		}
 	}
 
-	verdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
-	if verdict.Verdict != "FAIL" {
-		t.Fatalf("expected FAIL verdict, got %q", verdict.Verdict)
+	providerVerdict := readRunValidatorVerdict(t, ws.Path, info.RunID)
+	if providerVerdict.Verdict != "FAIL" {
+		t.Fatalf("expected immutable provider FAIL draft, got %q", providerVerdict.Verdict)
+	}
+	effective := readRunEffectiveVerdict(t, ws.Path, info.RunID)
+	if effective.Verdict != "PASS" {
+		t.Fatalf("expected effective PASS verdict, got %q", effective.Verdict)
+	}
+	if len(effective.AdvisoryIssues) != 1 || effective.AdvisoryIssues[0].Severity != "warning" {
+		t.Fatalf("expected provider issue to remain advisory warning, got %+v", effective.AdvisoryIssues)
 	}
 }
 

@@ -1,6 +1,8 @@
 package artifactquality
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,5 +47,63 @@ func TestValidateValidatorVerdictRejectsDuplicateUnorderedAndDanglingIssues(t *t
 		if err == nil || !strings.Contains(err.Error(), marker) {
 			t.Fatalf("expected %q in consistency error, got %v", marker, err)
 		}
+	}
+}
+
+func TestValidateValidatorVerdictAcceptsCurrentRunIndexPaths(t *testing.T) {
+	finalIndex := &contracts.FinalRunIndex{
+		RunID:             "run-1",
+		CitationIndexPath: "reports/taskruns/run-1/staging/final/citation-index.json",
+	}
+	citationIndex := &contracts.CitationIndex{RunID: "run-1"}
+	verdict := contracts.ValidatorVerdict{
+		RunID: "run-1",
+		Issues: []contracts.ValidatorIssue{
+			{Code: "citation.missing", Severity: "warning", Message: "citation index drift", Path: "reports/taskruns/run-1/staging/final/citation-index.json"},
+			{Code: "index.missing", Severity: "error", Message: "final index drift", Path: "reports/taskruns/run-1/staging/final/final-run-index.json"},
+		},
+	}
+	if err := ValidateValidatorVerdict(verdict, finalIndex, citationIndex, true, false); err != nil {
+		t.Fatalf("current-run validator paths should be in inventory: %v", err)
+	}
+}
+
+func TestNormalizeProviderValidatorPathsConvertsContainedAbsolutePaths(t *testing.T) {
+	root := t.TempDir()
+	finalPath := filepath.Join(root, "reports", "taskruns", "run-1", "staging", "final", "final-run-index.json")
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(finalPath, []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	verdict := contracts.ValidatorVerdict{
+		Verdict:      "PASS",
+		CheckedPaths: []string{finalPath},
+		Issues:       []contracts.ValidatorIssue{{Code: "index.naming", Severity: "warning", Message: "naming drift", Path: finalPath}},
+	}
+	if err := NormalizeProviderValidatorPaths(&verdict, root); err != nil {
+		t.Fatalf("normalize contained absolute paths: %v", err)
+	}
+	want := "reports/taskruns/run-1/staging/final/final-run-index.json"
+	if verdict.CheckedPaths[0] != want || verdict.Issues[0].Path != want {
+		t.Fatalf("normalized paths = %#v / %q, want %q", verdict.CheckedPaths, verdict.Issues[0].Path, want)
+	}
+	finalIndex := &contracts.FinalRunIndex{CanonicalDocuments: []contracts.FinalRunDocument{{CanonicalPath: "reports/as-is/overview.md", StagedPath: want}}}
+	if err := ValidateValidatorVerdict(verdict, finalIndex, nil, false, false); err != nil {
+		t.Fatalf("normalized provider verdict should pass inventory validation: %v", err)
+	}
+}
+
+func TestNormalizeProviderValidatorPathsRejectsForeignAbsolutePaths(t *testing.T) {
+	foreignRoot := t.TempDir()
+	foreignPath := filepath.Join(foreignRoot, "foreign.json")
+	if err := os.WriteFile(foreignPath, []byte("foreign"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	verdict := contracts.ValidatorVerdict{Issues: []contracts.ValidatorIssue{{Path: foreignPath}}}
+	if err := NormalizeProviderValidatorPaths(&verdict, t.TempDir()); err == nil || !strings.Contains(err.Error(), "outside the selected workspace") {
+		t.Fatalf("expected foreign absolute path rejection, got %v", err)
 	}
 }

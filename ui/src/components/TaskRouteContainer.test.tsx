@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskRouteContainer } from "./TaskRouteContainer";
-import { getTask, getTaskAttempt, listTaskAttempts, listTasks, type ProductTask, type TaskAttempt } from "../lib/taskApi";
+import { admitTaskAttempt, getTask, getTaskAttempt, listTaskAttempts, listTasks, type ProductTask, type TaskAttempt } from "../lib/taskApi";
 
 const task = {
   version: 1,
@@ -22,10 +22,12 @@ const task = {
 };
 
 vi.mock("../lib/taskApi", () => ({
+  admitTaskAttempt: vi.fn(async () => ({ attempt_id: "attempt-admitted", task_id: "task-1", run_id: "run-admitted", status: "queued", pipeline: "init", admitted_at: "2026-08-11T10:02:00Z", task_revision: 1 })),
   listTasks: vi.fn(async () => ({ items: [task], next_cursor: "", has_more: false })),
   getTask: vi.fn(async () => task),
   listTaskAttempts: vi.fn(async () => ({ items: [] })),
   getTaskAttempt: vi.fn(async () => ({ attempt_id: "attempt-2", task_id: "task-1", run_id: "run-1", status: "failed", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1 })),
+  newIdempotencyKey: vi.fn(() => "attempt-idempotency-key"),
   setTaskArchive: vi.fn(async () => task),
 }));
 vi.mock("../lib/runApi", () => ({
@@ -33,6 +35,26 @@ vi.mock("../lib/runApi", () => ({
 }));
 
 import { getPipelineRunReviewSummary } from "../lib/runApi";
+
+const taskAttempt = {
+  version: 1,
+  attempt_id: "attempt-admitted",
+  task_id: "task-1",
+  run_id: "run-admitted",
+  status: "queued",
+  pipeline: "init",
+  admitted_at: "2026-08-11T10:02:00Z",
+  queued_at: "2026-08-11T10:02:00Z",
+  started_at: null,
+  finished_at: null,
+  task_revision: 1,
+  intent_snapshot: task,
+  effective_runtime: task.desired_runner,
+  terminal_summary: null,
+  outcome: task.outcome,
+  retained_evidence: "none yet",
+  publication: task.publication,
+} as unknown as TaskAttempt;
 
 function deferredResponse<T>() {
   let resolve!: (value: T) => void;
@@ -71,12 +93,69 @@ describe("TaskRouteContainer", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("retries the Task Inbox request without relying on a URL change", async () => {
+    vi.mocked(listTasks)
+      .mockRejectedValueOnce(new Error("Task service unavailable"))
+      .mockResolvedValueOnce({ items: [task as ProductTask], next_cursor: "", has_more: false });
+    render(<TaskRouteContainer view="inbox" filters={{}} />);
+
+    await screen.findByTestId("task-inbox-error");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByTestId("task-row-task-1")).toHaveTextContent("Payments"));
+    expect(listTasks).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Load more failures visible and retryable", async () => {
+    const nextTask = { ...task, task_id: "task-next", title: "Next Payments" } as ProductTask;
+    vi.mocked(listTasks)
+      .mockResolvedValueOnce({ items: [task as ProductTask], next_cursor: "cursor-1", has_more: true })
+      .mockRejectedValueOnce(new Error("next Task page unavailable"))
+      .mockResolvedValueOnce({ items: [nextTask], next_cursor: "", has_more: false });
+    render(<TaskRouteContainer view="inbox" filters={{}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load more Tasks" }));
+    await screen.findByTestId("task-inbox-load-more-error");
+    fireEvent.click(screen.getByTestId("task-inbox-load-more-error").parentElement!.querySelector("button")!);
+
+    await waitFor(() => expect(screen.getByTestId("task-row-task-next")).toHaveTextContent("Next Payments"));
+    expect(screen.queryByTestId("task-inbox-load-more-error")).not.toBeInTheDocument();
+    expect(listTasks).toHaveBeenCalledTimes(3);
+  });
+
   it("opens a Task row from the keyboard without changing its identity", async () => {
     const onSelectTask = vi.fn();
     render(<TaskRouteContainer view="inbox" filters={{}} onSelectTask={onSelectTask} />);
     const row = await screen.findByLabelText("Open Task Payments");
     fireEvent.keyDown(row, { key: "Enter" });
     expect(onSelectTask).toHaveBeenCalledWith("task-1", {});
+  });
+
+  it("recovers a Task with no admitted Attempt from its detail page", async () => {
+    const onSelectAttempt = vi.fn();
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} onSelectAttempt={onSelectAttempt} />);
+
+    await screen.findByTestId("task-start-attempt");
+    fireEvent.click(screen.getByTestId("task-start-attempt"));
+
+    await waitFor(() => expect(admitTaskAttempt).toHaveBeenCalledWith("task-1", { pipeline: "init", intent: "start", idempotencyKey: "attempt-idempotency-key" }));
+    expect(onSelectAttempt).toHaveBeenCalledWith("task-1", "attempt-admitted", {});
+  });
+
+  it("keeps first Attempt admission retryable after a transient failure", async () => {
+    vi.mocked(admitTaskAttempt)
+      .mockRejectedValueOnce(new Error("runner is warming up"))
+      .mockResolvedValueOnce(taskAttempt);
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} />);
+
+    const start = await screen.findByTestId("task-start-attempt");
+    fireEvent.click(start);
+    expect(await screen.findByTestId("task-attempt-admission-error")).toHaveTextContent("runner is warming up");
+    fireEvent.click(screen.getByTestId("task-start-attempt"));
+
+    await waitFor(() => expect(admitTaskAttempt).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(admitTaskAttempt).mock.calls[0]).toEqual(["task-1", { pipeline: "init", intent: "start", idempotencyKey: "attempt-idempotency-key" }]);
+    expect(vi.mocked(admitTaskAttempt).mock.calls[1]).toEqual(["task-1", { pipeline: "init", intent: "start", idempotencyKey: "attempt-idempotency-key" }]);
   });
 
   it("drops a late Task page after the Inbox filter changes", async () => {
@@ -157,10 +236,57 @@ describe("TaskRouteContainer", () => {
     });
   });
 
+  it("keeps terminal Task identity visible when the outcome review needs retry", async () => {
+    const terminalAttempt = { version: 1, attempt_id: "attempt-1", task_id: "task-1", run_id: "run-1", status: "succeeded", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1 } as TaskAttempt;
+    const successfulReview = {
+      run_id: "run-1",
+      result: { state: "completed", summary: "Review recovered", produced: {}, partial_scopes: 0, failed_scopes: 0, promotion: { changed: true, current_usable: true }, recommended_action: "review_architecture" },
+    } as never;
+    vi.mocked(getTask).mockResolvedValue({ ...task, outcome: { state: "available", attempt_id: "attempt-1", run_id: "run-1" } } as ProductTask);
+    vi.mocked(listTaskAttempts).mockResolvedValue({ items: [terminalAttempt] });
+    vi.mocked(getPipelineRunReviewSummary)
+      .mockRejectedValueOnce(new Error("review service unavailable"))
+      .mockResolvedValueOnce(successfulReview);
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} />);
+
+    expect(await screen.findByTestId("task-review-error")).toHaveTextContent("review service unavailable");
+    expect(screen.getByTestId("task-route-detail")).toHaveTextContent("Map payment authorization");
+    fireEvent.click(screen.getByTestId("task-review-retry"));
+
+    await waitFor(() => expect(screen.getByTestId("task-outcome")).toHaveTextContent("Review recovered"));
+    expect(getPipelineRunReviewSummary).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps exact Task and Attempt identities visible while loading", () => {
     render(<TaskRouteContainer view="attempt" taskId="task-1" attemptId="attempt-2" />);
     expect(screen.getByTestId("task-route-identities")).toHaveTextContent("task-1");
     expect(screen.getByTestId("task-route-identities")).toHaveTextContent("attempt-2");
+  });
+
+  it("retries a failed Task detail load without changing the requested identity", async () => {
+    vi.mocked(getTask).mockRejectedValueOnce(new Error("Task service unavailable")).mockResolvedValueOnce(task as ProductTask);
+    render(<TaskRouteContainer view="detail" taskId="task-1" filters={{}} />);
+
+    await screen.findByTestId("task-detail-error");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByTestId("task-route-detail")).toHaveTextContent("Map payment authorization"));
+    expect(getTask).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries exact Attempt and Pipeline Studio loads in place", async () => {
+    const attemptResponse = { attempt_id: "attempt-2", task_id: "task-1", run_id: "run-1", status: "failed", pipeline: "init", admitted_at: "2026-08-11T10:00:00Z", task_revision: 1 } as TaskAttempt;
+    vi.mocked(getTaskAttempt).mockRejectedValueOnce(new Error("Attempt service unavailable")).mockResolvedValueOnce(attemptResponse);
+    const { rerender } = render(<TaskRouteContainer view="attempt" taskId="task-1" attemptId="attempt-2" />);
+    await screen.findByTestId("task-attempt-error");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("task-route-attempt")).toHaveTextContent("run-1"));
+
+    vi.mocked(getTaskAttempt).mockRejectedValueOnce(new Error("Studio service unavailable")).mockResolvedValueOnce(attemptResponse);
+    rerender(<TaskRouteContainer view="studio" taskId="task-1" attemptId="attempt-2" />);
+    await screen.findByTestId("pipeline-studio-error");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("task-pipeline-studio")).toHaveTextContent("attempt-2"));
   });
 
   it("fails closed for an invalid deep link", () => {

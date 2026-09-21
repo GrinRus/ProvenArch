@@ -5,6 +5,7 @@ import type { KnowledgeView } from "../lib/appRoutes";
 import { architectureFromKnowledge, loadArtifactText, loadRepositoryEvidenceAPI, saveEditableArtifact, type RepositoryEvidence } from "../lib/workspaceApi";
 import { levelLabel } from "../lib/architectureLabels";
 import { EvidenceViewer } from "./EvidenceViewer";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 import { clearDraft, draftStorageKey, readDraft, writeDraft } from "../lib/draftStorage";
 
 const ArchitectureMap = lazy(() => import("./ArchitectureMap").then((module) => ({ default: module.ArchitectureMap })));
@@ -130,7 +131,7 @@ export function KnowledgePage({
         {views.map((item) => <button key={item.id} type="button" aria-current={activePageView === item.id ? "page" : undefined} onClick={() => onViewChange(item.id)}>{item.label}</button>)}
       </nav>
 
-      {error ? <p className="status err" role="status">{error}</p> : null}
+      {error ? <AsyncStatusMessage tone="error" className="status err">{error}</AsyncStatusMessage> : null}
       {!loading && !error && architecture?.status === "unavailable" ? <div className="empty-state recovery-empty"><strong>No promoted knowledge is available.</strong><span>Run an analysis to create validator-approved architecture knowledge and C4 views. Source repositories stay read-only.</span>{onOpenRuns ? <button type="button" onClick={onOpenRuns}>Start or inspect analysis</button> : null}</div> : null}
       {architecture?.status === "partial" ? <aside className="status warn" role="status"><strong>Architecture is usable with gaps.</strong> Valid facts remain visible; {architecture.counts.issues} model issue(s) were excluded instead of guessed.</aside> : null}
 

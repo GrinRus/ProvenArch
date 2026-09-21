@@ -1728,6 +1728,39 @@ class BatchFailureClassificationTest(unittest.TestCase):
         self.assertEqual("runner_unavailable", result.failure_class)
         self.assertTrue(result.runner_unavailable)
 
+    def test_python_report_classifies_semantic_envelope_failure_without_prompt_429(self) -> None:
+        run_dir = self.root / "run-semantic-envelope-contract-python"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "full-run.log",
+            'pipeline failed: validator detected staged artifact issues: semantic envelope is invalid: '
+            'edge "edge.bank.reader.store" references dangling from endpoint "svc.bank.reader"\n',
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"kind":"runtime_output","stream":"stdout",'
+            '"message":"{\\"type\\":\\"assistant\\",'
+            '\\"message\\":{\\"content\\":\\"provider prompt example includes status=429\\"}}"}\n',
+        )
+        write_text(run_dir / "arch-workspace/reports/taskruns/raw/runtime.stderr.txt", "")
+
+        result = self.module.evaluate_run(
+            provider="qwen-code",
+            run_index=1,
+            run_dir=run_dir,
+            preflight={},
+            classification_row={
+                "failure_class": "none",
+                "failure_subclass": "none",
+                "cancellation_like": "0",
+                "process_exit": "1",
+            },
+        )
+
+        self.assertEqual("runtime_contract_failed", result.failure_class)
+        self.assertTrue(result.runtime_contract_failed)
+        self.assertFalse(result.runner_unavailable)
+
     def test_python_runner_unavailable_signal_ignores_codex_plugin_cloudflare_noise(self) -> None:
         text = "\n".join(
             [
@@ -3132,6 +3165,66 @@ class BatchFailureClassificationTest(unittest.TestCase):
             env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
         )
         self.assertEqual("no", completed.stdout.strip(), completed.stdout)
+
+    def test_shell_runner_unavailable_signature_ignores_runtime_output_prompt_429(self) -> None:
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        prompt_log = self.root / "runtime-output-prompt-429.ndjson"
+        write_text(
+            prompt_log,
+            '{"kind":"runtime_output","stream":"stdout",'
+            '"message":"{\\"type\\":\\"assistant\\",'
+            '\\"message\\":{\\"content\\":\\"provider prompt example includes status=429\\"}}"}\n',
+        )
+        command = (
+            prelude
+            + "\n"
+            + f'if contains_runner_unavailable_signature {shlex.quote(str(prompt_log))}; then echo yes; else echo no; fi\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("no", completed.stdout.strip(), completed.stdout)
+
+    def test_shell_classifier_classifies_semantic_envelope_failure_as_runtime_contract_failed(self) -> None:
+        run_dir = self.root / "run-semantic-envelope-contract-shell"
+        self._create_fixture_run_dir(run_dir)
+        write_text(
+            run_dir / "full-run.log",
+            'pipeline failed: validator detected staged artifact issues: semantic envelope is invalid: '
+            'edge "edge.bank.reader.store" references dangling from endpoint "svc.bank.reader"\n',
+        )
+        write_text(
+            run_dir / "arch-workspace/reports/taskruns/logs/runtime.ndjson",
+            '{"kind":"runtime_output","stream":"stdout",'
+            '"message":"{\\"type\\":\\"assistant\\",'
+            '\\"message\\":{\\"content\\":\\"provider prompt example includes status=429\\"}}"}\n',
+        )
+
+        script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")
+        prelude, _ = script_text.split('\nif [[ ! "$RUN_COUNT" =~', 1)
+        classifications_tsv = self.root / "backend-run-classifications-semantic-envelope.tsv"
+        command = (
+            prelude
+            + "\n"
+            + f'RUN_CLASSIFICATIONS_TSV={shlex.quote(str(classifications_tsv))}\n'
+            + f'classify_run_failure "qwen-code" "1" {shlex.quote(str(run_dir))} "1"\n'
+        )
+        completed = subprocess.run(
+            ["bash", "-lc", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PROVENARCH_ROOT": str(REPO_ROOT)},
+        )
+        self.assertEqual("", completed.stdout.strip(), completed.stdout)
+        fields = classifications_tsv.read_text(encoding="utf-8").strip().split("\t")
+        self.assertGreaterEqual(len(fields), 3, classifications_tsv.read_text(encoding="utf-8"))
+        self.assertEqual("runtime_contract_failed", fields[2], classifications_tsv.read_text(encoding="utf-8"))
 
     def test_shell_runner_unavailable_signature_detects_bare_429_line(self) -> None:
         script_text = FULL_RUN_BATCH_SCRIPT.read_text(encoding="utf-8")

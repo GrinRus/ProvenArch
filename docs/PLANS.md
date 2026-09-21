@@ -2201,6 +2201,22 @@ screen hierarchy, density and mobile behavior.
   current UI tree remains green on Vitest `45 files / 231 tests` and mock E2E `8/8`, so no local
   regression or unfinished deterministic fix remains. Release qualification is still waiting on
   provider quota/permission recovery.
+- 2026-09-21: Targeted UI/flow stabilization added mobile onboarding progress visibility, responsive
+  nav/stepper corrections, a mobile Context Details to Settings handoff, and recovery-path mock E2E
+  coverage. UI Vitest `48 files / 273 tests`, accessibility checks, mock E2E `8/8`, typecheck,
+  deterministic UI build and embedded dist equality all pass; the broader monolith decomposition
+  remains a separate open maintenance slice.
+- 2026-09-21: Task-first recovery hardening kept failed first-Attempt admission recoverable from the
+  created Task with stable idempotency and exact Attempt handoff; Task Inbox pagination, Task/
+  Attempt/Outcome and Pipeline Studio loads now expose local retry states, and terminal Tasks retain
+  identity when outcome review is unavailable. Focused/full UI checks and rendered mock E2E `8/8`
+  pass; deterministic DoD and the final canonical diagnostic live gate now also pass.
+- 2026-09-21: Final local DoD passed (`make contracts`, `make test`, `make lint`, `make build`,
+  `make verify-agent-guidance`, UI determinism/dist checks). Direct canonical `smoke-tiny` with
+  Qwen `0.19.11` then passed strict `1/1`: backend `4/4`, runtime/artifact failures `0`, repairs
+  and stalls `0`, validator first-pass valid and promotion audit pass. The selector intentionally
+  skipped frontend live smoke; the dirty working tree was recorded as release-blocking evidence
+  metadata (`source_tree_clean=false`), with no product live defect reproduced.
 
 ## EP-20260805-ui-bug-cleanup
 
@@ -5523,6 +5539,11 @@ This is a product-quality slice. It must keep the existing local-first/entity-pe
 - 2026-06-08: Audited the failed medium live run artifact surfaces. Backend/frontend promoted workspaces have no `model/` files, C4 is gap-only, findings/proposals/changelog/top-level overviews are placeholders, shard manifests have citations but no entities/edges/findings, and one init shard staged a `.qwen/skills/.../SKILL.md` provider-side-effect file as an as-is document. UI review/readiness currently surfaces artifact presence but not these substantive quality failures. The top status bar also hard-codes `v0.1.1 beta`, so screenshots can mislead operators about the tested build version.
 - 2026-06-08: Updated the plan to avoid making a persistent bad-run fixture the quality source of truth. The live gate must dynamically inspect and score the current run's generated artifacts every time; tests can use temporary in-test artifact trees only to protect evaluator behavior.
 - 2026-06-08: Started implementation slice for dynamic backend artifact quality. Added fresh run artifact inventory to quality summary, blocking `artifact_quality:*` signals for sparse current-run surfaces, and collect manifest rejection for provider/tool side-effect document paths; no persistent bad-run fixture added.
+- 2026-09-21: Hardened collect-manifest admission with full semantic-envelope validation, preserved
+  explicit provider relationship-coverage gaps as reviewable evidence instead of false empty-edge
+  blockers, and made terminal run state monotonic against stale progress callbacks. Added focused
+  regressions and completed canonical smoke-tiny live evidence: Qwen `1/1` strict PASS, runtime and
+  artifact quality PASS, snapshot source, zero quality/runtime blockers.
 - 2026-06-08: Completed the first backend/prompt hardening slice. Prompt policy now treats collect/as-is/proposals first-action skeletons as bootstrap-only, not final-acceptable content. Full local DoD passed with exact Node candidate: `make contracts`, `make test`, `make lint`, `make build`.
 - 2026-06-08: Medium diagnostic on selected live providers reproduced product-quality blockers before
   full provider readiness: collect manifests had citations/docs but no semantic entities/edges/findings,

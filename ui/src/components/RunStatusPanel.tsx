@@ -1,4 +1,5 @@
 import { deriveRunLifecycleState, runOutcomeLabel } from "../lib/runState";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 
 type RunStatus = {
   run_id: string;
@@ -39,7 +40,7 @@ export function RunStatusPanel({ runStatus, warnings }: RunStatusPanelProps) {
       ) : null}
       {!hideCurrentStep && runStatus.current_step ? <p>{runStatus.status === "failed" ? "Stopped at" : "Current step"}: {runStatus.current_step}</p> : null}
       {runStatus.error_code ? <p className="status warn">Error code: {runStatus.error_code}</p> : null}
-      {runStatus.error ? <p className="status err">Error: {runStatus.error}</p> : null}
+      {runStatus.error ? <AsyncStatusMessage tone="error" className="status err">Error: {runStatus.error}</AsyncStatusMessage> : null}
       {warnings.length > 0 ? (
         <div data-testid="run-status-warnings">
           <p className="hint">Warnings ({warnings.length})</p>

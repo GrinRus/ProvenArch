@@ -427,6 +427,61 @@ func TestAssessRunArtifactInventoryFlagsSparseCurrentRun(t *testing.T) {
 	}
 }
 
+func TestAssessRunArtifactInventoryAllowsExplicitRelationshipCoverageGap(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		missing     string
+		wantWarning bool
+	}{
+		{
+			name:        "explicit call graph gap",
+			missing:     "service-to-service call graph was not observed in the scoped documentation",
+			wantWarning: false,
+		},
+		{
+			name:        "unexplained empty edges",
+			missing:     "owner mapping remains unconfirmed",
+			wantWarning: true,
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			ws := workspace.Root{Path: root}
+			runID := "run-semantic-edges"
+			writeWorkspaceText(t, root, "reports/coverage/summary.md", "# Coverage\n\n## Missing\n- "+tc.missing+"\n")
+			writeWorkspaceText(t, root, "reports/findings/findings.md", "# Findings\n\n## Relationship evidence gap\n\n- Severity: `medium`\n- Description: The scoped evidence does not confirm the relationship graph.\n")
+			writeWorkspaceJSON(t, root, filepath.Join("reports", "taskruns", runID, "staging", "final", finalRunIndexFile), contracts.FinalRunIndex{
+				Version:            1,
+				RunID:              runID,
+				Pipeline:           "refresh",
+				GeneratedAt:        time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+				CitationIndexPath:  filepath.ToSlash(filepath.Join("reports", "taskruns", runID, "staging", "final", citationIndexFile)),
+				CanonicalDocuments: []contracts.FinalRunDocument{sparseFinalDocumentForRun(runID, "doc.overview", "report", "Overview", "reports/as-is/overview.md")},
+				Topics:             []contracts.TopicIndexEntry{},
+				Semantic: contracts.SemanticSnapshot{
+					Coverage: contracts.Coverage{
+						Observed: []string{"service inventory"},
+						Missing:  []string{tc.missing},
+						Notes:    []string{},
+					},
+					Entities:  []contracts.Entity{scaffoldEntity("svc.one", "one", "README.md"), scaffoldEntity("svc.two", "two", "README.md"), scaffoldEntity("svc.three", "three", "README.md")},
+					Edges:     []contracts.Edge{},
+					Findings:  []contracts.Finding{{ID: "finding.relationship-gap", Severity: "medium", Title: "Relationship evidence gap", Description: "The relationship graph is not confirmed.", Provenance: contracts.Provenance{Kind: "observation", Confidence: 0.6, Evidence: []contracts.Evidence{{Repo: "repo", Path: "README.md"}}}}},
+					Questions: []contracts.Question{},
+				},
+			})
+
+			_, signals := assessRunArtifactInventory(ws, runID, RunStatusSucceeded, reports.ReportRenderContext{ReportMode: reports.ReportModeNormal})
+			if got := hasRunQualitySignal(signals, "artifact_quality.empty_semantic_edges"); got != tc.wantWarning {
+				t.Fatalf("empty semantic edge signal = %v, want %v; signals=%+v", got, tc.wantWarning, signals)
+			}
+		})
+	}
+}
+
 func TestAssessRunArtifactInventoryFlagsScaffoldOnlySemanticModel(t *testing.T) {
 	t.Parallel()
 

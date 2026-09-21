@@ -127,6 +127,22 @@ func TestCollectDocumentRuntimeProcessContaminatedDetectsBoundedPass(t *testing.
 	}
 }
 
+func TestCollectDocumentRuntimeProcessContaminatedDetectsInternalExecutionPaths(t *testing.T) {
+	t.Parallel()
+
+	for _, marker := range []string{
+		".acp/repos/bank-of-anthos/src/frontend",
+		"reports/taskruns/run-1/staging/final/reports/as-is/overview.md",
+		"reports/taskruns/run-1/staging/shards/bank/shard-pack-manifest.json",
+		"write_root/overview.md",
+		"draft_final_root/overview.md",
+	} {
+		if !CollectDocumentRuntimeProcessContaminated("# Overview\n\nEvidence leaked through " + marker + ".\n") {
+			t.Fatalf("expected internal execution path %q to be classified as runtime process contamination", marker)
+		}
+	}
+}
+
 func bootstrapCollectManifest() contracts.ShardPackManifest {
 	return contracts.ShardPackManifest{
 		Version:      1,

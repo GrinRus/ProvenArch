@@ -1137,7 +1137,7 @@ func assessRunArtifactInventory(
 			Path:     inventory.FinalIndexPath,
 		})
 	}
-	if nontrivial && finalIndexOK && inventory.Semantic.Entities > 1 && inventory.Semantic.Edges == 0 {
+	if nontrivial && finalIndexOK && inventory.Semantic.Entities > 1 && inventory.Semantic.Edges == 0 && !semanticRelationshipGapRecorded(finalIndex.Semantic) {
 		signals = append(signals, runQualitySignal{
 			Code:     "artifact_quality.empty_semantic_edges",
 			Severity: "warning",
@@ -1162,6 +1162,28 @@ func assessRunArtifactInventory(
 	signals = append(signals, scaffoldDiagramSignals(ws, inventory, nontrivial)...)
 	signals = append(signals, hiddenProviderDocumentSignals(ws, runID)...)
 	return inventory, normalizeRunQualitySignals(signals)
+}
+
+// semanticRelationshipGapRecorded distinguishes an honest entity-only snapshot
+// from a silent loss of relationship evidence. A provider may have enough
+// evidence to inventory several entities while explicitly recording that the
+// call graph or dependency relationships were not observed; that is a
+// reviewable coverage gap, not an empty semantic artifact.
+func semanticRelationshipGapRecorded(snapshot contracts.SemanticSnapshot) bool {
+	for _, missing := range snapshot.Coverage.Missing {
+		normalized := normalizeCoverageGapText(missing)
+		if strings.Contains(normalized, "call graph") ||
+			strings.Contains(normalized, "dependency graph") ||
+			strings.Contains(normalized, "service to service") ||
+			strings.Contains(normalized, "inter service") ||
+			strings.Contains(normalized, "inter component") ||
+			strings.Contains(normalized, "relationship") ||
+			strings.Contains(normalized, "interaction") ||
+			strings.Contains(normalized, "edge") {
+			return true
+		}
+	}
+	return false
 }
 
 func collectRunArtifactSurfaceInventory(ws workspace.Root, runID string) []runArtifactSurfaceInventory {

@@ -692,6 +692,12 @@ func (s *Service) upsertRunsLocked(records ...runRecord) error {
 	candidate := cloneRunRegistry(s.runs)
 	for _, record := range records {
 		cloned := cloneRunRecord(record)
+		if existing, ok := candidate[cloned.info.RunID]; ok && existing != nil && isTerminalRunStatus(existing.info.Status) && !isTerminalRunStatus(cloned.info.Status) {
+			// Progress callbacks can arrive after finalization. A terminal run is
+			// authoritative and must never regress to queued/running, otherwise
+			// API consumers can observe a completed Attempt as active again.
+			continue
+		}
 		candidate[cloned.info.RunID] = &cloned
 	}
 	trimRunRegistry(candidate, s.historyRetention)

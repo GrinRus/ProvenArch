@@ -15,6 +15,7 @@ import "@xyflow/react/dist/style.css";
 
 import type { ArchitectureEdge, ArchitectureLevel, ArchitectureNode, ArchitectureView } from "../lib/appContracts";
 import { levelLabel } from "../lib/architectureLabels";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 
 const elk = new ELK();
 const nodeTypes = { architecture: ArchitectureNodeControl };
@@ -88,7 +89,7 @@ export function ArchitectureMap({
 
   if (!view.available) return <div className="empty-state recovery-empty"><strong>{levelLabel(level)} is not available.</strong><span>{view.unavailable_reason || "The promoted model has no validated entities for this level."}</span></div>;
   if (visible.nodes.length === 0) return <div className="empty-state"><strong>No architecture elements match this search.</strong><span>Clear the search or choose another C4 level.</span></div>;
-  if (layoutError) return <p className="status err" role="status">{layoutError}</p>;
+  if (layoutError) return <AsyncStatusMessage tone="error" className="status err">{layoutError}</AsyncStatusMessage>;
 
   return (
     <div ref={canvasRef} className="architecture-canvas" data-testid="architecture-canvas" aria-label={`${levelLabel(level)} architecture map`}>

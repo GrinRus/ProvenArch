@@ -307,6 +307,40 @@ func TestRunSnapshotsAreDeeplyIndependent(t *testing.T) {
 	}
 }
 
+func TestTerminalRunDoesNotRegressToInFlightState(t *testing.T) {
+	t.Parallel()
+
+	service := NewService()
+	startedAt := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(time.Minute)
+	if err := service.storeRun(runRecord{info: RunInfo{
+		RunID:      "run-terminal-monotonic",
+		Pipeline:   string(PipelineInit),
+		Status:     RunStatusSucceeded,
+		StartedAt:  startedAt,
+		FinishedAt: &finishedAt,
+	}}); err != nil {
+		t.Fatalf("store terminal run: %v", err)
+	}
+
+	if err := service.storeRun(runRecord{info: RunInfo{
+		RunID:     "run-terminal-monotonic",
+		Pipeline:  string(PipelineInit),
+		Status:    RunStatusRunning,
+		StartedAt: startedAt,
+	}}); err != nil {
+		t.Fatalf("store stale progress: %v", err)
+	}
+
+	info, ok := service.GetRun("run-terminal-monotonic")
+	if !ok {
+		t.Fatal("expected terminal run")
+	}
+	if info.Status != RunStatusSucceeded || info.FinishedAt == nil || !info.FinishedAt.Equal(finishedAt) {
+		t.Fatalf("terminal run regressed after stale progress: %+v", info)
+	}
+}
+
 func TestConcurrentRunSnapshotPollingDoesNotShareMutableState(t *testing.T) {
 	t.Parallel()
 

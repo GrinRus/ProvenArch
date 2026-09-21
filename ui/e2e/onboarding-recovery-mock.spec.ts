@@ -289,6 +289,23 @@ test("onboarding recovery mock: first-time blockers stay readable and retryable"
   await expect(page.getByTestId("onboarding-progress-summary")).toContainText("Runtime provider");
   await expect(page.getByTestId("onboarding-ready-action-hint")).toContainText("Runtime provider");
   await expectNoHorizontalOverflow(page);
+  const mobileProgressMetrics = await page.locator(".onboarding-progress-steps").evaluate((steps) => {
+    const container = steps.getBoundingClientRect();
+    const items = Array.from(steps.querySelectorAll("li")).map((item) => item.getBoundingClientRect());
+    return {
+      count: items.length,
+      minLeft: Math.round(Math.min(...items.map((item) => item.left))),
+      maxRight: Math.round(Math.max(...items.map((item) => item.right))),
+      left: Math.round(container.left),
+      right: Math.round(container.right),
+      scrollWidth: steps.scrollWidth,
+      clientWidth: steps.clientWidth,
+    };
+  });
+  expect(mobileProgressMetrics.count).toBe(4);
+  expect(mobileProgressMetrics.minLeft).toBeGreaterThanOrEqual(mobileProgressMetrics.left);
+  expect(mobileProgressMetrics.maxRight).toBeLessThanOrEqual(mobileProgressMetrics.right);
+  expect(mobileProgressMetrics.scrollWidth).toBeLessThanOrEqual(mobileProgressMetrics.clientWidth);
   await captureEvidenceScreenshot(page, "onboarding-recovery-mobile.png");
 
   await expectNoCriticalAxeViolations(page);

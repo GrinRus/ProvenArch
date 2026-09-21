@@ -33,6 +33,9 @@ func ValidateCollectManifestInRootWithRepoRoots(writeRoot string, repoRoots map[
 	if err != nil {
 		return err
 	}
+	if err := validateCollectManifestSemanticEnvelope(manifest); err != nil {
+		return err
+	}
 	if err := validateCollectManifestDocumentFiles(writeRoot, manifest.Documents); err != nil {
 		return err
 	}
@@ -49,8 +52,18 @@ func ValidateCollectManifestBytes(raw []byte) error {
 	if err := ValidateSemanticEnvelopeJSON(raw); err != nil {
 		return err
 	}
-	_, err := contracts.ParseShardPackManifest(raw)
-	return err
+	manifest, err := contracts.ParseShardPackManifest(raw)
+	if err != nil {
+		return err
+	}
+	return validateCollectManifestSemanticEnvelope(manifest)
+}
+
+func validateCollectManifestSemanticEnvelope(manifest contracts.ShardPackManifest) error {
+	if err := ValidateSemanticEnvelope(manifest.Semantic); err != nil {
+		return fmt.Errorf("shard pack manifest is invalid: %w", err)
+	}
+	return nil
 }
 
 func ValidateCollectManifestTaskIdentity(

@@ -4,10 +4,12 @@ import type { TaskFilters, TaskRouteView } from "../lib/appRoutes";
 import type { RunReviewSummaryResponse } from "../lib/appContracts";
 import { getPipelineRunReviewSummary } from "../lib/runApi";
 import {
+  admitTaskAttempt,
   getTask,
   getTaskAttempt,
   listTaskAttempts,
   listTasks,
+  newIdempotencyKey,
   setTaskArchive,
   type ProductTask,
   type TaskAttempt,
@@ -75,7 +77,9 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
+  const [loadMoreError, setLoadMoreError] = useState("");
   const [loadMoreBusy, setLoadMoreBusy] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const listRequest = useRequestGate("task-inbox");
   const networkFilters = useMemo(() => ({
@@ -88,9 +92,10 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
   const filterKey = [networkFilters.lifecycle ?? "", networkFilters.runner ?? "", networkFilters.repository ?? "", networkFilters.from ?? "", networkFilters.to ?? ""].join("|");
 
   useEffect(() => {
-    const token = listRequest.begin(`list:${filterKey}`);
+    const token = listRequest.begin(`list:${filterKey}:${reloadTick}`);
     setStatus("loading");
     setError("");
+    setLoadMoreError("");
     setLoadMoreBusy(false);
     void listTasks(networkFilters, "", token.signal).then((response) => {
       if (!listRequest.isCurrent(token)) return;
@@ -106,7 +111,7 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
       listRequest.finish(token);
     });
     return () => listRequest.abort();
-  }, [filterKey, listRequest, networkFilters]);
+  }, [filterKey, listRequest, networkFilters, reloadTick]);
 
   const visibleTasks = useMemo(() => {
     const needle = filters.search?.toLocaleLowerCase().trim();
@@ -127,15 +132,17 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
     if (!nextCursor || loadMoreBusy) return;
     const token = listRequest.begin(`more:${filterKey}:${nextCursor}`);
     setLoadMoreBusy(true);
+    setLoadMoreError("");
     try {
       const response = await listTasks(networkFilters, nextCursor, token.signal);
       if (!listRequest.isCurrent(token)) return;
       setTasks((current) => [...current, ...response.items]);
       setNextCursor(response.next_cursor);
       setHasMore(response.has_more);
+      setLoadMoreError("");
     } catch (requestError) {
       if (isAbortError(requestError) || !listRequest.isCurrent(token)) return;
-      setError(requestError instanceof Error ? requestError.message : "More Tasks could not be loaded");
+      setLoadMoreError(requestError instanceof Error ? requestError.message : "More Tasks could not be loaded");
     } finally {
       if (listRequest.isCurrent(token)) setLoadMoreBusy(false);
       listRequest.finish(token);
@@ -147,8 +154,9 @@ export function TaskInbox({ filters, onFiltersChange, onSelectTask, onNewTask }:
       <PageHeader title="Task Inbox" purpose="Scan durable Tasks by lifecycle and open an exact Task or Attempt without consulting legacy run recency." state={<span className="status info">Authoritative Task API</span>} action={<Button tone="primary" onClick={onNewTask} data-testid="task-inbox-new">New Task</Button>} />
       <TaskFiltersBar filters={filters} onChange={(next) => onFiltersChange?.(next)} />
       {status === "loading" ? <p className="status info" role="status" data-testid="task-inbox-loading">Loading Tasks…</p> : null}
-      {status === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-inbox-error">{error}</p><Button onClick={() => onFiltersChange?.({ ...filters })}>Retry</Button></div> : null}
+      {status === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-inbox-error">{error}</p><Button type="button" onClick={() => setReloadTick((current) => current + 1)}>Retry</Button></div> : null}
       {status === "loaded" && visibleTasks.length === 0 ? <p className="status info" role="status" data-testid="task-inbox-empty">No Tasks match these filters. Clear a filter or create a new Task.</p> : null}
+      {status === "loaded" && loadMoreError ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-inbox-load-more-error">{loadMoreError}</p><Button type="button" onClick={() => void loadMore()} disabled={loadMoreBusy}>{loadMoreBusy ? "Loading…" : "Retry"}</Button></div> : null}
       <div className="task-inbox-workbench">
       <div className="task-inbox-groups" data-testid="task-inbox-groups">
         {groups.filter((group) => grouped[group.id].length > 0).map((group) => <section className="task-group" key={group.id} data-testid={`task-group-${group.id}`} aria-labelledby={`task-group-${group.id}-title`}>
@@ -208,7 +216,12 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
   const [review, setReview] = useState<RunReviewSummaryResponse | null>(null);
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
+  const [reviewError, setReviewError] = useState("");
+  const [detailReloadTick, setDetailReloadTick] = useState(0);
   const [archiveStatus, setArchiveStatus] = useState("");
+  const [admissionState, setAdmissionState] = useState<"idle" | "busy">("idle");
+  const [admissionError, setAdmissionError] = useState("");
+  const [admissionIdempotencyKey, setAdmissionIdempotencyKey] = useState(() => newIdempotencyKey());
   const notifiedOutcomeRun = useRef<string | null>(null);
 
   function notifySettledOutcome(attempt: TaskAttempt | undefined, nextReview: RunReviewSummaryResponse | null) {
@@ -220,16 +233,25 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
   useEffect(() => {
     const controller = new AbortController();
     setState("loading");
+    setError("");
+    setReviewError("");
     void Promise.all([getTask(taskId, controller.signal), listTaskAttempts(taskId, controller.signal)]).then(async ([nextTask, nextAttempts]) => {
       if (controller.signal.aborted) return;
       setTask(nextTask);
       setAttempts(nextAttempts.items);
       const latest = nextAttempts.items[nextAttempts.items.length - 1];
       if (latest?.run_id && latest.status !== "queued" && latest.status !== "running") {
-        const nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
-        if (controller.signal.aborted) return;
-        setReview(nextReview);
-        notifySettledOutcome(latest, nextReview);
+        try {
+          const nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          setReview(nextReview);
+          setReviewError(nextReview ? "" : "The terminal Attempt is retained, but its outcome review is not available yet.");
+          notifySettledOutcome(latest, nextReview);
+        } catch (reviewRequestError) {
+          if (controller.signal.aborted) return;
+          setReview(null);
+          setReviewError(reviewRequestError instanceof Error ? reviewRequestError.message : "The terminal Attempt outcome review could not be loaded.");
+        }
       } else {
         setReview(null);
       }
@@ -240,22 +262,51 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
       setState("error");
     });
     return () => controller.abort();
+  }, [detailReloadTick, taskId]);
+
+  useEffect(() => {
+    setAdmissionState("idle");
+    setAdmissionError("");
+    setAdmissionIdempotencyKey(newIdempotencyKey());
   }, [taskId]);
+
+  async function admitFirstAttempt() {
+    if (!task || task.lifecycle !== "open" || attempts.length > 0 || admissionState === "busy") return;
+    setAdmissionState("busy");
+    setAdmissionError("");
+    try {
+      const attempt = await admitTaskAttempt(task.task_id, { pipeline: "init", intent: "start", idempotencyKey: admissionIdempotencyKey });
+      setAttempts((current) => current.some((item) => item.attempt_id === attempt.attempt_id) ? current : [...current, attempt]);
+      onSelectAttempt?.(task.task_id, attempt.attempt_id, filters);
+    } catch (requestError) {
+      setAdmissionError(requestError instanceof Error ? requestError.message : "Attempt admission failed. Retry when the runner is ready.");
+    } finally {
+      setAdmissionState("idle");
+    }
+  }
   const refreshTask = async (signal: AbortSignal): Promise<boolean> => {
     try {
       const [nextTask, nextAttempts] = await Promise.all([getTask(taskId, signal), listTaskAttempts(taskId, signal)]);
       if (signal.aborted) return true;
       const latest = nextAttempts.items[nextAttempts.items.length - 1];
-      let nextReview: RunReviewSummaryResponse | null = null;
-      if (latest && !["queued", "running"].includes(latest.status)) {
-        nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal });
-      }
-      if (signal.aborted) return true;
       setTask(nextTask);
       setAttempts(nextAttempts.items);
-      if (nextReview) {
-        setReview(nextReview);
-        notifySettledOutcome(latest, nextReview);
+      if (latest && !["queued", "running"].includes(latest.status)) {
+        try {
+          const nextReview = await getPipelineRunReviewSummary(latest.run_id, true, { signal });
+          if (signal.aborted) return true;
+          setReview(nextReview);
+          setReviewError(nextReview ? "" : "The terminal Attempt is retained, but its outcome review is not available yet.");
+          notifySettledOutcome(latest, nextReview);
+        } catch (reviewRequestError) {
+          if (isAbortError(reviewRequestError) || signal.aborted) return true;
+          setReview(null);
+          setReviewError(reviewRequestError instanceof Error ? reviewRequestError.message : "The terminal Attempt outcome review could not be loaded.");
+          return false;
+        }
+      } else {
+        setReview(null);
+        setReviewError("");
       }
       return true;
     } catch (requestError) {
@@ -285,22 +336,23 @@ function TaskDetail({ taskId, filters, onSelectAttempt, onBack, onOpenArchitectu
   return <section className="panel stage-panel task-detail" data-testid="task-route-detail">
     <PageHeader title={task?.title || "Task detail"} purpose="Exact Task identity, durable outcome state and immutable Attempt history." state={<span className="status info">Task-first</span>} action={<div className="actions"><Button density="compact" onClick={onBack} data-testid="task-detail-back">Back to Inbox</Button>{task ? <Button density="compact" onClick={() => void archive(task.lifecycle === "open")} data-testid="task-archive">{task.lifecycle === "open" ? "Archive" : "Unarchive"}</Button> : null}</div>} />
     {state === "loading" ? <p className="status info" role="status">Loading exact Task identity…</p> : null}
-    {state === "error" ? <p className="status err" role="alert" data-testid="task-detail-error">{error}</p> : null}
+    {state === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-detail-error">{error}</p><Button type="button" onClick={() => setDetailReloadTick((current) => current + 1)}>Retry</Button></div> : null}
     {archiveStatus ? <p className="status info" role="status" data-testid="task-archive-status">{archiveStatus}</p> : null}
     {task ? <>
       <div className="task-detail-summary"><p className="eyebrow">Task ID <code>{task.task_id}</code></p><p>{task.goal}</p><dl className="compact-defs"><div><dt>Lifecycle</dt><dd>{task.lifecycle}</dd></div><div><dt>Outcome</dt><dd>{task.outcome.state === "available" ? "Available" : task.outcome.unavailable_reason || "Unavailable"}</dd></div><div><dt>Runner</dt><dd>{runnerLabel(task)}</dd></div><div><dt>Scope</dt><dd>{repositoryLabel(task)}</dd></div></dl></div>
-      <TaskOutcome task={task} latestAttempt={attempts[attempts.length - 1]} review={review} onOpenArchitecture={onOpenArchitecture} onOpenChanges={onOpenChanges} />
+      <TaskOutcome task={task} latestAttempt={attempts[attempts.length - 1]} review={review} reviewError={reviewError} onRetryReview={reviewError ? () => setDetailReloadTick((current) => current + 1) : undefined} reviewRetryBusy={state === "loading"} onOpenArchitecture={onOpenArchitecture} onOpenChanges={onOpenChanges} onAdmitAttempt={task.lifecycle === "open" && attempts.length === 0 ? () => void admitFirstAttempt() : undefined} admissionBusy={admissionState === "busy"} admissionError={admissionError} />
       <section className="task-attempt-history" aria-labelledby="task-attempt-history-title"><div className="task-group-heading"><h2 id="task-attempt-history-title">Attempt history</h2><span className="status info">{attempts.length}</span></div>{attempts.length === 0 ? <p className="hint">No Attempt has been admitted for this Task yet.</p> : <div className="task-attempt-list">{attempts.map((attempt) => <AttemptRow key={attempt.attempt_id} attempt={attempt} onSelect={() => onSelectAttempt?.(task.task_id, attempt.attempt_id, filters)} />)}</div>}</section>
     </> : null}
   </section>;
 }
 
-function TaskOutcome({ task, latestAttempt, review, onOpenArchitecture, onOpenChanges }: { task: ProductTask; latestAttempt?: TaskAttempt; review: RunReviewSummaryResponse | null; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void }) {
+function TaskOutcome({ task, latestAttempt, review, reviewError = "", onRetryReview, reviewRetryBusy = false, onOpenArchitecture, onOpenChanges, onAdmitAttempt, admissionBusy = false, admissionError = "" }: { task: ProductTask; latestAttempt?: TaskAttempt; review: RunReviewSummaryResponse | null; reviewError?: string; onRetryReview?: () => void; reviewRetryBusy?: boolean; onOpenArchitecture?: (taskId: string) => void; onOpenChanges?: (taskId: string, attemptId: string, runId: string) => void; onAdmitAttempt?: () => void; admissionBusy?: boolean; admissionError?: string }) {
   const result = review?.result;
   const semanticAvailable = review?.review?.semantic_changes.available === true;
   const semantic = semanticAvailable ? review?.review?.summary : undefined;
   const terminalFailure = latestAttempt && ["failed", "canceled", "timeout"].includes(latestAttempt.status);
-  if (!result && !terminalFailure) return <section className="task-outcome task-outcome-unavailable" data-testid="task-outcome"><h2>Outcome</h2><p className="hint">No terminal Attempt outcome is available yet. The Task intent is durable and can be admitted when the runner is ready.</p></section>;
+  if (!result && !terminalFailure && latestAttempt && !["queued", "running"].includes(latestAttempt.status)) return <section className="task-outcome task-outcome-unavailable" data-testid="task-outcome"><h2>Outcome review unavailable</h2><p className="hint">The terminal Attempt is retained, but its structured outcome is not available yet. No replacement run or latest-run fallback was selected.</p><div className="task-outcome-action task-attempt-admission-recovery">{reviewError ? <p className="status err" role="alert" data-testid="task-review-error">{reviewError}</p> : null}{onRetryReview ? <Button type="button" tone="primary" density="compact" onClick={onRetryReview} disabled={reviewRetryBusy} data-testid="task-review-retry">{reviewRetryBusy ? "Refreshing…" : "Retry outcome review"}</Button> : null}</div></section>;
+  if (!result && !terminalFailure) return <section className="task-outcome task-outcome-unavailable" data-testid="task-outcome"><h2>Outcome</h2><p className="hint">{task.lifecycle === "archived" ? "This Task is archived. Unarchive it before admitting an Attempt." : "No terminal Attempt outcome is available yet. The Task intent is durable and ready for its first Attempt."}</p>{onAdmitAttempt ? <div className="task-outcome-action task-attempt-admission-recovery"><strong>Next action</strong><span>Start the first Attempt from this saved Task.</span>{admissionError ? <p className="status err" role="alert" data-testid="task-attempt-admission-error">{admissionError}</p> : null}<Button type="button" tone="primary" density="compact" onClick={onAdmitAttempt} disabled={admissionBusy} data-testid="task-start-attempt">{admissionBusy ? "Starting…" : admissionError ? "Retry Start" : "Start Attempt"}</Button></div> : null}</section>;
   if (!result) return <section className="task-outcome task-outcome-failed" data-testid="task-outcome"><div><p className="eyebrow">Attempt outcome</p><h2>{latestAttempt?.status === "canceled" ? "Attempt canceled" : "Attempt needs recovery"}</h2><p>{latestAttempt?.terminal_summary?.error || latestAttempt?.terminal_summary?.summary || "The last Attempt did not produce a promotable outcome."}</p></div><dl className="compact-defs"><div><dt>Evidence</dt><dd>{latestAttempt?.retained_evidence || "Retained evidence state is reported by the Attempt."}</dd></div><div><dt>Current Architecture</dt><dd>Not changed by this Attempt; last-good state remains independent.</dd></div></dl></section>;
   const partial = !semanticAvailable;
   const producedMetric = (key: string) => typeof result.produced[key] === "number" ? `${result.produced[key]} produced` : "Unavailable";
@@ -316,12 +368,14 @@ function AttemptDetail({ taskId, attemptId, filters, onSelectTask, onOpenStudio 
   const [attempt, setAttempt] = useState<TaskAttempt | null>(null);
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setState("loading");
+    setError("");
     void getTaskAttempt(taskId, attemptId, controller.signal).then((nextAttempt) => { if (!controller.signal.aborted) { setAttempt(nextAttempt); setState("loaded"); } }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Attempt could not be loaded"); setState("error"); } });
     return () => controller.abort();
-  }, [taskId, attemptId]);
+  }, [attemptId, reloadTick, taskId]);
   const refreshAttempt = async (signal: AbortSignal): Promise<boolean> => {
     try {
       const nextAttempt = await getTaskAttempt(taskId, attemptId, signal);
@@ -332,7 +386,7 @@ function AttemptDetail({ taskId, attemptId, filters, onSelectTask, onOpenStudio 
     }
   };
   usePollingLoop({ enabled: Boolean(attempt && ["queued", "running"].includes(attempt.status)), poll: refreshAttempt });
-  return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<div className="actions"><Button density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>{attempt ? <Button density="compact" onClick={() => onOpenStudio?.(taskId, attempt.attempt_id)} data-testid="attempt-open-studio">Open Pipeline Studio</Button> : null}</div>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
+  return <section className="panel stage-panel task-detail" data-testid="task-route-attempt"><PageHeader title="Attempt detail" purpose="Immutable admitted snapshot linked to this exact Task and pipeline run." state={<span className="status info">Read-only snapshot</span>} action={<div className="actions"><Button type="button" density="compact" onClick={() => onSelectTask?.(taskId, filters)}>Back to Task</Button>{attempt ? <Button type="button" density="compact" onClick={() => onOpenStudio?.(taskId, attempt.attempt_id)} data-testid="attempt-open-studio">Open Pipeline Studio</Button> : null}</div>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt identity…</p> : null}{state === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="task-attempt-error">{error}</p><Button type="button" onClick={() => setReloadTick((current) => current + 1)}>Retry</Button></div> : null}<dl className="compact-defs" data-testid="task-route-identities"><div><dt>Task ID</dt><dd>{taskId}</dd></div><div><dt>Attempt ID</dt><dd>{attemptId}</dd></div></dl>{attempt ? <div className="task-attempt-detail"><p className="eyebrow">Attempt ID <code>{attempt.attempt_id}</code></p><dl className="compact-defs"><div><dt>Task ID</dt><dd>{attempt.task_id}</dd></div><div><dt>Run ID</dt><dd>{attempt.run_id}</dd></div><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div><div><dt>Lineage</dt><dd>{attempt.parent_attempt_id ? `child of ${attempt.parent_attempt_id}` : "root Attempt"}</dd></div></dl><p className="hint">The admitted snapshot is immutable; later Settings or workspace changes cannot rewrite it.</p></div> : null}</section>;
 }
 
 function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attemptId: string; onBack: () => void }) {
@@ -340,9 +394,11 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
   const [review, setReview] = useState<RunReviewSummaryResponse | null>(null);
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
   const [error, setError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setState("loading");
+    setError("");
     void getTaskAttempt(taskId, attemptId, controller.signal).then(async (nextAttempt) => {
       if (controller.signal.aborted) return;
       setAttempt(nextAttempt);
@@ -352,7 +408,7 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
       setState("loaded");
     }).catch((requestError) => { if (!controller.signal.aborted) { setError(requestError instanceof Error ? requestError.message : "Pipeline Studio could not be loaded"); setState("error"); } });
     return () => controller.abort();
-  }, [taskId, attemptId]);
+  }, [attemptId, reloadTick, taskId]);
   const refreshStudio = async (signal: AbortSignal): Promise<boolean> => {
     try {
       const nextAttempt = await getTaskAttempt(taskId, attemptId, signal);
@@ -369,13 +425,14 @@ function PipelineStudio({ taskId, attemptId, onBack }: { taskId: string; attempt
     }
   };
   usePollingLoop({ enabled: Boolean(attempt && ["queued", "running"].includes(attempt.status)), poll: refreshStudio });
-  const steps = review?.steps.length ? review.steps : fallbackStudioSteps(attempt?.pipeline);
+  const reviewSteps = review?.steps ?? [];
+  const steps = reviewSteps.length > 0 ? reviewSteps : fallbackStudioSteps(attempt?.pipeline);
   const active = attempt?.status === "queued" || attempt?.status === "running";
   const terminalFailure = Boolean(attempt && ["failed", "canceled", "timeout"].includes(attempt.status));
   const blocker = terminalFailure ? review?.recovery || (attempt ? { title: "Attempt stopped", explanation: attempt.terminal_summary?.error || attempt.terminal_summary?.summary || "No promotable result was recorded.", retained_evidence: attempt.retained_evidence || "Retained evidence state is available on the Attempt." } : null) : active ? review?.recovery : null;
   const terminalSuccess = attempt?.status === "succeeded" && review?.result && ["completed", "completed_with_gaps"].includes(review.result.state);
   const displayedSteps = terminalSuccess ? steps.map((step) => ({ ...step, state: "done" as const })) : steps;
-  return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <p className="status err" role="alert">{error}</p> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{displayedSteps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress && active ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
+  return <section className="panel stage-panel pipeline-studio" data-testid="task-pipeline-studio"><PageHeader title="Pipeline Studio" purpose="Focused diagnostics for this exact immutable Attempt; no global run or latest-result fallback." state={<span className="status info">Attempt-bound</span>} action={<Button type="button" density="compact" onClick={onBack} data-testid="pipeline-studio-back">Back to Attempt</Button>} />{state === "loading" ? <p className="status info" role="status">Loading exact Attempt and structured progress…</p> : null}{state === "error" ? <div className="task-inbox-recovery"><p className="status err" role="alert" data-testid="pipeline-studio-error">{error}</p><Button type="button" onClick={() => setReloadTick((current) => current + 1)}>Retry</Button></div> : null}{attempt ? <><div className="pipeline-studio-identity"><p className="eyebrow">Task <code>{taskId}</code> · Attempt <code>{attempt.attempt_id}</code> · Run <code>{attempt.run_id}</code></p><dl className="compact-defs"><div><dt>Status</dt><dd>{attempt.status}</dd></div><div><dt>Runner snapshot</dt><dd>{runnerLabelFromAttempt(attempt)}</dd></div><div><dt>Pipeline</dt><dd>{attempt.pipeline}</dd></div></dl></div><section className="pipeline-track" aria-labelledby="pipeline-track-title"><div className="task-group-heading"><h2 id="pipeline-track-title">Canonical pipeline steps</h2>{active && review?.progress ? <span className="status info">{review.progress.completed_steps}/{review.progress.total_steps} complete</span> : null}</div><ol>{displayedSteps.map((step) => <li key={step.step_id} className={`pipeline-step pipeline-step-${step.state}`}><span className="pipeline-step-marker" aria-hidden="true" /> <div><strong>{step.label || step.key}</strong><span>{step.state}</span>{step.last_message ? <small>{step.last_message}</small> : null}</div></li>)}</ol>{!review?.progress && active ? <p className="hint">Structured progress is unavailable for this snapshot; no percentage is derived from provider output or heartbeats.</p> : null}</section>{blocker ? <section className="pipeline-blocker" data-testid="pipeline-blocker"><p className="eyebrow">Selected blocker</p><h2>{blocker.title}</h2><p>{blocker.explanation}</p><p className="hint">Retained data: {blocker.retained_evidence}</p></section> : null}<details className="pipeline-diagnostics"><summary>Diagnostics disclosure</summary><dl className="compact-defs"><div><dt>Error code</dt><dd>{review?.error_code || attempt.terminal_summary?.error_code || "none recorded"}</dd></div><div><dt>Warnings</dt><dd>{review?.warnings?.length ? review.warnings.join("; ") : "none recorded"}</dd></div></dl></details></> : null}</section>;
 }
 
 function fallbackStudioSteps(pipeline?: string): Array<{ step_id: string; key: string; label: string; state: "done" | "active" | "failed" | "pending"; artifact_count: number; artifact_paths: string[]; taskrun_paths: string[]; warnings_count: number; errors_count: number; last_message?: string }> {

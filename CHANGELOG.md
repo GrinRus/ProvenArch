@@ -2,6 +2,15 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## Unreleased
+
+- Hardened Task-first recovery: a Task whose first Attempt admission fails remains actionable from
+  Task detail, retries with the same idempotency key, and hands off to the exact admitted Attempt.
+- Added visible retry/error states for Task Inbox pagination, Task/Attempt/Outcome and Pipeline Studio
+  loads; terminal Tasks keep their identity when outcome review is unavailable instead of looking
+  unstarted.
+- Improved error announcements across knowledge, architecture, run, console, changes and QA views.
+
 ## v0.1.14 - 2026-08-10
 
 Owner-authorized unqualified beta prerelease for the truth-first publication flow and decomposed

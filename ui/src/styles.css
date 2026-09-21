@@ -4068,6 +4068,8 @@ body:has(.product-shell), html:has(.product-shell), #root:has(.product-shell) { 
 .task-outcome-counts dd { margin: 0; overflow-wrap: anywhere; }
 .task-outcome-action { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .task-outcome-action span { color: var(--ink-muted); text-transform: capitalize; }
+.task-attempt-admission-recovery { align-items: center; padding-top: var(--space-3); border-top: 1px solid var(--line-soft); }
+.task-attempt-admission-recovery > .status { flex-basis: 100%; margin: 0; }
 .task-outcome-unavailable { border-style: dashed; }
 .pipeline-studio { display: grid; gap: var(--space-4); min-width: 0; }
 .pipeline-studio-identity, .pipeline-track, .pipeline-blocker, .pipeline-diagnostics { display: grid; gap: var(--space-3); min-width: 0; }
@@ -4094,6 +4096,8 @@ body:has(.product-shell), html:has(.product-shell), #root:has(.product-shell) { 
   .task-row-meta time { margin-left: 0; }
   .task-attempt-row { grid-template-columns: 1fr 1fr; }
   .task-outcome-counts { grid-template-columns: 1fr 1fr; }
+  .task-attempt-admission-recovery { align-items: stretch; flex-direction: column; }
+  .task-attempt-admission-recovery .ui-button { width: 100%; }
 }
 .page-context-header {
   min-width: 0;
@@ -4433,6 +4437,12 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 .nav-section-label { margin: 8px 11px 7px; color: var(--sidebar-ink-muted); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
 .nav-section-label-utilities { margin-top: 22px; }
 .product-content { width: min(1340px, 100%); padding: 28px 32px 42px; }
+
+/* Tablet shell: the compact icon rail must match the hidden nav labels. */
+@media (min-width: 761px) and (max-width: 1279px) {
+  .product-layout, .product-layout.nav-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+  .primary-nav { padding-inline: var(--space-2); }
+}
 .context-drawer { border-radius: var(--radius-panel); }
 .ui-button { min-height: 39px; padding: 0 14px; border-radius: 9px; font-weight: 720; }
 .ui-button.tone-primary { background: var(--accent); }
@@ -4446,7 +4456,7 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
   .product-identity > strong { font-size: 16px; }
   .product-workspace { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
   .product-layout { display: block; min-height: calc(100vh - 58px); padding-bottom: 68px; }
-  .primary-nav { position: fixed; inset: auto 0 0; z-index: 80; display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; height: 68px; padding: 4px 10px max(4px, env(safe-area-inset-bottom)); border-top: 1px solid rgba(125,211,252,.16); }
+  .primary-nav { position: fixed; inset: auto 0 0; z-index: 80; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; height: 68px; padding: 4px 10px max(4px, env(safe-area-inset-bottom)); border-top: 1px solid rgba(125,211,252,.16); }
   .primary-nav .nav-collapse, .primary-nav .nav-section-label, .primary-nav a[data-testid="settings-nav"], .primary-nav a[data-testid="setup-nav"], .primary-nav button[data-testid="diagnostics-nav"] { display: none !important; }
   .primary-nav a { min-height: 56px; display: grid; justify-items: center; align-content: center; gap: 2px; padding: 4px 2px; border-radius: 8px; font-size: 10px; }
   .primary-nav a > span:first-child { width: auto; font-size: 14px; }
@@ -4695,6 +4705,8 @@ body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1
 
 /* Four setup steps remain discoverable without forcing a clipped horizontal strip. */
 @media (max-width: 680px) {
+  .onboarding-progress-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .onboarding-progress-steps li { min-width: 0; }
   .setup-stepper { grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: visible; }
   .setup-stepper button { min-width: 0; padding-inline: 3px; }
   .setup-stepper button strong { font-size: 11px; line-height: 1.2; overflow-wrap: anywhere; }

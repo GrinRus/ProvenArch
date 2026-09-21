@@ -8,6 +8,7 @@ import { SettingsPage } from "./SettingsPage";
 import { SetupRoute, type SetupRouteProps } from "./SetupRoute";
 import { TaskComposer } from "./TaskComposer";
 import { TaskRouteContainer } from "./TaskRouteContainer";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 import type { SystemVersionResponse } from "../lib/appContracts";
 import type { AppRoute } from "../lib/appRoutes";
 import type { StageId } from "../lib/consoleTypes";
@@ -109,7 +110,7 @@ export function AppConsoleView({
           <AnalysisStagePanel {...routeData.analysis} />
         </LegacyRunPage>
       ) : null}
-      {error ? <p className="status err">Error: {error}</p> : null}
+      {error ? <AsyncStatusMessage tone="error" className="status err">Error: {error}</AsyncStatusMessage> : null}
       {routeNotice ? <p className="status warn" role="status" data-testid="route-notice">{routeNotice}</p> : null}
     </ProductShell>
   );

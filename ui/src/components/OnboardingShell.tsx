@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Diagnostic, DoctorResponse, GuidedRepo, OnboardingRecentWorkspace, OnboardingStatusResponse, RepoSourceMode, ValidateResponse } from "../lib/appContracts";
 import { providerCommandEnv, providerCommandHint, providerReadinessGuidance } from "../lib/providerGuidance";
@@ -482,6 +482,19 @@ type OnboardingProgressSummary = {
 };
 
 function OnboardingProgressSummaryPanel({ summary, activeStep, onStepChange }: { summary: OnboardingProgressSummary; activeStep: OnboardingStep; onStepChange: (step: OnboardingStep) => void }) {
+  const stepsRef = useRef<HTMLOListElement | null>(null);
+
+  useEffect(() => {
+    const keepActiveStepVisible = () => {
+      const activeControl = stepsRef.current?.querySelector<HTMLElement>('[aria-current="step"]');
+      activeControl?.scrollIntoView?.({ block: "nearest", inline: "center" });
+    };
+
+    keepActiveStepVisible();
+    window.addEventListener("resize", keepActiveStepVisible);
+    return () => window.removeEventListener("resize", keepActiveStepVisible);
+  }, [activeStep]);
+
   return (
     <section className={`onboarding-progress-summary is-${summary.tone}`} data-testid="onboarding-progress-summary" aria-label="Onboarding setup progress">
       <div className="onboarding-progress-primary">
@@ -493,7 +506,7 @@ function OnboardingProgressSummaryPanel({ summary, activeStep, onStepChange }: {
         <span>{summary.tone === "ready" ? "Ready state" : "Current blocker"}</span>
         <strong>{summary.blocker}</strong>
       </div>
-      <ol className="onboarding-progress-steps">
+      <ol className="onboarding-progress-steps" ref={stepsRef}>
         {summary.items.map((item, index) => (
           <li className={`${item.ready ? "is-ready" : ""} ${activeStep === item.id ? "is-active" : ""}`.trim()} key={item.label}>
             <button type="button" data-testid={`onboarding-progress-${item.id}`} aria-current={activeStep === item.id ? "step" : undefined} disabled={!item.available} onClick={() => onStepChange(item.id)}>
