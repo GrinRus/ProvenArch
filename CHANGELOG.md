@@ -2,14 +2,33 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
-## Unreleased
+## v0.1.15 - 2026-09-21
 
+Owner-authorized unqualified beta prerelease for UI recovery, task-first flows and clearer
+failure handling.
+
+Highlights:
 - Hardened Task-first recovery: a Task whose first Attempt admission fails remains actionable from
   Task detail, retries with the same idempotency key, and hands off to the exact admitted Attempt.
 - Added visible retry/error states for Task Inbox pagination, Task/Attempt/Outcome and Pipeline Studio
   loads; terminal Tasks keep their identity when outcome review is unavailable instead of looking
   unstarted.
 - Improved error announcements across knowledge, architecture, run, console, changes and QA views.
+
+Verification notes:
+- Deterministic release precheck passed contracts, Go tests, Python tests, UI tests, lint and build.
+- Trusted-machine release-fast baseline `release-fast-20260921T173157Z` passed the Qwen backend and
+  frontend smoke. Claude and Codex live runs produced runtime-contract failures recorded in the
+  release waiver; no synthetic provider evidence is used.
+
+Known limitations:
+- `v0.1.15` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim canonical
+  `RELEASE READY`; full Qwen/Claude live qualification and the composite release verdict are waived
+  for this exact tag.
+- Claude failed the workspace write audit with unexpected unclassified mutations, while Codex
+  exhausted artifact-repair attempts on the refresh draft contract. The parallel-default sweep was
+  stopped before provider execution after the host resolved `python3` to a broken x86_64 Python 3.14.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
 
 ## v0.1.14 - 2026-08-10
 
