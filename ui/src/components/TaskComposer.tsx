@@ -159,7 +159,7 @@ export function TaskComposer({ workspaceReady, repos, workspaceKey, runtimeMode,
         </section>
         <div className="actions">
           <Button tone="primary" type="submit" data-testid="task-create-submit" disabled={!canSubmit}>{busy ? "Starting Task…" : "Start Task"}</Button>
-          {createdTaskId && error ? <Button type="button" onClick={() => onCreated(createdTaskId)} data-testid="task-open-created">Open created Task</Button> : null}
+          {createdTaskId && error ? <Button type="button" onClick={() => onCreated(createdTaskId)} data-testid="task-open-created">Open Task to retry Attempt</Button> : null}
         </div>
       </form>
       </div>

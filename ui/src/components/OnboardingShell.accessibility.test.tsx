@@ -107,4 +107,32 @@ describe("OnboardingShell accessibility announcements", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review & start/ }));
     expect(screen.getByText("First analysis is starting.").closest('[role="status"]')).toHaveAttribute("aria-live", "polite");
   });
+
+  it("keeps the active mobile progress step in view", () => {
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      renderShell({
+        guidedRepos: [{ ...incompleteRepo, name: "provenarch", git_url: "https://example.test/repo.git" }],
+        validateResult: { ok: true, workspace: "/work/acp" },
+        doctorResult: { ok: true, summary: "ready", checks: [] },
+      });
+
+      expect(screen.getByRole("button", { name: /Review & start/ })).toHaveAttribute("aria-current", "step");
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "center" });
+
+      fireEvent(window, new Event("resize"));
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest", inline: "center" });
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    }
+  });
 });

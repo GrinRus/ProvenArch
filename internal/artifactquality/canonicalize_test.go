@@ -73,6 +73,25 @@ func TestValidateCollectManifestRejectsContractInvalidCompatibilityPayload(t *te
 	}
 }
 
+func TestValidateCollectManifestRejectsDanglingSemanticEdge(t *testing.T) {
+	t.Parallel()
+
+	payload := validCollectManifestPayload()
+	semanticSliceItem(payload, "edges", 0)["to"] = "svc.missing"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	err = ValidateCollectManifestBytes(raw)
+	if err == nil {
+		t.Fatal("expected dangling semantic edge to fail collect admission")
+	}
+	if !strings.Contains(err.Error(), "dangling to endpoint") {
+		t.Fatalf("expected dangling endpoint error, got %v", err)
+	}
+}
+
 func TestValidateCollectManifestRejectsProviderToolDocumentPath(t *testing.T) {
 	t.Parallel()
 
@@ -228,6 +247,29 @@ func TestValidateCollectManifestRejectsRuntimeProcessNarrationDocument(t *testin
 	err = ValidateCollectManifestInRoot(writeRoot)
 	if err == nil {
 		t.Fatalf("expected runtime process narration collect document to fail validation")
+	}
+	if !strings.Contains(err.Error(), "process-contaminated collect document") {
+		t.Fatalf("expected process-contaminated document validation error, got %v", err)
+	}
+}
+
+func TestValidateCollectManifestRejectsInternalExecutionPathDocument(t *testing.T) {
+	t.Parallel()
+
+	writeRoot := t.TempDir()
+	payload := validCollectManifestPayload()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(writeRoot, shardPackManifestFile), raw, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	writeDoc(t, writeRoot, "overview.md", "# Services Overview\n\nThe repository checkout is available at /tmp/workspace/.acp/repos/payments/src.\n")
+
+	err = ValidateCollectManifestInRoot(writeRoot)
+	if err == nil {
+		t.Fatalf("expected internal execution path in collect document to fail validation")
 	}
 	if !strings.Contains(err.Error(), "process-contaminated collect document") {
 		t.Fatalf("expected process-contaminated document validation error, got %v", err)
@@ -942,6 +984,12 @@ func validCollectManifestPayload() map[string]any {
 				map[string]any{
 					"id":         "svc.payments",
 					"name":       "payments",
+					"type":       "service",
+					"provenance": provenance(0.8),
+				},
+				map[string]any{
+					"id":         "svc.ledger",
+					"name":       "ledger",
 					"type":       "service",
 					"provenance": provenance(0.8),
 				},

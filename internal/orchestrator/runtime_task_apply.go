@@ -197,6 +197,17 @@ func (e *pipelineExecution) applyValidatorRuntimeExecution(
 		})
 		return runtimeTaskExecution{}, err
 	}
+	if err := artifactquality.NormalizeProviderValidatorPaths(&providerVerdict, e.workspace.Path); err != nil {
+		e.recordConformanceDiagnostic(map[string]any{
+			"validation_first_pass_invalid": true,
+			"validation_issue_class":        "verdict",
+		})
+		e.logError(stepID, domainID, "validator verdict path normalization failed", map[string]any{
+			"task_id": task.TaskID,
+			"error":   strings.TrimSpace(err.Error()),
+		})
+		return runtimeTaskExecution{}, err
+	}
 	if err := artifactquality.ValidateValidatorVerdict(providerVerdict, e.finalRunIndex, e.citationIndex, false, false); err != nil {
 		e.recordConformanceDiagnostic(map[string]any{
 			"validation_first_pass_invalid": true,

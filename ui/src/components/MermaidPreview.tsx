@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AsyncStatusMessage } from "./AccessibleStatus";
 
 type MermaidPreviewProps = {
   source: string;
@@ -67,7 +68,7 @@ export function MermaidPreview(props: MermaidPreviewProps) {
   }, [source]);
 
   if (error) {
-    return <p className="status err">Diagram render error: {error}</p>;
+    return <AsyncStatusMessage tone="error" className="status err">Diagram render error: {error}</AsyncStatusMessage>;
   }
   if (!svg) {
     return <p className="hint">Rendering {title}...</p>;

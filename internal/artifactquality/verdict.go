@@ -3,6 +3,7 @@ package artifactquality
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -91,6 +92,70 @@ func ValidateValidatorVerdict(
 	return fmt.Errorf("validator verdict consistency failed: %s", strings.Join(problems, "; "))
 }
 
+// NormalizeProviderValidatorPaths converts provider-emitted absolute paths to
+// workspace-relative logical paths before consistency validation. Absolute
+// paths are accepted only after symlink-resolved containment proves that they
+// point inside the selected workspace; foreign or unresolved paths fail closed.
+// Relative paths remain untouched so the normal verdict validator still owns
+// their traversal and inventory checks.
+func NormalizeProviderValidatorPaths(verdict *contracts.ValidatorVerdict, workspaceRoot string) error {
+	if verdict == nil || strings.TrimSpace(workspaceRoot) == "" {
+		return nil
+	}
+
+	root, err := filepath.Abs(filepath.Clean(workspaceRoot))
+	if err != nil {
+		return fmt.Errorf("resolve validator workspace root: %w", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve validator workspace root symlinks: %w", err)
+	}
+
+	normalize := func(label, value string) (string, error) {
+		raw := strings.TrimSpace(value)
+		if !filepath.IsAbs(filepath.FromSlash(raw)) {
+			return value, nil
+		}
+		resolvedPath, err := filepath.EvalSymlinks(filepath.Clean(filepath.FromSlash(raw)))
+		if err != nil {
+			return "", fmt.Errorf("%s %q cannot be resolved inside selected workspace: %w", label, value, err)
+		}
+		relative, err := filepath.Rel(resolvedRoot, resolvedPath)
+		if err != nil {
+			return "", fmt.Errorf("%s %q cannot be made relative to selected workspace: %w", label, value, err)
+		}
+		normalized := normalizeVerdictPath(filepath.ToSlash(relative))
+		if normalized == "" {
+			return "", fmt.Errorf("%s %q is outside the selected workspace", label, value)
+		}
+		return normalized, nil
+	}
+
+	for idx := range verdict.CheckedPaths {
+		normalized, err := normalize("checked_paths", verdict.CheckedPaths[idx])
+		if err != nil {
+			return err
+		}
+		verdict.CheckedPaths[idx] = normalized
+	}
+	for idx := range verdict.FixedPaths {
+		normalized, err := normalize("fixed_paths", verdict.FixedPaths[idx])
+		if err != nil {
+			return err
+		}
+		verdict.FixedPaths[idx] = normalized
+	}
+	for idx := range verdict.Issues {
+		normalized, err := normalize(fmt.Sprintf("issues[%d].path", idx), verdict.Issues[idx].Path)
+		if err != nil {
+			return err
+		}
+		verdict.Issues[idx].Path = normalized
+	}
+	return nil
+}
+
 func hasTechnicalError(issues []contracts.ValidatorIssue) bool {
 	for _, issue := range issues {
 		if strings.EqualFold(strings.TrimSpace(issue.Severity), "error") {
@@ -125,6 +190,14 @@ func verdictInventory(finalIndex *contracts.FinalRunIndex, citationIndex *contra
 	citations := map[string]struct{}{}
 	paths := map[string]struct{}{}
 	if finalIndex != nil {
+		if runID := strings.TrimSpace(finalIndex.RunID); runID != "" {
+			finalRoot := path.Join("reports", "taskruns", runID, "staging", "final")
+			paths[path.Join(finalRoot, "final-run-index.json")] = struct{}{}
+			paths[path.Join(finalRoot, "citation-index.json")] = struct{}{}
+		}
+		if normalized := normalizeVerdictPath(finalIndex.CitationIndexPath); normalized != "" {
+			paths[normalized] = struct{}{}
+		}
 		for _, document := range finalIndex.CanonicalDocuments {
 			if id := strings.TrimSpace(document.ID); id != "" {
 				documents[id] = struct{}{}
@@ -137,6 +210,9 @@ func verdictInventory(finalIndex *contracts.FinalRunIndex, citationIndex *contra
 		}
 	}
 	if citationIndex != nil {
+		if runID := strings.TrimSpace(citationIndex.RunID); runID != "" {
+			paths[path.Join("reports", "taskruns", runID, "staging", "final", "citation-index.json")] = struct{}{}
+		}
 		for _, citation := range citationIndex.Citations {
 			if id := strings.TrimSpace(citation.ID); id != "" {
 				citations[id] = struct{}{}

@@ -27,6 +27,7 @@ from e2e_report_classifiers import (
     text_has_raw_provider_runner_unavailable_signal,
     text_has_runner_unavailable_signal,
     text_has_collect_document_path_contract_signature,
+    text_has_semantic_envelope_contract_signature,
     text_has_runtime_contract_parse_signature,
     text_has_structured_runner_unavailable_signal,
 )
@@ -2043,6 +2044,10 @@ def evaluate_run(
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
         focused_recovery_counts.update(extract_focused_recovery_reason_counts(text))
         if not terminal_success:
+            if text_has_semantic_envelope_contract_signature(text):
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
                 runtime_contract_failed_hit = True
@@ -2071,6 +2076,10 @@ def evaluate_run(
         focused_recovery_reasons.update(extract_focused_recovery_reason_tags(text))
         focused_recovery_counts.update(extract_focused_recovery_reason_counts(text))
         if not terminal_success:
+            if text_has_semantic_envelope_contract_signature(text):
+                runtime_contract_failed_hit = True
+                runner_error_hit = True
+                error_codes.append("runtime_contract_failed")
             if text_has_runtime_contract_parse_signature(text):
                 runtime_contract_parse_failed_hit = True
                 runtime_contract_failed_hit = True

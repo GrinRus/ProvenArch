@@ -678,6 +678,24 @@ contains_runner_unavailable_signature() {
     if grep -E -q "$structured_pattern" "$path"; then
       return 0
     fi
+    if [[ "$path" == *.ndjson ]]; then
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        # Structured runtime output records include prompts, tool inputs, and
+        # hashes. Only inspect stderr records for generic capacity signals;
+        # provider errors are also preserved in raw stderr files.
+        if printf '%s\n' "$line" | grep -E -q '"kind"[[:space:]]*:[[:space:]]*"runtime_output"' && \
+          ! printf '%s\n' "$line" | grep -E -q '"stream"[[:space:]]*:[[:space:]]*"stderr"'; then
+          continue
+        fi
+        if printf '%s\n' "$line" | grep -E -q "$generic_pattern"; then
+          if printf '%s\n' "$line" | grep -E -q "$noise_pattern"; then
+            continue
+          fi
+          return 0
+        fi
+      done < "$path"
+      continue
+    fi
     while IFS= read -r line || [[ -n "$line" ]]; do
       if printf '%s\n' "$line" | grep -E -q "$generic_pattern"; then
         if printf '%s\n' "$line" | grep -E -q "$noise_pattern"; then
@@ -686,6 +704,17 @@ contains_runner_unavailable_signature() {
         return 0
       fi
     done < "$path"
+  done
+  return 1
+}
+
+contains_semantic_envelope_contract_signature() {
+  local -a paths=("$@")
+  local path
+  for path in "${paths[@]}"; do
+    if [[ -f "$path" ]] && grep -E -q "semantic envelope is invalid|references dangling (from|to) endpoint" "$path"; then
+      return 0
+    fi
   done
   return 1
 }
@@ -1165,6 +1194,9 @@ classify_run_failure() {
     run_class="runtime_contract_failed"
   fi
   if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_collect_document_path_contract_signature "${classify_log_paths[@]}"; then
+    run_class="runtime_contract_failed"
+  fi
+  if [[ "$run_class" == "none" && "$terminal_success" != "1" ]] && contains_semantic_envelope_contract_signature "${classify_log_paths[@]}"; then
     run_class="runtime_contract_failed"
   fi
   if [[ "$run_class" == "none" && "$validator_verdict_failed" == "1" ]]; then

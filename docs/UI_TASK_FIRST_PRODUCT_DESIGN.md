@@ -159,9 +159,14 @@ Selected Task, Attempt, artifact/entity, evidence authority, viewer mode и filt
 
 1. Failed/retrying scope подсвечивается один раз в Task summary.
 2. Recovery panel отвечает: что произошло, что сохранено, что произойдёт дальше.
-3. `Retry failed scope` создаёт child Attempt; terminal Attempt не мутируется.
-4. `Change runner for next attempt` открывает runner preset; active Attempt остаётся immutable.
-5. Raw logs и runtime JSON доступны только через Diagnostics disclosure.
+3. Если создание Task прошло, но admission первого Attempt временно не удался, Task detail
+   сохраняет явный `Start Attempt`/`Retry Start`; повтор использует тот же idempotency key и после
+   успеха открывает именно admitted Attempt.
+4. `Retry failed scope` создаёт child Attempt; terminal Attempt не мутируется.
+5. Если terminal Attempt не имеет доступного outcome review, Task identity и history остаются
+   видимыми, а рядом предлагается повторить загрузку review.
+6. `Change runner for next attempt` открывает runner preset; active Attempt остаётся immutable.
+7. Raw logs и runtime JSON доступны только через Diagnostics disclosure.
 
 ### 6.4 Knowledge review
 

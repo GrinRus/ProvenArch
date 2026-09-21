@@ -95,6 +95,20 @@ func collectDocumentRuntimeProcessContaminated(text string) bool {
 		"guessed evidence",
 		"guessed repo",
 		"guessed repository",
+		// These are runtime-only paths. They are valid read_context_roots or
+		// staging inputs, but must never leak into operator-facing collect
+		// documents. Artifact audit rejects the same markers at promotion;
+		// reject them here so the existing provider-authored pair repair can
+		// rewrite the offending document before downstream steps.
+		".acp/repos/",
+		"reports/taskruns/",
+		"staging/final/",
+		"staging/shards/",
+		"write_root",
+		"draft_final_root",
+		"draft_artifact_enrichment",
+		"current run shard",
+		"runtime recovery",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

@@ -423,6 +423,12 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
 
   await page.setViewportSize({ width: 1024, height: 768 });
   await expectNoHorizontalOverflow(page);
+  const tabletNavMetrics = await page.locator(".primary-nav").evaluate((nav) => ({
+    width: Math.round(nav.getBoundingClientRect().width),
+    visibleLabels: Array.from(nav.querySelectorAll<HTMLElement>(".nav-label")).filter((label) => getComputedStyle(label).display !== "none" && getComputedStyle(label).clipPath !== "inset(50%)").length,
+  }));
+  expect(tabletNavMetrics.width).toBe(64);
+  expect(tabletNavMetrics.visibleLabels).toBe(0);
   await captureEvidenceScreenshot(page, "knowledge-empty-tablet.png");
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -432,6 +438,27 @@ test("qa recovery mock: failed Ask run remains understandable and retryable", as
   await page.goto("/tasks");
   await expect(page.getByTestId("task-route-inbox")).toBeVisible();
   await captureEvidenceScreenshot(page, "home-mobile.png");
+  const mobileNavMetrics = await page.locator(".primary-nav a").evaluateAll((links) => {
+    const visibleLinks = links.filter((link) => getComputedStyle(link).display !== "none");
+    const rects = visibleLinks.map((link) => link.getBoundingClientRect());
+    return {
+      count: visibleLinks.length,
+      right: Math.round(Math.max(...rects.map((rect) => rect.right))),
+      viewport: window.innerWidth,
+      widths: rects.map((rect) => Math.round(rect.width)),
+    };
+  });
+  expect(mobileNavMetrics.count).toBe(3);
+  expect(mobileNavMetrics.right).toBe(380);
+  expect(Math.max(...mobileNavMetrics.widths) - Math.min(...mobileNavMetrics.widths)).toBeLessThanOrEqual(1);
+
+  await page.getByRole("button", { name: "Details" }).click();
+  const detailsDialog = page.getByRole("dialog", { name: "Workspace details" });
+  await expect(detailsDialog).toBeVisible();
+  await detailsDialog.getByRole("button", { name: "Open Settings" }).click();
+  await expect(page.getByTestId("settings-page")).toBeVisible();
+  await page.goto("/tasks");
+  await expect(page.getByTestId("task-route-inbox")).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 980 });
   await page.getByTestId("stage-ask").click();

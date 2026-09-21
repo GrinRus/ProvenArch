@@ -48,7 +48,7 @@ export function QAFailureRecovery({
         <div><span className="metric-label">Audit evidence</span><strong>{auditRefs}</strong></div>
         <div><span className="metric-label">Warnings</span><strong>{warningCount}</strong></div>
       </div>
-      {qaRun.error ? <p className="status err">{qaRun.error}</p> : null}
+      {qaRun.error ? <p className="status err" role="alert">{qaRun.error}</p> : null}
       {warningCount > 0 ? <p className="status warn">Warnings: {(qaRun.warnings ?? []).join(", ")}</p> : null}
       <div className="actions qa-recovery-actions">
         <button type="button" data-testid="qa-retry-run-btn" onClick={onRetry} disabled={busy || !canRetry}>{retryLabel}</button>

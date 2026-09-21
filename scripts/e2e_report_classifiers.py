@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 import re
 
 FAILURE_CLASS_PRECEDENCE = {
@@ -93,12 +94,60 @@ def text_has_structured_runner_unavailable_signal(text: str) -> bool:
     haystack = str(text or "")
     for line in haystack.splitlines():
         if '"kind":"runtime_output"' in line or '"kind": "runtime_output"' in line:
-            if text_has_raw_provider_runner_unavailable_signal(line):
+            # Runtime-output records also contain the provider command prompt,
+            # tool inputs, and prompt hashes. Those fields may mention 429 or
+            # rate limits as examples and are not provider diagnostics. Inspect
+            # only stderr and result/error fields from the nested event.
+            if text_has_raw_provider_runner_unavailable_signal(
+                structured_runtime_output_diagnostics(line)
+            ):
                 return True
             continue
         if text_has_runner_unavailable_signal(line):
             return True
     return False
+
+
+def structured_runtime_output_diagnostics(line: str) -> str:
+    try:
+        outer = json.loads(line)
+    except (TypeError, json.JSONDecodeError):
+        return ""
+    if not isinstance(outer, dict):
+        return ""
+    if str(outer.get("kind") or "").strip() != "runtime_output":
+        return ""
+
+    message = outer.get("message")
+    stream = str(outer.get("stream") or "").strip().lower()
+    if stream == "stderr":
+        return str(message or "")
+
+    if isinstance(message, str):
+        try:
+            message = json.loads(message)
+        except json.JSONDecodeError:
+            # Plain stdout text is allowed as a provider diagnostic, but a
+            # structured prompt/event is intentionally not scanned wholesale.
+            return message if message.strip() and not message.lstrip().startswith("{") else ""
+
+    if not isinstance(message, dict):
+        return ""
+    diagnostics: list[str] = []
+    for key in ("error_code", "error", "error_message", "message", "result", "detail", "status"):
+        value = message.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)) and key == "message":
+            # Assistant/tool events put the entire prompt and command input
+            # under message. Do not treat that narrated content as provider
+            # stderr; concrete result/error objects remain inspectable below.
+            continue
+        if isinstance(value, (dict, list)):
+            diagnostics.append(json.dumps(value, sort_keys=True))
+        else:
+            diagnostics.append(str(value))
+    return "\n".join(diagnostics)
 
 
 def text_has_raw_provider_runner_unavailable_signal(text: str) -> bool:
@@ -117,6 +166,14 @@ def text_has_runtime_contract_parse_signature(text: str) -> bool:
     return bool(
         re.search(r"parse runtime draft manifest", haystack, flags=re.IGNORECASE)
         and re.search(r"unknown field", haystack, flags=re.IGNORECASE)
+    )
+
+
+def text_has_semantic_envelope_contract_signature(text: str) -> bool:
+    haystack = str(text or "")
+    return bool(
+        re.search(r"semantic envelope is invalid", haystack, flags=re.IGNORECASE)
+        or re.search(r"references dangling (?:from|to) endpoint", haystack, flags=re.IGNORECASE)
     )
 
 
