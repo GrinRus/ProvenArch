@@ -2,6 +2,29 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.16 - 2026-09-21
+
+Owner-authorized unqualified beta prerelease carrying release-gate stability fixes for Task action flows.
+
+Highlights:
+- Made retry/rerun action-flow coverage deterministic by isolating parent Attempt gate semantics from
+  unrelated asynchronous fake-pipeline outcomes.
+- Kept real asynchronous admission coverage in the dedicated Task/Attempt runtime tests while making
+  child-attempt lineage and edited-Task inheritance checks stable in full CI runs.
+
+Verification notes:
+- The complete `internal/api` Go package passes locally after the fix; the release workflow will rerun
+  the repository-wide contracts, Go, Python, UI, lint and binary checks for this tag.
+- Trusted-machine release-fast baseline evidence remains the same owner-waived evidence recorded for
+  `v0.1.15`; no synthetic provider evidence is used for release qualification.
+
+Known limitations:
+- `v0.1.16` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim canonical
+  `RELEASE READY`; full Qwen/Claude live qualification and the composite release verdict remain waived.
+- Claude failed the workspace write audit, Codex exhausted artifact-repair attempts, and the
+  parallel-default sweep was blocked before provider execution by the host's broken x86_64 Python 3.14.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.15 - 2026-09-21
 
 Owner-authorized unqualified beta prerelease for UI recovery, task-first flows and clearer

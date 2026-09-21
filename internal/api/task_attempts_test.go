@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -254,19 +255,9 @@ func TestTaskAttemptRerunCreatesChildAttempt(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 	created := createTaskForAttemptTest(t, httpServer.URL, "retry")
-	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"parent-key"}`)
-	var firstPayload struct {
-		Attempt producttasks.Attempt `json:"attempt"`
-	}
-	if err := json.NewDecoder(first.Body).Decode(&firstPayload); err != nil {
-		first.Body.Close()
-		t.Fatalf("decode parent: %v", err)
-	}
-	first.Body.Close()
-	waitForTerminalAttempt(t, server, firstPayload.Attempt.AttemptID)
-	waitForServiceIdle(t, server)
+	parent := seedTerminalAttemptForActionTest(t, server, created.TaskID, "parent-key", producttasks.AttemptSucceeded)
 
-	run := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+firstPayload.Attempt.AttemptID+"/rerun", `{"idempotency_key":"child-key","reason":"repair"}`)
+	run := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+parent.AttemptID+"/rerun", `{"idempotency_key":"child-key","reason":"repair"}`)
 	var retryPayload struct {
 		Attempt producttasks.Attempt `json:"attempt"`
 	}
@@ -275,7 +266,7 @@ func TestTaskAttemptRerunCreatesChildAttempt(t *testing.T) {
 		t.Fatalf("decode retry: %v", err)
 	}
 	run.Body.Close()
-	if run.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == firstPayload.Attempt.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != firstPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
+	if run.StatusCode != http.StatusAccepted || retryPayload.Attempt.AttemptID == parent.AttemptID || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != parent.AttemptID || retryPayload.Attempt.RetryReason != "repair" {
 		t.Fatalf("rerun did not create child attempt: status=%d payload=%+v", run.StatusCode, retryPayload)
 	}
 	// The Attempt watcher persists terminal history after the runtime finishes.
@@ -288,18 +279,9 @@ func TestTaskAttemptActionsDistinguishRetryAndRerun(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 	created := createTaskForAttemptTest(t, httpServer.URL, "action-gates")
-	first := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"action-parent"}`)
-	var parentPayload struct {
-		Attempt producttasks.Attempt `json:"attempt"`
-	}
-	if err := json.NewDecoder(first.Body).Decode(&parentPayload); err != nil {
-		first.Body.Close()
-		t.Fatalf("decode parent: %v", err)
-	}
-	first.Body.Close()
-	waitForTerminalAttempt(t, server, parentPayload.Attempt.AttemptID)
+	parent := seedTerminalAttemptForActionTest(t, server, created.TaskID, "action-parent", producttasks.AttemptSucceeded)
 
-	wrongAction := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+parentPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"wrong-action"}`)
+	wrongAction := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+parent.AttemptID+"/retry", `{"idempotency_key":"wrong-action"}`)
 	body, _ := io.ReadAll(wrongAction.Body)
 	wrongAction.Body.Close()
 	if wrongAction.StatusCode != http.StatusConflict || !strings.Contains(string(body), "retry_parent_not_retryable") {
@@ -310,25 +292,16 @@ func TestTaskAttemptActionsDistinguishRetryAndRerun(t *testing.T) {
 	failureHTTP := httptest.NewServer(failureServer.Handler())
 	defer failureHTTP.Close()
 	failureTask := createTaskForAttemptTest(t, failureHTTP.URL, "retry-gate")
-	failed := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts", `{"idempotency_key":"failed-parent"}`)
-	var failedPayload struct {
-		Attempt producttasks.Attempt `json:"attempt"`
-	}
-	if err := json.NewDecoder(failed.Body).Decode(&failedPayload); err != nil {
-		failed.Body.Close()
-		t.Fatalf("decode failed parent: %v", err)
-	}
-	failed.Body.Close()
-	waitForTerminalAttempt(t, failureServer, failedPayload.Attempt.AttemptID)
+	failedParent := seedTerminalAttemptForActionTest(t, failureServer, failureTask.TaskID, "failed-parent", producttasks.AttemptFailed)
 
-	wrongRerun := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedPayload.Attempt.AttemptID+"/rerun", `{"idempotency_key":"wrong-rerun"}`)
+	wrongRerun := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedParent.AttemptID+"/rerun", `{"idempotency_key":"wrong-rerun"}`)
 	body, _ = io.ReadAll(wrongRerun.Body)
 	wrongRerun.Body.Close()
 	if wrongRerun.StatusCode != http.StatusConflict || !strings.Contains(string(body), "rerun_parent_not_succeeded") {
 		t.Fatalf("failed parent was accepted by rerun: status=%d body=%s", wrongRerun.StatusCode, body)
 	}
 
-	retry := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedPayload.Attempt.AttemptID+"/retry", `{"idempotency_key":"valid-retry"}`)
+	retry := postJSON(t, failureHTTP.URL+"/api/tasks/"+failureTask.TaskID+"/attempts/"+failedParent.AttemptID+"/retry", `{"idempotency_key":"valid-retry"}`)
 	var retryPayload struct {
 		Attempt producttasks.Attempt `json:"attempt"`
 	}
@@ -337,7 +310,7 @@ func TestTaskAttemptActionsDistinguishRetryAndRerun(t *testing.T) {
 		t.Fatalf("decode child retry: %v", err)
 	}
 	retry.Body.Close()
-	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != failedPayload.Attempt.AttemptID || retryPayload.Attempt.RetryReason != "operator_retry" {
+	if retry.StatusCode != http.StatusAccepted || retryPayload.Attempt.ParentAttemptID == nil || *retryPayload.Attempt.ParentAttemptID != failedParent.AttemptID || retryPayload.Attempt.RetryReason != "operator_retry" {
 		t.Fatalf("failed parent did not create retry child: status=%d payload=%+v", retry.StatusCode, retryPayload.Attempt)
 	}
 	waitForTerminalAttempt(t, failureServer, retryPayload.Attempt.AttemptID)
@@ -348,15 +321,7 @@ func TestTaskAttemptEditDoesNotMutateAdmittedSnapshot(t *testing.T) {
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 	created := createTaskForAttemptTest(t, httpServer.URL, "immutable-edit")
-	admission := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts", `{"idempotency_key":"immutable-parent"}`)
-	var admitted struct {
-		Attempt producttasks.Attempt `json:"attempt"`
-	}
-	if err := json.NewDecoder(admission.Body).Decode(&admitted); err != nil {
-		admission.Body.Close()
-		t.Fatalf("decode admitted attempt: %v", err)
-	}
-	admission.Body.Close()
+	admitted := seedAdmittedAttemptForActionTest(t, server, created.TaskID, "immutable-parent")
 
 	patchRequest, err := http.NewRequest(http.MethodPatch, httpServer.URL+"/api/tasks/"+created.TaskID, strings.NewReader(`{"expected_revision":1,"title":"edited title","goal":"edited goal","context":"edited context"}`))
 	if err != nil {
@@ -379,7 +344,7 @@ func TestTaskAttemptEditDoesNotMutateAdmittedSnapshot(t *testing.T) {
 		t.Fatalf("task edit failed: status=%d task=%+v", patchResponse.StatusCode, patched.Task)
 	}
 
-	attemptResponse, err := http.Get(httpServer.URL + "/api/tasks/" + created.TaskID + "/attempts/" + admitted.Attempt.AttemptID)
+	attemptResponse, err := http.Get(httpServer.URL + "/api/tasks/" + created.TaskID + "/attempts/" + admitted.AttemptID)
 	if err != nil {
 		t.Fatalf("read immutable attempt: %v", err)
 	}
@@ -394,11 +359,11 @@ func TestTaskAttemptEditDoesNotMutateAdmittedSnapshot(t *testing.T) {
 	if attemptResponse.StatusCode != http.StatusOK {
 		t.Fatalf("read immutable attempt status=%d", attemptResponse.StatusCode)
 	}
-	if !reflect.DeepEqual(admitted.Attempt.IntentSnapshot, after.Attempt.IntentSnapshot) || !reflect.DeepEqual(admitted.Attempt.EffectiveRuntime, after.Attempt.EffectiveRuntime) {
-		t.Fatalf("Task edit mutated admitted Attempt: before=(%+v,%+v) after=(%+v,%+v)", admitted.Attempt.IntentSnapshot, admitted.Attempt.EffectiveRuntime, after.Attempt.IntentSnapshot, after.Attempt.EffectiveRuntime)
+	if !reflect.DeepEqual(admitted.IntentSnapshot, after.Attempt.IntentSnapshot) || !reflect.DeepEqual(admitted.EffectiveRuntime, after.Attempt.EffectiveRuntime) {
+		t.Fatalf("Task edit mutated admitted Attempt: before=(%+v,%+v) after=(%+v,%+v)", admitted.IntentSnapshot, admitted.EffectiveRuntime, after.Attempt.IntentSnapshot, after.Attempt.EffectiveRuntime)
 	}
-	waitForTerminalAttempt(t, server, admitted.Attempt.AttemptID)
-	rerun := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+admitted.Attempt.AttemptID+"/rerun", `{"idempotency_key":"edited-child"}`)
+	markSeededAttemptTerminal(t, server, created.TaskID, admitted.AttemptID, producttasks.AttemptSucceeded)
+	rerun := postJSON(t, httpServer.URL+"/api/tasks/"+created.TaskID+"/attempts/"+admitted.AttemptID+"/rerun", `{"idempotency_key":"edited-child"}`)
 	var child struct {
 		Attempt producttasks.Attempt `json:"attempt"`
 	}
@@ -407,7 +372,7 @@ func TestTaskAttemptEditDoesNotMutateAdmittedSnapshot(t *testing.T) {
 		t.Fatalf("decode edited child: %v", err)
 	}
 	rerun.Body.Close()
-	if rerun.StatusCode != http.StatusAccepted || child.Attempt.TaskRevision != 2 || child.Attempt.IntentSnapshot.Title != "edited title" || child.Attempt.IntentSnapshot.Goal != "edited goal" || child.Attempt.ParentAttemptID == nil || *child.Attempt.ParentAttemptID != admitted.Attempt.AttemptID {
+	if rerun.StatusCode != http.StatusAccepted || child.Attempt.TaskRevision != 2 || child.Attempt.IntentSnapshot.Title != "edited title" || child.Attempt.IntentSnapshot.Goal != "edited goal" || child.Attempt.ParentAttemptID == nil || *child.Attempt.ParentAttemptID != admitted.AttemptID {
 		t.Fatalf("edited Task values were not explicitly inherited by child: status=%d child=%+v", rerun.StatusCode, child.Attempt)
 	}
 	waitForTerminalAttempt(t, server, child.Attempt.AttemptID)
@@ -700,6 +665,88 @@ func createTaskForAttemptTest(t *testing.T, baseURL, title string) producttasks.
 		t.Fatalf("create task failed: %d", response.StatusCode)
 	}
 	return payload.Task
+}
+
+func seedAdmittedAttemptForActionTest(t *testing.T, server *Server, taskID, key string) producttasks.Attempt {
+	t.Helper()
+	history := server.taskRegistry.Snapshot()
+	task, ok := findTask(history, taskID)
+	if !ok {
+		t.Fatalf("task %s was not found while seeding an admitted attempt", taskID)
+	}
+	snapshot := server.sessionSnapshot()
+	fingerprint := attemptFingerprint(attemptAdmissionFingerprint{
+		TaskID: task.TaskID, TaskRevision: task.Revision, Pipeline: string(orchestrator.PipelineInit), Intent: string(orchestrator.RunIntentStart),
+	})
+	attempt, err := server.buildAdmittedAttempt(snapshot, task, orchestrator.PipelineInit, orchestrator.RunIntentStart, key, fingerprint, nil, "")
+	if err != nil {
+		t.Fatalf("build seeded admitted attempt: %v", err)
+	}
+	if err := server.taskRegistry.Update(func(candidate *producttasks.History) error {
+		return appendAttemptToHistory(candidate, task.TaskID, attempt)
+	}); err != nil {
+		t.Fatalf("persist seeded admitted attempt: %v", err)
+	}
+	return attempt
+}
+
+func seedTerminalAttemptForActionTest(t *testing.T, server *Server, taskID, key string, status producttasks.AttemptStatus) producttasks.Attempt {
+	t.Helper()
+	attempt := seedAdmittedAttemptForActionTest(t, server, taskID, key)
+	return markSeededAttemptTerminal(t, server, taskID, attempt.AttemptID, status)
+}
+
+func markSeededAttemptTerminal(t *testing.T, server *Server, taskID, attemptID string, status producttasks.AttemptStatus) producttasks.Attempt {
+	t.Helper()
+	if !isTerminalAttempt(status) {
+		t.Fatalf("seeded attempt status %q is not terminal", status)
+	}
+	var terminal producttasks.Attempt
+	err := server.taskRegistry.Update(func(history *producttasks.History) error {
+		attemptIndex := -1
+		for index := range history.Attempts {
+			if history.Attempts[index].TaskID == taskID && history.Attempts[index].AttemptID == attemptID {
+				attemptIndex = index
+				break
+			}
+		}
+		if attemptIndex < 0 {
+			return fmt.Errorf("seeded attempt %s was not found", attemptID)
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		attempt := &history.Attempts[attemptIndex]
+		attempt.Status = status
+		attempt.StartedAt = &now
+		attempt.FinishedAt = &now
+		attempt.TerminalSummary = &producttasks.TerminalSummary{Status: status, Summary: "seeded terminal attempt", RetainedEvidence: attempt.RetainedEvidence}
+		if status == producttasks.AttemptSucceeded {
+			attempt.Outcome = producttasks.Outcome{State: producttasks.Available, AttemptID: attempt.AttemptID, RunID: attempt.RunID, SnapshotPath: "reports/taskruns/" + attempt.RunID}
+		} else {
+			attempt.Outcome = producttasks.Outcome{State: producttasks.Unavailable, UnavailableReason: "seeded terminal attempt did not produce a successful outcome"}
+		}
+		taskIndex := indexTask(history.Tasks, taskID)
+		if taskIndex < 0 {
+			return fmt.Errorf("task %s was not found for seeded attempt", taskID)
+		}
+		for summaryIndex := range history.Tasks[taskIndex].Attempts {
+			summary := &history.Tasks[taskIndex].Attempts[summaryIndex]
+			if summary.AttemptID != attemptID {
+				continue
+			}
+			summary.Status = status
+			summary.UpdatedAt = now
+			summary.FinishedAt = &now
+			history.Tasks[taskIndex].LastActivityAt = now
+			history.Tasks[taskIndex].Outcome = attempt.Outcome
+			terminal = producttasks.CloneAttempt(*attempt)
+			return nil
+		}
+		return fmt.Errorf("attempt summary %s was not found for task %s", attemptID, taskID)
+	})
+	if err != nil {
+		t.Fatalf("mark seeded attempt %s terminal: %v", attemptID, err)
+	}
+	return terminal
 }
 
 func waitForTerminalAttempt(t *testing.T, server *Server, attemptID string) {
