@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tag": "v0.1.15",
+  "decision": "owner_waived",
+  "release_state": "UNQUALIFIED PRERELEASE",
+  "base_qualification_sha": "d618c72d0ad0bb6fda4507b8147a7d93ed5a5026",
+  "approved_by": "GrinRus",
+  "reason": "Repository owner explicitly authorized publishing v0.1.15 as an unqualified prerelease after the UI and flow hardening. The release-fast baseline passed Qwen backend and frontend smoke, while Claude failed the workspace write audit and Codex exhausted refresh artifact repairs; the parallel-default sweep was blocked by the host's broken x86_64 Python 3.14 resolution. No composite release verdict is claimed.",
+  "waived_requirements": [
+    "qwen-code live evidence",
+    "claude-code live evidence",
+    "composite release verdict"
+  ]
+}
