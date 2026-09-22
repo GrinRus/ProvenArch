@@ -153,6 +153,35 @@ func TestFocusedRepairActivityPolicyUsesPreArtifactWallClockCap(t *testing.T) {
 	}
 }
 
+func TestStep2FocusedRepairActivityPolicyUsesProviderDraftWindow(t *testing.T) {
+	t.Parallel()
+
+	base := ActivityPolicy{
+		PreArtifactStallWindow:      90 * time.Second,
+		PreArtifactWallClockWindow:  90 * time.Second,
+		RetryPreArtifactStallWindow: 90 * time.Second,
+	}
+	for _, provider := range []acpruntime.Provider{acpruntime.ProviderClaudeCode, acpruntime.ProviderCodexCode} {
+		policy := step2FocusedRepairActivityPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"}, provider, base)
+		if got, want := policy.PreArtifactStallWindow, step2FocusedRepairPreArtifactWindow; got != want {
+			t.Fatalf("%s step2 focused repair pre-artifact stall window = %s, want %s", provider, got, want)
+		}
+		if got, want := policy.PreArtifactWallClockWindow, step2FocusedRepairPreArtifactWindow; got != want {
+			t.Fatalf("%s step2 focused repair pre-artifact wall clock window = %s, want %s", provider, got, want)
+		}
+		if got, want := policy.RetryPreArtifactStallWindow, step2FocusedRepairPreArtifactWindow; got != want {
+			t.Fatalf("%s step2 focused repair retry pre-artifact window = %s, want %s", provider, got, want)
+		}
+	}
+
+	for _, provider := range []acpruntime.Provider{acpruntime.ProviderQwenCode, acpruntime.Provider("test-provider")} {
+		policy := step2FocusedRepairActivityPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"}, provider, base)
+		if policy != base {
+			t.Fatalf("%s should keep its provider-specific focused repair policy: got %#v, want %#v", provider, policy, base)
+		}
+	}
+}
+
 func TestRunHeadlessProviderManagedPermissionsFailFastWithoutProtocol(t *testing.T) {
 	t.Parallel()
 
