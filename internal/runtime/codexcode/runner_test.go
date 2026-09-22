@@ -199,6 +199,14 @@ func TestCodexAdapterMonitorsPreArtifactStallsForArtifactSteps(t *testing.T) {
 	if policy.PostArtifactStallWindow != 0 || policy.PartialArtifactStallWindow != 0 {
 		t.Fatalf("draft steps must keep shared post-artifact defaults, got %+v", policy)
 	}
+
+	policy = (codexAdapter{}).ActivityPolicy(acpruntime.Task{StepID: "init.step2.asis_docs"})
+	if got, want := policy.PreArtifactStallWindow, 5*time.Minute; got != want {
+		t.Fatalf("expected codex step2 pre-artifact window %s, got %s", want, got)
+	}
+	if got, want := policy.RetryPreArtifactStallWindow, 5*time.Minute; got != want {
+		t.Fatalf("expected codex step2 retry pre-artifact window %s, got %s", want, got)
+	}
 }
 
 func TestCodexAdapterRetriesInvalidOrMissingArtifactsOnce(t *testing.T) {

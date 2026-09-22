@@ -35,6 +35,7 @@ const (
 	runHistoryRetention     = 500
 	historyDiagnosticsLimit = 20
 	runLogsPath             = "reports/taskruns/logs"
+	runRawPath              = "reports/taskruns/raw"
 )
 
 const (

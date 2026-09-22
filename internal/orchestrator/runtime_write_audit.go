@@ -302,6 +302,7 @@ func runtimeWriteAuditExcludedRoots(task acpruntime.Task) []string {
 	if workspaceRoot != "" {
 		roots = append(roots,
 			filepath.Join(workspaceRoot, filepath.FromSlash(runLogsPath)),
+			filepath.Join(workspaceRoot, filepath.FromSlash(runRawPath)),
 			filepath.Join(workspaceRoot, filepath.FromSlash(runHistoryPath)),
 			filepath.Join(workspaceRoot, filepath.FromSlash(runHistoryPath+".last-good")),
 		)
@@ -326,7 +327,7 @@ func normalizeAbsoluteAuditRoots(roots []string) []string {
 	out := []string{}
 	seen := map[string]struct{}{}
 	for _, root := range roots {
-		root = absClean(root)
+		root = auditPathIdentity(root)
 		if root == "" {
 			continue
 		}
@@ -351,6 +352,10 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 	}
 	defer workspaceHandle.Close()
 	excluded := runtimeWriteAuditExcludedRoots(task)
+	auditWorkspaceRoot := auditPathIdentity(workspaceRoot)
+	if auditWorkspaceRoot == "" {
+		auditWorkspaceRoot = workspaceRoot
+	}
 	entries := map[string]runtimeWorkspaceEntrySnapshot{}
 	err = workspaceHandle.WalkDir(".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -364,13 +369,14 @@ func snapshotUnclassifiedWorkspaceEntries(task acpruntime.Task) (map[string]runt
 			return nil
 		}
 		absPath := absClean(filepath.Join(workspaceRoot, relPath))
-		if absPath != workspaceRoot && runtimeWriteAuditPathExcluded(absPath, excluded, task) {
+		auditPath := filepath.Join(auditWorkspaceRoot, relPath)
+		if absPath != workspaceRoot && runtimeWriteAuditPathExcluded(auditPath, excluded, task, auditWorkspaceRoot) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if entry.IsDir() && pathIsAncestorOfAny(absPath, excluded) {
+		if entry.IsDir() && pathIsAncestorOfAny(auditPath, excluded) {
 			// Runtime/orchestrator roots may be created during the provider call.
 			// Their parent directories are envelope plumbing, not independent writes.
 			return nil
@@ -413,11 +419,11 @@ func pathInsideAny(path string, roots []string) bool {
 	return false
 }
 
-func runtimeWriteAuditPathExcluded(path string, roots []string, task acpruntime.Task) bool {
+func runtimeWriteAuditPathExcluded(path string, roots []string, task acpruntime.Task, workspaceRoot string) bool {
 	if pathInsideAny(path, roots) {
 		return true
 	}
-	workspaceRoot := absClean(task.Workspace)
+	workspaceRoot = absClean(workspaceRoot)
 	if workspaceRoot == "" {
 		return false
 	}
@@ -563,7 +569,7 @@ func runtimeAuditRootIsExcluded(root string, task acpruntime.Task) bool {
 	}
 	for _, excluded := range []string{task.WriteRoot, task.DraftFinalRoot} {
 		absExcluded := absClean(excluded)
-		if absExcluded != "" && pathInsideOrEqual(root, absExcluded) {
+		if absExcluded != "" && pathInsideOrEqualResolved(root, absExcluded) {
 			return true
 		}
 	}
@@ -905,4 +911,8 @@ func pathInsideOrEqual(pathValue string, root string) bool {
 		return false
 	}
 	return rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
+}
+
+func pathInsideOrEqualResolved(pathValue string, root string) bool {
+	return pathInsideOrEqual(auditPathIdentity(pathValue), auditPathIdentity(root))
 }

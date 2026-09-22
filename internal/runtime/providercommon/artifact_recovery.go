@@ -2515,11 +2515,35 @@ func runFocusedArtifactRepairCommandWithPolicy(ctx context.Context, task acprunt
 		return acpruntime.Result{}, nil, classifyCommandFailure(adapter, task, baseResult, err)
 	}
 	repairPolicy := focusedRepairActivityPolicy(adapter.ActivityPolicy(task), true)
+	repairPolicy = step2FocusedRepairActivityPolicy(task, adapter.Provider(), repairPolicy)
 	if configure != nil {
 		repairPolicy = configure(repairPolicy)
 	}
 	repairResult, repairErr := runCommandSpecWithTransition(ctx, task, spec, repairPolicy, "focused_repair")
 	return repairResult, repairErr, nil
+}
+
+const step2FocusedRepairPreArtifactWindow = 5 * time.Minute
+
+func step2FocusedRepairActivityPolicy(task acpruntime.Task, provider acpruntime.Provider, policy ActivityPolicy) ActivityPolicy {
+	if provider != acpruntime.ProviderClaudeCode && provider != acpruntime.ProviderCodexCode {
+		return policy
+	}
+	switch strings.TrimSpace(task.StepID) {
+	case "init.step2.asis_docs", "refresh.step2.asis_docs":
+	default:
+		return policy
+	}
+	if policy.PreArtifactStallWindow < step2FocusedRepairPreArtifactWindow {
+		policy.PreArtifactStallWindow = step2FocusedRepairPreArtifactWindow
+	}
+	if policy.PreArtifactWallClockWindow < step2FocusedRepairPreArtifactWindow {
+		policy.PreArtifactWallClockWindow = step2FocusedRepairPreArtifactWindow
+	}
+	if policy.RetryPreArtifactStallWindow < step2FocusedRepairPreArtifactWindow {
+		policy.RetryPreArtifactStallWindow = step2FocusedRepairPreArtifactWindow
+	}
+	return policy
 }
 
 func collectArtifactPairRepairActivityPolicy(policy ActivityPolicy) ActivityPolicy {
