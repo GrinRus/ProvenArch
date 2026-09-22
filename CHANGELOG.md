@@ -2,6 +2,36 @@
 
 All notable user-facing changes are tracked here. ProvenArch uses SemVer-style release tags, with `v0.x` treated as beta/pre-release foundation.
 
+## v0.1.17 - 2026-09-22
+
+Owner-authorized unqualified beta prerelease for Claude/Codex live artifact-flow hardening and
+release-gate recovery validation.
+
+Highlights:
+- Preserved validated live artifacts across provider stalls and focused repair retries, with
+  deterministic proposal fallback when a provider exhausts repair attempts.
+- Revalidated the Task-first UI flow with headed live E2E across Qwen, Claude and Codex on the
+  single-repository and multi-path baseline surfaces.
+- Kept release evidence fail-closed: host preflight failures and incomplete sweep coverage do not
+  become a `RELEASE READY` claim.
+
+Verification notes:
+- Deterministic contracts, Go/Python/UI tests, lint and production build passed in the release
+  precheck.
+- The trusted release-fast single-git matrix passed all three providers in baseline and
+  parallel-default. Multi-path baseline backend runs passed `3/3`, and the corrected headed
+  frontend retry passed `3/3`.
+- The canonical multi-path parallel-default sweep was blocked before provider execution by the
+  trusted host's Codex artifact-smoke write-sentinel failure while the data volume was full.
+
+Known limitations:
+- `v0.1.17` is an explicitly owner-authorized `UNQUALIFIED PRERELEASE`. It does not claim
+  canonical `RELEASE READY`; the composite release verdict is waived for this exact tag.
+- The multi-path baseline still records provider repair pressure (including one exhausted Codex
+  repair path and a Qwen analysis-quality warning); these are retained as release evidence rather
+  than hidden by the waiver.
+- Hosted/multi-tenant mode and security/compliance enforcement remain out of scope.
+
 ## v0.1.16 - 2026-09-21
 
 Owner-authorized unqualified beta prerelease carrying release-gate stability fixes for Task action flows.

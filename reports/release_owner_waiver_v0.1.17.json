@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "tag": "v0.1.17",
+  "decision": "owner_waived",
+  "release_state": "UNQUALIFIED PRERELEASE",
+  "base_qualification_sha": "85c224d1f68b63e1aadcd1f7f06bd9c0914aa162",
+  "approved_by": "GrinRus",
+  "reason": "Repository owner explicitly authorized publishing v0.1.17 as an unqualified prerelease after deterministic release checks passed and the live matrix was revalidated. Single-git baseline and parallel-default passed all providers; multi-path baseline backend and corrected headed frontend retries passed, but the canonical multi-path parallel-default sweep was blocked before provider execution by the trusted host's Codex artifact-smoke write-sentinel failure while the data volume was full. Multi-path Codex repair exhaustion and Qwen analysis-quality warnings remain visible in the evidence. No composite RELEASE READY verdict is claimed.",
+  "waived_requirements": [
+    "qwen-code live evidence",
+    "claude-code live evidence",
+    "composite release verdict"
+  ]
+}
