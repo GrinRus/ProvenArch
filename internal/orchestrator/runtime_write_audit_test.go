@@ -81,6 +81,7 @@ func TestRuntimeWriteAuditAllowsOrchestratorOwnedRunStateWrites(t *testing.T) {
 		filepath.Join(ws.Path, filepath.FromSlash(runHistoryPath+".last-good")),
 		filepath.Join(ws.Path, filepath.FromSlash(filepath.Dir(runHistoryPath)), ".run-history.json.tmp-test"),
 		filepath.Join(ws.Path, filepath.FromSlash(filepath.Dir(runHistoryPath)), ".run-history.json.last-good.tmp-test"),
+		filepath.Join(ws.Path, filepath.FromSlash(runRawPath), "provider-stdout.log"),
 		filepath.Join(ws.Path, "reports", "taskruns", "run-1-init-step1-collect-shard-summary-orders.json"),
 		filepath.Join(ws.Path, "reports", "taskruns", "run-1-init-step1-collect-shard-plan-orders.json"),
 		filepath.Join(ws.Path, "reports", "taskruns", "run-1-quality.json"),
@@ -151,6 +152,36 @@ func TestRuntimeWriteAuditExcludesWorkspaceGitRepositoryAcrossSymlinkAliases(t *
 	snapshot := beginRuntimeWriteAudit(task)
 	if len(snapshot.repoStatuses) != 0 {
 		t.Fatalf("workspace repository alias must not be audited as a source repo: %#v", snapshot.repoStatuses)
+	}
+}
+
+func TestRuntimeWriteAuditExcludesNestedReadOnlyRepositoryAcrossSymlinkAliases(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	realRoot, err := os.MkdirTemp("/tmp", "provenarch-audit-nested-")
+	if err != nil {
+		t.Skipf("/tmp unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(realRoot) })
+	canonicalRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil || canonicalRoot == realRoot {
+		t.Skip("/tmp has no distinct symlink alias on this host")
+	}
+	ws := writeAuditWorkspaceAt(t, realRoot)
+	repoRoot := filepath.Join(realRoot, ".acp", "repos", "source")
+	writeAuditGitRepoAt(t, repoRoot)
+	task := writeAuditTask(ws, []string{filepath.Join(canonicalRoot, ".acp", "repos", "source")})
+
+	excluded := runtimeWriteAuditExcludedRoots(task)
+	aliasedRepoPath := filepath.Join(realRoot, ".acp", "repos", "source", "README.md")
+	if !pathInsideAny(auditPathIdentity(aliasedRepoPath), excluded) {
+		t.Fatalf("nested source repository under workspace alias must be excluded: path=%q roots=%v", aliasedRepoPath, excluded)
+	}
+	snapshot := beginRuntimeWriteAudit(task)
+	if _, ok := snapshot.workspaceEntries[filepath.ToSlash(filepath.Join(".acp", "repos", "source", "README.md"))]; ok {
+		t.Fatal("nested source repository files must not enter the unclassified workspace snapshot")
 	}
 }
 
@@ -502,7 +533,12 @@ func TestRuntimeWriteAuditLogsNonGitRepoSkip(t *testing.T) {
 func writeAuditWorkspace(t *testing.T) workspace.Root {
 	t.Helper()
 
-	root := t.TempDir()
+	return writeAuditWorkspaceAt(t, t.TempDir())
+}
+
+func writeAuditWorkspaceAt(t *testing.T, root string) workspace.Root {
+	t.Helper()
+
 	if err := os.MkdirAll(filepath.Join(root, "charter"), 0o755); err != nil {
 		t.Fatalf("mkdir charter: %v", err)
 	}

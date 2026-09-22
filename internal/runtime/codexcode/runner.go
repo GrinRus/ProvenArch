@@ -153,6 +153,13 @@ func (a codexAdapter) ActivityPolicy(task acpruntime.Task) providercommon.Activi
 	if acpruntime.IsCollectStep(task.StepID) {
 		policy.PreArtifactStallWindow = 5 * time.Minute
 		policy.RetryPreArtifactStallWindow = 5 * time.Minute
+	} else if task.StepID == "init.step2.asis_docs" || task.StepID == "refresh.step2.asis_docs" {
+		// Step2 is the largest draft prompt and its focused enrichment must
+		// get the same bounded reasoning window as the Claude adapter. A
+		// three-minute cap consistently stopped Codex after thread startup,
+		// before it could perform the required first filesystem write.
+		policy.PreArtifactStallWindow = 5 * time.Minute
+		policy.RetryPreArtifactStallWindow = 5 * time.Minute
 	} else if runtimedrafts.IsDraftStep(task.StepID) {
 		policy.PreArtifactStallWindow = 180 * time.Second
 	}
