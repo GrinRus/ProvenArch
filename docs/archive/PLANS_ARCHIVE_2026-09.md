@@ -1,8 +1,8 @@
 # Archived planning evidence — September 2026 reconciliation
 
 This archive preserves completed engineering/audit/design plans and superseded tracker snapshots
-moved from `docs/PLANS.md` on 2026-09-05. It is historical evidence, not the active queue or current
-product/release status. See the [active plan index](../PLANS.md#active-plan-index) and
+moved from `docs/PLANS.md` on 2026-09-05 and 2026-09-24. It is historical evidence, not the active
+queue or current product/release status. See the [active plan index](../PLANS.md#active-plan-index) and
 [canonical stakeholder matrix](../STAKEHOLDER_DOC.md#0-canonical-stakeholder-matrix-source-of-truth).
 
 The merged Epic 19 program and its child scopes are closed by the final `19Z` reconciliation
@@ -18,6 +18,7 @@ The 2026-09-05 remediation program, its dependencies and REM-25 remain unchanged
 
 | Original plan or note | Reason for relocation |
 | --- | --- |
+| [EP-20260924-github-actions-ci-efficiency](#ep-20260924-github-actions-ci-efficiency) | Scoped workflow-trigger reduction completed locally; required checks and governance remained unchanged. Validation records aggregate timing failures and successful isolated retries. |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | Approved cleanup merged through five checked PRs; final main audit and deterministic DoD passed. |
 | [EP-20260905-agent-development-revision](#ep-20260905-agent-development-revision) | Completed owner-approved local revision; full DoD and eight rendered mock scenarios passed. |
 | [EP-20260804-agents-gpt-5-6](#ep-20260804-agents-gpt-5-6) | Superseded by the owner-approved agent-development revision; implementation had passed its DoD and only archive/review bookkeeping remained. |
@@ -5260,3 +5261,52 @@ This is a bounded repository audit, not a mathematical proof that every possible
 external/manual consumer has been discovered. Unrelated remediation plans and open live/release
 gates remain separate. The closeout only archives this completed cleanup record and repairs its
 active-index route; post-closeout main verification and the consolidated chat report complete delivery.
+
+---
+
+## EP-20260924-github-actions-ci-efficiency
+
+Status: completed — scoped workflow and documentation changes are ready for review on a local branch; no push, PR, or GitHub settings change was made.
+
+Completion evidence: worktree branch `codex/github-actions-ci-efficiency` was created from `origin/main`
+at `55a94924d6eecb8f6d5310ceb766a01ac230ee51`. The existing six required contexts remain unchanged.
+Five short required workflows are now PR-only; Scorecard retains its weekly schedule and manual
+dispatch. Backend, lint, CodeQL, and release triggers are unchanged.
+
+### Context
+The Actions audit observed 96 workflow runs in seven days, no retained Actions artifacts, and 19
+caches totaling 750.44 MiB against a 10 GiB cache limit. Duplicate pull-request and main-push runs
+were the actionable source of excess activity. The five main commits in that interval imply up to
+30 avoided workflow runs from the five duplicate checks plus Scorecard. This slice removes those
+events without deleting artifacts, caches, or release assets. Branch protection and the
+required-context inventory remain outside this change.
+
+### Goals (must have)
+- [x] Keep all six required status contexts on pull requests.
+- [x] Remove duplicate `main` push events from `contracts`, `ui`, `golden`, `smoke-api`, and `smoke-cli`.
+- [x] Keep Scorecard weekly and manual runs; retain backend, lint, CodeQL, and release behavior.
+- [x] Add deterministic trigger-policy coverage and document the policy.
+- [x] Run the deterministic checks and record aggregate timing issues with isolated retries.
+
+### Non-goals
+No GitHub branch-protection/settings update, cache/artifact/release-asset deletion, Dependabot change, release workflow change, push, or publication.
+
+### Files changed
+- `.github/workflows/{contracts,ui,golden,smoke-api,smoke-cli,scorecard}.yml`
+- `scripts/tests/ci_trigger_policy_test.py`
+- `docs/TESTING_STRATEGY.md`
+- `docs/PLANS.md` and this archive record
+
+### Verification evidence
+- `make contracts` — passed.
+- `make verify-agent-guidance` — passed after plan archival.
+- `make verify-release-governance` — passed; versioned governance and six required contexts were not changed.
+- `scripts/tests/ci_trigger_policy_test.py` — 4 tests passed; the full Python suite also passed: 321 tests.
+- UI suite — 280 tests passed.
+- `make lint` and `make build` — passed.
+- `go test ./...` — the first aggregate run returned failures in five timing/temporary-directory assertions across `internal/api` and `internal/orchestrator`; all other Go packages passed in that run. Separate retries passed: `go test ./internal/api` and `go test ./internal/orchestrator`. The combined command itself was not green on its first run.
+- `git diff --check` — passed.
+
+The aggregate Go failures were not reproduced in isolated package runs. They occurred while
+concurrent package tests were consuming the local host; no runtime source was changed in this slice.
+The local branch remains unpushed for owner review.

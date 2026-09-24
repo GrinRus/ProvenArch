@@ -335,10 +335,22 @@ Implemented additional jobs:
     `@vitest/coverage-v8`, includes all `ui/src` implementation files and writes ignored
     `ui/coverage/coverage-summary.json` / `coverage-final.json`
 
+Workflow trigger policy:
+- All six versioned required status contexts run on `pull_request`.
+- `contracts`, `ui`, `golden`, `smoke-api` and `smoke-cli` are PR-only; their duplicate `main`
+  push runs are omitted because the same checks already gate the merge.
+- `backend` and `lint` continue on PRs and `main` pushes. Backend post-merge runs remain useful for
+  diagnosing failures observed on recent main revisions; lint retains its existing behavior.
+
 Security/advisory workflows:
 - `dependency-review` runs on pull requests and blocks newly introduced vulnerable dependencies.
 - `codeql` runs Go and JavaScript/TypeScript analysis on pull requests, pushes to `main`, and weekly schedule.
-- `scorecard` runs OpenSSF Scorecard on push/schedule with top-level read-only workflow permissions; the scorecard job alone gets `id-token: write` and `security-events: write` for result publishing/SARIF upload, and the action is pinned to the upstream tag's peeled commit so Scorecard publish verification can resolve the action owner correctly. Full Scorecard publish verification is confirmed on default-branch push/schedule; PR branches rely on ordinary required checks.
+- `scorecard` runs OpenSSF Scorecard on a weekly schedule or manual dispatch with top-level read-only
+  workflow permissions; the scorecard job alone gets `id-token: write` and `security-events: write`
+  for result publishing/SARIF upload, and the action is pinned to the upstream tag's peeled commit
+  so Scorecard publish verification can resolve the action owner correctly. Full Scorecard publish
+  verification is confirmed on default-branch scheduled/manual runs; PR branches rely on ordinary
+  required checks.
 
 Release workflow hardening:
 - tag-only release workflow uses job-level write permissions, an explicit `github-release` environment, pinned actions, timeouts, and provenance/SBOM artifact generation.

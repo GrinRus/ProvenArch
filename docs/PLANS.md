@@ -74,6 +74,7 @@ runbook или разрешение на новый запуск. Локальн
 Remediation program и release gates остаются отдельными scope и этой ревизией не запускаются.
 
 Согласованная очистка завершена; [проходы ревизии, disposition и проверки](archive/PLANS_ARCHIVE_2026-09.md#ep-20260905-approved-trash-cleanup) сохранены в архиве.
+Сокращение CI-триггеров завершено; [изменения и результаты проверок](archive/PLANS_ARCHIVE_2026-09.md#ep-20260924-github-actions-ci-efficiency) сохранены в архиве.
 
 | Plan | Status | Outstanding boundary |
 | --- | --- | --- |

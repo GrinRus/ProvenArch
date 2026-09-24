@@ -1,9 +1,6 @@
 name: scorecard
 
 on:
-  push:
-    branches:
-      - main
   schedule:
     - cron: "21 4 * * 2"
   workflow_dispatch:
