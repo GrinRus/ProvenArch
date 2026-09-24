@@ -18,7 +18,7 @@ The 2026-09-05 remediation program, its dependencies and REM-25 remain unchanged
 
 | Original plan or note | Reason for relocation |
 | --- | --- |
-| [EP-20260924-github-actions-ci-efficiency](#ep-20260924-github-actions-ci-efficiency) | Scoped workflow-trigger reduction completed locally; required checks and governance remained unchanged. Validation records aggregate timing failures and successful isolated retries. |
+| [EP-20260924-github-actions-ci-efficiency](#ep-20260924-github-actions-ci-efficiency) | Local workflow-trigger reduction was promoted into owner-authorized PR #327; required checks and GitHub governance remained unchanged. |
 | [EP-20260905-approved-trash-cleanup](#ep-20260905-approved-trash-cleanup) | Approved cleanup merged through five checked PRs; final main audit and deterministic DoD passed. |
 | [EP-20260905-agent-development-revision](#ep-20260905-agent-development-revision) | Completed owner-approved local revision; full DoD and eight rendered mock scenarios passed. |
 | [EP-20260804-agents-gpt-5-6](#ep-20260804-agents-gpt-5-6) | Superseded by the owner-approved agent-development revision; implementation had passed its DoD and only archive/review bookkeeping remained. |
@@ -5266,12 +5266,13 @@ active-index route; post-closeout main verification and the consolidated chat re
 
 ## EP-20260924-github-actions-ci-efficiency
 
-Status: completed — scoped workflow and documentation changes are ready for review on a local branch; no push, PR, or GitHub settings change was made.
+Status: completed — the scoped workflow and documentation changes were published in owner-authorized PR [#327](https://github.com/GrinRus/ProvenArch/pull/327); no GitHub settings change was made.
 
 Completion evidence: worktree branch `codex/github-actions-ci-efficiency` was created from `origin/main`
-at `55a94924d6eecb8f6d5310ceb766a01ac230ee51`. The existing six required contexts remain unchanged.
-Five short required workflows are now PR-only; Scorecard retains its weekly schedule and manual
-dispatch. Backend, lint, CodeQL, and release triggers are unchanged.
+at `55a94924d6eecb8f6d5310ceb766a01ac230ee51`, then published in PR #327 after the owner explicitly
+authorized merge. The existing six required contexts remain unchanged. Five short required workflows
+are now PR-only; Scorecard retains its weekly schedule and manual dispatch. Backend, lint, CodeQL, and
+release triggers are unchanged. The PR records its final required-check and merge state.
 
 ### Context
 The Actions audit observed 96 workflow runs in seven days, no retained Actions artifacts, and 19
@@ -5289,7 +5290,7 @@ required-context inventory remain outside this change.
 - [x] Run the deterministic checks and record aggregate timing issues with isolated retries.
 
 ### Non-goals
-No GitHub branch-protection/settings update, cache/artifact/release-asset deletion, Dependabot change, release workflow change, push, or publication.
+No GitHub branch-protection/settings update, cache/artifact/release-asset deletion, Dependabot change, or release workflow change.
 
 ### Files changed
 - `.github/workflows/{contracts,ui,golden,smoke-api,smoke-cli,scorecard}.yml`
@@ -5309,4 +5310,6 @@ No GitHub branch-protection/settings update, cache/artifact/release-asset deleti
 
 The aggregate Go failures were not reproduced in isolated package runs. They occurred while
 concurrent package tests were consuming the local host; no runtime source was changed in this slice.
-The local branch remains unpushed for owner review.
+The implementation was initially closed out as local-only. The owner's later authorization superseded
+that publication boundary; PR #327 was pushed for the protected-check merge path. No direct write to
+`main` or branch-protection change was made.
